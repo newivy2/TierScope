@@ -94,7 +94,8 @@ First, you need the Tampermonkey browser extension:
 
 | Version | Date | Notes |
 |---------|------|-------|
-| 2.9.8.0 | Current | Fixed broadcaster detection, consolidated tracking keys, CSS fixes |
+| 2.9.8.1 | Current | Anon canvas adjustment |
+| 2.9.8.0 | Legacy | Fixed broadcaster detection, consolidated tracking keys, CSS fixes |
 | 2.9.7.8 | Legacy | Added female/trans overlay tier with gender symbols |
 | 2.9.7.6 | Legacy | Gender report tuning |
 | 2.9.7.5 | Legacy | Working baseline before overlay features |
