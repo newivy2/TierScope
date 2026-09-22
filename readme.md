@@ -60,7 +60,7 @@ First, you need the Tampermonkey browser extension:
 | Purple | 🟣 | has tipped 1000+ tokens in the past 2 weeks  |
 | Pink | 💗 | 250+ |
 | Dark Blue | 🔵 | 50+ |
-| Light Blue | 💙 | has tokens but didn't tip in the past 2 weeks |
+| Light Blue | 💙 | has bought tokens |
 | gray | ⚪ | guest |
 | ♀⚧ | none | Female & Trans viewers (overlay - additive to above tiers) |
 
