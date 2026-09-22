@@ -5,11 +5,10 @@ A Tampermonkey userscript for tracking and analyzing viewer tiers on Chaturbate 
 ## Features
 
 - **Real-time Tier Tracking**: Automatically categorizes viewers into color-coded tiers (Red, Green, Purple, Grey) based on token holding status
-- **Female/Trans Overlay**: Session-persistent tracking of female and trans viewers with gender symbols (♀⚧) displayed in an additive overlay tier
 - **Spike Detection**: Identifies sudden viewer count changes with configurable thresholds
 - **Session Reports**: Download detailed tracking reports with high watermarks and viewer history
-- **Persistent Statistics**: Tracks highs, lows, and averages across the entire broadcast session
-- **Draggable UI**: Movable, resizable interface that persists position across page loads
+- **Persistent Statistics**: Tracks highs across the entire broadcast session
+- **Draggable UI**: Movable, resizable interface
 
 ---
 
@@ -48,9 +47,9 @@ First, you need the Tampermonkey browser extension:
 ## Usage
 
 ### Basic Operation
-- **Auto-scan**: The script automatically scans viewers every few seconds when enabled
-- **Manual Refresh**: Click the **REFRESH** button to force an immediate scan
-- **Send Report**: Click **SEND** to download a complete session report as a text file
+- **Auto-scan**: The script automatically scans viewers every 30 seconds when enabled
+- **Adjustments**: Minimize and adjust the timer (might prevent the detector from detecting)
+- **REPORTS**: Click download icon to download a complete session report as a text file
 
 ### Understanding the Tiers
 
@@ -62,24 +61,9 @@ First, you need the Tampermonkey browser extension:
 | Grey | ⚪ | Users with no tokens |
 | ♀⚧ | Pink/Blue | Female & Trans viewers (overlay - additive to above tiers) |
 
-### Keyboard Shortcuts
-- **Ctrl+Shift+T**: Toggle TierScope visibility
-- **Ctrl+Shift+R**: Force refresh scan
 
-### Configuration
-Click the **⚙️ Settings** button in the panel to adjust:
-- **Scan Interval**: How often to check for new viewers (seconds)
-- **Spike Threshold**: Minimum viewer change to trigger spike detection
-- **Auto-download**: Automatically save reports at session end
-- **UI Position**: Save current panel position as default
 
-### Downloading Reports
-Click **SEND** to generate a report containing:
-- Session duration and timestamps
-- Peak viewer counts per tier
-- Complete female/trans viewer list (session-accumulated)
-- Spike event log with timestamps
-- Raw viewer data for external analysis
+
 
 ---
 
@@ -91,14 +75,8 @@ Click **SEND** to generate a report containing:
 - Ensure you're on a broadcast room URL (`chaturbate.com/*/`)
 
 **Incorrect viewer counts:**
-- Click REFRESH to force a rescan
 - Check that the chat/userlist is loaded (script scans visible DOM elements)
-- Some users may not appear until they interact with chat
 
-**Female/Trans overlay not updating:**
-- The overlay accumulates across the entire session intentionally
-- Users are counted in both their original tier AND the overlay (additive)
-- The broadcaster (model) is automatically excluded from tracking
 
 **Report download not working:**
 - Check browser download permissions
@@ -116,7 +94,7 @@ Click **SEND** to generate a report containing:
 | 2.9.7.6 | Legacy | Gender report tuning |
 | 2.9.7.5 | Legacy | Working baseline before overlay features |
 | 2.9.7.3 | Legacy | Base reference version |
-| 2.9.6.14 | Legacy | Female ticker edition (reference implementation) |
+
 
 ---
 
