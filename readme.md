@@ -1,6 +1,8 @@
 # TierScope
 
-A Tampermonkey userscript for tracking and analyzing viewer tiers on Chaturbate broadcasts. TierScope provides real-time viewer categorization, session statistics, spike detection, and comprehensive reporting tools for broadcasters who want detailed analytics about their audience composition.
+A Tampermonkey userscript for tracking and analyzing viewer tiers on Chaturbate broadcasts.
+
+---
 
 ## Features
 
