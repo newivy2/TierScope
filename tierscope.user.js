@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      2.9.8.1
+// @version      2.9.8.2
 // @description  TierScope - Advanced tracking with spike detection and reports
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -545,15 +545,7 @@ const ViewerTracker = (function() {
             report.push('');
         }
 
-        // Female/Trans overlay high - using 'female-trans' consistently
-        var ftResult = getHighValue(history['female-trans'], 0);
-        var ftHigh = ftResult.value;
-        if (ftHigh > 0 && femaleTransHighTime) {
-            var elapsed = formatElapsedTime(femaleTransHighTime - trackingStartTime);
-            report.push('♀⚧ Overlay High: ' + ftHigh.toLocaleString());
-            report.push('  Recorded at: ' + formatDateTime(femaleTransHighTime) + ' (' + elapsed + ' into session)');
-            report.push('');
-        }
+        // REMOVED: Duplicate female-trans high block - Object.keys(TIERS) already prints "♀⚧ High"
         
         report.push('--- CURRENT STATS ---');
         report.push('');
