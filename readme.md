@@ -39,7 +39,7 @@ First, you need the Tampermonkey browser extension:
 
 ### Step 3: Verify Installation
 1. Navigate to any Chaturbate broadcast room
-2. Look for the TierScope panel in the top-left corner of the page
+2. Look for the TierScope panel in the top-right corner of the page
 3. If you see the colored tier bars and viewer counts, installation is complete
 
 ---
