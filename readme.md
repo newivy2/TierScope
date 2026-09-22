@@ -33,13 +33,25 @@ First, you need the Tampermonkey browser extension:
 1. Install from the [Mac App Store](https://apps.apple.com/us/app/tampermonkey/id1482490089) (Tampermonkey by Jan Biniok)
 2. Enable the extension in Safari Preferences → Extensions
 
-### Step 2: Install TierScope
+### Step 2: Enable User Scripts (IMPORTANT)
+After installing Tampermonkey, you must enable the "Allow User Scripts" setting:
+
+1. Click the **Tampermonkey icon** in your browser toolbar
+2. Select **"Dashboard"** from the dropdown menu
+3. Click the **Settings tab** (gear icon)
+4. Scroll down to **"Security & Privacy"** section
+5. Set **"Allow User Scripts"** to **"Allow"** (or check the box)
+6. Click **"Save"** at the bottom
+
+**Chrome/Edge users:** You may also need to enable "Developer Mode" in `chrome://extensions` for userscripts to work properly on some sites.
+
+### Step 3: Install TierScope
 1. Click on the `tierscope.user.js` file in this repository
 2. Click the **"Raw"** button (top-right of the code view)
 3. Tampermonkey will detect the userscript and show an installation page
 4. Click **"Install"** (or "Reinstall" if updating)
 
-### Step 3: Verify Installation
+### Step 4: Verify Installation
 1. Navigate to any Chaturbate broadcast room
 2. Look for the TierScope panel in the top-right corner of the page
 3. If you see the colored tier bars and viewer counts, installation is complete
@@ -66,10 +78,6 @@ First, you need the Tampermonkey browser extension:
 | gray | ⚪ | guest |
 | ♀⚧ | none | Female & Trans viewers (overlay - additive to above tiers) |
 
-
-
-
-
 ---
 
 ## Troubleshooting
@@ -78,10 +86,20 @@ First, you need the Tampermonkey browser extension:
 - Refresh the page after installation
 - Check that Tampermonkey is enabled (icon in browser toolbar)
 - Ensure you're on a broadcast room URL (`chaturbate.com/*/`)
+- **Verify "Allow User Scripts" is enabled** in Tampermonkey Dashboard → Settings
+
+**"Tampermonkey requires developer mode" error:**
+- Go to `chrome://extensions` in your browser
+- Toggle **"Developer mode"** ON (top-right corner)
+- Refresh the Chaturbate page
+
+**Script not running on Chaturbate:**
+- Check Tampermonkey Dashboard to ensure TierScope is enabled
+- Verify the script shows a green checkmark next to it
+- Try reinstalling the script if it appears disabled
 
 **Incorrect viewer counts:**
 - Check that the chat/userlist is loaded (script scans visible DOM elements)
-
 
 **Report download not working:**
 - Check browser download permissions
@@ -101,7 +119,6 @@ First, you need the Tampermonkey browser extension:
 | 2.9.7.6 | Legacy | Gender report tuning |
 | 2.9.7.5 | Legacy | Working baseline before overlay features |
 | 2.9.7.3 | Legacy | Base reference version |
-
 
 ---
 
