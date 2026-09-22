@@ -59,7 +59,7 @@ First, you need the Tampermonkey browser extension:
 | Green | 🟢 | Medium token holders |
 | Purple | 🟣 | Low token holders |
 | Grey | ⚪ | Users with no tokens |
-| ♀⚧ | Pink/Blue | Female & Trans viewers (overlay - additive to above tiers) |
+| ♀⚧ | none | Female & Trans viewers (overlay - additive to above tiers) |
 
 
 
