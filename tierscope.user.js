@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      2.9.7.9
+// @version      2.9.8.0
 // @description  TierScope - Advanced tracking with spike detection and reports
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -161,13 +161,13 @@ const ViewerTracker = (function() {
 
     // Female/Trans tracking variables - session persistent
     var sessionFemaleTransUsers = {}; // Stores {username: gender} for entire session
-    var femaleTransUsernames = []; // Current scan only (for backward compatibility)
+    var femaleTransUsernames = []; // Current scan only
     var femaleTransHighTime = null;
 
     var history = {
         timestamps: [],
         'red': [], 'green': [], 'purple': [], 'pink': [], 'dark-blue': [], 'light-blue': [], 'gray': [], 'female-trans': [],
-        'withTokens': [], 'total': [], 'anonymous': [], 'femaletrans': []
+        'withTokens': [], 'total': [], 'anonymous': []
     };
     var MAX_HISTORY_LENGTH = 10000;
 
@@ -545,11 +545,12 @@ const ViewerTracker = (function() {
             report.push('');
         }
 
-        var ftResult = getHighValue(history['femaletrans'], 0);
+        // Female/Trans overlay high - using 'female-trans' consistently
+        var ftResult = getHighValue(history['female-trans'], 0);
         var ftHigh = ftResult.value;
         if (ftHigh > 0 && femaleTransHighTime) {
             var elapsed = formatElapsedTime(femaleTransHighTime - trackingStartTime);
-            report.push('♀⚧ High: ' + ftHigh.toLocaleString());
+            report.push('♀⚧ Overlay High: ' + ftHigh.toLocaleString());
             report.push('  Recorded at: ' + formatDateTime(femaleTransHighTime) + ' (' + elapsed + ' into session)');
             report.push('');
         }
@@ -558,12 +559,10 @@ const ViewerTracker = (function() {
         report.push('');
         
         var counts = { 'red': 0, 'green': 0, 'purple': 0, 'pink': 0, 'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0 };
-        var femaleTransCount = 0;
         
         users.forEach(function(data) {
             if (counts[data.tier] !== undefined) counts[data.tier]++;
             if (data.gender === 'female' || data.gender === 'trans') {
-                femaleTransCount++;
                 counts['female-trans']++;
             }
         });
@@ -576,7 +575,7 @@ const ViewerTracker = (function() {
         var totalHighCurrent = getHighValue(history['total'], total).value;
         var withTokensHighCurrent = getHighValue(history['withTokens'], withTokens).value;
         var anonHighCurrent = getHighValue(history['anonymous'], anonymousCount).value;
-        var ftHighCurrent = getHighValue(history['femaletrans'], femaleTransCount).value;
+        var ftHighCurrent = getHighValue(history['female-trans'], counts['female-trans']).value;
         
         report.push('Current Room Total: ' + fullRoomTotal.toLocaleString() + ' (High: ' + roomTotalHigh.toLocaleString() + ')');
         report.push('Current Registered: ' + total.toLocaleString() + ' (High: ' + totalHighCurrent.toLocaleString() + ')');
@@ -589,7 +588,7 @@ const ViewerTracker = (function() {
         Object.keys(TIERS).forEach(function(tier) {
             var current = counts[tier] || 0;
             var high = getHighValue(history[tier], current).value;
-            report.push(TIERS[tier].name + ' (' + TIERS[tier].desc + '): ' + current.toLocaleString() + ' (High: ' + high.toLocaleString() + ')');
+            report.push(TIERS[tier].name + ' (' + (TIERS[tier].desc || 'Overlay') + '): ' + current.toLocaleString() + ' (High: ' + high.toLocaleString() + ')');
         });
         report.push('');
         
@@ -614,7 +613,7 @@ const ViewerTracker = (function() {
                 report.push('    🔴 Red: ' + currentSpike.startCounts.red + '  🟢 Green: ' + currentSpike.startCounts.green + '  🟣 Purple: ' + currentSpike.startCounts.purple);
                 report.push('    💗 Pink: ' + currentSpike.startCounts.pink + '  🔵 Dark Blue: ' + currentSpike.startCounts['dark-blue']);
                 report.push('    💙 Light Blue: ' + currentSpike.startCounts['light-blue'] + '  ⚪ Gray: ' + currentSpike.startCounts.gray);
-                report.push('    ♀⚧ F/T: ' + (currentSpike.startCounts['female-trans'] || 0));
+                report.push('    ♀⚧ Overlay: ' + (currentSpike.startCounts['female-trans'] || 0));
                 report.push('    Subtotals: 💎 With Tokens: ' + currentSpike.startWithTokens + '  📊 Total: ' + currentSpike.startTotal);
                 
                 report.push('');
@@ -622,7 +621,7 @@ const ViewerTracker = (function() {
                 report.push('    🔴 Red: ' + currentSpike.peakCounts.red + '  🟢 Green: ' + currentSpike.peakCounts.green + '  🟣 Purple: ' + currentSpike.peakCounts.purple);
                 report.push('    💗 Pink: ' + currentSpike.peakCounts.pink + '  🔵 Dark Blue: ' + currentSpike.peakCounts['dark-blue']);
                 report.push('    💙 Light Blue: ' + currentSpike.peakCounts['light-blue'] + '  ⚪ Gray: ' + currentSpike.peakCounts.gray);
-                report.push('    ♀⚧ F/T: ' + (currentSpike.peakCounts['female-trans'] || 0));
+                report.push('    ♀⚧ Overlay: ' + (currentSpike.peakCounts['female-trans'] || 0));
                 report.push('    Subtotals: 💎 With Tokens: ' + currentSpike.peakWithTokens + '  📊 Total: ' + currentSpike.peakTotal);
                 report.push('');
             }
@@ -641,7 +640,7 @@ const ViewerTracker = (function() {
                 report.push('    🔴 Red: ' + spike.startCounts.red + '  🟢 Green: ' + spike.startCounts.green + '  🟣 Purple: ' + spike.startCounts.purple);
                 report.push('    💗 Pink: ' + spike.startCounts.pink + '  🔵 Dark Blue: ' + spike.startCounts['dark-blue']);
                 report.push('    💙 Light Blue: ' + spike.startCounts['light-blue'] + '  ⚪ Gray: ' + spike.startCounts.gray);
-                report.push('    ♀⚧ F/T: ' + (spike.startCounts['female-trans'] || 0));
+                report.push('    ♀⚧ Overlay: ' + (spike.startCounts['female-trans'] || 0));
                 report.push('    Subtotals: 💎 With Tokens: ' + spike.startWithTokens + '  📊 Total Registered: ' + spike.startTotal + '  👻 Anonymous: ' + spike.baselineCount);
                 
                 report.push('');
@@ -649,7 +648,7 @@ const ViewerTracker = (function() {
                 report.push('    🔴 Red: ' + spike.peakCounts.red + '  🟢 Green: ' + spike.peakCounts.green + '  🟣 Purple: ' + spike.peakCounts.purple);
                 report.push('    💗 Pink: ' + spike.peakCounts.pink + '  🔵 Dark Blue: ' + spike.peakCounts['dark-blue']);
                 report.push('    💙 Light Blue: ' + spike.peakCounts['light-blue'] + '  ⚪ Gray: ' + spike.peakCounts.gray);
-                report.push('    ♀⚧ F/T: ' + (spike.peakCounts['female-trans'] || 0));
+                report.push('    ♀⚧ Overlay: ' + (spike.peakCounts['female-trans'] || 0));
                 report.push('    Subtotals: 💎 With Tokens: ' + spike.peakWithTokens + '  📊 Total Registered: ' + spike.peakTotal + '  👻 Anonymous: ' + spike.peakCount);
                 
                 report.push('');
@@ -657,14 +656,14 @@ const ViewerTracker = (function() {
                 report.push('    🔴 Red: ' + spike.finalCounts.red + '  🟢 Green: ' + spike.finalCounts.green + '  🟣 Purple: ' + spike.finalCounts.purple);
                 report.push('    💗 Pink: ' + spike.finalCounts.pink + '  🔵 Dark Blue: ' + spike.finalCounts['dark-blue']);
                 report.push('    💙 Light Blue: ' + spike.finalCounts['light-blue'] + '  ⚪ Gray: ' + spike.finalCounts.gray);
-                report.push('    ♀⚧ F/T: ' + (spike.finalCounts['female-trans'] || 0));
+                report.push('    ♀⚧ Overlay: ' + (spike.finalCounts['female-trans'] || 0));
                 report.push('    Subtotals: 💎 With Tokens: ' + spike.finalWithTokens + '  📊 Total Registered: ' + spike.finalTotal + '  👻 Anonymous: ' + spike.finalCount);
                 report.push('');
             });
         }
         
         report.push('');
-        report.push('--- ♀⚧ VIEWERS (SESSION) ---');
+        report.push('--- ♀⚧ OVERLAY (SESSION) ---');
         report.push('');
         
         var sessionFemaleCount = 0;
@@ -891,12 +890,10 @@ const ViewerTracker = (function() {
                 scanUsers();
 
                 var counts = { 'red': 0, 'green': 0, 'purple': 0, 'pink': 0, 'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0 };
-                var femaleTransCount = 0;
                 
                 users.forEach(function(data) {
                     if (counts[data.tier] !== undefined) counts[data.tier]++;
                     if (data.gender === 'female' || data.gender === 'trans') {
-                        femaleTransCount++;
                         counts['female-trans']++;
                     }
                 });
@@ -1145,13 +1142,11 @@ const ViewerTracker = (function() {
 
     function saveToHistory() {
         var counts = { 'red': 0, 'green': 0, 'purple': 0, 'pink': 0, 'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0 };
-        var femaleTransCount = 0;
         
         users.forEach(function(data) {
             if (counts[data.tier] !== undefined) counts[data.tier]++;
             
             if (data.gender === 'female' || data.gender === 'trans') {
-                femaleTransCount++;
                 counts['female-trans']++;
             }
         });
@@ -1183,7 +1178,8 @@ const ViewerTracker = (function() {
             anonHighTime = anonResult.time;
         }
 
-        var ftResult = getHighValue(history['femaletrans'], femaleTransCount, now);
+        // Track female-trans overlay high using consistent key
+        var ftResult = getHighValue(history['female-trans'], counts['female-trans'], now);
         if (ftResult.isNew && ftResult.time) {
             femaleTransHighTime = ftResult.time;
         }
@@ -1195,7 +1191,6 @@ const ViewerTracker = (function() {
         history['withTokens'].push(withTokens);
         history['total'].push(total);
         history['anonymous'].push(anonymousCount);
-        history['femaletrans'].push(femaleTransCount);
 
         if (history.timestamps.length > MAX_HISTORY_LENGTH) {
             history.timestamps.shift();
@@ -1203,7 +1198,6 @@ const ViewerTracker = (function() {
             history['withTokens'].shift();
             history['total'].shift();
             history['anonymous'].shift();
-            history['femaletrans'].shift();
         }
 
         if (!isMinimized) {
@@ -1786,12 +1780,14 @@ const ViewerTracker = (function() {
         updateDisplay();
     }
 
+    // FIXED: Compare to model name instead of isFirstUser
     function scanUsers() {
         var userListTab = document.querySelector(DOM_SELECTORS.userListTab);
         if (!userListTab) return;
 
         roomTotal = getRoomTotal();
         femaleTransUsernames = [];
+        var modelName = getModelName().toLowerCase();
 
         var userElements = [];
         for (var i = 0; i < DOM_SELECTORS.usernameElements.length; i++) {
@@ -1800,8 +1796,6 @@ const ViewerTracker = (function() {
                 userElements.push(found[j]);
             }
         }
-
-        var isFirstUser = true;
 
         for (var i = 0; i < userElements.length; i++) {
             var el = userElements[i];
@@ -1814,12 +1808,11 @@ const ViewerTracker = (function() {
                 
                 users.set(username, { tier: tier, gender: gender });
                 
-                if ((gender === 'female' || gender === 'trans') && !isFirstUser) {
+                // Skip broadcaster by comparing to model name (case-insensitive)
+                if ((gender === 'female' || gender === 'trans') && username.toLowerCase() !== modelName) {
                     femaleTransUsernames.push(username);
                     sessionFemaleTransUsers[username] = gender;
                 }
-                
-                isFirstUser = false;
             }
         }
     }
@@ -1947,8 +1940,9 @@ const ViewerTracker = (function() {
         }
 
         var resizeHandle = document.getElementById('resize-handle');
+        // FIXED: Use style.display instead of styleDisplay
         if (resizeHandle) {
-            resizeHandle.styleDisplay = isMinimized ? 'none' : 'block';
+            resizeHandle.style.display = isMinimized ? 'none' : 'block';
         }
 
         if (!isMinimized) {
