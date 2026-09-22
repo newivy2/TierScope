@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      2.9.8.0
+// @version      2.9.8.1
 // @description  TierScope - Advanced tracking with spike detection and reports
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -893,6 +893,7 @@ const ViewerTracker = (function() {
                 
                 users.forEach(function(data) {
                     if (counts[data.tier] !== undefined) counts[data.tier]++;
+                    
                     if (data.gender === 'female' || data.gender === 'trans') {
                         counts['female-trans']++;
                     }
@@ -1205,7 +1206,8 @@ const ViewerTracker = (function() {
         }
     }
 
-    function drawSparkline(canvasId, data, color) {
+    // MODIFIED: drawSparkline now accepts custom height parameter for full height utilization
+    function drawSparkline(canvasId, data, color, customHeight) {
         var canvas = document.getElementById(canvasId);
         if (!canvas) return;
         
@@ -1213,7 +1215,8 @@ const ViewerTracker = (function() {
         
         var scale = Math.max(1, currentScale || 1);
         var displayWidth = 105;
-        var displayHeight = 28;
+        // Use custom height if provided, otherwise default to 28
+        var displayHeight = customHeight || 28;
         
         canvas.width = Math.floor(displayWidth * scale);
         canvas.height = Math.floor(displayHeight * scale);
@@ -1233,6 +1236,10 @@ const ViewerTracker = (function() {
         var max = Math.max.apply(null, data);
         var range = max - min || 1;
 
+        // Use full height with minimal padding (2px top/bottom)
+        var padding = 2;
+        var drawHeight = height - (padding * 2);
+
         ctx.strokeStyle = color;
         ctx.lineWidth = 2;
         ctx.lineCap = 'round';
@@ -1241,7 +1248,8 @@ const ViewerTracker = (function() {
 
         for (var i = 0; i < data.length; i++) {
             var x = (i / (data.length - 1)) * width;
-            var y = height - ((data[i] - min) / range) * (height - 6) - 3;
+            // Scale to use full available height
+            var y = height - padding - ((data[i] - min) / range) * drawHeight;
             if (i === 0) ctx.moveTo(x, y);
             else ctx.lineTo(x, y);
         }
@@ -1255,7 +1263,8 @@ const ViewerTracker = (function() {
         });
         drawSparkline('spark-withtokens', history['withTokens'], '#ff69b4');
         drawSparkline('spark-total', history['total'], '#ffffff');
-        drawSparkline('spark-anon', history['anonymous'], '#888888');
+        // MODIFIED: Anon sparkline uses 50px height for better spike visualization
+        drawSparkline('spark-anon', history['anonymous'], '#888888', 50);
     }
 
     function getHighValue(data, currentValue, timestamp) {
@@ -1567,13 +1576,14 @@ const ViewerTracker = (function() {
                     '</div>' +
                 '</div>' +
                 
+                // MODIFIED: Anon section with taller canvas (50px) for better spike visualization
                 '<div id="anon-rate-full" style="margin-top:4px;padding:4px;background:rgba(136,136,136,0.15);border-radius:3px;border:1px solid #888;">' +
                     '<div style="display:flex;align-items:center;">' +
                         '<div style="width:68px;flex-shrink:0;">' +
                             '<div style="font-size:8px;font-weight:bold;color:#aaa;line-height:1.0;">👻 Anon</div>' +
                             '<div style="font-size:6px;color:#888;line-height:1.0;">Not logged in</div>' +
                         '</div>' +
-                        '<canvas id="spark-anon" width="105" height="28" style="flex:1;margin:0 3px;"></canvas>' +
+                        '<canvas id="spark-anon" width="105" height="50" style="flex:1;margin:0 3px;"></canvas>' +
                         '<div style="text-align:right;width:40px;flex-shrink:0;">' +
                             '<span id="anon-ratio-full" style="font-size:11px;font-weight:bold;color:#ff69b4;">--</span>' +
                             '<div id="high-anon" style="font-size:6px;color:#32CD32;margin-top:0;">H:0</div>' +
