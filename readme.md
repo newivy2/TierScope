@@ -4,7 +4,7 @@ A Tampermonkey userscript for tracking and analyzing viewer tiers on Chaturbate 
 
 ## Features
 
-- **Real-time Tier Tracking**: Automatically categorizes viewers into color-coded tiers (Red, Green, Purple, Grey) based on token holding status
+- **Real-time Tier Tracking**: Automatically categorizes viewers into color-coded tiers (Red, Green, Purple, Pink, Dark Blue, Light Blue, Gray and anons) based on token holding/registered account status 
 - **Spike Detection**: Identifies sudden viewer count changes
 - **Session Reports**: Download detailed tracking reports with high watermarks and peak details
 - **Persistent Statistics**: Tracks highs across the entire broadcast session
