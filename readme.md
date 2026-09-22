@@ -55,10 +55,13 @@ First, you need the Tampermonkey browser extension:
 
 | Tier | Color | Description |
 |------|-------|-------------|
-| Red | 🔴 | High token holders (typically >1000 tokens) |
-| Green | 🟢 | Medium token holders |
-| Purple | 🟣 | Low token holders |
-| Grey | ⚪ | Users with no tokens |
+| Red | 🔴 | mod |
+| Green | 🟢 | fan club |
+| Purple | 🟣 | 1000+ tokens in the past 2 weeks  |
+| Pink | 💗 | 250+ |
+| Dark Blue | 🔵 | 50+ |
+| Light Blue | 💙 | tokens |
+| gray | ⚪ | guest |
 | ♀⚧ | none | Female & Trans viewers (overlay - additive to above tiers) |
 
 
