@@ -33,17 +33,28 @@ First, you need the Tampermonkey browser extension:
 1. Install from the [Mac App Store](https://apps.apple.com/us/app/tampermonkey/id1482490089) (Tampermonkey by Jan Biniok)
 2. Enable the extension in Safari Preferences → Extensions
 
-### Step 2: Enable User Scripts (IMPORTANT)
-After installing Tampermonkey, you must enable the "Allow User Scripts" setting:
+### Step 2: Enable "Allow User Scripts" (Chrome/Edge/Brave ONLY)
 
-1. Click the **Tampermonkey icon** in your browser toolbar
-2. Select **"Dashboard"** from the dropdown menu
-3. Click the **Settings tab** (gear icon)
-4. Scroll down to **"Security & Privacy"** section
-5. Set **"Allow User Scripts"** to **"Allow"** (or check the box)
-6. Click **"Save"** at the bottom
+**This is required for Chrome 138+ and Edge/Brave (Chromium-based browsers).** Firefox and Safari users can skip this step.
+
+**Chrome/Edge/Brave:**
+1. Type `chrome://extensions` in your address bar and press Enter
+   - (or click menu → Extensions → Manage extensions)
+2. Find **Tampermonkey** in the list and click **"Details"**
+3. Scroll down and toggle **"Allow user scripts"** to ON (blue/enabled)
+4. You may need to refresh any open Chaturbate tabs
+
+**Alternative method:**
+- Right-click the Tampermonkey icon in your toolbar → Select **"Manage Extension"** → Toggle **"Allow user scripts"**
+
+**Note:** If you don't see this toggle, your browser may be older than Chrome 138. In that case, enable **Developer Mode** at the top-right of the extensions page instead.
+
+**Firefox:** No additional setting needed - skip to Step 3.
+
+**Safari:** No additional setting needed - skip to Step 3.
 
 **Chrome/Edge users:** You may also need to enable "Developer Mode" in `chrome://extensions` for userscripts to work properly on some sites.
+
 
 ### Step 3: Install TierScope
 1. Click on the `tierscope.user.js` file in this repository
