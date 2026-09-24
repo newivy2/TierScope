@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      2.9.9.1
+// @version      2.9.9.2
 // @description  TierScope - Advanced tracking with spike detection, reports, and persistence
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -1660,6 +1660,41 @@ const ViewerTracker = (function() {
         };
     }
 
+    // NEW: Keep panel visible on window resize
+    function setupResizeHandler() {
+        var resizeTimeout;
+        window.addEventListener('resize', function() {
+            clearTimeout(resizeTimeout);
+            resizeTimeout = setTimeout(function() {
+                var container = document.getElementById('tracker-container');
+                if (!container) return;
+                
+                var scale = currentScale || 1;
+                var rect = container.getBoundingClientRect();
+                var viewportWidth = window.innerWidth;
+                var viewportHeight = window.innerHeight;
+                
+                // Calculate current position
+                var currentLeft = parseInt(container.style.left) || rect.left;
+                var currentTop = parseInt(container.style.top) || rect.top;
+                
+                // Clamp to viewport bounds
+                var maxX = viewportWidth - (rect.width * scale);
+                var maxY = viewportHeight - (rect.height * scale);
+                
+                var newLeft = Math.max(0, Math.min(currentLeft, maxX));
+                var newTop = Math.max(0, Math.min(currentTop, maxY));
+                
+                // Apply if changed
+                if (newLeft !== currentLeft || newTop !== currentTop) {
+                    container.style.left = newLeft + 'px';
+                    container.style.top = newTop + 'px';
+                    container.style.right = 'auto';
+                }
+            }, 100);
+        });
+    }
+
     function createPanel() {
         cleanupDragListeners();
         
@@ -1850,6 +1885,7 @@ const ViewerTracker = (function() {
 
         setupDraggable();
         setupResizable();
+        setupResizeHandler(); // NEW: Add resize handler
         
         var btnToggle = document.getElementById('btn-toggle');
         var btnExpand = document.getElementById('btn-expand');
