@@ -10,6 +10,7 @@ A Tampermonkey userscript for tracking and analyzing viewer tiers on Chaturbate 
 - **Spike Detection**: Identifies sudden viewer count changes
 - **Session Reports**: Download detailed tracking reports with high watermarks and peak details and more
 - **Persistent Statistics**: Tracks highs an unique users across the entire broadcast session
+- **Reload Proof**: The data doesn't disappear on accidental reload or closed tabs.
 - **Draggable UI**: Movable, resizable interface
 
 ---
