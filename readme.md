@@ -73,7 +73,7 @@ First, you need the Tampermonkey browser extension:
 
 ### Basic Operation
 - **Auto-scan**: The script automatically scans viewers every 30 seconds when enabled
-- **Adjustments**: Minimize and adjust the timer (might prevent the detector from detecting)
+- **Adjustments**: Minimize and adjust the timer (spike detection works best at 30s or 60s max)
 - **REPORTS**: Click download icon to download a complete session report as a text file
 
 ### Understanding the Tiers
