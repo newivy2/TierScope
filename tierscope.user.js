@@ -1,17 +1,23 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      2.9.8.2
-// @description  TierScope - Advanced tracking with spike detection and reports
+// @version      2.9.9.1
+// @description  TierScope - Advanced tracking with spike detection, reports, and persistence
 // @author       newivy
 // @match        https://chaturbate.com/*
 // @match        https://*.chaturbate.com/*
 // @grant        unsafeWindow
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @grant        GM_deleteValue
 // @run-at       document-end
 // ==/UserScript==
 
 const ViewerTracker = (function() {
     'use strict';
+
+    const STORAGE_KEY_PREFIX = 'tierscope:v1:';
+    const STORAGE_MAX_AGE_MS = 3 * 60 * 60 * 1000; // 3 hours
 
     const DOM_SELECTORS = {
         userListTab: '#UserListTab',
@@ -57,6 +63,10 @@ const ViewerTracker = (function() {
     var healthCheckInterval = null;
     var initGuard = 0;
     var urlCheckInterval = null;
+    var scanEpoch = 0;
+
+    // Session-persistent unique tracking
+    var sessionUniqueUsers = {};
 
     function validateDOMHealth() {
         const now = Date.now();
@@ -159,9 +169,8 @@ const ViewerTracker = (function() {
     var totalHighTime = null;
     var anonHighTime = null;
 
-    // Female/Trans tracking variables - session persistent
-    var sessionFemaleTransUsers = {}; // Stores {username: gender} for entire session
-    var femaleTransUsernames = []; // Current scan only
+    var sessionFemaleTransUsers = {};
+    var femaleTransUsernames = [];
     var femaleTransHighTime = null;
 
     var history = {
@@ -191,6 +200,124 @@ const ViewerTracker = (function() {
 
     function log(msg) {
         console.log('[TierTracker] ' + msg);
+    }
+
+    // NEW: Parse model name from URL string (not current location)
+    function getModelNameFromUrl(url) {
+        if (!url) return 'unknown';
+        var path = new URL(url).pathname;
+        var bMatch = path.match(/\/b\/([^\/\?#]+)/);
+        if (bMatch) return bMatch[1];
+        
+        var normalMatch = path.match(/\/([^\/\?#]+)\/?$/);
+        if (normalMatch) {
+            var name = normalMatch[1];
+            var nonRoomPaths = ['followed', 'featured', 'tags', 'accounts', 'login', 'register',
+                               'supporter', 'settings', 'apps', 'explore', 'trending', 'new',
+                               'female', 'male', 'couple', 'trans', 'hd', 'north-american',
+                               'european', 'asian', 'south-american', 'exhibitionist',
+                               'followed-cams', 'female-cams', 'trans-cams', 'male-cams', 'couple-cams'];
+            if (nonRoomPaths.indexOf(name) === -1) return name;
+        }
+        return 'unknown';
+    }
+
+    // NEW: Persistence functions
+    function getStorageKey(model) {
+        return STORAGE_KEY_PREFIX + model.toLowerCase();
+    }
+
+    function saveSession(model) {
+        if (!model || model === 'unknown') return;
+        
+        var saveData = {
+            timestamp: Date.now(),
+            history: history,
+            tierHighTimes: tierHighTimes,
+            withTokensHighTime: withTokensHighTime,
+            totalHighTime: totalHighTime,
+            anonHighTime: anonHighTime,
+            femaleTransHighTime: femaleTransHighTime,
+            roomTotalHigh: roomTotalHigh,
+            roomTotalHighTime: roomTotalHighTime,
+            trackingStartTime: trackingStartTime,
+            isPaused: isPaused,
+            pausedElapsedTime: pausedElapsedTime,
+            sessionFemaleTransUsers: sessionFemaleTransUsers,
+            sessionUniqueUsers: sessionUniqueUsers,
+            spikeState: spikeState,
+            currentSpike: currentSpike,
+            completedSpikes: completedSpikes,
+            preSpikeBaseline: preSpikeBaseline,
+            anonHistory: anonHistory,
+            stabilizationWindow: stabilizationWindow,
+            consecutiveStableScans: consecutiveStableScans,
+            previousUserCount: previousUserCount,
+            previousRoomTotal: previousRoomTotal
+        };
+        
+        try {
+            GM_setValue(getStorageKey(model), JSON.stringify(saveData));
+            log('Session saved for ' + model);
+        } catch (e) {
+            log('Failed to save session: ' + e);
+        }
+    }
+
+    function loadSession(model) {
+        if (!model || model === 'unknown') return false;
+        
+        var key = getStorageKey(model);
+        var saved = GM_getValue(key, null);
+        if (!saved) return false;
+        
+        try {
+            var data = JSON.parse(saved);
+            var age = Date.now() - data.timestamp;
+            
+            if (age > STORAGE_MAX_AGE_MS) {
+                log('Saved session expired (' + Math.round(age/60000) + ' min old), deleting');
+                GM_deleteValue(key);
+                return false;
+            }
+            
+            // Restore all saved state
+            history = data.history || { timestamps: [], 'red': [], 'green': [], 'purple': [], 'pink': [], 'dark-blue': [], 'light-blue': [], 'gray': [], 'female-trans': [], 'withTokens': [], 'total': [], 'anonymous': [] };
+            tierHighTimes = data.tierHighTimes || {};
+            withTokensHighTime = data.withTokensHighTime || null;
+            totalHighTime = data.totalHighTime || null;
+            anonHighTime = data.anonHighTime || null;
+            femaleTransHighTime = data.femaleTransHighTime || null;
+            roomTotalHigh = data.roomTotalHigh || 0;
+            roomTotalHighTime = data.roomTotalHighTime || null;
+            trackingStartTime = data.trackingStartTime || null;
+            isPaused = data.isPaused || false;
+            pausedElapsedTime = data.pausedElapsedTime || 0;
+            sessionFemaleTransUsers = data.sessionFemaleTransUsers || {};
+            sessionUniqueUsers = data.sessionUniqueUsers || {};
+            spikeState = data.spikeState || 'detecting';
+            currentSpike = data.currentSpike || null;
+            completedSpikes = data.completedSpikes || [];
+            preSpikeBaseline = data.preSpikeBaseline || null;
+            anonHistory = data.anonHistory || [];
+            stabilizationWindow = data.stabilizationWindow || [];
+            consecutiveStableScans = data.consecutiveStableScans || 0;
+            previousUserCount = data.previousUserCount || 0;
+            previousRoomTotal = data.previousRoomTotal || 0;
+            
+            log('Session restored for ' + model + ' (' + Math.round(age/60000) + ' min old)');
+            return true;
+        } catch (e) {
+            log('Failed to load session: ' + e);
+            GM_deleteValue(key);
+            return false;
+        }
+    }
+
+    function deleteSession(model) {
+        if (!model || model === 'unknown') return;
+        GM_deleteValue(getStorageKey(model));
+        log('Session deleted for ' + model);
     }
 
     function isBroadcastRoom() {
@@ -241,36 +368,25 @@ const ViewerTracker = (function() {
     }
 
     function getModelName() {
-        var path = window.location.pathname;
-        var bMatch = path.match(/\/b\/([^\/\?#]+)/);
-        if (bMatch) return bMatch[1];
-        
-        var normalMatch = path.match(/\/([^\/\?#]+)\/?$/);
-        if (normalMatch) {
-            var name = normalMatch[1];
-            var nonRoomPaths = ['followed', 'featured', 'tags', 'accounts', 'login', 'register',
-                               'supporter', 'settings', 'apps', 'explore', 'trending', 'new',
-                               'female', 'male', 'couple', 'trans', 'hd', 'north-american',
-                               'european', 'asian', 'south-american', 'exhibitionist',
-                               'followed-cams', 'female-cams', 'trans-cams', 'male-cams', 'couple-cams'];
-            if (nonRoomPaths.indexOf(name) === -1) return name;
-        }
-        return 'unknown';
+        return getModelNameFromUrl(location.href);
     }
 
     function updateTrackingTimer() {
-        var timerEl = document.getElementById('tracking-timer');
-        if (!timerEl) return;
+        var controlTimerEl = document.getElementById('control-tracking-timer');
+        var displayTime = '00:00:00';
+        var displayColor = '#888';
         
         if (isPaused) {
-            timerEl.textContent = formatElapsedTime(pausedElapsedTime);
-            timerEl.style.color = '#ff4444';
+            displayTime = formatElapsedTime(pausedElapsedTime);
+            displayColor = '#ff4444';
         } else if (trackingStartTime) {
-            timerEl.textContent = formatElapsedTime(Date.now() - trackingStartTime);
-            timerEl.style.color = '#ffd43b';
-        } else {
-            timerEl.textContent = '00:00:00';
-            timerEl.style.color = '#888';
+            displayTime = formatElapsedTime(Date.now() - trackingStartTime);
+            displayColor = '#ffd43b';
+        }
+        
+        if (controlTimerEl) {
+            controlTimerEl.textContent = displayTime;
+            controlTimerEl.style.color = displayColor;
         }
     }
 
@@ -289,6 +405,8 @@ const ViewerTracker = (function() {
         
         trackingTimerInterval = setInterval(updateTrackingTimer, 1000);
         updateTrackingTimer();
+        
+        saveSession(getModelName());
     }
 
     function pauseTrackingTimer() {
@@ -300,6 +418,7 @@ const ViewerTracker = (function() {
             trackingTimerInterval = null;
         }
         updateTrackingTimer();
+        saveSession(getModelName());
     }
 
     function stopTrackingTimer() {
@@ -318,11 +437,76 @@ const ViewerTracker = (function() {
         anonHighTime = null;
         femaleTransHighTime = null;
         
-        var timerEl = document.getElementById('tracking-timer');
-        if (timerEl) {
-            timerEl.textContent = '00:00:00';
-            timerEl.style.color = '#888';
+        updateTrackingTimer();
+    }
+
+    function resetAllTracking() {
+        if (!confirm('Reset all tracking data?\n\nThis will clear:\n- All session history\n- Spike records\n- Elapsed timer\n- Female/Trans user list\n- Unique user count\n\nA new scan will start immediately.')) {
+            return;
         }
+        
+        var modelName = getModelName();
+        log('Performing main reset...');
+        
+        deleteSession(modelName);
+        
+        scanEpoch++;
+        isScanning = false;
+        
+        stopCountdown();
+        stopTrackingTimer();
+        
+        users.clear();
+        previousUserCount = 0;
+        previousRoomTotal = 0;
+        roomTotal = 0;
+        roomTotalHigh = 0;
+        
+        sessionUniqueUsers = {};
+        
+        history = {
+            timestamps: [],
+            'red': [], 'green': [], 'purple': [], 'pink': [], 'dark-blue': [], 'light-blue': [], 'gray': [], 'female-trans': [],
+            'withTokens': [], 'total': [], 'anonymous': []
+        };
+        
+        completedSpikes.length = 0;
+        anonHistory.length = 0;
+        spikeState = 'detecting';
+        currentSpike = null;
+        stabilizationWindow = [];
+        consecutiveStableScans = 0;
+        preSpikeBaseline = null;
+        
+        sessionFemaleTransUsers = {};
+        femaleTransUsernames = [];
+        
+        roomTotalHighTime = null;
+        tierHighTimes = {};
+        withTokensHighTime = null;
+        totalHighTime = null;
+        anonHighTime = null;
+        femaleTransHighTime = null;
+        
+        countdownSeconds = scanIntervalSeconds;
+        
+        updateDisplay();
+        updateSpikeDisplay();
+        updateTrackingTimer();
+        updateCountdownDisplay();
+        
+        drawAllSparklines();
+        
+        if (isAutoRefreshOn) {
+            startTrackingTimer();
+            startCountdown();
+        }
+        
+        setTimeout(function() {
+            performScanThenReturn(true);
+        }, 500);
+        
+        log('Reset complete - starting fresh scan (epoch: ' + scanEpoch + ')');
     }
 
     function getTierFromClassList(classList) {
@@ -544,8 +728,9 @@ const ViewerTracker = (function() {
             report.push('  Recorded at: ' + formatDateTime(anonHighTime) + ' (' + elapsed + ' into session)');
             report.push('');
         }
-
-        // REMOVED: Duplicate female-trans high block - Object.keys(TIERS) already prints "♀⚧ High"
+        
+        report.push('Unique Registered This Session: ' + Object.keys(sessionUniqueUsers).length.toLocaleString());
+        report.push('');
         
         report.push('--- CURRENT STATS ---');
         report.push('');
@@ -810,11 +995,13 @@ const ViewerTracker = (function() {
     function toggleSpikeDetection() {
         spikeDetectionEnabled = !spikeDetectionEnabled;
         updateSpikeToggleButton();
+        saveSession(getModelName());
     }
 
     function closeSpike(index) {
         completedSpikes.splice(index, 1);
         updateSpikeDisplay();
+        saveSession(getModelName());
     }
 
     function clearAllSpikes() {
@@ -827,6 +1014,7 @@ const ViewerTracker = (function() {
             preSpikeBaseline = null;
         }
         updateSpikeDisplay();
+        saveSession(getModelName());
     }
 
     function performScanThenReturn(returnToChat) {
@@ -834,6 +1022,7 @@ const ViewerTracker = (function() {
         if (isScanning) return;
         isScanning = true;
 
+        var myScanEpoch = ++scanEpoch;
         var scanGeneration = initGuard;
         
         var statusEl = document.getElementById('auto-status');
@@ -866,8 +1055,8 @@ const ViewerTracker = (function() {
         }
 
         setTimeout(function() {
-            if (scanGeneration !== initGuard) {
-                log('Scan callback: generation changed, aborting');
+            if (scanGeneration !== initGuard || myScanEpoch !== scanEpoch) {
+                log('Scan callback: generation/epoch changed, aborting');
                 return;
             }
             
@@ -894,6 +1083,15 @@ const ViewerTracker = (function() {
                 var total = users.size;
                 var withTokens = counts['red'] + counts['green'] + counts['purple'] + counts['pink'] + counts['dark-blue'] + counts['light-blue'];
                 var anonymousCount = getAnonymousCount();
+                
+                if (myScanEpoch !== scanEpoch) {
+                    log('Scan data processing: epoch changed, aborting write');
+                    users = tempUsers;
+                    previousUserCount = tempPreviousCount;
+                    previousRoomTotal = tempPreviousRoomTotal;
+                    roomTotal = tempRoomTotal;
+                    return;
+                }
                 
                 if (!isScanValid(total, roomTotal)) {
                     users = tempUsers;
@@ -1007,6 +1205,8 @@ const ViewerTracker = (function() {
                     updateDisplay();
                     updateSpikeDisplay();
                     saveToHistory();
+                    
+                    saveSession(getModelName());
                 }
                 
             } catch (err) {
@@ -1016,8 +1216,8 @@ const ViewerTracker = (function() {
                 previousRoomTotal = tempPreviousRoomTotal;
                 roomTotal = tempRoomTotal;
             } finally {
-                if (scanGeneration !== initGuard) {
-                    log('Scan finally: generation changed, skipping cleanup');
+                if (scanGeneration !== initGuard || myScanEpoch !== scanEpoch) {
+                    log('Scan finally: generation/epoch changed, skipping cleanup');
                     return;
                 }
                 
@@ -1171,7 +1371,6 @@ const ViewerTracker = (function() {
             anonHighTime = anonResult.time;
         }
 
-        // Track female-trans overlay high using consistent key
         var ftResult = getHighValue(history['female-trans'], counts['female-trans'], now);
         if (ftResult.isNew && ftResult.time) {
             femaleTransHighTime = ftResult.time;
@@ -1198,7 +1397,6 @@ const ViewerTracker = (function() {
         }
     }
 
-    // MODIFIED: drawSparkline now accepts custom height parameter for full height utilization
     function drawSparkline(canvasId, data, color, customHeight) {
         var canvas = document.getElementById(canvasId);
         if (!canvas) return;
@@ -1207,7 +1405,6 @@ const ViewerTracker = (function() {
         
         var scale = Math.max(1, currentScale || 1);
         var displayWidth = 105;
-        // Use custom height if provided, otherwise default to 28
         var displayHeight = customHeight || 28;
         
         canvas.width = Math.floor(displayWidth * scale);
@@ -1228,7 +1425,6 @@ const ViewerTracker = (function() {
         var max = Math.max.apply(null, data);
         var range = max - min || 1;
 
-        // Use full height with minimal padding (2px top/bottom)
         var padding = 2;
         var drawHeight = height - (padding * 2);
 
@@ -1240,7 +1436,6 @@ const ViewerTracker = (function() {
 
         for (var i = 0; i < data.length; i++) {
             var x = (i / (data.length - 1)) * width;
-            // Scale to use full available height
             var y = height - padding - ((data[i] - min) / range) * drawHeight;
             if (i === 0) ctx.moveTo(x, y);
             else ctx.lineTo(x, y);
@@ -1255,7 +1450,6 @@ const ViewerTracker = (function() {
         });
         drawSparkline('spark-withtokens', history['withTokens'], '#ff69b4');
         drawSparkline('spark-total', history['total'], '#ffffff');
-        // MODIFIED: Anon sparkline uses 50px height for better spike visualization
         drawSparkline('spark-anon', history['anonymous'], '#888888', 50);
     }
 
@@ -1278,6 +1472,7 @@ const ViewerTracker = (function() {
         var statusEl = document.getElementById('auto-status');
         var timerDisplay = document.getElementById('timer-display');
         var expandedCountdown = document.getElementById('expanded-countdown');
+        var controlNextScan = document.getElementById('control-next-scan');
 
         if (timerDisplay) {
             timerDisplay.textContent = scanIntervalSeconds + 's';
@@ -1298,6 +1493,19 @@ const ViewerTracker = (function() {
             } else {
                 expandedCountdown.textContent = 'paused';
                 expandedCountdown.style.color = '#ff4444';
+            }
+        }
+
+        if (controlNextScan) {
+            if (isScanning) {
+                controlNextScan.textContent = spikeState === 'tracking' ? 'Tracking...' : 'Scanning...';
+                controlNextScan.style.color = spikeState === 'tracking' ? '#ff4444' : '#ffd43b';
+            } else if (isAutoRefreshOn) {
+                controlNextScan.textContent = 'Next: ' + countdownSeconds + 's';
+                controlNextScan.style.color = '#32CD32';
+            } else {
+                controlNextScan.textContent = 'Paused';
+                controlNextScan.style.color = '#ff4444';
             }
         }
 
@@ -1476,20 +1684,9 @@ const ViewerTracker = (function() {
                     'display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;' +
                     'border-bottom:1px solid #ff69b4;padding-bottom:3px;cursor:move;' +
                 '">' +
-                    '<span id="header-label" style="font-weight:bold;color:#ff69b4;font-size:8px;display:none;margin-right:2px;">👥 USERS:</span>' +
-                    '<span id="header-text" style="font-weight:bold;color:#ff69b4;font-size:10px;">0</span>' +
-                    '<button id="btn-download-report" style="background:#4169E1;border:none;color:#fff;border-radius:3px;cursor:pointer;width:18px;height:18px;padding:0;display:flex;align-items:center;justify-content:center;margin:0 4px;flex-shrink:0;" title="Download tracking report">' +
-                        '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:block;">' +
-                            '<line x1="12" y1="4" x2="12" y2="16"/>' +
-                            '<polyline points="6 10 12 16 18 10"/>' +
-                            '<line x1="4" y1="20" x2="20" y2="20"/>' +
-                        '</svg>' +
-                    '</button>' +
-                    '<div style="display:flex;align-items:center;gap:4px;">' +
-                        '<span id="expanded-countdown" style="font-size:8px;color:#32CD32;font-weight:bold;display:none;">next: 30s</span>' +
-                        '<span id="tracking-timer" style="font-size:8px;color:#ffd43b;background:rgba(0,0,0,0.3);padding:1px 4px;border-radius:3px;border:1px solid #444;font-family:monospace;">00:00:00</span>' +
-                        '<button id="btn-toggle" style="background:#333;border:1px solid #555;color:#fff;border-radius:3px;cursor:pointer;font-size:9px;padding:1px 4px;">+</button>' +
-                    '</div>' +
+                    '<span id="header-text" style="font-weight:bold;color:#ff69b4;font-size:10px;">USERS: 0 (H:0)</span>' +
+                    '<span id="header-unique" style="font-weight:bold;color:#32CD32;font-size:10px;display:none;">U:0</span>' +
+                    '<button id="btn-toggle" style="background:#333;border:1px solid #555;color:#fff;border-radius:3px;cursor:pointer;font-size:9px;padding:1px 4px;flex-shrink:0;">+</button>' +
                 '</div>' +
                 
                 '<div id="minimized-view" style="display:block;text-align:center;">' +
@@ -1568,7 +1765,6 @@ const ViewerTracker = (function() {
                     '</div>' +
                 '</div>' +
                 
-                // MODIFIED: Anon section with taller canvas (50px) for better spike visualization
                 '<div id="anon-rate-full" style="margin-top:4px;padding:4px;background:rgba(136,136,136,0.15);border-radius:3px;border:1px solid #888;">' +
                     '<div style="display:flex;align-items:center;">' +
                         '<div style="width:68px;flex-shrink:0;">' +
@@ -1580,6 +1776,35 @@ const ViewerTracker = (function() {
                             '<span id="anon-ratio-full" style="font-size:11px;font-weight:bold;color:#ff69b4;">--</span>' +
                             '<div id="high-anon" style="font-size:6px;color:#32CD32;margin-top:0;">H:0</div>' +
                         '</div>' +
+                    '</div>' +
+                '</div>' +
+                
+                // COMPACTED CONTROL FIELD
+                '<div id="control-field" style="margin-top:4px;padding:3px;background:rgba(65,105,225,0.15);border-radius:3px;border:1px solid #4169E1;">' +
+                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">' +
+                        '<span style="font-size:8px;font-weight:bold;color:#4169E1;">🎛️ CONTROLS</span>' +
+                        '<div style="display:flex;gap:6px;align-items:center;">' +
+                            '<span style="font-size:8px;color:#ffd43b;font-family:monospace;" id="control-tracking-timer">00:00:00</span>' +
+                            '<span style="font-size:7px;color:#32CD32;" id="control-next-scan">Next: 30s</span>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div style="display:flex;gap:3px;justify-content:center;">' +
+                        '<button id="btn-download-report" style="background:#4169E1;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 6px;display:flex;align-items:center;gap:2px;" title="Download tracking report">' +
+                            '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
+                                '<line x1="12" y1="4" x2="12" y2="16"/>' +
+                                '<polyline points="6 10 12 16 18 10"/>' +
+                                '<line x1="4" y1="20" x2="20" y2="20"/>' +
+                            '</svg>' +
+                            'Report' +
+                        '</button>' +
+                        '<button id="btn-control-auto" style="background:#32CD32;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 6px;min-width:24px;" title="Auto-Refresh ON">⏸</button>' +
+                        '<button id="btn-main-reset" style="background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 6px;display:flex;align-items:center;gap:2px;" title="Reset all tracking data">' +
+                            '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
+                                '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12"/>' +
+                                '<path d="M3 3v9h9"/>' +
+                            '</svg>' +
+                            'Reset' +
+                        '</button>' +
                     '</div>' +
                 '</div>' +
                 
@@ -1610,12 +1835,16 @@ const ViewerTracker = (function() {
         document.body.appendChild(div);
 
         var btnDownload = document.getElementById('btn-download-report');
+        var btnMainReset = document.getElementById('btn-main-reset');
         var btnClearAll = document.getElementById('btn-clear-all-spikes');
         var btnSpikeToggle = document.getElementById('btn-spike-toggle');
+        var btnControlAuto = document.getElementById('btn-control-auto');
         
         if (btnDownload) btnDownload.addEventListener('click', downloadTrackingReport);
+        if (btnMainReset) btnMainReset.addEventListener('click', resetAllTracking);
         if (btnClearAll) btnClearAll.addEventListener('click', clearAllSpikes);
         if (btnSpikeToggle) btnSpikeToggle.addEventListener('click', toggleSpikeDetection);
+        if (btnControlAuto) btnControlAuto.addEventListener('click', toggleAutoRefresh);
         
         setupSpikeContainerListeners();
 
@@ -1666,18 +1895,33 @@ const ViewerTracker = (function() {
     function toggleAutoRefresh() {
         isAutoRefreshOn = !isAutoRefreshOn;
         var btn = document.getElementById('btn-auto');
+        var btnControl = document.getElementById('btn-control-auto');
 
         if (isAutoRefreshOn) {
-            btn.style.background = '#32CD32';
-            btn.innerHTML = '⏸';
-            btn.title = 'Auto-Refresh ON - Click to pause';
+            if (btn) {
+                btn.style.background = '#32CD32';
+                btn.innerHTML = '⏸';
+                btn.title = 'Auto-Refresh ON - Click to pause';
+            }
+            if (btnControl) {
+                btnControl.style.background = '#32CD32';
+                btnControl.innerHTML = '⏸';
+                btnControl.title = 'Auto-Refresh ON - Click to pause';
+            }
             startTrackingTimer();
             startCountdown();
             performScanThenReturn(true);
         } else {
-            btn.style.background = '#ff4444';
-            btn.innerHTML = '▶';
-            btn.title = 'Auto-Refresh OFF - Click to start';
+            if (btn) {
+                btn.style.background = '#ff4444';
+                btn.innerHTML = '▶';
+                btn.title = 'Auto-Refresh OFF - Click to start';
+            }
+            if (btnControl) {
+                btnControl.style.background = '#ff4444';
+                btnControl.innerHTML = '▶';
+                btnControl.title = 'Auto-Refresh OFF - Click to start';
+            }
             stopCountdown();
             pauseTrackingTimer();
             updateCountdownDisplay();
@@ -1740,9 +1984,8 @@ const ViewerTracker = (function() {
         var miniView = document.getElementById('minimized-view');
         var toggleBtn = document.getElementById('btn-toggle');
         var container = document.getElementById('tracker-container');
-        var headerLabel = document.getElementById('header-label');
         var headerText = document.getElementById('header-text');
-        var expandedCountdown = document.getElementById('expanded-countdown');
+        var headerUnique = document.getElementById('header-unique');
         var resizeHandle = document.getElementById('resize-handle');
 
         var anonymousCount = getAnonymousCount();
@@ -1756,11 +1999,11 @@ const ViewerTracker = (function() {
             }
             if (resizeHandle) resizeHandle.style.display = 'none';
             if (isResizing) isResizing = false;
-            if (headerLabel) headerLabel.style.display = 'none';
+            
+            if (headerUnique) headerUnique.style.display = 'none';
             
             var currentTotal = roomTotal > 0 ? roomTotal : (users.size + anonymousCount);
             if (headerText) headerText.textContent = currentTotal.toLocaleString() + ' (H:' + roomTotalHigh.toLocaleString() + ')';
-            if (expandedCountdown) expandedCountdown.style.display = 'none';
         } else {
             if (fullView) fullView.style.display = 'block';
             if (miniView) miniView.style.display = 'none';
@@ -1769,11 +2012,11 @@ const ViewerTracker = (function() {
                 container.style.width = BASE_WIDTH_FULL + 'px';
             }
             if (resizeHandle) resizeHandle.style.display = 'block';
-            if (headerLabel) headerLabel.style.display = 'inline';
+            
+            if (headerUnique) headerUnique.style.display = 'inline';
             
             var currentTotal = roomTotal > 0 ? roomTotal : (users.size + anonymousCount);
-            if (headerText) headerText.textContent = currentTotal.toLocaleString() + ' (H:' + roomTotalHigh.toLocaleString() + ')';
-            if (expandedCountdown) expandedCountdown.style.display = 'inline';
+            if (headerText) headerText.textContent = 'USERS: ' + currentTotal.toLocaleString() + ' (H:' + roomTotalHigh.toLocaleString() + ')';
             setTimeout(function() {
                 drawAllSparklines();
                 updateSpikeDisplay();
@@ -1782,7 +2025,6 @@ const ViewerTracker = (function() {
         updateDisplay();
     }
 
-    // FIXED: Compare to model name instead of isFirstUser
     function scanUsers() {
         var userListTab = document.querySelector(DOM_SELECTORS.userListTab);
         if (!userListTab) return;
@@ -1810,7 +2052,10 @@ const ViewerTracker = (function() {
                 
                 users.set(username, { tier: tier, gender: gender });
                 
-                // Skip broadcaster by comparing to model name (case-insensitive)
+                if (username.toLowerCase() !== modelName) {
+                    sessionUniqueUsers[username.toLowerCase()] = true;
+                }
+                
                 if ((gender === 'female' || gender === 'trans') && username.toLowerCase() !== modelName) {
                     femaleTransUsernames.push(username);
                     sessionFemaleTransUsers[username] = gender;
@@ -1845,16 +2090,19 @@ const ViewerTracker = (function() {
         var withTokensPct = total > 0 ? Math.round((withTokens / total) * 100) + '%' : '0%';
         var registeredPct = fullRoomTotal > 0 ? Math.round((total / fullRoomTotal) * 100) + '%' : '0%';
 
-        var headerLabel = document.getElementById('header-label');
         var headerText = document.getElementById('header-text');
+        var headerUnique = document.getElementById('header-unique');
+        
         if (headerText) {
             if (isMinimized) {
-                if (headerLabel) headerLabel.style.display = 'none';
                 headerText.textContent = fullRoomTotal.toLocaleString() + ' (H:' + roomTotalHigh.toLocaleString() + ')';
             } else {
-                if (headerLabel) headerLabel.style.display = 'inline';
-                headerText.textContent = fullRoomTotal.toLocaleString() + ' (H:' + roomTotalHigh.toLocaleString() + ')';
+                headerText.textContent = 'USERS: ' + fullRoomTotal.toLocaleString() + ' (H:' + roomTotalHigh.toLocaleString() + ')';
             }
+        }
+        
+        if (headerUnique && !isMinimized) {
+            headerUnique.textContent = 'U:' + Object.keys(sessionUniqueUsers).length.toLocaleString();
         }
 
         var miniWithTokens = document.getElementById('mini-withtokens');
@@ -1930,9 +2178,27 @@ const ViewerTracker = (function() {
         }
         
         var isRoom = isBroadcastRoom();
+        var modelName = getModelName();
         
-        isMinimized = !isRoom;
-        isAutoRefreshOn = isRoom;
+        // NEW: Load session BEFORE setting defaults, so restored values survive
+        var loaded = false;
+        if (isRoom && modelName !== 'unknown') {
+            loaded = loadSession(modelName);
+            if (loaded) {
+                log('Restored session for ' + modelName);
+            }
+        }
+        
+        // NEW: Respect restored pause state - don't auto-enable if paused
+        if (!loaded) {
+            isMinimized = !isRoom;
+            isAutoRefreshOn = isRoom;
+        } else {
+            // If we loaded a session, keep its pause state
+            isMinimized = false; // Show expanded since there's data
+            // FIX: Sync isAutoRefreshOn with the restored pause state
+            isAutoRefreshOn = !isPaused;
+        }
         
         try {
             createPanel();
@@ -1942,7 +2208,6 @@ const ViewerTracker = (function() {
         }
 
         var resizeHandle = document.getElementById('resize-handle');
-        // FIXED: Use style.display instead of styleDisplay
         if (resizeHandle) {
             resizeHandle.style.display = isMinimized ? 'none' : 'block';
         }
@@ -1952,8 +2217,7 @@ const ViewerTracker = (function() {
             var miniView = document.getElementById('minimized-view');
             var toggleBtn = document.getElementById('btn-toggle');
             var container = document.getElementById('tracker-container');
-            var expandedCountdown = document.getElementById('expanded-countdown');
-            var headerLabel = document.getElementById('header-label');
+            var headerUnique = document.getElementById('header-unique');
             
             if (fullView) fullView.style.display = 'block';
             if (miniView) miniView.style.display = 'none';
@@ -1961,8 +2225,10 @@ const ViewerTracker = (function() {
             if (container) {
                 container.style.width = BASE_WIDTH_FULL + 'px';
             }
-            if (expandedCountdown) expandedCountdown.style.display = 'inline';
-            if (headerLabel) headerLabel.style.display = 'inline';
+            if (headerUnique) headerUnique.style.display = 'inline';
+            
+            // NEW: Draw sparklines for restored session
+            drawAllSparklines();
             
             updateDisplay();
         }
@@ -1992,24 +2258,34 @@ const ViewerTracker = (function() {
                     return;
                 }
 
-                performScanThenReturn(true);
+                // FIX: Skip immediate scan if session was restored paused
+                if (!isPaused) {
+                    performScanThenReturn(true);
+                }
 
                 setTimeout(function() {
                     if (myGeneration !== initGuard) return;
                     
-                    if (isAutoRefreshOn) {
+                    // NEW: Only start timer if not paused from restored session
+                    if (isAutoRefreshOn && !isPaused) {
                         startTrackingTimer();
                         startCountdown();
                     } else {
                         var btnAuto = document.getElementById('btn-auto');
+                        var btnControlAuto = document.getElementById('btn-control-auto');
                         if (btnAuto) {
                             btnAuto.style.background = '#ff4444';
                             btnAuto.innerHTML = '▶';
                             btnAuto.title = 'Auto-Refresh OFF - Click to start';
                         }
+                        if (btnControlAuto) {
+                            btnControlAuto.style.background = '#ff4444';
+                            btnControlAuto.innerHTML = '▶';
+                            btnControlAuto.title = 'Auto-Refresh OFF - Click to start';
+                        }
                         var statusEl = document.getElementById('auto-status');
                         if (statusEl) {
-                            statusEl.textContent = 'Paused';
+                            statusEl.textContent = isPaused ? 'Paused (restored)' : 'Paused';
                             statusEl.style.color = '#ff4444';
                         }
                         updateTrackingTimer();
@@ -2028,7 +2304,14 @@ const ViewerTracker = (function() {
     var lastUrl = location.href;
     function checkUrlChange() {
         if (location.href !== lastUrl) {
+            // FIXED: Parse model from lastUrl BEFORE updating it
+            var oldModel = getModelNameFromUrl(lastUrl);
             lastUrl = location.href;
+            
+            // Save old room's session using the parsed old model name
+            if (oldModel && oldModel !== 'unknown') {
+                saveSession(oldModel);
+            }
             
             stopCountdown();
             stopTrackingTimer();
@@ -2055,6 +2338,8 @@ const ViewerTracker = (function() {
             preSpikeBaseline = null;
             roomTotalHigh = 0;
             
+            sessionUniqueUsers = {};
+            
             roomTotalHighTime = null;
             tierHighTimes = {};
             withTokensHighTime = null;
@@ -2072,6 +2357,14 @@ const ViewerTracker = (function() {
     
     urlCheckInterval = setInterval(checkUrlChange, 500);
 
+    // beforeunload handler for refresh/close tab persistence
+    window.addEventListener('beforeunload', function() {
+        var modelName = getModelName();
+        if (modelName && modelName !== 'unknown') {
+            saveSession(modelName);
+        }
+    });
+
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', function() {
             setTimeout(init, 2000);
@@ -2088,6 +2381,7 @@ const ViewerTracker = (function() {
         toggleSpikeDetection: toggleSpikeDetection,
         closeSpike: closeSpike,
         clearAllSpikes: clearAllSpikes,
+        resetAllTracking: resetAllTracking,
         getHealth: function() { return domHealthStatus; }
     };
 })();
