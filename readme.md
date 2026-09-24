@@ -75,6 +75,8 @@ First, you need the Tampermonkey browser extension:
 - **Auto-scan**: The script automatically scans viewers every 30 seconds when enabled
 - **Adjustments**: Minimize and adjust the timer (spike detection works best at 30s or 60s max)
 - **REPORTS**: Click download icon to download a complete session report as a text file
+- **Play/Pause**: Click the Play/Pause icon to temporarily pause the scans.
+- **Reset**: tracked data survives a reload or even closing and reopening the tab. Use the reset button or completely close the browser to clear and start a new tracking session.
 
 ### Understanding the Tiers
 
