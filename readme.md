@@ -126,7 +126,8 @@ First, you need the Tampermonkey browser extension:
 
 | Version | Date | Notes |
 |---------|------|-------|
-| 2.9.9.2 | Current | window resizing bug fixed |
+| 2.9.9.3 | Current | visual improvements |
+| 2.9.9.2 | Legacy | window resizing bug fixed |
 | 2.9.9.1 | Legacy | added persistent storage, control panel, reset button, Unique viewers tracking |
 | 2.9.8.2 | Legacy | minor fix |
 | 2.9.8.1 | Legacy | Anon canvas adjustment |
