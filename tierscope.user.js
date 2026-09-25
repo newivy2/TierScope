@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      2.9.9.2
+// @version      2.9.9.3
 // @description  TierScope - Advanced tracking with spike detection, reports, and persistence
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -17,7 +17,7 @@ const ViewerTracker = (function() {
     'use strict';
 
     const STORAGE_KEY_PREFIX = 'tierscope:v1:';
-    const STORAGE_MAX_AGE_MS = 3 * 60 * 60 * 1000; // 3 hours
+    const STORAGE_MAX_AGE_MS = 3 * 60 * 60 * 1000;
 
     const DOM_SELECTORS = {
         userListTab: '#UserListTab',
@@ -64,17 +64,15 @@ const ViewerTracker = (function() {
     var initGuard = 0;
     var urlCheckInterval = null;
     var scanEpoch = 0;
-
-    // Session-persistent unique tracking
     var sessionUniqueUsers = {};
+    // NEW: Track the resize handler for cleanup
+    var windowResizeHandler = null;
 
     function validateDOMHealth() {
         const now = Date.now();
         const container = document.getElementById('tracker-container');
-        
         const userListTab = document.querySelector(DOM_SELECTORS.userListTab);
         const hasUserList = !!userListTab;
-        
         let hasUsernameElements = false;
         for (let i = 0; i < DOM_SELECTORS.usernameElements.length; i++) {
             if (document.querySelector(DOM_SELECTORS.usernameElements[i])) {
@@ -82,7 +80,6 @@ const ViewerTracker = (function() {
                 break;
             }
         }
-
         const health = {
             timestamp: now,
             userListTab: hasUserList,
@@ -90,12 +87,10 @@ const ViewerTracker = (function() {
             container: !!container,
             roomTotalSelectors: DOM_SELECTORS.roomTotal.some(sel => !!document.querySelector(sel))
         };
-
         const wasHealthy = domHealthStatus.isHealthy;
         domHealthStatus.isHealthy = health.userListTab && health.usernameElements;
         domHealthStatus.lastCheck = now;
         domHealthStatus.userListTabFound = hasUserList;
-
         if (!domHealthStatus.isHealthy) {
             domHealthStatus.consecutiveFailures++;
             if (domHealthStatus.consecutiveFailures === 1 || domHealthStatus.consecutiveFailures % 10 === 0) {
@@ -123,7 +118,6 @@ const ViewerTracker = (function() {
             }
             domHealthStatus.consecutiveFailures = 0;
         }
-
         return health;
     }
 
@@ -147,7 +141,6 @@ const ViewerTracker = (function() {
     var isPaused = false;
     var pausedElapsedTime = 0;
     var dragListeners = [];
-
     var isResizing = false;
     var resizeStartX = 0;
     var resizeStartY = 0;
@@ -156,30 +149,25 @@ const ViewerTracker = (function() {
     var currentScale = 1.0;
     var BASE_WIDTH_MINI = 130;
     var BASE_WIDTH_FULL = 265;
-
     var spikeState = 'detecting';
     var currentSpike = null;
     var stabilizationWindow = [];
     var consecutiveStableScans = 0;
     var preSpikeBaseline = null;
-
     var roomTotalHighTime = null;
     var tierHighTimes = {};
     var withTokensHighTime = null;
     var totalHighTime = null;
     var anonHighTime = null;
-
     var sessionFemaleTransUsers = {};
     var femaleTransUsernames = [];
     var femaleTransHighTime = null;
-
     var history = {
         timestamps: [],
         'red': [], 'green': [], 'purple': [], 'pink': [], 'dark-blue': [], 'light-blue': [], 'gray': [], 'female-trans': [],
         'withTokens': [], 'total': [], 'anonymous': []
     };
     var MAX_HISTORY_LENGTH = 10000;
-
     var completedSpikes = [];
     var anonHistory = [];
     var SPIKE_THRESHOLD = 2.0;
@@ -202,13 +190,11 @@ const ViewerTracker = (function() {
         console.log('[TierTracker] ' + msg);
     }
 
-    // NEW: Parse model name from URL string (not current location)
     function getModelNameFromUrl(url) {
         if (!url) return 'unknown';
         var path = new URL(url).pathname;
         var bMatch = path.match(/\/b\/([^\/\?#]+)/);
         if (bMatch) return bMatch[1];
-        
         var normalMatch = path.match(/\/([^\/\?#]+)\/?$/);
         if (normalMatch) {
             var name = normalMatch[1];
@@ -222,14 +208,12 @@ const ViewerTracker = (function() {
         return 'unknown';
     }
 
-    // NEW: Persistence functions
     function getStorageKey(model) {
         return STORAGE_KEY_PREFIX + model.toLowerCase();
     }
 
     function saveSession(model) {
         if (!model || model === 'unknown') return;
-        
         var saveData = {
             timestamp: Date.now(),
             history: history,
@@ -255,7 +239,6 @@ const ViewerTracker = (function() {
             previousUserCount: previousUserCount,
             previousRoomTotal: previousRoomTotal
         };
-        
         try {
             GM_setValue(getStorageKey(model), JSON.stringify(saveData));
             log('Session saved for ' + model);
@@ -266,22 +249,17 @@ const ViewerTracker = (function() {
 
     function loadSession(model) {
         if (!model || model === 'unknown') return false;
-        
         var key = getStorageKey(model);
         var saved = GM_getValue(key, null);
         if (!saved) return false;
-        
         try {
             var data = JSON.parse(saved);
             var age = Date.now() - data.timestamp;
-            
             if (age > STORAGE_MAX_AGE_MS) {
                 log('Saved session expired (' + Math.round(age/60000) + ' min old), deleting');
                 GM_deleteValue(key);
                 return false;
             }
-            
-            // Restore all saved state
             history = data.history || { timestamps: [], 'red': [], 'green': [], 'purple': [], 'pink': [], 'dark-blue': [], 'light-blue': [], 'gray': [], 'female-trans': [], 'withTokens': [], 'total': [], 'anonymous': [] };
             tierHighTimes = data.tierHighTimes || {};
             withTokensHighTime = data.withTokensHighTime || null;
@@ -304,7 +282,6 @@ const ViewerTracker = (function() {
             consecutiveStableScans = data.consecutiveStableScans || 0;
             previousUserCount = data.previousUserCount || 0;
             previousRoomTotal = data.previousRoomTotal || 0;
-            
             log('Session restored for ' + model + ' (' + Math.round(age/60000) + ' min old)');
             return true;
         } catch (e) {
@@ -323,21 +300,16 @@ const ViewerTracker = (function() {
     function isBroadcastRoom() {
         var path = window.location.pathname;
         var pathParts = path.split('/').filter(function(p) { return p; });
-        
         if (pathParts.length === 0) return false;
-        
         var nonRoomPaths = ['followed', 'featured', 'tags', 'accounts', 'login', 'register',
                            'supporter', 'settings', 'apps', 'explore', 'trending', 'new',
                            'female', 'male', 'couple', 'trans', 'hd', 'north-american',
                            'european', 'asian', 'south-american', 'exhibitionist',
                            'followed-cams', 'female-cams', 'trans-cams', 'male-cams', 'couple-cams'];
-        
         if (nonRoomPaths.indexOf(pathParts[0]) !== -1) return false;
-        
         if (pathParts[0] === 'b' && pathParts.length >= 2) return true;
         if (pathParts.length === 1) return true;
         if (pathParts.length === 2 && pathParts[1] === 'cam') return true;
-        
         return false;
     }
 
@@ -375,7 +347,6 @@ const ViewerTracker = (function() {
         var controlTimerEl = document.getElementById('control-tracking-timer');
         var displayTime = '00:00:00';
         var displayColor = '#888';
-        
         if (isPaused) {
             displayTime = formatElapsedTime(pausedElapsedTime);
             displayColor = '#ff4444';
@@ -383,7 +354,6 @@ const ViewerTracker = (function() {
             displayTime = formatElapsedTime(Date.now() - trackingStartTime);
             displayColor = '#ffd43b';
         }
-        
         if (controlTimerEl) {
             controlTimerEl.textContent = displayTime;
             controlTimerEl.style.color = displayColor;
@@ -397,15 +367,12 @@ const ViewerTracker = (function() {
         } else if (!trackingStartTime) {
             trackingStartTime = Date.now();
         }
-        
         if (trackingTimerInterval) {
             clearInterval(trackingTimerInterval);
             trackingTimerInterval = null;
         }
-        
         trackingTimerInterval = setInterval(updateTrackingTimer, 1000);
         updateTrackingTimer();
-        
         saveSession(getModelName());
     }
 
@@ -429,14 +396,12 @@ const ViewerTracker = (function() {
         trackingStartTime = null;
         pausedElapsedTime = 0;
         isPaused = false;
-        
         roomTotalHighTime = null;
         tierHighTimes = {};
         withTokensHighTime = null;
         totalHighTime = null;
         anonHighTime = null;
         femaleTransHighTime = null;
-        
         updateTrackingTimer();
     }
 
@@ -444,32 +409,24 @@ const ViewerTracker = (function() {
         if (!confirm('Reset all tracking data?\n\nThis will clear:\n- All session history\n- Spike records\n- Elapsed timer\n- Female/Trans user list\n- Unique user count\n\nA new scan will start immediately.')) {
             return;
         }
-        
         var modelName = getModelName();
         log('Performing main reset...');
-        
         deleteSession(modelName);
-        
         scanEpoch++;
         isScanning = false;
-        
         stopCountdown();
         stopTrackingTimer();
-        
         users.clear();
         previousUserCount = 0;
         previousRoomTotal = 0;
         roomTotal = 0;
         roomTotalHigh = 0;
-        
         sessionUniqueUsers = {};
-        
         history = {
             timestamps: [],
             'red': [], 'green': [], 'purple': [], 'pink': [], 'dark-blue': [], 'light-blue': [], 'gray': [], 'female-trans': [],
             'withTokens': [], 'total': [], 'anonymous': []
         };
-        
         completedSpikes.length = 0;
         anonHistory.length = 0;
         spikeState = 'detecting';
@@ -477,35 +434,27 @@ const ViewerTracker = (function() {
         stabilizationWindow = [];
         consecutiveStableScans = 0;
         preSpikeBaseline = null;
-        
         sessionFemaleTransUsers = {};
         femaleTransUsernames = [];
-        
         roomTotalHighTime = null;
         tierHighTimes = {};
         withTokensHighTime = null;
         totalHighTime = null;
         anonHighTime = null;
         femaleTransHighTime = null;
-        
         countdownSeconds = scanIntervalSeconds;
-        
         updateDisplay();
         updateSpikeDisplay();
         updateTrackingTimer();
         updateCountdownDisplay();
-        
         drawAllSparklines();
-        
         if (isAutoRefreshOn) {
             startTrackingTimer();
             startCountdown();
         }
-        
         setTimeout(function() {
             performScanThenReturn(true);
         }, 500);
-        
         log('Reset complete - starting fresh scan (epoch: ' + scanEpoch + ')');
     }
 
@@ -546,11 +495,9 @@ const ViewerTracker = (function() {
                 parent = parent.parentElement;
             }
         }
-        
         if (genderImg) {
             var src = genderImg.src || '';
             var title = genderImg.title || '';
-            
             if (src.indexOf('female') !== -1 || title === 'Female') return 'female';
             if (src.indexOf('trans') !== -1 || title === 'Trans') return 'trans';
             if (src.indexOf('male') !== -1 || title === 'Male') return 'male';
@@ -603,12 +550,10 @@ const ViewerTracker = (function() {
 
     function findTab(tabName) {
         var selectors = DOM_SELECTORS.tabs[tabName.toLowerCase()] || [];
-        
         for (var i = 0; i < selectors.length; i++) {
             var el = document.querySelector(selectors[i]);
             if (el) return el;
         }
-
         var buttons = document.querySelectorAll('button, div[role="tab"]');
         for (var j = 0; j < buttons.length; j++) {
             var btn = buttons[j];
@@ -616,7 +561,6 @@ const ViewerTracker = (function() {
             var tabAttr = btn.getAttribute('data-tab') || '';
             if (text.indexOf(tabName.toUpperCase()) !== -1) return btn;
         }
-
         return null;
     }
 
@@ -642,15 +586,12 @@ const ViewerTracker = (function() {
 
     function isScanValid(newUserCount, newRoomTotal) {
         if (previousRoomTotal === 0) return true;
-        
         if (newRoomTotal === 0 && previousRoomTotal > 0) {
             log('Scan rejected: room total is 0 but previous was ' + previousRoomTotal);
             return false;
         }
-        
         var roomTotalChange = Math.abs(newRoomTotal - previousRoomTotal) / previousRoomTotal;
         if (roomTotalChange > 0.10) return true;
-        
         var userDrop = previousUserCount > 0 ? (previousUserCount - newUserCount) / previousUserCount : 0;
         if (userDrop > 0.50) {
             log('Scan rejected: user count dropped ' + Math.round(userDrop * 100) + '% (' + 
@@ -658,7 +599,6 @@ const ViewerTracker = (function() {
                 previousRoomTotal + ' -> ' + newRoomTotal + ')');
             return false;
         }
-        
         return true;
     }
 
@@ -667,7 +607,6 @@ const ViewerTracker = (function() {
         var sessionStart = trackingStartTime ? formatDateTime(trackingStartTime) : 'Not started';
         var totalTime = trackingStartTime ? formatElapsedTime(isPaused ? pausedElapsedTime : (Date.now() - trackingStartTime)) : '00:00:00';
         var now = Date.now();
-        
         var report = [
             '================================',
             'CHATURBATE TRACKING REPORT',
@@ -679,17 +618,14 @@ const ViewerTracker = (function() {
             'Total Tracking Time: ' + totalTime,
             ''
         ];
-        
         report.push('--- ALL-TIME HIGHS ---');
         report.push('');
-        
         if (roomTotalHigh > 0 && roomTotalHighTime) {
             var elapsed = formatElapsedTime(roomTotalHighTime - trackingStartTime);
             report.push('Room Total High: ' + roomTotalHigh.toLocaleString() + ' users');
             report.push('  Recorded at: ' + formatDateTime(roomTotalHighTime) + ' (' + elapsed + ' into session)');
             report.push('');
         }
-        
         Object.keys(TIERS).forEach(function(tier) {
             var highResult = getHighValue(history[tier], 0);
             var highVal = highResult.value;
@@ -701,7 +637,6 @@ const ViewerTracker = (function() {
                 report.push('');
             }
         });
-        
         var withTokensResult = getHighValue(history['withTokens'], 0);
         var withTokensHigh = withTokensResult.value;
         if (withTokensHigh > 0 && withTokensHighTime) {
@@ -710,7 +645,6 @@ const ViewerTracker = (function() {
             report.push('  Recorded at: ' + formatDateTime(withTokensHighTime) + ' (' + elapsed + ' into session)');
             report.push('');
         }
-        
         var totalResult = getHighValue(history['total'], 0);
         var totalHigh = totalResult.value;
         if (totalHigh > 0 && totalHighTime) {
@@ -719,7 +653,6 @@ const ViewerTracker = (function() {
             report.push('  Recorded at: ' + formatDateTime(totalHighTime) + ' (' + elapsed + ' into session)');
             report.push('');
         }
-        
         var anonResult = getHighValue(history['anonymous'], 0);
         var anonHigh = anonResult.value;
         if (anonHigh > 0 && anonHighTime) {
@@ -728,38 +661,30 @@ const ViewerTracker = (function() {
             report.push('  Recorded at: ' + formatDateTime(anonHighTime) + ' (' + elapsed + ' into session)');
             report.push('');
         }
-        
         report.push('Unique Registered This Session: ' + Object.keys(sessionUniqueUsers).length.toLocaleString());
         report.push('');
-        
         report.push('--- CURRENT STATS ---');
         report.push('');
-        
         var counts = { 'red': 0, 'green': 0, 'purple': 0, 'pink': 0, 'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0 };
-        
         users.forEach(function(data) {
             if (counts[data.tier] !== undefined) counts[data.tier]++;
             if (data.gender === 'female' || data.gender === 'trans') {
                 counts['female-trans']++;
             }
         });
-        
         var total = users.size;
         var withTokens = counts['red'] + counts['green'] + counts['purple'] + counts['pink'] + counts['dark-blue'] + counts['light-blue'];
         var anonymousCount = getAnonymousCount();
         var fullRoomTotal = roomTotal > total ? roomTotal : (total + anonymousCount);
-        
         var totalHighCurrent = getHighValue(history['total'], total).value;
         var withTokensHighCurrent = getHighValue(history['withTokens'], withTokens).value;
         var anonHighCurrent = getHighValue(history['anonymous'], anonymousCount).value;
         var ftHighCurrent = getHighValue(history['female-trans'], counts['female-trans']).value;
-        
         report.push('Current Room Total: ' + fullRoomTotal.toLocaleString() + ' (High: ' + roomTotalHigh.toLocaleString() + ')');
         report.push('Current Registered: ' + total.toLocaleString() + ' (High: ' + totalHighCurrent.toLocaleString() + ')');
         report.push('Current With Tokens: ' + withTokens.toLocaleString() + ' (High: ' + withTokensHighCurrent.toLocaleString() + ')');
         report.push('Current Anonymous: ' + anonymousCount.toLocaleString() + ' (High: ' + anonHighCurrent.toLocaleString() + ')');
         report.push('');
-        
         report.push('--- TIER BREAKDOWN ---');
         report.push('');
         Object.keys(TIERS).forEach(function(tier) {
@@ -768,23 +693,19 @@ const ViewerTracker = (function() {
             report.push(TIERS[tier].name + ' (' + (TIERS[tier].desc || 'Overlay') + '): ' + current.toLocaleString() + ' (High: ' + high.toLocaleString() + ')');
         });
         report.push('');
-        
         report.push('--- SPIKE SUMMARY ---');
         report.push('');
-        
         if (completedSpikes.length === 0 && !currentSpike) {
             report.push('No spikes detected during this session.');
         } else {
             report.push('Total Spikes Detected: ' + (completedSpikes.length + (currentSpike ? 1 : 0)));
             report.push('');
-            
             if (currentSpike) {
                 report.push('CURRENTLY TRACKING SPIKE:');
                 report.push('  Started: ' + formatDateTime(currentSpike.startTime));
                 report.push('  Baseline: ' + currentSpike.baselineCount);
                 report.push('  Current Peak: ' + currentSpike.peakCount);
                 report.push('  Duration so far: ' + formatDuration(now - currentSpike.startTime));
-                
                 report.push('');
                 report.push('  --- TIER BREAKDOWN AT START ---');
                 report.push('    🔴 Red: ' + currentSpike.startCounts.red + '  🟢 Green: ' + currentSpike.startCounts.green + '  🟣 Purple: ' + currentSpike.startCounts.purple);
@@ -792,7 +713,6 @@ const ViewerTracker = (function() {
                 report.push('    💙 Light Blue: ' + currentSpike.startCounts['light-blue'] + '  ⚪ Gray: ' + currentSpike.startCounts.gray);
                 report.push('    ♀⚧ Overlay: ' + (currentSpike.startCounts['female-trans'] || 0));
                 report.push('    Subtotals: 💎 With Tokens: ' + currentSpike.startWithTokens + '  📊 Total: ' + currentSpike.startTotal);
-                
                 report.push('');
                 report.push('  --- TIER BREAKDOWN AT PEAK ---');
                 report.push('    🔴 Red: ' + currentSpike.peakCounts.red + '  🟢 Green: ' + currentSpike.peakCounts.green + '  🟣 Purple: ' + currentSpike.peakCounts.purple);
@@ -802,7 +722,6 @@ const ViewerTracker = (function() {
                 report.push('    Subtotals: 💎 With Tokens: ' + currentSpike.peakWithTokens + '  📊 Total: ' + currentSpike.peakTotal);
                 report.push('');
             }
-            
             completedSpikes.forEach(function(spike, idx) {
                 report.push('Spike #' + (completedSpikes.length - idx) + ':');
                 report.push('  Start: ' + formatDateTime(spike.startTime));
@@ -811,7 +730,6 @@ const ViewerTracker = (function() {
                 report.push('  Duration: ' + formatDuration(spike.duration));
                 report.push('  Baseline → Peak → Final: ' + spike.baselineCount + ' → ' + spike.peakCount + ' → ' + spike.finalCount);
                 report.push('  Net Change: +' + (spike.peakCount - spike.baselineCount) + ' (peak), ' + (spike.finalCount - spike.baselineCount) + ' (settled)');
-                
                 report.push('');
                 report.push('  --- TIER BREAKDOWN AT START ---');
                 report.push('    🔴 Red: ' + spike.startCounts.red + '  🟢 Green: ' + spike.startCounts.green + '  🟣 Purple: ' + spike.startCounts.purple);
@@ -819,7 +737,6 @@ const ViewerTracker = (function() {
                 report.push('    💙 Light Blue: ' + spike.startCounts['light-blue'] + '  ⚪ Gray: ' + spike.startCounts.gray);
                 report.push('    ♀⚧ Overlay: ' + (spike.startCounts['female-trans'] || 0));
                 report.push('    Subtotals: 💎 With Tokens: ' + spike.startWithTokens + '  📊 Total Registered: ' + spike.startTotal + '  👻 Anonymous: ' + spike.baselineCount);
-                
                 report.push('');
                 report.push('  --- TIER BREAKDOWN AT PEAK ---');
                 report.push('    🔴 Red: ' + spike.peakCounts.red + '  🟢 Green: ' + spike.peakCounts.green + '  🟣 Purple: ' + spike.peakCounts.purple);
@@ -827,7 +744,6 @@ const ViewerTracker = (function() {
                 report.push('    💙 Light Blue: ' + spike.peakCounts['light-blue'] + '  ⚪ Gray: ' + spike.peakCounts.gray);
                 report.push('    ♀⚧ Overlay: ' + (spike.peakCounts['female-trans'] || 0));
                 report.push('    Subtotals: 💎 With Tokens: ' + spike.peakWithTokens + '  📊 Total Registered: ' + spike.peakTotal + '  👻 Anonymous: ' + spike.peakCount);
-                
                 report.push('');
                 report.push('  --- TIER BREAKDOWN AT FINAL ---');
                 report.push('    🔴 Red: ' + spike.finalCounts.red + '  🟢 Green: ' + spike.finalCounts.green + '  🟣 Purple: ' + spike.finalCounts.purple);
@@ -838,15 +754,12 @@ const ViewerTracker = (function() {
                 report.push('');
             });
         }
-        
         report.push('');
         report.push('--- ♀⚧ OVERLAY (SESSION) ---');
         report.push('');
-        
         var sessionFemaleCount = 0;
         var sessionTransCount = 0;
         var femaleTransList = [];
-        
         Object.keys(sessionFemaleTransUsers).forEach(function(username) {
             var gender = sessionFemaleTransUsers[username];
             var icon = gender === 'female' ? '♀' : '⚧';
@@ -854,14 +767,11 @@ const ViewerTracker = (function() {
             if (gender === 'female') sessionFemaleCount++;
             else if (gender === 'trans') sessionTransCount++;
         });
-        
         femaleTransList.sort(function(a, b) {
             return a.username.localeCompare(b.username);
         });
-        
         report.push('Total Unique Viewers: ' + femaleTransList.length + ' (♀ Female: ' + sessionFemaleCount + ', ⚧ Trans: ' + sessionTransCount + ')');
         report.push('');
-        
         if (femaleTransList.length > 0) {
             report.push('Usernames:');
             femaleTransList.forEach(function(item) {
@@ -871,20 +781,16 @@ const ViewerTracker = (function() {
             report.push('No ♀⚧ viewers detected during this session.');
         }
         report.push('');
-        
         report.push('');
         report.push('================================');
         report.push('End of Report');
         report.push('================================');
-        
         var date = new Date();
         var dateStr = date.toISOString().slice(0, 10);
         var timeStr = date.getHours().toString().padStart(2, '0') + '-' + 
                      date.getMinutes().toString().padStart(2, '0') + '-' + 
                      date.getSeconds().toString().padStart(2, '0');
-        
         var filename = modelName + '-tracking-report-' + dateStr + '-' + timeStr + '.txt';
-
         var blob = new Blob([report.join('\n')], { type: 'text/plain' });
         var url = URL.createObjectURL(blob);
         var a = document.createElement('a');
@@ -899,7 +805,6 @@ const ViewerTracker = (function() {
     function downloadSpikeReport(index) {
         var spike = completedSpikes[index];
         if (!spike) return;
-
         var report = [
             '================================',
             'CHATURBATE ANON SPIKE REPORT',
@@ -970,7 +875,6 @@ const ViewerTracker = (function() {
             'End of Report',
             '================================'
         ].join('\n');
-
         var modelName = getModelName();
         var spikeNumber = completedSpikes.length - index;
         var date = new Date(spike.startTime);
@@ -978,9 +882,7 @@ const ViewerTracker = (function() {
         var timeStr = date.getHours().toString().padStart(2, '0') + '-' + 
                      date.getMinutes().toString().padStart(2, '0') + '-' + 
                      date.getSeconds().toString().padStart(2, '0');
-        
         var filename = modelName + '-spike-' + spikeNumber + '-' + dateStr + '-' + timeStr + '.txt';
-
         var blob = new Blob([report], { type: 'text/plain' });
         var url = URL.createObjectURL(blob);
         var a = document.createElement('a');
@@ -1021,10 +923,8 @@ const ViewerTracker = (function() {
         if (typeof returnToChat === 'undefined') returnToChat = true;
         if (isScanning) return;
         isScanning = true;
-
         var myScanEpoch = ++scanEpoch;
         var scanGeneration = initGuard;
-        
         var statusEl = document.getElementById('auto-status');
         if (statusEl) {
             if (spikeState === 'tracking') {
@@ -1035,16 +935,13 @@ const ViewerTracker = (function() {
                 statusEl.style.color = '#ffd43b';
             }
         }
-
         var usersTab = findTab('users');
         var chatTab = findTab('chat');
-
         if (!usersTab) {
             isScanning = false;
             resetCountdown();
             return;
         }
-
         try {
             usersTab.click();
         } catch (e) {
@@ -1053,37 +950,29 @@ const ViewerTracker = (function() {
             resetCountdown();
             return;
         }
-
         setTimeout(function() {
             if (scanGeneration !== initGuard || myScanEpoch !== scanEpoch) {
                 log('Scan callback: generation/epoch changed, aborting');
                 return;
             }
-            
             var tempUsers = new Map(users);
             var tempPreviousCount = previousUserCount;
             var tempPreviousRoomTotal = previousRoomTotal;
             var tempRoomTotal = roomTotal;
             var scanRejected = false;
-            
             try {
                 users.clear();
                 scanUsers();
-
                 var counts = { 'red': 0, 'green': 0, 'purple': 0, 'pink': 0, 'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0 };
-                
                 users.forEach(function(data) {
                     if (counts[data.tier] !== undefined) counts[data.tier]++;
-                    
                     if (data.gender === 'female' || data.gender === 'trans') {
                         counts['female-trans']++;
                     }
                 });
-                
                 var total = users.size;
                 var withTokens = counts['red'] + counts['green'] + counts['purple'] + counts['pink'] + counts['dark-blue'] + counts['light-blue'];
                 var anonymousCount = getAnonymousCount();
-                
                 if (myScanEpoch !== scanEpoch) {
                     log('Scan data processing: epoch changed, aborting write');
                     users = tempUsers;
@@ -1092,7 +981,6 @@ const ViewerTracker = (function() {
                     roomTotal = tempRoomTotal;
                     return;
                 }
-                
                 if (!isScanValid(total, roomTotal)) {
                     users = tempUsers;
                     previousUserCount = tempPreviousCount;
@@ -1100,7 +988,6 @@ const ViewerTracker = (function() {
                     roomTotal = tempRoomTotal;
                     scanRejected = true;
                     log('Scan rejected - keeping previous data');
-                    
                     if (statusEl) {
                         statusEl.textContent = 'Scan skipped (unreliable)';
                         statusEl.style.color = '#ff4444';
@@ -1108,13 +995,11 @@ const ViewerTracker = (function() {
                 } else {
                     previousUserCount = total;
                     previousRoomTotal = roomTotal;
-                    
                     var currentRoomTotal = roomTotal > 0 ? roomTotal : (total + anonymousCount);
                     if (currentRoomTotal > roomTotalHigh) {
                         roomTotalHigh = currentRoomTotal;
                         roomTotalHighTime = Date.now();
                     }
-
                     if (spikeDetectionEnabled) {
                         if (spikeState === 'detecting') {
                             var baseline;
@@ -1125,9 +1010,7 @@ const ViewerTracker = (function() {
                             } else {
                                 baseline = anonymousCount;
                             }
-                            
                             var increase = anonymousCount - baseline;
-
                             if (baseline > 0 && anonymousCount >= baseline * SPIKE_THRESHOLD && increase >= MIN_ABSOLUTE_INCREASE) {
                                 spikeState = 'tracking';
                                 currentSpike = {
@@ -1155,19 +1038,16 @@ const ViewerTracker = (function() {
                             }
                         } else if (spikeState === 'tracking') {
                             currentSpike.readings.push(anonymousCount);
-                            
                             var prevReading = currentSpike.readings[currentSpike.readings.length - 2];
                             if (isReadingStable(anonymousCount, prevReading)) {
                                 consecutiveStableScans++;
                             } else {
                                 consecutiveStableScans = 0;
                             }
-                            
                             stabilizationWindow.push(anonymousCount);
                             if (stabilizationWindow.length > STABILIZATION_SCANS) {
                                 stabilizationWindow.shift();
                             }
-
                             if (anonymousCount > currentSpike.peakCount) {
                                 currentSpike.peakCount = anonymousCount;
                                 currentSpike.peakTime = Date.now();
@@ -1175,7 +1055,6 @@ const ViewerTracker = (function() {
                                 currentSpike.peakWithTokens = withTokens;
                                 currentSpike.peakTotal = total;
                             }
-
                             if (isStabilized(stabilizationWindow)) {
                                 currentSpike.endTime = Date.now();
                                 currentSpike.finalCount = anonymousCount;
@@ -1184,12 +1063,9 @@ const ViewerTracker = (function() {
                                 currentSpike.finalCounts = Object.assign({}, counts);
                                 currentSpike.finalWithTokens = withTokens;
                                 currentSpike.finalTotal = total;
-
                                 completedSpikes.unshift(Object.assign({}, currentSpike));
                                 if (completedSpikes.length > 5) completedSpikes.pop();
-
                                 log('SPIKE STABILIZED - Duration: ' + formatDuration(currentSpike.duration));
-
                                 spikeState = 'detecting';
                                 currentSpike = null;
                                 stabilizationWindow = [];
@@ -1198,17 +1074,13 @@ const ViewerTracker = (function() {
                             }
                         }
                     }
-
                     anonHistory.push(anonymousCount);
                     if (anonHistory.length > 5) anonHistory.shift();
-                    
                     updateDisplay();
                     updateSpikeDisplay();
                     saveToHistory();
-                    
                     saveSession(getModelName());
                 }
-                
             } catch (err) {
                 log('Error during scan: ' + err);
                 users = tempUsers;
@@ -1220,7 +1092,6 @@ const ViewerTracker = (function() {
                     log('Scan finally: generation/epoch changed, skipping cleanup');
                     return;
                 }
-                
                 if (returnToChat && chatTab) {
                     chatTab.click();
                 }
@@ -1255,14 +1126,11 @@ const ViewerTracker = (function() {
     function setupSpikeContainerListeners() {
         var spikeContainer = document.getElementById('spike-container');
         if (!spikeContainer) return;
-        
         spikeContainer.addEventListener('click', function(e) {
             var btn = e.target.closest('button');
             if (!btn) return;
-            
             var action = btn.dataset.action;
             var index = btn.dataset.index;
-            
             if (action === 'download' && index !== undefined) {
                 downloadSpikeReport(parseInt(index));
             } else if (action === 'close' && index !== undefined) {
@@ -1275,21 +1143,17 @@ const ViewerTracker = (function() {
         var spikeContainer = document.getElementById('spike-container');
         var clearAllBtn = document.getElementById('btn-clear-all-spikes');
         if (!spikeContainer) return;
-
         if (clearAllBtn) {
             clearAllBtn.style.display = (completedSpikes.length > 0 || spikeState === 'tracking') ? 'inline-block' : 'none';
         }
         updateSpikeToggleButton();
-
         if (spikeState === 'tracking' && currentSpike) {
             var currentReading = currentSpike.readings[currentSpike.readings.length - 1];
             var trackingDuration = Date.now() - currentSpike.startTime;
-
             var formatTiers = function(counts) {
                 return 'R:' + counts.red + ' G:' + counts.green + ' P:' + counts.purple + ' PK:' + counts.pink + 
                        ' DB:' + counts['dark-blue'] + ' LB:' + counts['light-blue'] + ' GY:' + counts.gray + ' FT:' + (counts['female-trans'] || 0);
             };
-
             spikeContainer.innerHTML = 
                 '<div style="margin-bottom:4px;padding:4px;background:rgba(255,68,68,0.2);border-radius:3px;border:2px solid #ff4444;">' +
                     '<div style="font-size:9px;color:#ff4444;font-weight:bold;text-align:center;margin-bottom:3px;">⚡ TRACKING SPIKE - ' + formatDuration(trackingDuration) + '</div>' +
@@ -1304,12 +1168,10 @@ const ViewerTracker = (function() {
                 '</div>';
             return;
         }
-
         if (completedSpikes.length === 0) {
             spikeContainer.innerHTML = '<div style="font-size:7px;color:#666;text-align:center;padding:3px;">No spikes detected yet</div>';
             return;
         }
-
         var html = '';
         for (var i = 0; i < completedSpikes.length; i++) {
             var spike = completedSpikes[i];
@@ -1335,47 +1197,38 @@ const ViewerTracker = (function() {
 
     function saveToHistory() {
         var counts = { 'red': 0, 'green': 0, 'purple': 0, 'pink': 0, 'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0 };
-        
         users.forEach(function(data) {
             if (counts[data.tier] !== undefined) counts[data.tier]++;
-            
             if (data.gender === 'female' || data.gender === 'trans') {
                 counts['female-trans']++;
             }
         });
-
         var total = users.size;
         var withTokens = counts['red'] + counts['green'] + counts['purple'] + counts['pink'] + counts['dark-blue'] + counts['light-blue'];
         var anonymousCount = getAnonymousCount();
         var now = Date.now();
-
         Object.keys(counts).forEach(function(tier) {
             var highResult = getHighValue(history[tier], counts[tier], now);
             if (highResult.isNew && highResult.time) {
                 tierHighTimes[tier] = highResult.time;
             }
         });
-
         var withTokensResult = getHighValue(history['withTokens'], withTokens, now);
         if (withTokensResult.isNew && withTokensResult.time) {
             withTokensHighTime = withTokensResult.time;
         }
-
         var totalResult = getHighValue(history['total'], total, now);
         if (totalResult.isNew && totalResult.time) {
             totalHighTime = totalResult.time;
         }
-
         var anonResult = getHighValue(history['anonymous'], anonymousCount, now);
         if (anonResult.isNew && anonResult.time) {
             anonHighTime = anonResult.time;
         }
-
         var ftResult = getHighValue(history['female-trans'], counts['female-trans'], now);
         if (ftResult.isNew && ftResult.time) {
             femaleTransHighTime = ftResult.time;
         }
-
         history.timestamps.push(now);
         Object.keys(counts).forEach(function(tier) {
             history[tier].push(counts[tier]);
@@ -1383,7 +1236,6 @@ const ViewerTracker = (function() {
         history['withTokens'].push(withTokens);
         history['total'].push(total);
         history['anonymous'].push(anonymousCount);
-
         if (history.timestamps.length > MAX_HISTORY_LENGTH) {
             history.timestamps.shift();
             Object.keys(counts).forEach(function(tier) { history[tier].shift(); });
@@ -1391,7 +1243,6 @@ const ViewerTracker = (function() {
             history['total'].shift();
             history['anonymous'].shift();
         }
-
         if (!isMinimized) {
             drawAllSparklines();
         }
@@ -1400,47 +1251,35 @@ const ViewerTracker = (function() {
     function drawSparkline(canvasId, data, color, customHeight) {
         var canvas = document.getElementById(canvasId);
         if (!canvas) return;
-        
         var ctx = canvas.getContext('2d');
-        
         var scale = Math.max(1, currentScale || 1);
         var displayWidth = 105;
         var displayHeight = customHeight || 28;
-        
         canvas.width = Math.floor(displayWidth * scale);
         canvas.height = Math.floor(displayHeight * scale);
-        
         canvas.style.width = displayWidth + 'px';
         canvas.style.height = displayHeight + 'px';
-        
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        
         if (data.length < 2) return;
-
         ctx.scale(scale, scale);
-        
         var width = displayWidth;
         var height = displayHeight;
         var min = Math.min.apply(null, data);
         var max = Math.max.apply(null, data);
         var range = max - min || 1;
-
         var padding = 2;
         var drawHeight = height - (padding * 2);
-
         ctx.strokeStyle = color;
         ctx.lineWidth = 2;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
         ctx.beginPath();
-
         for (var i = 0; i < data.length; i++) {
             var x = (i / (data.length - 1)) * width;
             var y = height - padding - ((data[i] - min) / range) * drawHeight;
             if (i === 0) ctx.moveTo(x, y);
             else ctx.lineTo(x, y);
         }
-
         ctx.stroke();
     }
 
@@ -1456,7 +1295,6 @@ const ViewerTracker = (function() {
     function getHighValue(data, currentValue, timestamp) {
         var historyMax = data && data.length > 0 ? Math.max.apply(null, data) : 0;
         var newHigh = Math.max(historyMax, currentValue || 0);
-        
         if (timestamp && newHigh > historyMax) {
             return { value: newHigh, isNew: true, time: timestamp };
         }
@@ -1473,11 +1311,9 @@ const ViewerTracker = (function() {
         var timerDisplay = document.getElementById('timer-display');
         var expandedCountdown = document.getElementById('expanded-countdown');
         var controlNextScan = document.getElementById('control-next-scan');
-
         if (timerDisplay) {
             timerDisplay.textContent = scanIntervalSeconds + 's';
         }
-
         if (expandedCountdown) {
             if (isScanning) {
                 if (spikeState === 'tracking') {
@@ -1495,7 +1331,6 @@ const ViewerTracker = (function() {
                 expandedCountdown.style.color = '#ff4444';
             }
         }
-
         if (controlNextScan) {
             if (isScanning) {
                 controlNextScan.textContent = spikeState === 'tracking' ? 'Tracking...' : 'Scanning...';
@@ -1508,9 +1343,7 @@ const ViewerTracker = (function() {
                 controlNextScan.style.color = '#ff4444';
             }
         }
-
         if (!statusEl) return;
-
         if (spikeState === 'tracking') {
             statusEl.textContent = 'Tracking spike...';
             statusEl.style.color = '#ff4444';
@@ -1531,7 +1364,6 @@ const ViewerTracker = (function() {
         if (newValue < 30) scanIntervalSeconds = 30;
         else if (newValue > 300) scanIntervalSeconds = 300;
         else scanIntervalSeconds = newValue;
-
         if (isAutoRefreshOn) {
             stopCountdown();
             resetCountdown();
@@ -1543,7 +1375,6 @@ const ViewerTracker = (function() {
                 timerDisplay.textContent = scanIntervalSeconds + 's';
             }
         }
-
         updateCountdownDisplay();
     }
 
@@ -1552,13 +1383,10 @@ const ViewerTracker = (function() {
             clearInterval(countdownInterval);
             countdownInterval = null;
         }
-        
         countdownInterval = setInterval(function() {
             if (!isAutoRefreshOn || isScanning) return;
-
             countdownSeconds--;
             updateCountdownDisplay();
-
             if (countdownSeconds <= 0) {
                 performScanThenReturn(true);
             }
@@ -1589,17 +1417,14 @@ const ViewerTracker = (function() {
         currentScale = scale;
         var container = document.getElementById('tracker-container');
         if (!container) return;
-        
         container.style.transform = 'scale(' + scale + ')';
         container.style.transformOrigin = 'top left';
-        
         container.dataset.scale = scale;
     }
 
     function setupResizable() {
         var container = document.getElementById('tracker-container');
         if (!container) return;
-        
         var resizeHandle = document.createElement('div');
         resizeHandle.id = 'resize-handle';
         resizeHandle.style.cssText = 
@@ -1607,52 +1432,40 @@ const ViewerTracker = (function() {
             'background:linear-gradient(135deg, #ff69b4 50%, transparent 50%);' +
             'cursor:nw-resize;z-index:999999;border-top-left-radius:6px;' +
             'opacity:0.8;transition:opacity 0.2s;';
-        
         resizeHandle.addEventListener('mouseenter', function() {
             this.style.opacity = '1';
         });
         resizeHandle.addEventListener('mouseleave', function() {
             this.style.opacity = '0.8';
         });
-        
         container.appendChild(resizeHandle);
-        
         var startResize = function(e) {
             if (isDragging) return;
             isResizing = true;
             resizeStartX = e.clientX;
             resizeStartY = e.clientY;
-            
             var rect = container.getBoundingClientRect();
             resizeStartWidth = rect.width;
             resizeStartHeight = rect.height;
-            
             e.preventDefault();
             e.stopPropagation();
         };
-        
         var doResize = function(e) {
             if (!isResizing) return;
-            
             var deltaX = resizeStartX - e.clientX;
             var deltaY = resizeStartY - e.clientY;
-            
             var newWidth = resizeStartWidth + deltaX;
             var baseWidth = isMinimized ? BASE_WIDTH_MINI : BASE_WIDTH_FULL;
             var newScale = Math.max(0.5, Math.min(3.0, newWidth / baseWidth));
-            
             applyScale(newScale);
         };
-        
         var stopResize = function() {
             if (!isResizing) return;
             isResizing = false;
         };
-        
         resizeHandle.addEventListener('mousedown', startResize);
         document.addEventListener('mousemove', doResize);
         document.addEventListener('mouseup', stopResize);
-        
         window._trackerResizeCleanup = function() {
             resizeHandle.removeEventListener('mousedown', startResize);
             document.removeEventListener('mousemove', doResize);
@@ -1660,16 +1473,22 @@ const ViewerTracker = (function() {
         };
     }
 
-    // NEW: Keep panel visible on window resize
+    // FIXED: Removed scale multiplication - getBoundingClientRect already includes transform
+    // FIXED: Added cleanup for window resize listener to prevent stacking on room changes
     function setupResizeHandler() {
+        // Remove old handler if exists (prevents stacking on room changes)
+        if (windowResizeHandler) {
+            window.removeEventListener('resize', windowResizeHandler);
+            windowResizeHandler = null;
+        }
+        
         var resizeTimeout;
-        window.addEventListener('resize', function() {
+        windowResizeHandler = function() {
             clearTimeout(resizeTimeout);
             resizeTimeout = setTimeout(function() {
                 var container = document.getElementById('tracker-container');
                 if (!container) return;
                 
-                var scale = currentScale || 1;
                 var rect = container.getBoundingClientRect();
                 var viewportWidth = window.innerWidth;
                 var viewportHeight = window.innerHeight;
@@ -1678,9 +1497,9 @@ const ViewerTracker = (function() {
                 var currentLeft = parseInt(container.style.left) || rect.left;
                 var currentTop = parseInt(container.style.top) || rect.top;
                 
-                // Clamp to viewport bounds
-                var maxX = viewportWidth - (rect.width * scale);
-                var maxY = viewportHeight - (rect.height * scale);
+                // FIXED: Use rect.width/height directly - they already include the transform scale
+                var maxX = viewportWidth - rect.width;
+                var maxY = viewportHeight - rect.height;
                 
                 var newLeft = Math.max(0, Math.min(currentLeft, maxX));
                 var newTop = Math.max(0, Math.min(currentTop, maxY));
@@ -1692,11 +1511,19 @@ const ViewerTracker = (function() {
                     container.style.right = 'auto';
                 }
             }, 100);
-        });
+        };
+        
+        window.addEventListener('resize', windowResizeHandler);
     }
 
     function createPanel() {
         cleanupDragListeners();
+        
+        // FIXED: Also cleanup window resize handler
+        if (windowResizeHandler) {
+            window.removeEventListener('resize', windowResizeHandler);
+            windowResizeHandler = null;
+        }
         
         if (window._trackerResizeCleanup) {
             window._trackerResizeCleanup();
@@ -1760,86 +1587,85 @@ const ViewerTracker = (function() {
         
         Object.keys(TIERS).forEach(function(key) {
             var t = TIERS[key];
-            var descHtml = t.desc ? '<div style="font-size:6px;color:#888;line-height:1.0;">' + t.desc + '</div>' : '';
+            var descHtml = t.desc ? '<div style="font-size:7px;color:#888;line-height:1.0;">' + t.desc + '</div>' : '';
             html += 
-                '<div style="display:flex;align-items:center;padding:0px 2px;margin:0;background:rgba(255,255,255,0.05);border-radius:3px;border-left:2px solid ' + t.color + ';">' +
-                    '<div style="width:68px;flex-shrink:0;">' +
-                        '<div style="font-size:8px;line-height:1.0;">' + t.name + '</div>' +
+                '<div style="display:flex;align-items:center;padding:1px 3px;margin:1px 0;background:rgba(255,255,255,0.05);border-radius:3px;border-left:3px solid ' + t.color + ';">' +
+                    '<div style="width:65px;flex-shrink:0;">' +
+                        '<div style="font-size:10px;line-height:1.1;font-weight:500;">' + t.name + '</div>' +
                         descHtml +
                     '</div>' +
-                    '<canvas id="spark-' + key + '" width="105" height="28" style="flex:1;margin:0 3px;"></canvas>' +
-                    '<div style="text-align:right;width:40px;flex-shrink:0;">' +
-                        '<span id="count-' + key + '" style="font-weight:bold;color:' + t.color + ';font-size:11px;">0</span>' +
-                        '<div id="high-' + key + '" style="font-size:6px;color:#32CD32;margin-top:0;">H:0</div>' +
+                    '<canvas id="spark-' + key + '" width="105" height="28" style="flex:1;margin:0 4px;"></canvas>' +
+                    '<div style="text-align:right;width:48px;flex-shrink:0;">' +
+                        '<span id="count-' + key + '" style="font-weight:bold;color:' + t.color + ';font-size:14px;">0</span>' +
+                        '<div id="high-' + key + '" style="font-size:8px;color:#32CD32;margin-top:1px;">H:0</div>' +
                     '</div>' +
                 '</div>';
         });
         
         html += 
-                '<div style="border-top:1px solid #555;margin-top:3px;padding-top:3px;">' +
-                    '<div style="display:flex;align-items:center;padding:1px 2px;background:rgba(255,105,180,0.15);border-radius:3px;border:1px solid #ff69b4;margin-bottom:2px;">' +
-                        '<div style="width:68px;flex-shrink:0;">' +
-                            '<div style="font-size:8px;font-weight:bold;line-height:1.0;">💎 With Tokens</div>' +
+                '<div style="border-top:1px solid #555;margin-top:4px;padding-top:4px;">' +
+                    '<div style="display:flex;align-items:center;padding:2px 3px;background:rgba(255,105,180,0.15);border-radius:3px;border:1px solid #ff69b4;margin-bottom:3px;">' +
+                        '<div style="width:65px;flex-shrink:0;">' +
+                            '<div style="font-size:10px;font-weight:bold;line-height:1.1;">💎 With Tokens</div>' +
                         '</div>' +
-                        '<canvas id="spark-withtokens" width="105" height="28" style="flex:1;margin:0 3px;"></canvas>' +
-                        '<div style="text-align:right;width:40px;flex-shrink:0;">' +
-                            '<span id="count-withtokens" style="font-weight:bold;color:#ff69b4;font-size:11px;">0</span>' +
-                            '<span id="pct-withtokens" style="font-size:6px;color:#ff69b4;margin-left:1px;">0%</span>' +
-                            '<div id="high-withtokens" style="font-size:6px;color:#32CD32;margin-top:0;">H:0</div>' +
+                        '<canvas id="spark-withtokens" width="105" height="28" style="flex:1;margin:0 4px;"></canvas>' +
+                        '<div style="text-align:right;width:48px;flex-shrink:0;">' +
+                            '<span id="count-withtokens" style="font-weight:bold;color:#ff69b4;font-size:14px;">0</span>' +
+                            '<span id="pct-withtokens" style="font-size:8px;color:#ff69b4;margin-left:2px;">0%</span>' +
+                            '<div id="high-withtokens" style="font-size:8px;color:#32CD32;margin-top:1px;">H:0</div>' +
                         '</div>' +
                     '</div>' +
-                    '<div style="display:flex;align-items:center;padding:1px 2px;background:rgba(255,255,255,0.1);border-radius:3px;">' +
-                        '<div style="width:68px;flex-shrink:0;">' +
-                            '<div style="font-size:8px;font-weight:bold;line-height:1.0;">📊 Total</div>' +
+                    '<div style="display:flex;align-items:center;padding:2px 3px;background:rgba(255,255,255,0.1);border-radius:3px;">' +
+                        '<div style="width:65px;flex-shrink:0;">' +
+                            '<div style="font-size:10px;font-weight:bold;line-height:1.1;">📊 Total</div>' +
                         '</div>' +
-                        '<canvas id="spark-total" width="105" height="28" style="flex:1;margin:0 3px;"></canvas>' +
-                        '<div style="text-align:right;width:40px;flex-shrink:0;">' +
-                            '<span id="count-total" style="font-weight:bold;color:#fff;font-size:11px;">0</span>' +
-                            '<div id="high-total" style="font-size:6px;color:#32CD32;margin-top:0;">H:0</div>' +
+                        '<canvas id="spark-total" width="105" height="28" style="flex:1;margin:0 4px;"></canvas>' +
+                        '<div style="text-align:right;width:48px;flex-shrink:0;">' +
+                            '<span id="count-total" style="font-weight:bold;color:#fff;font-size:14px;">0</span>' +
+                            '<div id="high-total" style="font-size:8px;color:#32CD32;margin-top:1px;">H:0</div>' +
                         '</div>' +
                     '</div>' +
                 '</div>' +
                 
-                '<div id="anon-rate-full" style="margin-top:4px;padding:4px;background:rgba(136,136,136,0.15);border-radius:3px;border:1px solid #888;">' +
+                '<div id="anon-rate-full" style="margin-top:5px;padding:5px;background:rgba(136,136,136,0.15);border-radius:3px;border:1px solid #888;">' +
                     '<div style="display:flex;align-items:center;">' +
-                        '<div style="width:68px;flex-shrink:0;">' +
-                            '<div style="font-size:8px;font-weight:bold;color:#aaa;line-height:1.0;">👻 Anon</div>' +
-                            '<div style="font-size:6px;color:#888;line-height:1.0;">Not logged in</div>' +
+                        '<div style="width:65px;flex-shrink:0;">' +
+                            '<div style="font-size:10px;font-weight:bold;color:#aaa;line-height:1.1;">👻 Anon</div>' +
+                            '<div style="font-size:7px;color:#888;line-height:1.0;">Not logged in</div>' +
                         '</div>' +
-                        '<canvas id="spark-anon" width="105" height="50" style="flex:1;margin:0 3px;"></canvas>' +
-                        '<div style="text-align:right;width:40px;flex-shrink:0;">' +
-                            '<span id="anon-ratio-full" style="font-size:11px;font-weight:bold;color:#ff69b4;">--</span>' +
-                            '<div id="high-anon" style="font-size:6px;color:#32CD32;margin-top:0;">H:0</div>' +
+                        '<canvas id="spark-anon" width="105" height="50" style="flex:1;margin:0 4px;"></canvas>' +
+                        '<div style="text-align:right;width:48px;flex-shrink:0;">' +
+                            '<span id="anon-ratio-full" style="font-size:13px;font-weight:bold;color:#ff69b4;">--</span>' +
+                            '<div id="high-anon" style="font-size:8px;color:#32CD32;margin-top:1px;">H:0</div>' +
                         '</div>' +
                     '</div>' +
                 '</div>' +
                 
-                // COMPACTED CONTROL FIELD
-                '<div id="control-field" style="margin-top:4px;padding:3px;background:rgba(65,105,225,0.15);border-radius:3px;border:1px solid #4169E1;">' +
-                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">' +
-                        '<span style="font-size:8px;font-weight:bold;color:#4169E1;">🎛️ CONTROLS</span>' +
-                        '<div style="display:flex;gap:6px;align-items:center;">' +
-                            '<span style="font-size:8px;color:#ffd43b;font-family:monospace;" id="control-tracking-timer">00:00:00</span>' +
-                            '<span style="font-size:7px;color:#32CD32;" id="control-next-scan">Next: 30s</span>' +
-                        '</div>' +
+                '<div id="control-field" style="margin-top:5px;padding:4px;background:rgba(65,105,225,0.15);border-radius:3px;border:1px solid #4169E1;">' +
+                    '<div style="display:flex;justify-content:center;align-items:center;margin-bottom:3px;">' +
+                        '<span style="font-size:9px;font-weight:bold;color:#4169E1;">🎛️ CONTROLS</span>' +
                     '</div>' +
-                    '<div style="display:flex;gap:3px;justify-content:center;">' +
-                        '<button id="btn-download-report" style="background:#4169E1;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 6px;display:flex;align-items:center;gap:2px;" title="Download tracking report">' +
-                            '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
-                                '<line x1="12" y1="4" x2="12" y2="16"/>' +
-                                '<polyline points="6 10 12 16 18 10"/>' +
-                                '<line x1="4" y1="20" x2="20" y2="20"/>' +
-                            '</svg>' +
-                            'Report' +
-                        '</button>' +
-                        '<button id="btn-control-auto" style="background:#32CD32;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 6px;min-width:24px;" title="Auto-Refresh ON">⏸</button>' +
-                        '<button id="btn-main-reset" style="background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 6px;display:flex;align-items:center;gap:2px;" title="Reset all tracking data">' +
-                            '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
-                                '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12"/>' +
-                                '<path d="M3 3v9h9"/>' +
-                            '</svg>' +
-                            'Reset' +
-                        '</button>' +
+                    '<div style="display:flex;gap:4px;justify-content:space-between;align-items:center;">' +
+                        '<span style="font-size:10px;color:#ffd43b;font-family:monospace;font-weight:bold;" id="control-tracking-timer">00:00:00</span>' +
+                        '<div style="display:flex;gap:3px;">' +
+                            '<button id="btn-download-report" style="background:#4169E1;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 6px;display:flex;align-items:center;gap:2px;" title="Download tracking report">' +
+                                '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
+                                    '<line x1="12" y1="4" x2="12" y2="16"/>' +
+                                    '<polyline points="6 10 12 16 18 10"/>' +
+                                    '<line x1="4" y1="20" x2="20" y2="20"/>' +
+                                '</svg>' +
+                                'Report' +
+                            '</button>' +
+                            '<button id="btn-control-auto" style="background:#32CD32;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 6px;min-width:24px;" title="Auto-Refresh ON">⏸</button>' +
+                            '<button id="btn-main-reset" style="background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 6px;display:flex;align-items:center;gap:2px;" title="Reset all tracking data">' +
+                                '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
+                                    '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12"/>' +
+                                    '<path d="M3 3v9h9"/>' +
+                                '</svg>' +
+                                'Reset' +
+                            '</button>' +
+                        '</div>' +
+                        '<span style="font-size:10px;color:#32CD32;font-weight:bold;" id="control-next-scan">Next: 30s</span>' +
                     '</div>' +
                 '</div>' +
                 
@@ -1885,7 +1711,7 @@ const ViewerTracker = (function() {
 
         setupDraggable();
         setupResizable();
-        setupResizeHandler(); // NEW: Add resize handler
+        setupResizeHandler();
         
         var btnToggle = document.getElementById('btn-toggle');
         var btnExpand = document.getElementById('btn-expand');
@@ -2216,7 +2042,6 @@ const ViewerTracker = (function() {
         var isRoom = isBroadcastRoom();
         var modelName = getModelName();
         
-        // NEW: Load session BEFORE setting defaults, so restored values survive
         var loaded = false;
         if (isRoom && modelName !== 'unknown') {
             loaded = loadSession(modelName);
@@ -2225,14 +2050,11 @@ const ViewerTracker = (function() {
             }
         }
         
-        // NEW: Respect restored pause state - don't auto-enable if paused
         if (!loaded) {
             isMinimized = !isRoom;
             isAutoRefreshOn = isRoom;
         } else {
-            // If we loaded a session, keep its pause state
-            isMinimized = false; // Show expanded since there's data
-            // FIX: Sync isAutoRefreshOn with the restored pause state
+            isMinimized = false;
             isAutoRefreshOn = !isPaused;
         }
         
@@ -2263,7 +2085,6 @@ const ViewerTracker = (function() {
             }
             if (headerUnique) headerUnique.style.display = 'inline';
             
-            // NEW: Draw sparklines for restored session
             drawAllSparklines();
             
             updateDisplay();
@@ -2294,7 +2115,6 @@ const ViewerTracker = (function() {
                     return;
                 }
 
-                // FIX: Skip immediate scan if session was restored paused
                 if (!isPaused) {
                     performScanThenReturn(true);
                 }
@@ -2302,7 +2122,6 @@ const ViewerTracker = (function() {
                 setTimeout(function() {
                     if (myGeneration !== initGuard) return;
                     
-                    // NEW: Only start timer if not paused from restored session
                     if (isAutoRefreshOn && !isPaused) {
                         startTrackingTimer();
                         startCountdown();
@@ -2340,11 +2159,9 @@ const ViewerTracker = (function() {
     var lastUrl = location.href;
     function checkUrlChange() {
         if (location.href !== lastUrl) {
-            // FIXED: Parse model from lastUrl BEFORE updating it
             var oldModel = getModelNameFromUrl(lastUrl);
             lastUrl = location.href;
             
-            // Save old room's session using the parsed old model name
             if (oldModel && oldModel !== 'unknown') {
                 saveSession(oldModel);
             }
@@ -2393,7 +2210,6 @@ const ViewerTracker = (function() {
     
     urlCheckInterval = setInterval(checkUrlChange, 500);
 
-    // beforeunload handler for refresh/close tab persistence
     window.addEventListener('beforeunload', function() {
         var modelName = getModelName();
         if (modelName && modelName !== 'unknown') {
