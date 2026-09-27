@@ -12,7 +12,7 @@ A Tampermonkey userscript that tracks viewer tiers on a Chaturbate broadcast and
 - **Unique viewers**: The header `U:` count is every distinct registered username seen during the session, not the size of the current list.
 - **Female / trans overlay**: ♀⚧ is counted on top of the color tiers. It is not its own color.
 - **Session report**: Downloads a text file with highs and when they were hit, the current breakdown, and the female / trans usernames seen this session.
-- **Reload proof**: Tracking is saved per model for 3 hours. A refresh, a navigation away, or a closed tab restores it. Reset starts a new session.
+- **Reload proof**: Tracking is saved per model for 3 hours. A refresh, a navigation away, or a closed tab doesn't erase it. Reset starts a new session.
 - **Panel**: Draggable, resizable, and collapsible to a small view.
 
 ---
