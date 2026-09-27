@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.0.4
+// @version      3.0.7
 // @description  TierScope - Viewer visualizer with trend tracking and reports
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -77,6 +77,9 @@ const ViewerTracker = (function() {
     
     // NEW: Trend comparison mode - 'last', '5min', '15min', '30min', '1hour', 'start'
     var trendComparisonMode = 'last';
+    
+    // NEW: Auto-escalation flag - set to false when user manually selects a preset
+    var autoTrendEscalation = true;
 
     function validateDOMHealth() {
         const now = Date.now();
@@ -245,7 +248,8 @@ const ViewerTracker = (function() {
             sessionUniqueUsers: sessionUniqueUsers,
             previousCounts: previousCounts,
             hasTrendBaseline: hasTrendBaseline,
-            trendComparisonMode: trendComparisonMode
+            trendComparisonMode: trendComparisonMode,
+            autoTrendEscalation: autoTrendEscalation
         };
         try {
             GM_setValue(getStorageKey(model), JSON.stringify(saveData));
@@ -288,6 +292,7 @@ const ViewerTracker = (function() {
             };
             hasTrendBaseline = data.hasTrendBaseline || false;
             trendComparisonMode = data.trendComparisonMode || 'last';
+            autoTrendEscalation = data.autoTrendEscalation !== false; // Default to true if not saved
             log('Session restored for ' + model + ' (' + Math.round(age/60000) + ' min old)');
             return true;
         } catch (e) {
@@ -336,6 +341,35 @@ const ViewerTracker = (function() {
         return getModelNameFromUrl(location.href);
     }
 
+    // NEW: Check and auto-escalate trend mode based on elapsed time
+    function checkTrendAutoEscalation() {
+        if (!autoTrendEscalation || !trackingStartTime) return;
+        
+        var elapsedMs = isPaused ? pausedElapsedTime : (Date.now() - trackingStartTime);
+        var elapsedMin = elapsedMs / 60000;
+        
+        var targetMode = 'last';
+        if (elapsedMin >= 60) targetMode = '1hour';
+        else if (elapsedMin >= 30) targetMode = '30min';
+        else if (elapsedMin >= 15) targetMode = '15min';
+        else if (elapsedMin >= 5) targetMode = '5min';
+        
+        if (targetMode !== trendComparisonMode) {
+            log('Auto-escalating trend mode: ' + trendComparisonMode + ' -> ' + targetMode + ' (' + Math.floor(elapsedMin) + ' min elapsed)');
+            
+            // FIXED: If users map is empty (restored session, no scan yet), just update mode and buttons without redrawing
+            if (users.size === 0) {
+                trendComparisonMode = targetMode;
+                updateTrendPresetButtons();
+                updateAutoTrendButton(); // Update the AUTO button visual state
+                saveSession(getModelName());
+                return;
+            }
+            
+            setTrendComparisonMode(targetMode);
+        }
+    }
+
     function updateTrackingTimer() {
         var controlTimerEl = document.getElementById('control-tracking-timer');
         var displayTime = '00:00:00';
@@ -351,6 +385,9 @@ const ViewerTracker = (function() {
             controlTimerEl.textContent = displayTime;
             controlTimerEl.style.color = displayColor;
         }
+        
+        // NEW: Check for auto-escalation every second
+        checkTrendAutoEscalation();
     }
 
     function startTrackingTimer() {
@@ -402,7 +439,39 @@ const ViewerTracker = (function() {
         };
         hasTrendBaseline = false;
         trendComparisonMode = 'last';
+        autoTrendEscalation = true; // Reset auto-escalation
         updateTrackingTimer();
+    }
+
+    // NEW: Toggle auto trend escalation
+    function toggleAutoTrendEscalation() {
+        autoTrendEscalation = !autoTrendEscalation;
+        updateAutoTrendButton();
+        log('Auto trend escalation ' + (autoTrendEscalation ? 'enabled' : 'disabled'));
+        saveSession(getModelName());
+        
+        // FIXED: If just turned on, check immediately for catch-up (in case timer isn't running while paused)
+        if (autoTrendEscalation) {
+            checkTrendAutoEscalation();
+        }
+    }
+
+    // NEW: Update the AUTO button visual state
+    function updateAutoTrendButton() {
+        var btn = document.getElementById('btn-trend-auto');
+        if (btn) {
+            if (autoTrendEscalation) {
+                btn.style.background = '#32CD32';
+                btn.style.color = '#fff';
+                btn.style.borderColor = '#32CD32';
+                btn.title = 'Auto-escalation ON - Click to disable';
+            } else {
+                btn.style.background = '#333';
+                btn.style.color = '#aaa';
+                btn.style.borderColor = '#555';
+                btn.title = 'Auto-escalation OFF - Click to enable';
+            }
+        }
     }
 
     function resetAllTracking() {
@@ -429,6 +498,7 @@ const ViewerTracker = (function() {
         };
         hasTrendBaseline = false;
         trendComparisonMode = 'last';
+        autoTrendEscalation = true; // Reset auto-escalation on manual reset
         history = {
             timestamps: [],
             'red': [], 'green': [], 'purple': [], 'pink': [], 'dark-blue': [], 'light-blue': [], 'gray': [], 'female-trans': [],
@@ -455,6 +525,11 @@ const ViewerTracker = (function() {
         setTimeout(function() {
             performScanThenReturn(true);
         }, 500);
+        
+        // FIXED: Repaint buttons after reset so AUTO shows green and Last is highlighted
+        updateTrendPresetButtons();
+        updateAutoTrendButton();
+        
         log('Reset complete - starting fresh scan (epoch: ' + scanEpoch + ')');
     }
 
@@ -1491,7 +1566,7 @@ const ViewerTracker = (function() {
                     '</div>' +
                 '</div>' +
 
-                // FIXED: Trend section with preset buttons and dynamic header label
+                // FIXED: Trend section with preset buttons, AUTO toggle, and dynamic header label
                 '<div style="border-top:1px solid #4169E1;margin-top:5px;padding-top:5px;">' +
                     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;flex-wrap:wrap;gap:2px;">' +
                         '<span id="trend-header-label" style="font-size:9px;font-weight:bold;color:#4169E1;">📈 TREND</span>' +
@@ -1502,6 +1577,7 @@ const ViewerTracker = (function() {
                             '<button class="trend-preset-btn" data-mode="30min" style="background:#333;border:1px solid #555;color:#aaa;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">30m</button>' +
                             '<button class="trend-preset-btn" data-mode="1hour" style="background:#333;border:1px solid #555;color:#aaa;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">1h</button>' +
                             '<button class="trend-preset-btn" data-mode="start" style="background:#333;border:1px solid #555;color:#aaa;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Start</button>' +
+                            '<button id="btn-trend-auto" style="background:#32CD32;border:1px solid #32CD32;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;" title="Auto-escalation ON - Click to disable">AUTO</button>' +
                         '</div>' +
                     '</div>' +
                     '<div id="trend-container" style="min-height:30px;">' +
@@ -1602,15 +1678,25 @@ const ViewerTracker = (function() {
             };
         }
         
-        // NEW: Setup trend preset buttons
+        // NEW: Setup trend preset buttons - disable auto-escalation on manual click
         var trendPresetBtns = document.querySelectorAll('.trend-preset-btn');
         for (var k = 0; k < trendPresetBtns.length; k++) {
             trendPresetBtns[k].onclick = function() {
+                autoTrendEscalation = false; // User manually selected - disable auto-escalation
+                updateAutoTrendButton(); // Update the AUTO button to show disabled state
                 var mode = this.dataset.mode;
                 setTrendComparisonMode(mode);
             };
         }
+        
+        // NEW: Setup AUTO trend escalation toggle button
+        var btnTrendAuto = document.getElementById('btn-trend-auto');
+        if (btnTrendAuto) {
+            btnTrendAuto.onclick = toggleAutoTrendEscalation;
+        }
+        
         updateTrendPresetButtons();
+        updateAutoTrendButton(); // Set initial state
     }
 
     function toggleAutoRefresh() {
@@ -1962,6 +2048,7 @@ const ViewerTracker = (function() {
             };
             hasTrendBaseline = false;
             trendComparisonMode = 'last';
+            autoTrendEscalation = true; // Reset on URL change
             roomTotalHigh = 0;
             sessionUniqueUsers = {};
             roomTotalHighTime = null;
