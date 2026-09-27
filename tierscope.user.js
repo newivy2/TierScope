@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         TierScope - Chaturbate Viewers Visualizer
+// @name         TierScope - Chaturbate Viewers Visualizer BETA
 // @namespace    http://tampermonkey.net/
-// @version      2.9.9.3
-// @description  TierScope - Advanced tracking with spike detection, reports, and persistence
+// @version      3.0.0
+// @description  TierScope - Viewer visualizer with trend tracking and reports
 // @author       newivy
 // @match        https://chaturbate.com/*
 // @match        https://*.chaturbate.com/*
@@ -65,8 +65,15 @@ const ViewerTracker = (function() {
     var urlCheckInterval = null;
     var scanEpoch = 0;
     var sessionUniqueUsers = {};
-    // NEW: Track the resize handler for cleanup
     var windowResizeHandler = null;
+
+    var previousCounts = {
+        'red': 0, 'green': 0, 'purple': 0, 'pink': 0,
+        'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0,
+        'withTokens': 0, 'total': 0, 'anonymous': 0
+    };
+
+    var hasTrendBaseline = false;
 
     function validateDOMHealth() {
         const now = Date.now();
@@ -133,11 +140,10 @@ const ViewerTracker = (function() {
     var countdownInterval = null;
     var isAutoRefreshOn = true;
     var isScanning = false;
-    var countdownSeconds = 30;
-    var scanIntervalSeconds = 30;
+    var countdownSeconds = 60;
+    var scanIntervalSeconds = 60;
     var trackingStartTime = null;
     var trackingTimerInterval = null;
-    var spikeDetectionEnabled = true;
     var isPaused = false;
     var pausedElapsedTime = 0;
     var dragListeners = [];
@@ -147,13 +153,8 @@ const ViewerTracker = (function() {
     var resizeStartWidth = 0;
     var resizeStartHeight = 0;
     var currentScale = 1.0;
-    var BASE_WIDTH_MINI = 130;
-    var BASE_WIDTH_FULL = 265;
-    var spikeState = 'detecting';
-    var currentSpike = null;
-    var stabilizationWindow = [];
-    var consecutiveStableScans = 0;
-    var preSpikeBaseline = null;
+    var BASE_WIDTH_MINI = 140;
+    var BASE_WIDTH_FULL = 280;
     var roomTotalHighTime = null;
     var tierHighTimes = {};
     var withTokensHighTime = null;
@@ -168,22 +169,22 @@ const ViewerTracker = (function() {
         'withTokens': [], 'total': [], 'anonymous': []
     };
     var MAX_HISTORY_LENGTH = 10000;
-    var completedSpikes = [];
-    var anonHistory = [];
-    var SPIKE_THRESHOLD = 2.0;
-    var MIN_ABSOLUTE_INCREASE = 100;
-    var STABILIZATION_SCANS = 3;
-    var STABILIZATION_PERCENT = 5;
 
     var TIERS = {
-        'red': { name: '🔴 Red', desc: 'Mod', color: '#FF0000' },
-        'green': { name: '🟢 Green', desc: 'Fan Club', color: '#32CD32' },
-        'purple': { name: '🟣 Purple', desc: '1000+', color: '#8B00FF' },
-        'pink': { name: '💗 Pink', desc: '250+', color: '#FF69B4' },
-        'dark-blue': { name: '🔵 Dark Blue', desc: '50+', color: '#0000CD' },
-        'light-blue': { name: '💙 Light Blue', desc: 'Tokens', color: '#4169E1' },
-        'gray': { name: '⚪ Gray', desc: 'Guest', color: '#808080' },
+        'red': { name: '🔴', desc: '', color: '#FF0000' },
+        'green': { name: '🟢', desc: '', color: '#32CD32' },
+        'purple': { name: '🟣', desc: '', color: '#8B00FF' },
+        'pink': { name: '💗', desc: '', color: '#FF69B4' },
+        'dark-blue': { name: '🔵', desc: '', color: '#0000CD' },
+        'light-blue': { name: '💙', desc: '', color: '#4169E1' },
+        'gray': { name: '⚪', desc: '', color: '#808080' },
         'female-trans': { name: '♀⚧', desc: '', color: '#FF1493' }
+    };
+
+    const TREND_ICONS = {
+        up: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#32CD32" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>',
+        down: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ff4444" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>',
+        stable: '<svg width="16" height="16" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="#ffd43b"/></svg>'
     };
 
     function log(msg) {
@@ -229,15 +230,8 @@ const ViewerTracker = (function() {
             pausedElapsedTime: pausedElapsedTime,
             sessionFemaleTransUsers: sessionFemaleTransUsers,
             sessionUniqueUsers: sessionUniqueUsers,
-            spikeState: spikeState,
-            currentSpike: currentSpike,
-            completedSpikes: completedSpikes,
-            preSpikeBaseline: preSpikeBaseline,
-            anonHistory: anonHistory,
-            stabilizationWindow: stabilizationWindow,
-            consecutiveStableScans: consecutiveStableScans,
-            previousUserCount: previousUserCount,
-            previousRoomTotal: previousRoomTotal
+            previousCounts: previousCounts,
+            hasTrendBaseline: hasTrendBaseline
         };
         try {
             GM_setValue(getStorageKey(model), JSON.stringify(saveData));
@@ -273,15 +267,12 @@ const ViewerTracker = (function() {
             pausedElapsedTime = data.pausedElapsedTime || 0;
             sessionFemaleTransUsers = data.sessionFemaleTransUsers || {};
             sessionUniqueUsers = data.sessionUniqueUsers || {};
-            spikeState = data.spikeState || 'detecting';
-            currentSpike = data.currentSpike || null;
-            completedSpikes = data.completedSpikes || [];
-            preSpikeBaseline = data.preSpikeBaseline || null;
-            anonHistory = data.anonHistory || [];
-            stabilizationWindow = data.stabilizationWindow || [];
-            consecutiveStableScans = data.consecutiveStableScans || 0;
-            previousUserCount = data.previousUserCount || 0;
-            previousRoomTotal = data.previousRoomTotal || 0;
+            previousCounts = data.previousCounts || {
+                'red': 0, 'green': 0, 'purple': 0, 'pink': 0,
+                'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0,
+                'withTokens': 0, 'total': 0, 'anonymous': 0
+            };
+            hasTrendBaseline = data.hasTrendBaseline || false;
             log('Session restored for ' + model + ' (' + Math.round(age/60000) + ' min old)');
             return true;
         } catch (e) {
@@ -322,21 +313,8 @@ const ViewerTracker = (function() {
         return (hours < 10 ? '0' : '') + hours + ':' + (minutes < 10 ? '0' : '') + minutes + ':' + (seconds < 10 ? '0' : '') + seconds;
     }
 
-    function formatTimeShort(timestamp) {
-        var date = new Date(timestamp);
-        return (date.getHours() < 10 ? '0' : '') + date.getHours() + ':' + (date.getMinutes() < 10 ? '0' : '') + date.getMinutes();
-    }
-
     function formatDateTime(timestamp) {
         return new Date(timestamp).toLocaleString();
-    }
-
-    function formatDuration(ms) {
-        var seconds = Math.floor(ms / 1000);
-        if (seconds < 60) return seconds + 's';
-        var minutes = Math.floor(seconds / 60);
-        var remainingSecs = seconds % 60;
-        return minutes + 'm ' + remainingSecs + 's';
     }
 
     function getModelName() {
@@ -402,11 +380,17 @@ const ViewerTracker = (function() {
         totalHighTime = null;
         anonHighTime = null;
         femaleTransHighTime = null;
+        previousCounts = {
+            'red': 0, 'green': 0, 'purple': 0, 'pink': 0,
+            'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0,
+            'withTokens': 0, 'total': 0, 'anonymous': 0
+        };
+        hasTrendBaseline = false;
         updateTrackingTimer();
     }
 
     function resetAllTracking() {
-        if (!confirm('Reset all tracking data?\n\nThis will clear:\n- All session history\n- Spike records\n- Elapsed timer\n- Female/Trans user list\n- Unique user count\n\nA new scan will start immediately.')) {
+        if (!confirm('Reset all tracking data?\n\nThis will clear:\n- All session history\n- Trend tracking\n- Elapsed timer\n- Female/Trans user list\n- Unique user count\n\nA new scan will start immediately.')) {
             return;
         }
         var modelName = getModelName();
@@ -422,18 +406,17 @@ const ViewerTracker = (function() {
         roomTotal = 0;
         roomTotalHigh = 0;
         sessionUniqueUsers = {};
+        previousCounts = {
+            'red': 0, 'green': 0, 'purple': 0, 'pink': 0,
+            'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0,
+            'withTokens': 0, 'total': 0, 'anonymous': 0
+        };
+        hasTrendBaseline = false;
         history = {
             timestamps: [],
             'red': [], 'green': [], 'purple': [], 'pink': [], 'dark-blue': [], 'light-blue': [], 'gray': [], 'female-trans': [],
             'withTokens': [], 'total': [], 'anonymous': []
         };
-        completedSpikes.length = 0;
-        anonHistory.length = 0;
-        spikeState = 'detecting';
-        currentSpike = null;
-        stabilizationWindow = [];
-        consecutiveStableScans = 0;
-        preSpikeBaseline = null;
         sessionFemaleTransUsers = {};
         femaleTransUsernames = [];
         roomTotalHighTime = null;
@@ -444,7 +427,7 @@ const ViewerTracker = (function() {
         femaleTransHighTime = null;
         countdownSeconds = scanIntervalSeconds;
         updateDisplay();
-        updateSpikeDisplay();
+        updateTrendDisplay();
         updateTrackingTimer();
         updateCountdownDisplay();
         drawAllSparklines();
@@ -524,16 +507,6 @@ const ViewerTracker = (function() {
         return 0;
     }
 
-    function getAnonRatio(anon, tracked) {
-        if (tracked === 0) return anon === 0 ? '0:0' : anon + 'x';
-        var ratio = anon / tracked;
-        if (ratio >= 0.95 && ratio <= 1.05) return '1:1';
-        if (ratio >= 10) return Math.round(ratio) + 'x';
-        if (ratio >= 1) return (Math.round(ratio * 10) / 10) + 'x';
-        if (ratio >= 0.1) return '0.' + Math.round(ratio * 10);
-        return '<0.1';
-    }
-
     function extractUsername(text) {
         if (!text) return null;
         text = text.trim().split('\n')[0];
@@ -558,30 +531,9 @@ const ViewerTracker = (function() {
         for (var j = 0; j < buttons.length; j++) {
             var btn = buttons[j];
             var text = (btn.textContent || '').toUpperCase();
-            var tabAttr = btn.getAttribute('data-tab') || '';
             if (text.indexOf(tabName.toUpperCase()) !== -1) return btn;
         }
         return null;
-    }
-
-    function isReadingStable(current, previous) {
-        if (!previous) return false;
-        if (current === 0 && previous === 0) return true;
-        var max = Math.max(current, previous);
-        var min = Math.min(current, previous);
-        if (max === 0) return false;
-        var variance = ((max - min) / max) * 100;
-        return variance <= STABILIZATION_PERCENT;
-    }
-
-    function isStabilized(readings) {
-        if (readings.length < STABILIZATION_SCANS) return false;
-        var recent = readings.slice(-STABILIZATION_SCANS);
-        var max = Math.max.apply(null, recent);
-        var min = Math.min.apply(null, recent);
-        if (max === 0) return min === 0;
-        var variance = ((max - min) / max) * 100;
-        return variance <= STABILIZATION_PERCENT;
     }
 
     function isScanValid(newUserCount, newRoomTotal) {
@@ -594,8 +546,8 @@ const ViewerTracker = (function() {
         if (roomTotalChange > 0.10) return true;
         var userDrop = previousUserCount > 0 ? (previousUserCount - newUserCount) / previousUserCount : 0;
         if (userDrop > 0.50) {
-            log('Scan rejected: user count dropped ' + Math.round(userDrop * 100) + '% (' + 
-                previousUserCount + ' -> ' + newUserCount + ') while room total stable (' + 
+            log('Scan rejected: user count dropped ' + Math.round(userDrop * 100) + '% (' +
+                previousUserCount + ' -> ' + newUserCount + ') while room total stable (' +
                 previousRoomTotal + ' -> ' + newRoomTotal + ')');
             return false;
         }
@@ -679,7 +631,6 @@ const ViewerTracker = (function() {
         var totalHighCurrent = getHighValue(history['total'], total).value;
         var withTokensHighCurrent = getHighValue(history['withTokens'], withTokens).value;
         var anonHighCurrent = getHighValue(history['anonymous'], anonymousCount).value;
-        var ftHighCurrent = getHighValue(history['female-trans'], counts['female-trans']).value;
         report.push('Current Room Total: ' + fullRoomTotal.toLocaleString() + ' (High: ' + roomTotalHigh.toLocaleString() + ')');
         report.push('Current Registered: ' + total.toLocaleString() + ' (High: ' + totalHighCurrent.toLocaleString() + ')');
         report.push('Current With Tokens: ' + withTokens.toLocaleString() + ' (High: ' + withTokensHighCurrent.toLocaleString() + ')');
@@ -690,70 +641,8 @@ const ViewerTracker = (function() {
         Object.keys(TIERS).forEach(function(tier) {
             var current = counts[tier] || 0;
             var high = getHighValue(history[tier], current).value;
-            report.push(TIERS[tier].name + ' (' + (TIERS[tier].desc || 'Overlay') + '): ' + current.toLocaleString() + ' (High: ' + high.toLocaleString() + ')');
+            report.push(TIERS[tier].name + ': ' + current.toLocaleString() + ' (High: ' + high.toLocaleString() + ')');
         });
-        report.push('');
-        report.push('--- SPIKE SUMMARY ---');
-        report.push('');
-        if (completedSpikes.length === 0 && !currentSpike) {
-            report.push('No spikes detected during this session.');
-        } else {
-            report.push('Total Spikes Detected: ' + (completedSpikes.length + (currentSpike ? 1 : 0)));
-            report.push('');
-            if (currentSpike) {
-                report.push('CURRENTLY TRACKING SPIKE:');
-                report.push('  Started: ' + formatDateTime(currentSpike.startTime));
-                report.push('  Baseline: ' + currentSpike.baselineCount);
-                report.push('  Current Peak: ' + currentSpike.peakCount);
-                report.push('  Duration so far: ' + formatDuration(now - currentSpike.startTime));
-                report.push('');
-                report.push('  --- TIER BREAKDOWN AT START ---');
-                report.push('    🔴 Red: ' + currentSpike.startCounts.red + '  🟢 Green: ' + currentSpike.startCounts.green + '  🟣 Purple: ' + currentSpike.startCounts.purple);
-                report.push('    💗 Pink: ' + currentSpike.startCounts.pink + '  🔵 Dark Blue: ' + currentSpike.startCounts['dark-blue']);
-                report.push('    💙 Light Blue: ' + currentSpike.startCounts['light-blue'] + '  ⚪ Gray: ' + currentSpike.startCounts.gray);
-                report.push('    ♀⚧ Overlay: ' + (currentSpike.startCounts['female-trans'] || 0));
-                report.push('    Subtotals: 💎 With Tokens: ' + currentSpike.startWithTokens + '  📊 Total: ' + currentSpike.startTotal);
-                report.push('');
-                report.push('  --- TIER BREAKDOWN AT PEAK ---');
-                report.push('    🔴 Red: ' + currentSpike.peakCounts.red + '  🟢 Green: ' + currentSpike.peakCounts.green + '  🟣 Purple: ' + currentSpike.peakCounts.purple);
-                report.push('    💗 Pink: ' + currentSpike.peakCounts.pink + '  🔵 Dark Blue: ' + currentSpike.peakCounts['dark-blue']);
-                report.push('    💙 Light Blue: ' + currentSpike.peakCounts['light-blue'] + '  ⚪ Gray: ' + currentSpike.peakCounts.gray);
-                report.push('    ♀⚧ Overlay: ' + (currentSpike.peakCounts['female-trans'] || 0));
-                report.push('    Subtotals: 💎 With Tokens: ' + currentSpike.peakWithTokens + '  📊 Total: ' + currentSpike.peakTotal);
-                report.push('');
-            }
-            completedSpikes.forEach(function(spike, idx) {
-                report.push('Spike #' + (completedSpikes.length - idx) + ':');
-                report.push('  Start: ' + formatDateTime(spike.startTime));
-                report.push('  Peak: ' + formatDateTime(spike.peakTime));
-                report.push('  End: ' + formatDateTime(spike.endTime));
-                report.push('  Duration: ' + formatDuration(spike.duration));
-                report.push('  Baseline → Peak → Final: ' + spike.baselineCount + ' → ' + spike.peakCount + ' → ' + spike.finalCount);
-                report.push('  Net Change: +' + (spike.peakCount - spike.baselineCount) + ' (peak), ' + (spike.finalCount - spike.baselineCount) + ' (settled)');
-                report.push('');
-                report.push('  --- TIER BREAKDOWN AT START ---');
-                report.push('    🔴 Red: ' + spike.startCounts.red + '  🟢 Green: ' + spike.startCounts.green + '  🟣 Purple: ' + spike.startCounts.purple);
-                report.push('    💗 Pink: ' + spike.startCounts.pink + '  🔵 Dark Blue: ' + spike.startCounts['dark-blue']);
-                report.push('    💙 Light Blue: ' + spike.startCounts['light-blue'] + '  ⚪ Gray: ' + spike.startCounts.gray);
-                report.push('    ♀⚧ Overlay: ' + (spike.startCounts['female-trans'] || 0));
-                report.push('    Subtotals: 💎 With Tokens: ' + spike.startWithTokens + '  📊 Total Registered: ' + spike.startTotal + '  👻 Anonymous: ' + spike.baselineCount);
-                report.push('');
-                report.push('  --- TIER BREAKDOWN AT PEAK ---');
-                report.push('    🔴 Red: ' + spike.peakCounts.red + '  🟢 Green: ' + spike.peakCounts.green + '  🟣 Purple: ' + spike.peakCounts.purple);
-                report.push('    💗 Pink: ' + spike.peakCounts.pink + '  🔵 Dark Blue: ' + spike.peakCounts['dark-blue']);
-                report.push('    💙 Light Blue: ' + spike.peakCounts['light-blue'] + '  ⚪ Gray: ' + spike.peakCounts.gray);
-                report.push('    ♀⚧ Overlay: ' + (spike.peakCounts['female-trans'] || 0));
-                report.push('    Subtotals: 💎 With Tokens: ' + spike.peakWithTokens + '  📊 Total Registered: ' + spike.peakTotal + '  👻 Anonymous: ' + spike.peakCount);
-                report.push('');
-                report.push('  --- TIER BREAKDOWN AT FINAL ---');
-                report.push('    🔴 Red: ' + spike.finalCounts.red + '  🟢 Green: ' + spike.finalCounts.green + '  🟣 Purple: ' + spike.finalCounts.purple);
-                report.push('    💗 Pink: ' + spike.finalCounts.pink + '  🔵 Dark Blue: ' + spike.finalCounts['dark-blue']);
-                report.push('    💙 Light Blue: ' + spike.finalCounts['light-blue'] + '  ⚪ Gray: ' + spike.finalCounts.gray);
-                report.push('    ♀⚧ Overlay: ' + (spike.finalCounts['female-trans'] || 0));
-                report.push('    Subtotals: 💎 With Tokens: ' + spike.finalWithTokens + '  📊 Total Registered: ' + spike.finalTotal + '  👻 Anonymous: ' + spike.finalCount);
-                report.push('');
-            });
-        }
         report.push('');
         report.push('--- ♀⚧ OVERLAY (SESSION) ---');
         report.push('');
@@ -781,14 +670,13 @@ const ViewerTracker = (function() {
             report.push('No ♀⚧ viewers detected during this session.');
         }
         report.push('');
-        report.push('');
         report.push('================================');
         report.push('End of Report');
         report.push('================================');
         var date = new Date();
         var dateStr = date.toISOString().slice(0, 10);
-        var timeStr = date.getHours().toString().padStart(2, '0') + '-' + 
-                     date.getMinutes().toString().padStart(2, '0') + '-' + 
+        var timeStr = date.getHours().toString().padStart(2, '0') + '-' +
+                     date.getMinutes().toString().padStart(2, '0') + '-' +
                      date.getSeconds().toString().padStart(2, '0');
         var filename = modelName + '-tracking-report-' + dateStr + '-' + timeStr + '.txt';
         var blob = new Blob([report.join('\n')], { type: 'text/plain' });
@@ -802,123 +690,6 @@ const ViewerTracker = (function() {
         URL.revokeObjectURL(url);
     }
 
-    function downloadSpikeReport(index) {
-        var spike = completedSpikes[index];
-        if (!spike) return;
-        var report = [
-            '================================',
-            'CHATURBATE ANON SPIKE REPORT',
-            '================================',
-            '',
-            'Spike #' + (completedSpikes.length - index),
-            'Generated: ' + formatDateTime(Date.now()),
-            '',
-            '--- TIMING ---',
-            'Start Time: ' + formatDateTime(spike.startTime),
-            'Peak Time: ' + formatDateTime(spike.peakTime),
-            'End Time: ' + formatDateTime(spike.endTime),
-            'Duration: ' + formatDuration(spike.duration),
-            '',
-            '--- ANONYMOUS USERS ---',
-            'Baseline (pre-spike): ' + spike.baselineCount,
-            'Peak (during spike): ' + spike.peakCount,
-            'Final (stabilized): ' + spike.finalCount,
-            'Net Change: +' + (spike.peakCount - spike.baselineCount) + ' (peak)',
-            'Settled At: ' + (spike.finalCount - spike.baselineCount >= 0 ? '+' : '') + (spike.finalCount - spike.baselineCount) + ' from baseline',
-            '',
-            '--- ROOM COMPOSITION AT START ---',
-            'Total Registered Users: ' + spike.startTotal,
-            'Users With Tokens: ' + spike.startWithTokens,
-            'Anonymous: ' + spike.baselineCount,
-            '',
-            '--- TIER BREAKDOWN AT START ---',
-            '🔴 Red (Mod): ' + spike.startCounts.red,
-            '🟢 Green (Fan Club): ' + spike.startCounts.green,
-            '🟣 Purple (1000+): ' + spike.startCounts.purple,
-            '💗 Pink (250+): ' + spike.startCounts.pink,
-            '🔵 Dark Blue (50+): ' + spike.startCounts['dark-blue'],
-            '💙 Light Blue (Tokens): ' + spike.startCounts['light-blue'],
-            '⚪ Gray (Guest): ' + spike.startCounts.gray,
-            '',
-            '--- ROOM COMPOSITION AT PEAK ---',
-            'Total Registered Users: ' + spike.peakTotal,
-            'Users With Tokens: ' + spike.peakWithTokens,
-            'Anonymous: ' + spike.peakCount,
-            '',
-            '--- TIER BREAKDOWN AT PEAK ---',
-            '🔴 Red (Mod): ' + spike.peakCounts.red,
-            '🟢 Green (Fan Club): ' + spike.peakCounts.green,
-            '🟣 Purple (1000+): ' + spike.peakCounts.purple,
-            '💗 Pink (250+): ' + spike.peakCounts.pink,
-            '🔵 Dark Blue (50+): ' + spike.peakCounts['dark-blue'],
-            '💙 Light Blue (Tokens): ' + spike.peakCounts['light-blue'],
-            '⚪ Gray (Guest): ' + spike.peakCounts.gray,
-            '',
-            '--- ROOM COMPOSITION AT FINAL ---',
-            'Total Registered Users: ' + spike.finalTotal,
-            'Users With Tokens: ' + spike.finalWithTokens,
-            'Anonymous: ' + spike.finalCount,
-            '',
-            '--- TIER BREAKDOWN AT FINAL ---',
-            '🔴 Red (Mod): ' + spike.finalCounts.red,
-            '🟢 Green (Fan Club): ' + spike.finalCounts.green,
-            '🟣 Purple (1000+): ' + spike.finalCounts.purple,
-            '💗 Pink (250+): ' + spike.finalCounts.pink,
-            '🔵 Dark Blue (50+): ' + spike.finalCounts['dark-blue'],
-            '💙 Light Blue (Tokens): ' + spike.finalCounts['light-blue'],
-            '⚪ Gray (Guest): ' + spike.finalCounts.gray,
-            '',
-            '--- RAW DATA ---',
-            'All anon readings during spike: ' + spike.readings.join(', '),
-            '',
-            '================================',
-            'End of Report',
-            '================================'
-        ].join('\n');
-        var modelName = getModelName();
-        var spikeNumber = completedSpikes.length - index;
-        var date = new Date(spike.startTime);
-        var dateStr = date.toISOString().slice(0, 10);
-        var timeStr = date.getHours().toString().padStart(2, '0') + '-' + 
-                     date.getMinutes().toString().padStart(2, '0') + '-' + 
-                     date.getSeconds().toString().padStart(2, '0');
-        var filename = modelName + '-spike-' + spikeNumber + '-' + dateStr + '-' + timeStr + '.txt';
-        var blob = new Blob([report], { type: 'text/plain' });
-        var url = URL.createObjectURL(blob);
-        var a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-    }
-
-    function toggleSpikeDetection() {
-        spikeDetectionEnabled = !spikeDetectionEnabled;
-        updateSpikeToggleButton();
-        saveSession(getModelName());
-    }
-
-    function closeSpike(index) {
-        completedSpikes.splice(index, 1);
-        updateSpikeDisplay();
-        saveSession(getModelName());
-    }
-
-    function clearAllSpikes() {
-        completedSpikes.length = 0;
-        if (spikeState === 'tracking') {
-            spikeState = 'detecting';
-            currentSpike = null;
-            stabilizationWindow = [];
-            consecutiveStableScans = 0;
-            preSpikeBaseline = null;
-        }
-        updateSpikeDisplay();
-        saveSession(getModelName());
-    }
-
     function performScanThenReturn(returnToChat) {
         if (typeof returnToChat === 'undefined') returnToChat = true;
         if (isScanning) return;
@@ -927,13 +698,8 @@ const ViewerTracker = (function() {
         var scanGeneration = initGuard;
         var statusEl = document.getElementById('auto-status');
         if (statusEl) {
-            if (spikeState === 'tracking') {
-                statusEl.textContent = 'Tracking spike...';
-                statusEl.style.color = '#ff4444';
-            } else {
-                statusEl.textContent = 'Scanning...';
-                statusEl.style.color = '#ffd43b';
-            }
+            statusEl.textContent = 'Scanning...';
+            statusEl.style.color = '#ffd43b';
         }
         var usersTab = findTab('users');
         var chatTab = findTab('chat');
@@ -1000,84 +766,26 @@ const ViewerTracker = (function() {
                         roomTotalHigh = currentRoomTotal;
                         roomTotalHighTime = Date.now();
                     }
-                    if (spikeDetectionEnabled) {
-                        if (spikeState === 'detecting') {
-                            var baseline;
-                            if (preSpikeBaseline !== null) {
-                                baseline = preSpikeBaseline;
-                            } else if (anonHistory.length >= 3) {
-                                baseline = Math.min.apply(null, anonHistory);
-                            } else {
-                                baseline = anonymousCount;
-                            }
-                            var increase = anonymousCount - baseline;
-                            if (baseline > 0 && anonymousCount >= baseline * SPIKE_THRESHOLD && increase >= MIN_ABSOLUTE_INCREASE) {
-                                spikeState = 'tracking';
-                                currentSpike = {
-                                    startTime: Date.now(),
-                                    baselineCount: baseline,
-                                    peakCount: anonymousCount,
-                                    peakTime: Date.now(),
-                                    readings: [anonymousCount],
-                                    startCounts: Object.assign({}, counts),
-                                    startWithTokens: withTokens,
-                                    startTotal: total,
-                                    peakCounts: Object.assign({}, counts),
-                                    peakWithTokens: withTokens,
-                                    peakTotal: total,
-                                    stabilized: false
-                                };
-                                stabilizationWindow = [anonymousCount];
-                                consecutiveStableScans = 0;
-                                preSpikeBaseline = baseline;
-                                log('SPIKE DETECTED - Baseline: ' + baseline + ', Initial: ' + anonymousCount);
-                            } else {
-                                if (anonHistory.length === 0 || anonymousCount < Math.min.apply(null, anonHistory)) {
-                                    preSpikeBaseline = anonymousCount;
-                                }
-                            }
-                        } else if (spikeState === 'tracking') {
-                            currentSpike.readings.push(anonymousCount);
-                            var prevReading = currentSpike.readings[currentSpike.readings.length - 2];
-                            if (isReadingStable(anonymousCount, prevReading)) {
-                                consecutiveStableScans++;
-                            } else {
-                                consecutiveStableScans = 0;
-                            }
-                            stabilizationWindow.push(anonymousCount);
-                            if (stabilizationWindow.length > STABILIZATION_SCANS) {
-                                stabilizationWindow.shift();
-                            }
-                            if (anonymousCount > currentSpike.peakCount) {
-                                currentSpike.peakCount = anonymousCount;
-                                currentSpike.peakTime = Date.now();
-                                currentSpike.peakCounts = Object.assign({}, counts);
-                                currentSpike.peakWithTokens = withTokens;
-                                currentSpike.peakTotal = total;
-                            }
-                            if (isStabilized(stabilizationWindow)) {
-                                currentSpike.endTime = Date.now();
-                                currentSpike.finalCount = anonymousCount;
-                                currentSpike.stabilized = true;
-                                currentSpike.duration = currentSpike.endTime - currentSpike.startTime;
-                                currentSpike.finalCounts = Object.assign({}, counts);
-                                currentSpike.finalWithTokens = withTokens;
-                                currentSpike.finalTotal = total;
-                                completedSpikes.unshift(Object.assign({}, currentSpike));
-                                if (completedSpikes.length > 5) completedSpikes.pop();
-                                log('SPIKE STABILIZED - Duration: ' + formatDuration(currentSpike.duration));
-                                spikeState = 'detecting';
-                                currentSpike = null;
-                                stabilizationWindow = [];
-                                consecutiveStableScans = 0;
-                                preSpikeBaseline = null;
-                            }
-                        }
-                    }
-                    anonHistory.push(anonymousCount);
-                    if (anonHistory.length > 5) anonHistory.shift();
+
                     updateDisplay();
-                    updateSpikeDisplay();
+                    updateTrendDisplay();
+
+                    previousCounts = {
+                        'red': counts['red'] || 0,
+                        'green': counts['green'] || 0,
+                        'purple': counts['purple'] || 0,
+                        'pink': counts['pink'] || 0,
+                        'dark-blue': counts['dark-blue'] || 0,
+                        'light-blue': counts['light-blue'] || 0,
+                        'gray': counts['gray'] || 0,
+                        'female-trans': counts['female-trans'] || 0,
+                        'withTokens': withTokens || 0,
+                        'total': total || 0,
+                        'anonymous': anonymousCount || 0
+                    };
+
+                    hasTrendBaseline = true;
+
                     saveToHistory();
                     saveSession(getModelName());
                 }
@@ -1101,98 +809,78 @@ const ViewerTracker = (function() {
         }, 800);
     }
 
-    function updateSpikeToggleButton() {
-        var btn = document.getElementById('btn-spike-toggle');
-        var label = document.getElementById('spike-header-label');
-        if (btn) {
-            if (spikeDetectionEnabled) {
-                btn.textContent = spikeState === 'tracking' ? 'TRACKING' : 'ON';
-                btn.style.background = spikeState === 'tracking' ? '#ff4444' : '#32CD32';
-                btn.style.color = '#fff';
-                btn.title = spikeState === 'tracking' ? 'Currently tracking a spike' : 'Spike detection enabled - Click to disable';
-            } else {
-                btn.textContent = 'OFF';
-                btn.style.background = '#ff4444';
-                btn.style.color = '#fff';
-                btn.title = 'Spike detection disabled - Click to enable';
-            }
-        }
-        if (label) {
-            label.style.color = spikeDetectionEnabled ? '#ff4444' : '#666';
-            label.textContent = spikeState === 'tracking' ? '🚨 TRACKING SPIKE...' : '🚨 SPIKE DETECTOR';
-        }
-    }
+    function updateTrendDisplay() {
+        var trendContainer = document.getElementById('trend-container');
+        if (!trendContainer) return;
 
-    function setupSpikeContainerListeners() {
-        var spikeContainer = document.getElementById('spike-container');
-        if (!spikeContainer) return;
-        spikeContainer.addEventListener('click', function(e) {
-            var btn = e.target.closest('button');
-            if (!btn) return;
-            var action = btn.dataset.action;
-            var index = btn.dataset.index;
-            if (action === 'download' && index !== undefined) {
-                downloadSpikeReport(parseInt(index));
-            } else if (action === 'close' && index !== undefined) {
-                closeSpike(parseInt(index));
+        if (!hasTrendBaseline) {
+            trendContainer.innerHTML = '<div style="font-size:8px;color:#666;text-align:center;padding:8px;">Waiting for scan...</div>';
+            return;
+        }
+
+        var counts = { 'red': 0, 'green': 0, 'purple': 0, 'pink': 0, 'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0 };
+        users.forEach(function(data) {
+            if (counts[data.tier] !== undefined) counts[data.tier]++;
+            if (data.gender === 'female' || data.gender === 'trans') {
+                counts['female-trans']++;
             }
         });
-    }
+        var total = users.size;
+        var withTokens = counts['red'] + counts['green'] + counts['purple'] + counts['pink'] + counts['dark-blue'] + counts['light-blue'];
+        var anonymousCount = getAnonymousCount();
 
-    function updateSpikeDisplay() {
-        var spikeContainer = document.getElementById('spike-container');
-        var clearAllBtn = document.getElementById('btn-clear-all-spikes');
-        if (!spikeContainer) return;
-        if (clearAllBtn) {
-            clearAllBtn.style.display = (completedSpikes.length > 0 || spikeState === 'tracking') ? 'inline-block' : 'none';
-        }
-        updateSpikeToggleButton();
-        if (spikeState === 'tracking' && currentSpike) {
-            var currentReading = currentSpike.readings[currentSpike.readings.length - 1];
-            var trackingDuration = Date.now() - currentSpike.startTime;
-            var formatTiers = function(counts) {
-                return 'R:' + counts.red + ' G:' + counts.green + ' P:' + counts.purple + ' PK:' + counts.pink + 
-                       ' DB:' + counts['dark-blue'] + ' LB:' + counts['light-blue'] + ' GY:' + counts.gray + ' FT:' + (counts['female-trans'] || 0);
-            };
-            spikeContainer.innerHTML = 
-                '<div style="margin-bottom:4px;padding:4px;background:rgba(255,68,68,0.2);border-radius:3px;border:2px solid #ff4444;">' +
-                    '<div style="font-size:9px;color:#ff4444;font-weight:bold;text-align:center;margin-bottom:3px;">⚡ TRACKING SPIKE - ' + formatDuration(trackingDuration) + '</div>' +
-                    '<div style="font-size:8px;color:#ffd43b;text-align:center;margin-bottom:2px;">Anon: ' + currentSpike.baselineCount + ' → ' + currentReading + ' → ' + currentSpike.peakCount + ' (peak)</div>' +
-                    '<div style="border-top:1px solid #ff4444;margin-top:3px;padding-top:3px;">' +
-                        '<div style="font-size:7px;color:#aaa;margin-bottom:1px;"><strong>START:</strong> 💎' + currentSpike.startWithTokens + ' 📊' + currentSpike.startTotal + ' 👻' + currentSpike.baselineCount + '</div>' +
-                        '<div style="font-size:6px;color:#888;margin-bottom:3px;">' + formatTiers(currentSpike.startCounts) + '</div>' +
-                        '<div style="font-size:7px;color:#ff69b4;margin-bottom:1px;"><strong>PEAK:</strong> 💎' + currentSpike.peakWithTokens + ' 📊' + currentSpike.peakTotal + ' 👻' + currentSpike.peakCount + '</div>' +
-                        '<div style="font-size:6px;color:#888;">' + formatTiers(currentSpike.peakCounts) + '</div>' +
-                    '</div>' +
-                    '<div style="font-size:7px;color:#888;text-align:center;margin-top:3px;border-top:1px solid #ff4444;padding-top:3px;">Waiting for stabilization... (' + consecutiveStableScans + '/' + STABILIZATION_SCANS + ' consecutive stable)</div>' +
-                '</div>';
-            return;
-        }
-        if (completedSpikes.length === 0) {
-            spikeContainer.innerHTML = '<div style="font-size:7px;color:#666;text-align:center;padding:3px;">No spikes detected yet</div>';
-            return;
-        }
-        var html = '';
-        for (var i = 0; i < completedSpikes.length; i++) {
-            var spike = completedSpikes[i];
-            var idx = i;
-            html += 
-                '<div style="margin-bottom:4px;padding:3px;background:rgba(255,0,0,0.1);border-radius:3px;border-left:2px solid #ff4444;position:relative;">' +
-                    '<div style="position:absolute;top:2px;right:2px;display:flex;gap:2px;">' +
-                        '<button data-action="download" data-index="' + idx + '" style="background:#4169E1;border:none;color:white;border-radius:3px;cursor:pointer;font-size:8px;padding:1px 4px;line-height:1;" title="Download report">💾</button>' +
-                        '<button data-action="close" data-index="' + idx + '" style="background:#ff4444;border:none;color:white;border-radius:3px;cursor:pointer;font-size:8px;padding:1px 4px;line-height:1;" title="Remove">×</button>' +
-                    '</div>' +
-                    '<div style="font-size:8px;color:#ff4444;font-weight:bold;padding-right:40px;">🚨 SPIKE #' + (completedSpikes.length - idx) + ' at ' + formatTimeShort(spike.startTime) + '</div>' +
-                    '<div style="font-size:7px;color:#ffd43b;margin-top:1px;">Duration: ' + formatDuration(spike.duration) + '</div>' +
-                    '<div style="font-size:7px;color:#aaa;margin-top:2px;">' + spike.baselineCount + ' → ' + spike.peakCount + ' (+' + (spike.peakCount - spike.baselineCount) + ') → ' + spike.finalCount + ' (stable)</div>' +
-                    '<div style="font-size:7px;color:#888;margin-top:2px;">Peak: R:' + spike.peakCounts.red + ' G:' + spike.peakCounts.green + ' P:' + spike.peakCounts.purple + ' PK:' + spike.peakCounts.pink + ' DB:' + spike.peakCounts['dark-blue'] + ' LB:' + spike.peakCounts['light-blue'] + ' GY:' + spike.peakCounts.gray + ' FT:' + (spike.peakCounts['female-trans'] || 0) + '</div>' +
-                    '<div style="border-top:1px solid #555;margin-top:3px;padding-top:2px;">' +
-                        '<div style="font-size:7px;color:#32CD32;margin-bottom:1px;"><strong>START:</strong> 💎' + spike.startWithTokens + ' 📊' + spike.startTotal + ' 👻' + spike.baselineCount + ' | R:' + spike.startCounts.red + ' G:' + spike.startCounts.green + ' P:' + spike.startCounts.purple + ' PK:' + spike.startCounts.pink + '</div>' +
-                        '<div style="font-size:7px;color:#ff69b4;"><strong>FINAL:</strong> 💎' + spike.finalWithTokens + ' 📊' + spike.finalTotal + ' 👻' + spike.finalCount + ' | R:' + spike.finalCounts.red + ' G:' + spike.finalCounts.green + ' P:' + spike.finalCounts.purple + ' PK:' + spike.finalCounts.pink + '</div>' +
-                    '</div>' +
+        function buildTrendItem(name, current, prev, isSpecial, isLarge) {
+            var diff = current - prev;
+            var trend = diff > 0 ? 'up' : diff < 0 ? 'down' : 'stable';
+            var trendIcon = TREND_ICONS[trend];
+            var deltaText = diff !== 0 ? (diff > 0 ? '+' + diff : diff) : '';
+            var deltaColor = diff > 0 ? '#32CD32' : '#ff4444';
+            var bgStyle = isSpecial ?
+                'background:rgba(255,105,180,0.15);border:1px solid #ff69b4;' :
+                'background:rgba(255,255,255,0.05);';
+            var padding = isLarge ? '4px 10px' : '2px 6px';
+            var fontSize = isLarge ? '12px' : '10px';
+            var containerSize = isLarge ? '28px' : '22px';
+            
+            // FIXED: Scale only the ghost (👻) delta font size based on digit count
+            var deltaFont = fontSize;
+            if (name === '👻' && deltaText) {
+                var dlen = String(Math.abs(diff)).length;
+                if (dlen >= 4) deltaFont = '8px';
+                else if (dlen === 3) deltaFont = '10px';
+            }
+            
+            return '<div style="display:flex;align-items:center;gap:4px;' + bgStyle + 'padding:' + padding + ';border-radius:4px;">' +
+                '<span style="font-size:' + fontSize + ';">' + name + '</span>' +
+                '<span style="display:flex;align-items:center;justify-content:center;width:' + containerSize + ';height:' + containerSize + ';">' + trendIcon + '</span>' +
+                (deltaText ? '<span style="font-size:' + deltaFont + ';font-weight:bold;color:' + deltaColor + ';">' + deltaText + '</span>' : '') +
                 '</div>';
         }
-        spikeContainer.innerHTML = html;
+
+        // Row 1: red, green, purple, pink
+        var html = '<div style="display:flex;justify-content:center;gap:6px;padding:4px 0;">';
+        html += buildTrendItem(TIERS['red'].name, counts['red'] || 0, previousCounts['red'] || 0, false, false);
+        html += buildTrendItem(TIERS['green'].name, counts['green'] || 0, previousCounts['green'] || 0, false, false);
+        html += buildTrendItem(TIERS['purple'].name, counts['purple'] || 0, previousCounts['purple'] || 0, false, false);
+        html += buildTrendItem(TIERS['pink'].name, counts['pink'] || 0, previousCounts['pink'] || 0, false, false);
+        html += '</div>';
+
+        // Row 2: dark-blue, light-blue, gray, female-trans
+        html += '<div style="display:flex;justify-content:center;gap:6px;padding:4px 0;">';
+        html += buildTrendItem(TIERS['dark-blue'].name, counts['dark-blue'] || 0, previousCounts['dark-blue'] || 0, false, false);
+        html += buildTrendItem(TIERS['light-blue'].name, counts['light-blue'] || 0, previousCounts['light-blue'] || 0, false, false);
+        html += buildTrendItem(TIERS['gray'].name, counts['gray'] || 0, previousCounts['gray'] || 0, false, false);
+        html += buildTrendItem(TIERS['female-trans'].name, counts['female-trans'] || 0, previousCounts['female-trans'] || 0, false, false);
+        html += '</div>';
+
+        // Row 3: WithTokens, Total, Anonymous (LARGER)
+        html += '<div style="display:flex;justify-content:center;gap:8px;padding:6px 0;">';
+        html += buildTrendItem('💎', withTokens || 0, previousCounts.withTokens || 0, true, true);
+        html += buildTrendItem('📊', total || 0, previousCounts.total || 0, false, true);
+        html += buildTrendItem('👻', anonymousCount || 0, previousCounts.anonymous || 0, false, true);
+        html += '</div>';
+
+        trendContainer.innerHTML = html;
     }
 
     function saveToHistory() {
@@ -1316,13 +1004,8 @@ const ViewerTracker = (function() {
         }
         if (expandedCountdown) {
             if (isScanning) {
-                if (spikeState === 'tracking') {
-                    expandedCountdown.textContent = 'tracking...';
-                    expandedCountdown.style.color = '#ff4444';
-                } else {
-                    expandedCountdown.textContent = 'scanning...';
-                    expandedCountdown.style.color = '#ffd43b';
-                }
+                expandedCountdown.textContent = 'scanning...';
+                expandedCountdown.style.color = '#ffd43b';
             } else if (isAutoRefreshOn) {
                 expandedCountdown.textContent = 'next: ' + countdownSeconds + 's';
                 expandedCountdown.style.color = '#32CD32';
@@ -1333,8 +1016,8 @@ const ViewerTracker = (function() {
         }
         if (controlNextScan) {
             if (isScanning) {
-                controlNextScan.textContent = spikeState === 'tracking' ? 'Tracking...' : 'Scanning...';
-                controlNextScan.style.color = spikeState === 'tracking' ? '#ff4444' : '#ffd43b';
+                controlNextScan.textContent = 'Scanning...';
+                controlNextScan.style.color = '#ffd43b';
             } else if (isAutoRefreshOn) {
                 controlNextScan.textContent = 'Next: ' + countdownSeconds + 's';
                 controlNextScan.style.color = '#32CD32';
@@ -1344,10 +1027,7 @@ const ViewerTracker = (function() {
             }
         }
         if (!statusEl) return;
-        if (spikeState === 'tracking') {
-            statusEl.textContent = 'Tracking spike...';
-            statusEl.style.color = '#ff4444';
-        } else if (isScanning) {
+        if (isScanning) {
             statusEl.textContent = 'Scanning...';
             statusEl.style.color = '#ffd43b';
         } else if (isAutoRefreshOn) {
@@ -1427,7 +1107,7 @@ const ViewerTracker = (function() {
         if (!container) return;
         var resizeHandle = document.createElement('div');
         resizeHandle.id = 'resize-handle';
-        resizeHandle.style.cssText = 
+        resizeHandle.style.cssText =
             'position:absolute;top:0;left:0;width:16px;height:16px;' +
             'background:linear-gradient(135deg, #ff69b4 50%, transparent 50%);' +
             'cursor:nw-resize;z-index:999999;border-top-left-radius:6px;' +
@@ -1473,38 +1153,26 @@ const ViewerTracker = (function() {
         };
     }
 
-    // FIXED: Removed scale multiplication - getBoundingClientRect already includes transform
-    // FIXED: Added cleanup for window resize listener to prevent stacking on room changes
     function setupResizeHandler() {
-        // Remove old handler if exists (prevents stacking on room changes)
         if (windowResizeHandler) {
             window.removeEventListener('resize', windowResizeHandler);
             windowResizeHandler = null;
         }
-        
         var resizeTimeout;
         windowResizeHandler = function() {
             clearTimeout(resizeTimeout);
             resizeTimeout = setTimeout(function() {
                 var container = document.getElementById('tracker-container');
                 if (!container) return;
-                
                 var rect = container.getBoundingClientRect();
                 var viewportWidth = window.innerWidth;
                 var viewportHeight = window.innerHeight;
-                
-                // Calculate current position
                 var currentLeft = parseInt(container.style.left) || rect.left;
                 var currentTop = parseInt(container.style.top) || rect.top;
-                
-                // FIXED: Use rect.width/height directly - they already include the transform scale
                 var maxX = viewportWidth - rect.width;
                 var maxY = viewportHeight - rect.height;
-                
                 var newLeft = Math.max(0, Math.min(currentLeft, maxX));
                 var newTop = Math.max(0, Math.min(currentTop, maxY));
-                
-                // Apply if changed
                 if (newLeft !== currentLeft || newTop !== currentTop) {
                     container.style.left = newLeft + 'px';
                     container.style.top = newTop + 'px';
@@ -1512,33 +1180,28 @@ const ViewerTracker = (function() {
                 }
             }, 100);
         };
-        
         window.addEventListener('resize', windowResizeHandler);
     }
 
     function createPanel() {
         cleanupDragListeners();
-        
-        // FIXED: Also cleanup window resize handler
         if (windowResizeHandler) {
             window.removeEventListener('resize', windowResizeHandler);
             windowResizeHandler = null;
         }
-        
         if (window._trackerResizeCleanup) {
             window._trackerResizeCleanup();
             window._trackerResizeCleanup = null;
         }
-        
         var existing = document.getElementById('cb-tier-tracker');
         if (existing) existing.remove();
 
         var div = document.createElement('div');
         div.id = 'cb-tier-tracker';
-        
-        var html = 
+
+        var html =
             '<div id="tracker-container" style="' +
-                'position:fixed;top:70px;right:10px;background:rgba(20,20,30,0.95);color:white;padding:5px;' +
+                'position:fixed;top:80px;right:20px;background:rgba(20,20,30,0.95);color:white;padding:5px;' +
                 'border-radius:6px;font-family:Arial,sans-serif;font-size:9px;z-index:999999;width:' + BASE_WIDTH_MINI + 'px;' +
                 'border:1px solid #ff69b4;transition:width 0.3s ease;cursor:default;user-select:none;' +
             '">' +
@@ -1550,7 +1213,7 @@ const ViewerTracker = (function() {
                     '<span id="header-unique" style="font-weight:bold;color:#32CD32;font-size:10px;display:none;">U:0</span>' +
                     '<button id="btn-toggle" style="background:#333;border:1px solid #555;color:#fff;border-radius:3px;cursor:pointer;font-size:9px;padding:1px 4px;flex-shrink:0;">+</button>' +
                 '</div>' +
-                
+
                 '<div id="minimized-view" style="display:block;text-align:center;">' +
                     '<div style="font-size:9px;margin-bottom:3px;">' +
                         '<div>💎 <span id="mini-withtokens" style="color:#ff69b4;font-weight:bold;">0</span>' +
@@ -1558,41 +1221,36 @@ const ViewerTracker = (function() {
                         '<div style="margin-top:2px;">📊 <span id="mini-total" style="color:#fff;font-weight:bold;">0</span>' +
                         '(<span id="mini-total-pct" style="color:#fff;">0%</span>)</div>' +
                     '</div>' +
-                    
+
                     '<div style="display:flex;align-items:center;justify-content:center;gap:3px;margin:3px 0;padding:2px;background:rgba(255,255,255,0.05);border-radius:3px;">' +
                         '<button id="btn-timer-down" style="background:#444;border:none;color:#fff;border-radius:2px;cursor:pointer;font-size:9px;padding:1px 4px;font-weight:bold;">−</button>' +
-                        '<span id="timer-display" style="font-size:9px;color:#ffd43b;font-weight:bold;min-width:24px;">30s</span>' +
+                        '<span id="timer-display" style="font-size:11px;color:#ffd43b;font-weight:bold;min-width:28px;">60s</span>' +
                         '<button id="btn-timer-up" style="background:#444;border:none;color:#fff;border-radius:2px;cursor:pointer;font-size:9px;padding:1px 4px;font-weight:bold;">+</button>' +
                     '</div>' +
-                    
+
                     '<div style="display:flex;gap:2px;justify-content:center;flex-wrap:wrap;">' +
                         '<button id="btn-expand" style="background:#444;border:none;color:white;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 5px;">Expand</button>' +
                         '<button id="btn-auto" style="background:#32CD32;border:none;color:white;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 4px;" title="Auto-Refresh ON">⏸</button>' +
                     '</div>' +
-                    
+
                     '<div style="display:flex;gap:2px;justify-content:center;margin-top:3px;">' +
-                        '<button class="timer-preset" data-time="30" style="background:#ff69b4;border:1px solid #ff69b4;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">30s</button>' +
-                        '<button class="timer-preset" data-time="60" style="background:#333;border:1px solid #555;color:#aaa;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">60s</button>' +
+                        '<button class="timer-preset" data-time="30" style="background:#333;border:1px solid #555;color:#aaa;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">30s</button>' +
+                        '<button class="timer-preset" data-time="60" style="background:#ff69b4;border:1px solid #ff69b4;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">60s</button>' +
                         '<button class="timer-preset" data-time="120" style="background:#333;border:1px solid #555;color:#aaa;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">2m</button>' +
                         '<button class="timer-preset" data-time="300" style="background:#333;border:1px solid #555;color:#aaa;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">5m</button>' +
                     '</div>' +
-                    
-                    '<div id="anon-rate-mini" style="margin-top:3px;font-size:8px;color:#aaa;display:none;">' +
-                        '👻 Anon: <span id="anon-ratio-mini" style="color:#ff69b4;font-weight:bold;">--</span>' +
-                    '</div>' +
+
                     '<div id="auto-status" style="margin-top:2px;font-size:7px;color:#32CD32;">Starting...</div>' +
                 '</div>' +
-                
+
                 '<div id="full-view" style="display:none;">';
-        
+
         Object.keys(TIERS).forEach(function(key) {
             var t = TIERS[key];
-            var descHtml = t.desc ? '<div style="font-size:7px;color:#888;line-height:1.0;">' + t.desc + '</div>' : '';
-            html += 
+            html +=
                 '<div style="display:flex;align-items:center;padding:1px 3px;margin:1px 0;background:rgba(255,255,255,0.05);border-radius:3px;border-left:3px solid ' + t.color + ';">' +
-                    '<div style="width:65px;flex-shrink:0;">' +
-                        '<div style="font-size:10px;line-height:1.1;font-weight:500;">' + t.name + '</div>' +
-                        descHtml +
+                    '<div style="width:30px;flex-shrink:0;text-align:center;">' +
+                        '<span style="font-size:14px;">' + t.name + '</span>' +
                     '</div>' +
                     '<canvas id="spark-' + key + '" width="105" height="28" style="flex:1;margin:0 4px;"></canvas>' +
                     '<div style="text-align:right;width:48px;flex-shrink:0;">' +
@@ -1601,12 +1259,12 @@ const ViewerTracker = (function() {
                     '</div>' +
                 '</div>';
         });
-        
-        html += 
+
+        html +=
                 '<div style="border-top:1px solid #555;margin-top:4px;padding-top:4px;">' +
                     '<div style="display:flex;align-items:center;padding:2px 3px;background:rgba(255,105,180,0.15);border-radius:3px;border:1px solid #ff69b4;margin-bottom:3px;">' +
-                        '<div style="width:65px;flex-shrink:0;">' +
-                            '<div style="font-size:10px;font-weight:bold;line-height:1.1;">💎 With Tokens</div>' +
+                        '<div style="width:30px;flex-shrink:0;text-align:center;">' +
+                            '<span style="font-size:14px;">💎</span>' +
                         '</div>' +
                         '<canvas id="spark-withtokens" width="105" height="28" style="flex:1;margin:0 4px;"></canvas>' +
                         '<div style="text-align:right;width:48px;flex-shrink:0;">' +
@@ -1616,8 +1274,8 @@ const ViewerTracker = (function() {
                         '</div>' +
                     '</div>' +
                     '<div style="display:flex;align-items:center;padding:2px 3px;background:rgba(255,255,255,0.1);border-radius:3px;">' +
-                        '<div style="width:65px;flex-shrink:0;">' +
-                            '<div style="font-size:10px;font-weight:bold;line-height:1.1;">📊 Total</div>' +
+                        '<div style="width:30px;flex-shrink:0;text-align:center;">' +
+                            '<span style="font-size:14px;">📊</span>' +
                         '</div>' +
                         '<canvas id="spark-total" width="105" height="28" style="flex:1;margin:0 4px;"></canvas>' +
                         '<div style="text-align:right;width:48px;flex-shrink:0;">' +
@@ -1626,12 +1284,11 @@ const ViewerTracker = (function() {
                         '</div>' +
                     '</div>' +
                 '</div>' +
-                
+
                 '<div id="anon-rate-full" style="margin-top:5px;padding:5px;background:rgba(136,136,136,0.15);border-radius:3px;border:1px solid #888;">' +
                     '<div style="display:flex;align-items:center;">' +
-                        '<div style="width:65px;flex-shrink:0;">' +
-                            '<div style="font-size:10px;font-weight:bold;color:#aaa;line-height:1.1;">👻 Anon</div>' +
-                            '<div style="font-size:7px;color:#888;line-height:1.0;">Not logged in</div>' +
+                        '<div style="width:30px;flex-shrink:0;text-align:center;">' +
+                            '<span style="font-size:14px;">👻</span>' +
                         '</div>' +
                         '<canvas id="spark-anon" width="105" height="50" style="flex:1;margin:0 4px;"></canvas>' +
                         '<div style="text-align:right;width:48px;flex-shrink:0;">' +
@@ -1640,13 +1297,26 @@ const ViewerTracker = (function() {
                         '</div>' +
                     '</div>' +
                 '</div>' +
-                
-                '<div id="control-field" style="margin-top:5px;padding:4px;background:rgba(65,105,225,0.15);border-radius:3px;border:1px solid #4169E1;">' +
+
+                '<div style="border-top:1px solid #4169E1;margin-top:5px;padding-top:5px;">' +
                     '<div style="display:flex;justify-content:center;align-items:center;margin-bottom:3px;">' +
-                        '<span style="font-size:9px;font-weight:bold;color:#4169E1;">🎛️ CONTROLS</span>' +
+                        '<span style="font-size:9px;font-weight:bold;color:#4169E1;">📈 TREND</span>' +
                     '</div>' +
-                    '<div style="display:flex;gap:4px;justify-content:space-between;align-items:center;">' +
-                        '<span style="font-size:10px;color:#ffd43b;font-family:monospace;font-weight:bold;" id="control-tracking-timer">00:00:00</span>' +
+                    '<div id="trend-container" style="min-height:30px;">' +
+                        '<div style="font-size:8px;color:#666;text-align:center;padding:8px;">Waiting for scan...</div>' +
+                    '</div>' +
+                '</div>' +
+
+                // FIXED: Control field with timer on left, buttons centered
+                '<div id="control-field" style="margin-top:5px;padding:4px;background:rgba(65,105,225,0.15);border-radius:3px;border:1px solid #4169E1;">' +
+                    // Top row: CONTROLS title left, Next countdown right
+                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">' +
+                        '<span style="font-size:9px;font-weight:bold;color:#4169E1;">🎛️ CONTROLS</span>' +
+                        '<span style="font-size:11px;color:#32CD32;font-weight:bold;" id="control-next-scan">Next: 60s</span>' +
+                    '</div>' +
+                    // Bottom row: Timer absolute left, buttons centered
+                    '<div style="display:flex;justify-content:center;align-items:center;position:relative;">' +
+                        '<span style="font-size:12px;color:#ffd43b;font-family:monospace;font-weight:bold;position:absolute;left:0;" id="control-tracking-timer">00:00:00</span>' +
                         '<div style="display:flex;gap:3px;">' +
                             '<button id="btn-download-report" style="background:#4169E1;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 6px;display:flex;align-items:center;gap:2px;" title="Download tracking report">' +
                                 '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
@@ -1665,23 +1335,9 @@ const ViewerTracker = (function() {
                                 'Reset' +
                             '</button>' +
                         '</div>' +
-                        '<span style="font-size:10px;color:#32CD32;font-weight:bold;" id="control-next-scan">Next: 30s</span>' +
                     '</div>' +
                 '</div>' +
-                
-                '<div style="border-top:1px solid #ff4444;margin-top:4px;padding-top:4px;">' +
-                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">' +
-                        '<span id="spike-header-label" style="font-size:8px;color:#ff4444;font-weight:bold;">🚨 SPIKE DETECTOR</span>' +
-                        '<div style="display:flex;gap:4px;">' +
-                            '<button id="btn-clear-all-spikes" style="display:none;background:#444;border:1px solid #666;color:#ff4444;border-radius:3px;cursor:pointer;font-size:7px;padding:2px 6px;">Clear All</button>' +
-                            '<button id="btn-spike-toggle" style="background:#32CD32;border:1px solid #444;color:#fff;border-radius:3px;cursor:pointer;font-size:7px;padding:2px 6px;font-weight:bold;" title="Spike detection enabled - Click to disable">ON</button>' +
-                        '</div>' +
-                    '</div>' +
-                    '<div id="spike-container" style="max-height:180px;overflow-y:auto;">' +
-                        '<div style="font-size:7px;color:#666;text-align:center;padding:3px;">No spikes detected yet</div>' +
-                    '</div>' +
-                '</div>' +
-                
+
                 '<div style="position:absolute;bottom:4px;right:6px;display:flex;align-items:center;gap:3px;opacity:0.6;transition:opacity 0.2s;" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0.6">' +
                     '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#ff69b4" stroke-width="2" style="flex-shrink:0;">' +
                         '<circle cx="12" cy="12" r="10"/>' +
@@ -1691,34 +1347,28 @@ const ViewerTracker = (function() {
                     '<span style="font-size:7px;font-family:\'Courier New\',monospace;font-weight:bold;color:#ff69b4;letter-spacing:1px;">TIERSCOPE</span>' +
                 '</div>' +
             '</div>';
-        
+
         div.innerHTML = html;
         document.body.appendChild(div);
 
         var btnDownload = document.getElementById('btn-download-report');
         var btnMainReset = document.getElementById('btn-main-reset');
-        var btnClearAll = document.getElementById('btn-clear-all-spikes');
-        var btnSpikeToggle = document.getElementById('btn-spike-toggle');
         var btnControlAuto = document.getElementById('btn-control-auto');
-        
+
         if (btnDownload) btnDownload.addEventListener('click', downloadTrackingReport);
         if (btnMainReset) btnMainReset.addEventListener('click', resetAllTracking);
-        if (btnClearAll) btnClearAll.addEventListener('click', clearAllSpikes);
-        if (btnSpikeToggle) btnSpikeToggle.addEventListener('click', toggleSpikeDetection);
         if (btnControlAuto) btnControlAuto.addEventListener('click', toggleAutoRefresh);
-        
-        setupSpikeContainerListeners();
 
         setupDraggable();
         setupResizable();
         setupResizeHandler();
-        
+
         var btnToggle = document.getElementById('btn-toggle');
         var btnExpand = document.getElementById('btn-expand');
         var btnAuto = document.getElementById('btn-auto');
         var btnTimerDown = document.getElementById('btn-timer-down');
         var btnTimerUp = document.getElementById('btn-timer-up');
-        
+
         if (btnToggle) btnToggle.onclick = toggleView;
         if (btnExpand) btnExpand.onclick = toggleView;
         if (btnAuto) btnAuto.onclick = toggleAutoRefresh;
@@ -1730,7 +1380,6 @@ const ViewerTracker = (function() {
             presetBtns[i].onclick = function() {
                 var time = parseInt(this.dataset.time);
                 scanIntervalSeconds = time;
-
                 if (isAutoRefreshOn) {
                     stopCountdown();
                     resetCountdown();
@@ -1738,9 +1387,7 @@ const ViewerTracker = (function() {
                 } else {
                     resetCountdown();
                 }
-
                 updateCountdownDisplay();
-
                 var allPresets = document.querySelectorAll('.timer-preset');
                 for (var j = 0; j < allPresets.length; j++) {
                     allPresets[j].style.background = '#333';
@@ -1758,7 +1405,6 @@ const ViewerTracker = (function() {
         isAutoRefreshOn = !isAutoRefreshOn;
         var btn = document.getElementById('btn-auto');
         var btnControl = document.getElementById('btn-control-auto');
-
         if (isAutoRefreshOn) {
             if (btn) {
                 btn.style.background = '#32CD32';
@@ -1794,49 +1440,37 @@ const ViewerTracker = (function() {
         var container = document.getElementById('tracker-container');
         var dragHandle = document.getElementById('drag-handle');
         if (!container || !dragHandle) return;
-
         var startDrag = function(e) {
             if (isResizing) return;
             isDragging = true;
-            
             var rect = container.getBoundingClientRect();
-            
             var scale = currentScale || 1;
             dragOffsetX = (e.clientX - rect.left) / scale;
             dragOffsetY = (e.clientY - rect.top) / scale;
-            
             if (container.style.right !== 'auto') {
                 container.style.left = rect.left + 'px';
                 container.style.right = 'auto';
             }
-            
             addDragListener('mousemove', doDrag, false);
             addDragListener('mouseup', stopDrag, false);
             e.preventDefault();
         };
-
         var doDrag = function(e) {
             if (!isDragging) return;
-            
             var scale = currentScale || 1;
             var newX = e.clientX - (dragOffsetX * scale);
             var newY = e.clientY - (dragOffsetY * scale);
-            
             var maxX = window.innerWidth - (container.offsetWidth * scale);
             var maxY = window.innerHeight - (container.offsetHeight * scale);
-            
             newX = Math.max(0, Math.min(newX, maxX));
             newY = Math.max(0, Math.min(newY, maxY));
-            
             container.style.left = newX + 'px';
             container.style.top = newY + 'px';
         };
-
         var stopDrag = function() {
             isDragging = false;
             cleanupDragListeners();
         };
-
         dragHandle.addEventListener('mousedown', startDrag, false);
     }
 
@@ -1849,39 +1483,28 @@ const ViewerTracker = (function() {
         var headerText = document.getElementById('header-text');
         var headerUnique = document.getElementById('header-unique');
         var resizeHandle = document.getElementById('resize-handle');
-
         var anonymousCount = getAnonymousCount();
-
         if (isMinimized) {
             if (fullView) fullView.style.display = 'none';
             if (miniView) miniView.style.display = 'block';
             if (toggleBtn) toggleBtn.textContent = '+';
-            if (container) {
-                container.style.width = BASE_WIDTH_MINI + 'px';
-            }
+            if (container) container.style.width = BASE_WIDTH_MINI + 'px';
             if (resizeHandle) resizeHandle.style.display = 'none';
             if (isResizing) isResizing = false;
-            
             if (headerUnique) headerUnique.style.display = 'none';
-            
             var currentTotal = roomTotal > 0 ? roomTotal : (users.size + anonymousCount);
             if (headerText) headerText.textContent = currentTotal.toLocaleString() + ' (H:' + roomTotalHigh.toLocaleString() + ')';
         } else {
             if (fullView) fullView.style.display = 'block';
             if (miniView) miniView.style.display = 'none';
             if (toggleBtn) toggleBtn.textContent = '−';
-            if (container) {
-                container.style.width = BASE_WIDTH_FULL + 'px';
-            }
+            if (container) container.style.width = BASE_WIDTH_FULL + 'px';
             if (resizeHandle) resizeHandle.style.display = 'block';
-            
             if (headerUnique) headerUnique.style.display = 'inline';
-            
             var currentTotal = roomTotal > 0 ? roomTotal : (users.size + anonymousCount);
             if (headerText) headerText.textContent = 'USERS: ' + currentTotal.toLocaleString() + ' (H:' + roomTotalHigh.toLocaleString() + ')';
             setTimeout(function() {
                 drawAllSparklines();
-                updateSpikeDisplay();
             }, 100);
         }
         updateDisplay();
@@ -1890,11 +1513,9 @@ const ViewerTracker = (function() {
     function scanUsers() {
         var userListTab = document.querySelector(DOM_SELECTORS.userListTab);
         if (!userListTab) return;
-
         roomTotal = getRoomTotal();
         femaleTransUsernames = [];
         var modelName = getModelName().toLowerCase();
-
         var userElements = [];
         for (var i = 0; i < DOM_SELECTORS.usernameElements.length; i++) {
             var found = userListTab.querySelectorAll(DOM_SELECTORS.usernameElements[i]);
@@ -1902,22 +1523,17 @@ const ViewerTracker = (function() {
                 userElements.push(found[j]);
             }
         }
-
         for (var i = 0; i < userElements.length; i++) {
             var el = userElements[i];
             var rawText = (el.textContent || '').trim() || (el.getAttribute('data-username') || '').trim();
             var username = extractUsername(rawText);
-
             if (username && !users.has(username)) {
                 var tier = getTierFromElement(el);
                 var gender = getGenderFromElement(el);
-                
                 users.set(username, { tier: tier, gender: gender });
-                
                 if (username.toLowerCase() !== modelName) {
                     sessionUniqueUsers[username.toLowerCase()] = true;
                 }
-                
                 if ((gender === 'female' || gender === 'trans') && username.toLowerCase() !== modelName) {
                     femaleTransUsernames.push(username);
                     sessionFemaleTransUsers[username] = gender;
@@ -1928,33 +1544,24 @@ const ViewerTracker = (function() {
 
     function updateDisplay() {
         var counts = { 'red': 0, 'green': 0, 'purple': 0, 'pink': 0, 'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0 };
-        
         users.forEach(function(data) {
             if (counts[data.tier] !== undefined) counts[data.tier]++;
-            
             if (data.gender === 'female' || data.gender === 'trans') {
                 counts['female-trans']++;
             }
         });
-
         var total = users.size;
         var withTokens = counts['red'] + counts['green'] + counts['purple'] + counts['pink'] + counts['dark-blue'] + counts['light-blue'];
         var anonymousCount = getAnonymousCount();
         var fullRoomTotal = roomTotal > total ? roomTotal : (total + anonymousCount);
-        
         if (fullRoomTotal > roomTotalHigh) {
             roomTotalHigh = fullRoomTotal;
             roomTotalHighTime = Date.now();
         }
-
-        var ratioText = getAnonRatio(anonymousCount, total);
-
         var withTokensPct = total > 0 ? Math.round((withTokens / total) * 100) + '%' : '0%';
         var registeredPct = fullRoomTotal > 0 ? Math.round((total / fullRoomTotal) * 100) + '%' : '0%';
-
         var headerText = document.getElementById('header-text');
         var headerUnique = document.getElementById('header-unique');
-        
         if (headerText) {
             if (isMinimized) {
                 headerText.textContent = fullRoomTotal.toLocaleString() + ' (H:' + roomTotalHigh.toLocaleString() + ')';
@@ -1962,68 +1569,49 @@ const ViewerTracker = (function() {
                 headerText.textContent = 'USERS: ' + fullRoomTotal.toLocaleString() + ' (H:' + roomTotalHigh.toLocaleString() + ')';
             }
         }
-        
         if (headerUnique && !isMinimized) {
             headerUnique.textContent = 'U:' + Object.keys(sessionUniqueUsers).length.toLocaleString();
         }
-
         var miniWithTokens = document.getElementById('mini-withtokens');
         var miniWithTokensPct = document.getElementById('mini-withtokens-pct');
         var miniTotal = document.getElementById('mini-total');
         var miniTotalPct = document.getElementById('mini-total-pct');
-        
         if (miniWithTokens) miniWithTokens.textContent = withTokens;
         if (miniWithTokensPct) miniWithTokensPct.textContent = withTokensPct;
         if (miniTotal) miniTotal.textContent = total;
         if (miniTotalPct) miniTotalPct.textContent = registeredPct;
-
-        var miniAnon = document.getElementById('anon-rate-mini');
-        var miniAnonText = document.getElementById('anon-ratio-mini');
-        if (miniAnon && miniAnonText) {
-            if (anonymousCount > 0) {
-                miniAnon.style.display = 'block';
-                miniAnonText.textContent = ratioText + ' (' + anonymousCount.toLocaleString() + ')';
-            } else {
-                miniAnon.style.display = 'none';
-            }
-        }
-
         if (!isMinimized) {
-            Object.keys(counts).forEach(function(tier) {
+            Object.keys(TIERS).forEach(function(tier) {
                 var countEl = document.getElementById('count-' + tier);
                 var highEl = document.getElementById('high-' + tier);
                 var currentVal = counts[tier];
                 var highResult = getHighValue(history[tier], currentVal);
                 var highVal = highResult.value;
-                
                 if (countEl) countEl.textContent = currentVal;
                 if (highEl) highEl.textContent = 'H:' + highVal.toLocaleString();
             });
-
             var withTokensCountEl = document.getElementById('count-withtokens');
             var withTokensPctEl = document.getElementById('pct-withtokens');
             var withTokensHighEl = document.getElementById('high-withtokens');
             var totalEl = document.getElementById('count-total');
             var totalHighEl = document.getElementById('high-total');
-
             var withTokensResult = getHighValue(history['withTokens'], withTokens);
             var totalResult = getHighValue(history['total'], total);
             var anonResult = getHighValue(history['anonymous'], anonymousCount);
-
             if (withTokensCountEl) withTokensCountEl.textContent = withTokens;
             if (withTokensPctEl) withTokensPctEl.textContent = withTokensPct;
             if (withTokensHighEl) withTokensHighEl.textContent = 'H:' + withTokensResult.value.toLocaleString();
             if (totalEl) totalEl.textContent = total;
             if (totalHighEl) totalHighEl.textContent = 'H:' + totalResult.value.toLocaleString();
-
+            
+            // FIXED: Scale anon number font size based on digit count
             var fullAnonText = document.getElementById('anon-ratio-full');
             var anonHighEl = document.getElementById('high-anon');
             if (fullAnonText) {
-                if (anonymousCount > 0) {
-                    fullAnonText.textContent = anonymousCount.toLocaleString() + ' (' + ratioText + ')';
-                } else {
-                    fullAnonText.textContent = '0 (0 anon)';
-                }
+                var anonLabel = anonymousCount > 0 ? anonymousCount.toLocaleString() : '0';
+                var digits = String(Math.abs(anonymousCount)).length;
+                fullAnonText.textContent = anonLabel;
+                fullAnonText.style.fontSize = digits >= 6 ? '9px' : digits === 5 ? '11px' : '13px';
             }
             if (anonHighEl) anonHighEl.textContent = 'H:' + anonResult.value.toLocaleString();
         }
@@ -2031,17 +1619,13 @@ const ViewerTracker = (function() {
 
     function init() {
         var myGeneration = ++initGuard;
-        
         log('Initializing... (generation ' + myGeneration + ')');
-        
         if (healthCheckInterval) {
             clearInterval(healthCheckInterval);
             healthCheckInterval = null;
         }
-        
         var isRoom = isBroadcastRoom();
         var modelName = getModelName();
-        
         var loaded = false;
         if (isRoom && modelName !== 'unknown') {
             loaded = loadSession(modelName);
@@ -2049,7 +1633,6 @@ const ViewerTracker = (function() {
                 log('Restored session for ' + modelName);
             }
         }
-        
         if (!loaded) {
             isMinimized = !isRoom;
             isAutoRefreshOn = isRoom;
@@ -2057,54 +1640,41 @@ const ViewerTracker = (function() {
             isMinimized = false;
             isAutoRefreshOn = !isPaused;
         }
-        
         try {
             createPanel();
         } catch (e) {
             log('Error creating panel: ' + e);
             return;
         }
-
         var resizeHandle = document.getElementById('resize-handle');
         if (resizeHandle) {
             resizeHandle.style.display = isMinimized ? 'none' : 'block';
         }
-
         if (!isMinimized) {
             var fullView = document.getElementById('full-view');
             var miniView = document.getElementById('minimized-view');
             var toggleBtn = document.getElementById('btn-toggle');
             var container = document.getElementById('tracker-container');
             var headerUnique = document.getElementById('header-unique');
-            
             if (fullView) fullView.style.display = 'block';
             if (miniView) miniView.style.display = 'none';
             if (toggleBtn) toggleBtn.textContent = '−';
-            if (container) {
-                container.style.width = BASE_WIDTH_FULL + 'px';
-            }
+            if (container) container.style.width = BASE_WIDTH_FULL + 'px';
             if (headerUnique) headerUnique.style.display = 'inline';
-            
             drawAllSparklines();
-            
             updateDisplay();
         }
-
         var attempts = 0;
         var maxAttempts = 30;
-        
         var checkInterval = setInterval(function() {
             if (myGeneration !== initGuard) {
                 clearInterval(checkInterval);
                 log('Init ' + myGeneration + ' superseded by newer generation');
                 return;
             }
-            
             attempts++;
-            
             if (document.querySelector(DOM_SELECTORS.userListTab) || attempts >= maxAttempts) {
                 clearInterval(checkInterval);
-                
                 if (attempts >= maxAttempts && !document.querySelector(DOM_SELECTORS.userListTab)) {
                     log('UserListTab not found after 30s, giving up');
                     var statusEl = document.getElementById('auto-status');
@@ -2114,14 +1684,11 @@ const ViewerTracker = (function() {
                     }
                     return;
                 }
-
                 if (!isPaused) {
                     performScanThenReturn(true);
                 }
-
                 setTimeout(function() {
                     if (myGeneration !== initGuard) return;
-                    
                     if (isAutoRefreshOn && !isPaused) {
                         startTrackingTimer();
                         startCountdown();
@@ -2148,7 +1715,6 @@ const ViewerTracker = (function() {
                 }, 2002);
             }
         }, 1000);
-
         healthCheckInterval = setInterval(function() {
             if (myGeneration === initGuard) {
                 validateDOMHealth();
@@ -2161,38 +1727,30 @@ const ViewerTracker = (function() {
         if (location.href !== lastUrl) {
             var oldModel = getModelNameFromUrl(lastUrl);
             lastUrl = location.href;
-            
             if (oldModel && oldModel !== 'unknown') {
                 saveSession(oldModel);
             }
-            
             stopCountdown();
             stopTrackingTimer();
             cleanupDragListeners();
             isScanning = false;
-            
             if (healthCheckInterval) {
                 clearInterval(healthCheckInterval);
                 healthCheckInterval = null;
             }
-            
             currentScale = 1.0;
-            
             users.clear();
             previousUserCount = 0;
             previousRoomTotal = 0;
             Object.keys(history).forEach(function(k) { history[k] = []; });
-            completedSpikes.length = 0;
-            anonHistory.length = 0;
-            spikeState = 'detecting';
-            currentSpike = null;
-            stabilizationWindow = [];
-            consecutiveStableScans = 0;
-            preSpikeBaseline = null;
+            previousCounts = {
+                'red': 0, 'green': 0, 'purple': 0, 'pink': 0,
+                'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0,
+                'withTokens': 0, 'total': 0, 'anonymous': 0
+            };
+            hasTrendBaseline = false;
             roomTotalHigh = 0;
-            
             sessionUniqueUsers = {};
-            
             roomTotalHighTime = null;
             tierHighTimes = {};
             withTokensHighTime = null;
@@ -2201,13 +1759,10 @@ const ViewerTracker = (function() {
             femaleTransHighTime = null;
             femaleTransUsernames = [];
             sessionFemaleTransUsers = {};
-            
             initGuard++;
-            
             setTimeout(init, 2002);
         }
     }
-    
     urlCheckInterval = setInterval(checkUrlChange, 500);
 
     window.addEventListener('beforeunload', function() {
@@ -2224,15 +1779,10 @@ const ViewerTracker = (function() {
     } else {
         setTimeout(init, 2000);
     }
-    
     log('Script loaded and waiting for init');
 
     return {
         downloadTrackingReport: downloadTrackingReport,
-        downloadSpikeReport: downloadSpikeReport,
-        toggleSpikeDetection: toggleSpikeDetection,
-        closeSpike: closeSpike,
-        clearAllSpikes: clearAllSpikes,
         resetAllTracking: resetAllTracking,
         getHealth: function() { return domHealthStatus; }
     };
