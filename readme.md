@@ -127,17 +127,17 @@ These are the same classes Chaturbate puts on the user list.
 | Version | Notes |
 | --- | --- |
 | 3.0.4 | Current | Trend presets added |
-| 3.0.0 | Spike detector removed. Trend arrows compare each scan with the one before it. |
-| 2.9.9.3 | Visual improvements |
-| 2.9.9.2 | Window resize bug fixed |
-| 2.9.9.1 | Persistent storage, control panel, reset, unique viewers |
-| 2.9.8.2 | Minor fix |
-| 2.9.8.1 | Anonymous canvas adjustment |
-| 2.9.8.0 | Broadcaster detection, tracking keys, CSS |
-| 2.9.7.8 | Female / trans overlay |
-| 2.9.7.6 | Gender report tuning |
-| 2.9.7.5 | Baseline before the overlay |
-| 2.9.7.3 | Base reference |
+| 3.0.0 | Legacy | Spike detector removed. Trend arrows compare each scan with the one before it. |
+| 2.9.9.3 | Legacy | Visual improvements |
+| 2.9.9.2 | Legacy | Window resize bug fixed |
+| 2.9.9.1 | Legacy | Persistent storage, control panel, reset, unique viewers |
+| 2.9.8.2 | Legacy | Minor fix |
+| 2.9.8.1 | Legacy | Anonymous canvas adjustment |
+| 2.9.8.0 | Legacy | Broadcaster detection, tracking keys, CSS |
+| 2.9.7.8 | Legacy | Female / trans overlay |
+| 2.9.7.6 | Legacy | Gender report tuning |
+| 2.9.7.5 | Legacy | Baseline before the overlay |
+| 2.9.7.3 | Legacy | Base reference |
 
 ---
 
