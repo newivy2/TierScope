@@ -126,7 +126,8 @@ These are the same classes Chaturbate puts on the user list.
 
 | Version | Status | Notes |
 | --- | --- | --- |
-| 3.0.4 | Current | Trend presets added |
+| 3.0.7 | Current | Trend preset auto-escalation added |
+| 3.0.4 | Legacy | Trend presets added |
 | 3.0.0 | Legacy | Spike detector removed. Trend arrows compare each scan with the one before it. |
 | 2.9.9.3 | Legacy | Visual improvements |
 | 2.9.9.2 | Legacy | Window resize bug fixed |
