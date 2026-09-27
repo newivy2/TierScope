@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         TierScope - Chaturbate Viewers Visualizer BETA
+// @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.0.0
+// @version      3.0.4
 // @description  TierScope - Viewer visualizer with trend tracking and reports
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -74,6 +74,9 @@ const ViewerTracker = (function() {
     };
 
     var hasTrendBaseline = false;
+    
+    // NEW: Trend comparison mode - 'last', '5min', '15min', '30min', '1hour', 'start'
+    var trendComparisonMode = 'last';
 
     function validateDOMHealth() {
         const now = Date.now();
@@ -187,6 +190,16 @@ const ViewerTracker = (function() {
         stable: '<svg width="16" height="16" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="#ffd43b"/></svg>'
     };
 
+    // NEW: Preset configuration
+    const TREND_PRESETS = {
+        'last': { label: 'Last', ms: 0 },
+        '5min': { label: '5m', ms: 5 * 60 * 1000 },
+        '15min': { label: '15m', ms: 15 * 60 * 1000 },
+        '30min': { label: '30m', ms: 30 * 60 * 1000 },
+        '1hour': { label: '1h', ms: 60 * 60 * 1000 },
+        'start': { label: 'Start', ms: -1 }
+    };
+
     function log(msg) {
         console.log('[TierTracker] ' + msg);
     }
@@ -231,7 +244,8 @@ const ViewerTracker = (function() {
             sessionFemaleTransUsers: sessionFemaleTransUsers,
             sessionUniqueUsers: sessionUniqueUsers,
             previousCounts: previousCounts,
-            hasTrendBaseline: hasTrendBaseline
+            hasTrendBaseline: hasTrendBaseline,
+            trendComparisonMode: trendComparisonMode
         };
         try {
             GM_setValue(getStorageKey(model), JSON.stringify(saveData));
@@ -273,6 +287,7 @@ const ViewerTracker = (function() {
                 'withTokens': 0, 'total': 0, 'anonymous': 0
             };
             hasTrendBaseline = data.hasTrendBaseline || false;
+            trendComparisonMode = data.trendComparisonMode || 'last';
             log('Session restored for ' + model + ' (' + Math.round(age/60000) + ' min old)');
             return true;
         } catch (e) {
@@ -386,6 +401,7 @@ const ViewerTracker = (function() {
             'withTokens': 0, 'total': 0, 'anonymous': 0
         };
         hasTrendBaseline = false;
+        trendComparisonMode = 'last';
         updateTrackingTimer();
     }
 
@@ -412,6 +428,7 @@ const ViewerTracker = (function() {
             'withTokens': 0, 'total': 0, 'anonymous': 0
         };
         hasTrendBaseline = false;
+        trendComparisonMode = 'last';
         history = {
             timestamps: [],
             'red': [], 'green': [], 'purple': [], 'pink': [], 'dark-blue': [], 'light-blue': [], 'gray': [], 'female-trans': [],
@@ -767,9 +784,14 @@ const ViewerTracker = (function() {
                         roomTotalHighTime = Date.now();
                     }
 
+                    // FIXED: Save to history BEFORE updating display so 'last' preset can access it
+                    saveToHistory();
+                    hasTrendBaseline = true;
+
                     updateDisplay();
                     updateTrendDisplay();
 
+                    // Keep previousCounts for session save/load compatibility
                     previousCounts = {
                         'red': counts['red'] || 0,
                         'green': counts['green'] || 0,
@@ -784,9 +806,6 @@ const ViewerTracker = (function() {
                         'anonymous': anonymousCount || 0
                     };
 
-                    hasTrendBaseline = true;
-
-                    saveToHistory();
                     saveSession(getModelName());
                 }
             } catch (err) {
@@ -809,12 +828,154 @@ const ViewerTracker = (function() {
         }, 800);
     }
 
+    // FIXED: Helper function to get comparison counts based on selected time mode
+    // Returns { counts: {}, short: boolean, actualMinutes: number }
+    function getComparisonCounts() {
+        if (trendComparisonMode === 'last') {
+            // FIXED: Use history instead of previousCounts to avoid stale data when switching presets
+            if (history.timestamps.length < 2) {
+                // Not enough history (need at least 1 previous scan) - return null to indicate "not ready"
+                return { counts: null, short: false, actualMinutes: 0 };
+            }
+            
+            // Get the second-to-last entry (the scan before current)
+            var lastIdx = history.timestamps.length - 2;
+            var actualMinutes = Math.round((Date.now() - history.timestamps[lastIdx]) / 60000);
+            
+            return {
+                counts: {
+                    'red': history['red'][lastIdx] || 0,
+                    'green': history['green'][lastIdx] || 0,
+                    'purple': history['purple'][lastIdx] || 0,
+                    'pink': history['pink'][lastIdx] || 0,
+                    'dark-blue': history['dark-blue'][lastIdx] || 0,
+                    'light-blue': history['light-blue'][lastIdx] || 0,
+                    'gray': history['gray'][lastIdx] || 0,
+                    'female-trans': history['female-trans'][lastIdx] || 0,
+                    'withTokens': history['withTokens'][lastIdx] || 0,
+                    'total': history['total'][lastIdx] || 0,
+                    'anonymous': history['anonymous'][lastIdx] || 0
+                },
+                short: false,
+                actualMinutes: actualMinutes
+            };
+        }
+        
+        if (trendComparisonMode === 'start') {
+            // Return first history entry or zeros if no history
+            if (history.timestamps.length === 0) {
+                return {
+                    counts: {
+                        'red': 0, 'green': 0, 'purple': 0, 'pink': 0,
+                        'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0,
+                        'withTokens': 0, 'total': 0, 'anonymous': 0
+                    },
+                    short: false,
+                    actualMinutes: 0
+                };
+            }
+            var startMinutes = Math.round((Date.now() - history.timestamps[0]) / 60000);
+            return {
+                counts: {
+                    'red': history['red'][0] || 0,
+                    'green': history['green'][0] || 0,
+                    'purple': history['purple'][0] || 0,
+                    'pink': history['pink'][0] || 0,
+                    'dark-blue': history['dark-blue'][0] || 0,
+                    'light-blue': history['light-blue'][0] || 0,
+                    'gray': history['gray'][0] || 0,
+                    'female-trans': history['female-trans'][0] || 0,
+                    'withTokens': history['withTokens'][0] || 0,
+                    'total': history['total'][0] || 0,
+                    'anonymous': history['anonymous'][0] || 0
+                },
+                short: false,
+                actualMinutes: startMinutes
+            };
+        }
+        
+        // Time-based modes - find latest scan at or before target time
+        var preset = TREND_PRESETS[trendComparisonMode];
+        if (!preset || preset.ms <= 0) return { counts: previousCounts, short: false, actualMinutes: 0 };
+        
+        var targetTime = Date.now() - preset.ms;
+        var idx = -1;
+        
+        // Find the latest scan that is at or before the target time
+        for (var i = 0; i < history.timestamps.length; i++) {
+            if (history.timestamps[i] <= targetTime) {
+                idx = i;
+            } else {
+                break; // Timestamps are in order, so we can stop once we pass the target
+            }
+        }
+        
+        var short = idx === -1; // No scan old enough means session is shorter than preset
+        if (short) idx = 0; // Use the oldest scan we have
+        
+        if (idx === -1 || history.timestamps.length === 0) {
+            return { counts: previousCounts, short: false, actualMinutes: 0 };
+        }
+        
+        // Calculate actual age of the comparison scan
+        var actualMs = Date.now() - history.timestamps[idx];
+        var actualMinutes = Math.round(actualMs / 60000);
+        
+        return {
+            counts: {
+                'red': history['red'][idx] || 0,
+                'green': history['green'][idx] || 0,
+                'purple': history['purple'][idx] || 0,
+                'pink': history['pink'][idx] || 0,
+                'dark-blue': history['dark-blue'][idx] || 0,
+                'light-blue': history['light-blue'][idx] || 0,
+                'gray': history['gray'][idx] || 0,
+                'female-trans': history['female-trans'][idx] || 0,
+                'withTokens': history['withTokens'][idx] || 0,
+                'total': history['total'][idx] || 0,
+                'anonymous': history['anonymous'][idx] || 0
+            },
+            short: short,
+            actualMinutes: actualMinutes
+        };
+    }
+
+    // NEW: Function to set trend comparison mode
+    function setTrendComparisonMode(mode) {
+        if (!TREND_PRESETS[mode] && mode !== 'last') return;
+        trendComparisonMode = mode;
+        updateTrendDisplay();
+        updateTrendPresetButtons();
+        saveSession(getModelName());
+    }
+
+    // NEW: Update preset button visual states
+    function updateTrendPresetButtons() {
+        var buttons = document.querySelectorAll('.trend-preset-btn');
+        buttons.forEach(function(btn) {
+            var mode = btn.dataset.mode;
+            if (mode === trendComparisonMode) {
+                btn.style.background = '#4169E1';
+                btn.style.color = '#fff';
+                btn.style.borderColor = '#4169E1';
+            } else {
+                btn.style.background = '#333';
+                btn.style.color = '#aaa';
+                btn.style.borderColor = '#555';
+            }
+        });
+    }
+
     function updateTrendDisplay() {
         var trendContainer = document.getElementById('trend-container');
+        var trendHeaderLabel = document.getElementById('trend-header-label');
+        
         if (!trendContainer) return;
 
+        // FIXED: Clear header label on early exit (Reset can leave "vs 4m" stuck)
         if (!hasTrendBaseline) {
             trendContainer.innerHTML = '<div style="font-size:8px;color:#666;text-align:center;padding:8px;">Waiting for scan...</div>';
+            if (trendHeaderLabel) trendHeaderLabel.textContent = '📈 TREND';
             return;
         }
 
@@ -828,6 +989,28 @@ const ViewerTracker = (function() {
         var total = users.size;
         var withTokens = counts['red'] + counts['green'] + counts['purple'] + counts['pink'] + counts['dark-blue'] + counts['light-blue'];
         var anonymousCount = getAnonymousCount();
+        
+        // FIXED: Get comparison counts and metadata
+        var comparison = getComparisonCounts();
+        var comparisonCounts = comparison.counts;
+        var shortSession = comparison.short;
+        var actualMinutes = comparison.actualMinutes;
+
+        // FIXED: Handle "not ready" state (e.g., "Last" preset with fewer than 2 history points)
+        if (!comparisonCounts) {
+            trendContainer.innerHTML = '<div style="font-size:8px;color:#666;text-align:center;padding:8px;">Waiting for scan...</div>';
+            if (trendHeaderLabel) trendHeaderLabel.textContent = '📈 TREND';
+            return;
+        }
+
+        // Helper to format short session label
+        var getShortLabel = function() {
+            if (!shortSession || actualMinutes <= 0) return '';
+            if (actualMinutes < 60) return ' vs ' + actualMinutes + 'm';
+            var hours = Math.floor(actualMinutes / 60);
+            var mins = actualMinutes % 60;
+            return ' vs ' + hours + 'h' + (mins > 0 ? mins : '');
+        };
 
         function buildTrendItem(name, current, prev, isSpecial, isLarge) {
             var diff = current - prev;
@@ -842,12 +1025,13 @@ const ViewerTracker = (function() {
             var fontSize = isLarge ? '12px' : '10px';
             var containerSize = isLarge ? '28px' : '22px';
             
-            // FIXED: Scale only the ghost (👻) delta font size based on digit count
+            // FIXED: Apply dynamic font sizing to ALL delta numbers based on digit count
             var deltaFont = fontSize;
-            if (name === '👻' && deltaText) {
+            if (deltaText) {
                 var dlen = String(Math.abs(diff)).length;
                 if (dlen >= 4) deltaFont = '8px';
                 else if (dlen === 3) deltaFont = '10px';
+                // 1-2 digits stay at default fontSize
             }
             
             return '<div style="display:flex;align-items:center;gap:4px;' + bgStyle + 'padding:' + padding + ';border-radius:4px;">' +
@@ -857,30 +1041,39 @@ const ViewerTracker = (function() {
                 '</div>';
         }
 
+        // Build trend header with optional short session label
+        var headerLabel = '📈 TREND';
+        var shortLabel = getShortLabel();
+        
         // Row 1: red, green, purple, pink
         var html = '<div style="display:flex;justify-content:center;gap:6px;padding:4px 0;">';
-        html += buildTrendItem(TIERS['red'].name, counts['red'] || 0, previousCounts['red'] || 0, false, false);
-        html += buildTrendItem(TIERS['green'].name, counts['green'] || 0, previousCounts['green'] || 0, false, false);
-        html += buildTrendItem(TIERS['purple'].name, counts['purple'] || 0, previousCounts['purple'] || 0, false, false);
-        html += buildTrendItem(TIERS['pink'].name, counts['pink'] || 0, previousCounts['pink'] || 0, false, false);
+        html += buildTrendItem(TIERS['red'].name, counts['red'] || 0, comparisonCounts['red'] || 0, false, false);
+        html += buildTrendItem(TIERS['green'].name, counts['green'] || 0, comparisonCounts['green'] || 0, false, false);
+        html += buildTrendItem(TIERS['purple'].name, counts['purple'] || 0, comparisonCounts['purple'] || 0, false, false);
+        html += buildTrendItem(TIERS['pink'].name, counts['pink'] || 0, comparisonCounts['pink'] || 0, false, false);
         html += '</div>';
 
         // Row 2: dark-blue, light-blue, gray, female-trans
         html += '<div style="display:flex;justify-content:center;gap:6px;padding:4px 0;">';
-        html += buildTrendItem(TIERS['dark-blue'].name, counts['dark-blue'] || 0, previousCounts['dark-blue'] || 0, false, false);
-        html += buildTrendItem(TIERS['light-blue'].name, counts['light-blue'] || 0, previousCounts['light-blue'] || 0, false, false);
-        html += buildTrendItem(TIERS['gray'].name, counts['gray'] || 0, previousCounts['gray'] || 0, false, false);
-        html += buildTrendItem(TIERS['female-trans'].name, counts['female-trans'] || 0, previousCounts['female-trans'] || 0, false, false);
+        html += buildTrendItem(TIERS['dark-blue'].name, counts['dark-blue'] || 0, comparisonCounts['dark-blue'] || 0, false, false);
+        html += buildTrendItem(TIERS['light-blue'].name, counts['light-blue'] || 0, comparisonCounts['light-blue'] || 0, false, false);
+        html += buildTrendItem(TIERS['gray'].name, counts['gray'] || 0, comparisonCounts['gray'] || 0, false, false);
+        html += buildTrendItem(TIERS['female-trans'].name, counts['female-trans'] || 0, comparisonCounts['female-trans'] || 0, false, false);
         html += '</div>';
 
         // Row 3: WithTokens, Total, Anonymous (LARGER)
         html += '<div style="display:flex;justify-content:center;gap:8px;padding:6px 0;">';
-        html += buildTrendItem('💎', withTokens || 0, previousCounts.withTokens || 0, true, true);
-        html += buildTrendItem('📊', total || 0, previousCounts.total || 0, false, true);
-        html += buildTrendItem('👻', anonymousCount || 0, previousCounts.anonymous || 0, false, true);
+        html += buildTrendItem('💎', withTokens || 0, comparisonCounts.withTokens || 0, true, true);
+        html += buildTrendItem('📊', total || 0, comparisonCounts.total || 0, false, true);
+        html += buildTrendItem('👻', anonymousCount || 0, comparisonCounts.anonymous || 0, false, true);
         html += '</div>';
 
         trendContainer.innerHTML = html;
+        
+        // Update header label if needed (we need to update the DOM outside this container)
+        if (trendHeaderLabel) {
+            trendHeaderLabel.textContent = headerLabel + shortLabel;
+        }
     }
 
     function saveToHistory() {
@@ -1298,9 +1491,18 @@ const ViewerTracker = (function() {
                     '</div>' +
                 '</div>' +
 
+                // FIXED: Trend section with preset buttons and dynamic header label
                 '<div style="border-top:1px solid #4169E1;margin-top:5px;padding-top:5px;">' +
-                    '<div style="display:flex;justify-content:center;align-items:center;margin-bottom:3px;">' +
-                        '<span style="font-size:9px;font-weight:bold;color:#4169E1;">📈 TREND</span>' +
+                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;flex-wrap:wrap;gap:2px;">' +
+                        '<span id="trend-header-label" style="font-size:9px;font-weight:bold;color:#4169E1;">📈 TREND</span>' +
+                        '<div style="display:flex;gap:2px;flex-wrap:wrap;">' +
+                            '<button class="trend-preset-btn" data-mode="last" style="background:#4169E1;border:1px solid #4169E1;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Last</button>' +
+                            '<button class="trend-preset-btn" data-mode="5min" style="background:#333;border:1px solid #555;color:#aaa;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">5m</button>' +
+                            '<button class="trend-preset-btn" data-mode="15min" style="background:#333;border:1px solid #555;color:#aaa;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">15m</button>' +
+                            '<button class="trend-preset-btn" data-mode="30min" style="background:#333;border:1px solid #555;color:#aaa;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">30m</button>' +
+                            '<button class="trend-preset-btn" data-mode="1hour" style="background:#333;border:1px solid #555;color:#aaa;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">1h</button>' +
+                            '<button class="trend-preset-btn" data-mode="start" style="background:#333;border:1px solid #555;color:#aaa;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Start</button>' +
+                        '</div>' +
                     '</div>' +
                     '<div id="trend-container" style="min-height:30px;">' +
                         '<div style="font-size:8px;color:#666;text-align:center;padding:8px;">Waiting for scan...</div>' +
@@ -1399,6 +1601,16 @@ const ViewerTracker = (function() {
                 this.style.borderColor = '#ff69b4';
             };
         }
+        
+        // NEW: Setup trend preset buttons
+        var trendPresetBtns = document.querySelectorAll('.trend-preset-btn');
+        for (var k = 0; k < trendPresetBtns.length; k++) {
+            trendPresetBtns[k].onclick = function() {
+                var mode = this.dataset.mode;
+                setTrendComparisonMode(mode);
+            };
+        }
+        updateTrendPresetButtons();
     }
 
     function toggleAutoRefresh() {
@@ -1604,7 +1816,7 @@ const ViewerTracker = (function() {
             if (totalEl) totalEl.textContent = total;
             if (totalHighEl) totalHighEl.textContent = 'H:' + totalResult.value.toLocaleString();
             
-            // FIXED: Scale anon number font size based on digit count
+            // Scale anon number font size based on digit count
             var fullAnonText = document.getElementById('anon-ratio-full');
             var anonHighEl = document.getElementById('high-anon');
             if (fullAnonText) {
@@ -1749,6 +1961,7 @@ const ViewerTracker = (function() {
                 'withTokens': 0, 'total': 0, 'anonymous': 0
             };
             hasTrendBaseline = false;
+            trendComparisonMode = 'last';
             roomTotalHigh = 0;
             sessionUniqueUsers = {};
             roomTotalHighTime = null;
