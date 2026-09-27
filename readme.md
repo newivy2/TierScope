@@ -1,148 +1,149 @@
 # TierScope
 
-A Tampermonkey userscript for tracking and analyzing viewer tiers on Chaturbate broadcasts.
+A Tampermonkey userscript that tracks viewer tiers on a Chaturbate broadcast and shows whether each tier went up, down, or stayed the same since the last scan.
 
 ---
 
 ## Features
 
-- **Real-time Tier Tracking**: Scans the USERS tab at set intervals and automatically categorizes viewers into color-coded tiers (Red, Green, Purple, Pink, Dark Blue, Light Blue, Gray and anons) based on token spending habits and registered account status 
-- **Spike Detection**: Identifies sudden viewer count changes
-- **Session Reports**: Download detailed tracking reports with high watermarks and peak details and more
-- **Persistent Statistics**: Tracks highs an unique users across the entire broadcast session
-- **Reload Proof**: The data doesn't disappear on accidental reload or closed tabs.
-- **Draggable UI**: Movable, resizable interface
+- **Tier tracking**: Opens the USERS tab on a timer and counts the same color order Chaturbate shows: red, green, purple, pink, dark blue, light blue, gray. Anonymous viewers are the room total minus the names in that list.
+- **Trend display**: After the first scan, each tier gets an arrow. Green is up, red is down, a yellow dot is unchanged. The number next to the arrow is the change since the previous scan.
+- **Sparklines and highs**: Every tier, the colored-user total, the registered total, and anonymous viewers keep a sparkline and an all-time high for the session.
+- **Unique viewers**: The header `U:` count is every distinct registered username seen during the session, not the size of the current list.
+- **Female / trans overlay**: ♀⚧ is counted on top of the color tiers. It is not its own color.
+- **Session report**: Downloads a text file with highs and when they were hit, the current breakdown, and the female / trans usernames seen this session.
+- **Reload proof**: Tracking is saved per model for 3 hours. A refresh, a navigation away, or a closed tab restores it. Reset starts a new session.
+- **Panel**: Draggable, resizable, and collapsible to a small view.
 
 ---
 
 ## Installation
 
 ### Step 1: Install Tampermonkey
-First, you need the Tampermonkey browser extension:
 
-**Chrome/Edge/Brave:**
-1. Go to [chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo](https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo)
-2. Click **"Add to Chrome"**
-3. Click **"Add extension"** in the popup
+**Chrome / Edge / Brave:**
+
+1. Go to [Tampermonkey on the Chrome Web Store](https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo)
+2. Click **Add to Chrome**
+3. Click **Add extension**
 
 **Firefox:**
-1. Go to [addons.mozilla.org/en-US/firefox/addon/tampermonkey](https://addons.mozilla.org/en-US/firefox/addon/tampermonkey)
-2. Click **"+ Add to Firefox"**
-3. Click **"Add"** in the permission dialog
+
+1. Go to [Tampermonkey on Firefox Add-ons](https://addons.mozilla.org/en-US/firefox/addon/tampermonkey)
+2. Click **Add to Firefox**
+3. Click **Add**
 
 **Safari:**
-1. Install from the [Mac App Store](https://apps.apple.com/us/app/tampermonkey/id1482490089) (Tampermonkey by Jan Biniok)
-2. Enable the extension in Safari Preferences → Extensions
 
-### Step 2: Enable "Allow User Scripts" (Chrome/Edge/Brave ONLY)
+1. Install [Tampermonkey from the Mac App Store](https://apps.apple.com/us/app/tampermonkey/id1482490089)
+2. Enable it in Safari Settings, then Extensions
 
-**This is required for Chrome 138+ and Edge/Brave (Chromium-based browsers).** Firefox and Safari users can skip this step.
+### Step 2: Allow user scripts (Chrome / Edge / Brave only)
 
-**Chrome/Edge/Brave:**
-1. Type `chrome://extensions` in your address bar and press Enter
-   - (or click menu → Extensions → Manage extensions)
-2. Find **Tampermonkey** in the list and click **"Details"**
-3. Scroll down and toggle **"Allow user scripts"** to ON (blue/enabled)
-4. You may need to refresh any open Chaturbate tabs
+Required on Chrome 138+ and current Edge / Brave. Firefox and Safari can skip this.
 
-**Alternative method:**
-- Right-click the Tampermonkey icon in your toolbar → Select **"Manage Extension"** → Toggle **"Allow user scripts"**
+1. Open `chrome://extensions`
+2. Open **Details** on Tampermonkey
+3. Turn **Allow user scripts** on
+4. Refresh any open Chaturbate tab
 
-**Note:** If you don't see this toggle, your browser may be older than Chrome 138. In that case, enable **Developer Mode** at the top-right of the extensions page instead.
-
-**Firefox:** No additional setting needed - skip to Step 3.
-
-**Safari:** No additional setting needed - skip to Step 3.
-
-**Chrome/Edge users:** You may also need to enable "Developer Mode" in `chrome://extensions` for userscripts to work properly on some sites.
-
+If that toggle is missing, turn **Developer mode** on at the top of the extensions page instead.
 
 ### Step 3: Install TierScope
-1. Click on the `tierscope.user.js` file in this repository
-2. Click the **"Raw"** button (top-right of the code view)
-3. Tampermonkey will detect the userscript and show an installation page
-4. Click **"Install"** (or "Reinstall" if updating)
 
-### Step 4: Verify Installation
-1. Navigate to any Chaturbate broadcast room
-2. Look for the TierScope panel in the top-right corner of the page
-3. If you see the colored tier bars and viewer counts, installation is complete
+1. Open [tierscope.user.js](https://github.com/newivy2/TierScope/blob/main/tierscope.user.js)
+2. Click **Raw**
+3. Tampermonkey opens an install page
+4. Click **Install**
+
+### Step 4: Check it
+
+Open a broadcast room. The panel sits at the top right. A room total in the header means it is running.
 
 ---
 
 ## Usage
 
-### Basic Operation
-- **Auto-scan**: The script automatically scans viewers every 30 seconds when enabled
-- **Adjustments**: Minimize and adjust the timer (spike detection works best at 30s or 60s max)
-- **REPORTS**: Click download icon to download a complete session report as a text file
-- **Play/Pause**: Click the Play/Pause icon to temporarily pause the scans.
-- **Reset**: tracked data survives a reload or even closing and reopening the tab. Use the reset button or allow 3 hours of inactivity in order to clear and start a new tracking session.
+The default scan is **60 seconds**. Chaturbate does not always refresh the user list faster than that, so 30 seconds can repeat the previous list and paint a yellow dot on every tier. Use 60 seconds or slower.
 
-### Understanding the Tiers
+- **Pause / play**: The button in the mini view and the one in Controls do the same thing. Pausing stops the timer and the scans. The session stays saved.
+- **Timer**: The mini view has − / + and presets (30s, 60s, 2m, 5m).
+- **Expand**: The full panel shows one row per tier, then the colored total (💎), registered total (📊), and anonymous count (👻).
+- **Trend**: Three fixed rows under the counts. Row 1 is red, green, purple, pink. Row 2 is dark blue, light blue, gray, ♀⚧. Row 3 is 💎, 📊, and 👻. The first scan says "Waiting for scan..." because there is nothing to compare yet.
+- **Report**: Downloads the session as a text file.
+- **Reset**: Clears history, trends, the timer, unique users, and the female / trans list, then starts a new scan. Use this when you want a fresh session. A reload will not do it.
 
-| Tier | Color | Description |
-|------|-------|-------------|
-| Red | 🔴 | mod |
-| Green | 🟢 | fan club |
-| Purple | 🟣 | has tipped 1000+ tokens in the past 2 weeks  |
-| Pink | 💗 | 250+ |
-| Dark Blue | 🔵 | 50+ |
-| Light Blue | 💙 | has bought tokens |
-| gray | ⚪ | guest |
-| ♀⚧ | none | Female & Trans viewers (overlay - additive to above tiers) |
+Anonymous counts shrink their font at 5 digits and again at 6, so a large room still fits the row.
+
+---
+
+## Tiers
+
+These match the classes Chaturbate puts on the user list. A mod or a fan-club member still shows as red or green here, same as in the list and in chat.
+
+| Shown as | Meaning |
+| --- | --- |
+| 🔴 Red | Moderator |
+| 🟢 Green | Fan club |
+| 🟣 Purple | Tipped 1000+ tokens in the past 2 weeks |
+| 💗 Pink | Tipped 250+ |
+| 🔵 Dark blue | Tipped 50+ |
+| 💙 Light blue | Has bought tokens |
+| ⚪ Gray | Registered, none of the above |
+| 👻 Anonymous | In the room total, not in the user list |
+| 💎 | Everyone except gray |
+| 📊 | Registered users in the list |
+| ♀⚧ | Female and trans viewers. Counted again on top of whatever color they already have |
 
 ---
 
 ## Troubleshooting
 
-**Panel not appearing:**
-- Refresh the page after installation
-- Check that Tampermonkey is enabled (icon in browser toolbar)
-- Ensure you're on a broadcast room URL (`chaturbate.com/*/`)
-- **Verify "Allow User Scripts" is enabled** in Tampermonkey Dashboard → Settings
+**No panel**
 
-**"Tampermonkey requires developer mode" error:**
-- Go to `chrome://extensions` in your browser
-- Toggle **"Developer mode"** ON (top-right corner)
-- Refresh the Chaturbate page
+- Refresh after installing
+- Confirm Tampermonkey is enabled and TierScope is turned on
+- You have to be in a broadcast room, not the homepage
+- On Chrome / Edge / Brave, confirm **Allow user scripts** is on
 
-**Script not running on Chaturbate:**
-- Check Tampermonkey Dashboard to ensure TierScope is enabled
-- Verify the script shows a green checkmark next to it
-- Try reinstalling the script if it appears disabled
+**"Tampermonkey requires developer mode"**
 
-**Incorrect viewer counts:**
-- Check that the chat/userlist is loaded (script scans visible DOM elements)
+- Open `chrome://extensions`
+- Turn **Developer mode** on
+- Refresh the room
 
-**Report download not working:**
-- Check browser download permissions
-- Disable popup blockers for chaturbate.com
-- Try manual copy/paste from the panel display
+**Counts look frozen, or every arrow is a yellow dot**
+
+- The user list had not refreshed yet. Set the timer to 60 seconds or slower.
+- Confirm the USERS tab can actually open in that room.
+
+**Report did not download**
+
+- Allow downloads for chaturbate.com
+- Turn off the popup blocker for that site
 
 ---
 
-## Version History
+## Version history
 
-| Version | Date | Notes |
-|---------|------|-------|
-| 2.9.9.3 | Current | visual improvements |
-| 2.9.9.2 | Legacy | window resizing bug fixed |
-| 2.9.9.1 | Legacy | added persistent storage, control panel, reset button, Unique viewers tracking |
-| 2.9.8.2 | Legacy | minor fix |
-| 2.9.8.1 | Legacy | Anon canvas adjustment |
-| 2.9.8.0 | Legacy | Fixed broadcaster detection, consolidated tracking keys, CSS fixes |
-| 2.9.7.8 | Legacy | Added female/trans overlay tier with gender symbols |
-| 2.9.7.6 | Legacy | Gender report tuning |
-| 2.9.7.5 | Legacy | Working baseline before overlay features |
-| 2.9.7.3 | Legacy | Base reference version |
+| Version | Notes |
+| --- | --- |
+| 3.0.0 | Current. Spike detector removed. Trend arrows compare each scan with the one before it. |
+| 2.9.9.3 | Visual improvements |
+| 2.9.9.2 | Window resize bug fixed |
+| 2.9.9.1 | Persistent storage, control panel, reset, unique viewers |
+| 2.9.8.2 | Minor fix |
+| 2.9.8.1 | Anonymous canvas adjustment |
+| 2.9.8.0 | Broadcaster detection, tracking keys, CSS |
+| 2.9.7.8 | Female / trans overlay |
+| 2.9.7.6 | Gender report tuning |
+| 2.9.7.5 | Baseline before the overlay |
+| 2.9.7.3 | Base reference |
 
 ---
 
 ## License
 
-MIT License - See [LICENSE](LICENSE) file for details.
+MIT. See [LICENSE](LICENSE).
 
----
-
-**Disclaimer**: This userscript is for educational and analytical purposes. Use in accordance with Chaturbate's Terms of Service. The authors are not responsible for any account actions resulting from use of this script.
+**Disclaimer**: For educational and analytical use. Follow Chaturbate's Terms of Service. The authors are not responsible for any account action that results from using this script.
