@@ -64,22 +64,20 @@ Open a broadcast room. The panel sits at the top right. A room total in the head
 
 ## Usage
 
-The default scan is **60 seconds**. Chaturbate does not always refresh the user list faster than that, so 30 seconds can repeat the previous list and paint a yellow dot on every tier. Use 60 seconds or slower.
-
+The default scan is **60 seconds**. Chaturbate does not always refresh the user list faster than that.
 - **Pause / play**: The button in the mini view and the one in Controls do the same thing. Pausing stops the timer and the scans. The session stays saved.
 - **Timer**: The mini view has − / + and presets (30s, 60s, 2m, 5m).
 - **Expand**: The full panel shows one row per tier, then the colored total (💎), registered total (📊), and anonymous count (👻).
-- **Trend**: Three fixed rows under the counts. Row 1 is red, green, purple, pink. Row 2 is dark blue, light blue, gray, ♀⚧. Row 3 is 💎, 📊, and 👻. The first scan says "Waiting for scan..." because there is nothing to compare yet.
+- **Trend**: Displays the change since the previous scan.
 - **Report**: Downloads the session as a text file.
-- **Reset**: Clears history, trends, the timer, unique users, and the female / trans list, then starts a new scan. Use this when you want a fresh session. A reload will not do it.
+- **Reset**: Clears history, trends, the timer, unique users, and the female / trans list, then starts a new scan. Use this when you want a fresh session.
 
-Anonymous counts shrink their font at 5 digits and again at 6, so a large room still fits the row.
 
 ---
 
 ## Tiers
 
-These match the classes Chaturbate puts on the user list. A mod or a fan-club member still shows as red or green here, same as in the list and in chat.
+These are the same classes Chaturbate puts on the user list.
 
 | Shown as | Meaning |
 | --- | --- |
