@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.0.7
+// @version      3.1.0
 // @description  TierScope - Viewer visualizer with trend tracking and reports
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -13,11 +13,63 @@
 // @run-at       document-end
 // ==/UserScript==
 
+/*
+ * TierScope 3.1.0
+ *
+ * A Chaturbate room audience visualizer/tracker. Normal acquisition uses the
+ * same-origin /api/getchatuserlist/ API, with a default interval of 60 seconds
+ * after the preceding acquisition completes. Accepted API samples do not require
+ * chat-tab manipulation. DOM scanning is a conservative fallback after API failure
+ * or invalidity. Each room waits at least 60 seconds after a fallback completes
+ * before its next fallback attempt; API retries keep their own cadence.
+ *
+ * Validated, current-room samples feed counts, trend deltas, sparklines, highs,
+ * unique-user/session statistics and reports. Rejected samples leave accepted
+ * data intact and add no history point. Per-room history/session state is saved
+ * through Tampermonkey storage under tierscope:v1:<room>.
+ *
+ * Storage schema version describes structural compatibility; producer version
+ * identifies the TierScope application that last saved the record. Legacy
+ * 3.0-format records qualify as schema 1 only after structural validation and
+ * gain metadata on their next successful save, without rewriting history.
+ * Corrupt, unsupported and newer-schema records are retained and protected
+ * against automatic overwrite. Live users and their acquisition source/time
+ * are intentionally not restored as though a saved session were a current sample.
+ *
+ * Compact API interpretation:
+ *   response   := anonymousCount,userRecord,userRecord,...
+ *   userRecord := username|class|gender|flag
+ *   A scalar-only response represents zero named records; validity checks still apply.
+ *
+ *   class:  o  Orange broadcaster/room owner (not a viewer tier)
+ *           m  Red             f  Green
+ *           l  Dark Purple     p  Light Purple
+ *           tr Dark Blue       t  Light Blue       g  Grey
+ *   These class/color names follow Chaturbate terminology, not historical
+ *   TierScope labels. Internal purple/pink/gray keys remain storage-compatible.
+ *
+ *   gender: m  Man    f  Woman    c  Couple    s  Trans
+ *   flag:   retained as rawFlag; its meaning is not inferred by TierScope.
+ *
+ * API Total Users = Anonymous + Registered. Registered includes every accepted
+ * named record, including the owner. The seven viewer-tier counts exclude the
+ * owner and unknown-class records, so their sum need not equal Registered.
+ */
+
 const ViewerTracker = (function() {
     'use strict';
 
+    const TIERSCOPE_VERSION = '3.1.0';
+    const API_TIMEOUT_MS = 10000;
+    const DEFAULT_API_INTERVAL_SECONDS = 60;
+    const DOM_FALLBACK_INTERVAL_SECONDS = 60;
+    const STORAGE_SCHEMA_VERSION = 1;
     const STORAGE_KEY_PREFIX = 'tierscope:v1:';
     const STORAGE_MAX_AGE_MS = 3 * 60 * 60 * 1000;
+    const STORAGE_HISTORY_SERIES = ['red', 'green', 'purple', 'pink', 'dark-blue', 'light-blue', 'gray',
+        'female-trans', 'withTokens', 'total', 'anonymous'];
+    const STORAGE_NULLABLE_TIMES = ['withTokensHighTime', 'totalHighTime', 'anonHighTime',
+        'femaleTransHighTime', 'roomTotalHighTime', 'trackingStartTime'];
 
     const DOM_SELECTORS = {
         userListTab: '#UserListTab',
@@ -53,87 +105,23 @@ const ViewerTracker = (function() {
         }
     };
 
-    let domHealthStatus = {
-        lastCheck: 0,
-        userListTabFound: false,
-        consecutiveFailures: 0,
-        isHealthy: true
-    };
-
+    // Runtime state
+    let domHealthStatus = { lastCheck: 0, userListTabFound: false, consecutiveFailures: 0, isHealthy: true };
+    var sessionStorageStatus = new Map();
+    var activeSessionStorageKey = null;
     var healthCheckInterval = null;
     var initGuard = 0;
     var urlCheckInterval = null;
     var scanEpoch = 0;
     var sessionUniqueUsers = {};
+    var lastAcceptedAcquisition = null;
+    var lastAcquisitionAttemptSource = 'API';
+    var domFallbackReadyAtByRoom = new Map();
+    var freshnessInterval = null;
+    var nextScanAt = 0;
     var windowResizeHandler = null;
 
-    var previousCounts = {
-        'red': 0, 'green': 0, 'purple': 0, 'pink': 0,
-        'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0,
-        'withTokens': 0, 'total': 0, 'anonymous': 0
-    };
-
-    var hasTrendBaseline = false;
-    
-    // NEW: Trend comparison mode - 'last', '5min', '15min', '30min', '1hour', 'start'
-    var trendComparisonMode = 'last';
-    
-    // NEW: Auto-escalation flag - set to false when user manually selects a preset
-    var autoTrendEscalation = true;
-
-    function validateDOMHealth() {
-        const now = Date.now();
-        const container = document.getElementById('tracker-container');
-        const userListTab = document.querySelector(DOM_SELECTORS.userListTab);
-        const hasUserList = !!userListTab;
-        let hasUsernameElements = false;
-        for (let i = 0; i < DOM_SELECTORS.usernameElements.length; i++) {
-            if (document.querySelector(DOM_SELECTORS.usernameElements[i])) {
-                hasUsernameElements = true;
-                break;
-            }
-        }
-        const health = {
-            timestamp: now,
-            userListTab: hasUserList,
-            usernameElements: hasUsernameElements,
-            container: !!container,
-            roomTotalSelectors: DOM_SELECTORS.roomTotal.some(sel => !!document.querySelector(sel))
-        };
-        const wasHealthy = domHealthStatus.isHealthy;
-        domHealthStatus.isHealthy = health.userListTab && health.usernameElements;
-        domHealthStatus.lastCheck = now;
-        domHealthStatus.userListTabFound = hasUserList;
-        if (!domHealthStatus.isHealthy) {
-            domHealthStatus.consecutiveFailures++;
-            if (domHealthStatus.consecutiveFailures === 1 || domHealthStatus.consecutiveFailures % 10 === 0) {
-                console.warn('[TierTracker] DOM health check failed:', health);
-                if (container) {
-                    const statusEl = document.getElementById('auto-status');
-                    if (statusEl) {
-                        statusEl.textContent = 'DOM mismatch - check console';
-                        statusEl.style.color = '#ff4444';
-                    }
-                }
-            }
-            if (domHealthStatus.consecutiveFailures > 5 && isAutoRefreshOn) {
-                console.warn('[TierTracker] Auto-pausing due to DOM health issues');
-                toggleAutoRefresh();
-            }
-        } else {
-            if (!wasHealthy && domHealthStatus.consecutiveFailures > 0) {
-                console.log('[TierTracker] DOM health restored');
-                const statusEl = document.getElementById('auto-status');
-                if (statusEl && isAutoRefreshOn) {
-                    statusEl.textContent = 'Next: ' + countdownSeconds + 's';
-                    statusEl.style.color = '#32CD32';
-                }
-            }
-            domHealthStatus.consecutiveFailures = 0;
-        }
-        return health;
-    }
-
+    // Presentation state
     var users = new Map();
     var previousUserCount = 0;
     var previousRoomTotal = 0;
@@ -146,18 +134,15 @@ const ViewerTracker = (function() {
     var countdownInterval = null;
     var isAutoRefreshOn = true;
     var isScanning = false;
-    var countdownSeconds = 60;
-    var scanIntervalSeconds = 60;
+    var countdownSeconds = DEFAULT_API_INTERVAL_SECONDS;
+    var scanIntervalSeconds = DEFAULT_API_INTERVAL_SECONDS;
     var trackingStartTime = null;
     var trackingTimerInterval = null;
     var isPaused = false;
     var pausedElapsedTime = 0;
     var dragListeners = [];
     var isResizing = false;
-    var resizeStartX = 0;
-    var resizeStartY = 0;
-    var resizeStartWidth = 0;
-    var resizeStartHeight = 0;
+    var resizeStartX = 0, resizeStartY = 0, resizeStartWidth = 0, resizeStartHeight = 0;
     var currentScale = 1.0;
     var BASE_WIDTH_MINI = 140;
     var BASE_WIDTH_FULL = 280;
@@ -176,14 +161,24 @@ const ViewerTracker = (function() {
     };
     var MAX_HISTORY_LENGTH = 10000;
 
+    var previousCounts = {
+        'red': 0, 'green': 0, 'purple': 0, 'pink': 0,
+        'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0,
+        'withTokens': 0, 'total': 0, 'anonymous': 0
+    };
+
+    var hasTrendBaseline = false;
+    var trendComparisonMode = 'last';
+    var autoTrendEscalation = true;
+
     var TIERS = {
-        'red': { name: '🔴', desc: '', color: '#FF0000' },
-        'green': { name: '🟢', desc: '', color: '#32CD32' },
-        'purple': { name: '🟣', desc: '', color: '#8B00FF' },
-        'pink': { name: '💗', desc: '', color: '#FF69B4' },
-        'dark-blue': { name: '🔵', desc: '', color: '#0000CD' },
-        'light-blue': { name: '💙', desc: '', color: '#4169E1' },
-        'gray': { name: '⚪', desc: '', color: '#808080' },
+        'red': { name: 'Red', desc: '', color: '#DC0000' },
+        'green': { name: 'Green', desc: '', color: '#69BE45' },
+        'purple': { name: 'Dark Purple', desc: '', color: '#804BAA' },
+        'pink': { name: 'Light Purple', desc: '', color: '#BE6AFF' },
+        'dark-blue': { name: 'Dark Blue', desc: '', color: '#393993' },
+        'light-blue': { name: 'Light Blue', desc: '', color: '#1E5FC8' },
+        'gray': { name: 'Grey', desc: '', color: '#6B6A6F' },
         'female-trans': { name: '♀⚧', desc: '', color: '#FF1493' }
     };
 
@@ -193,7 +188,6 @@ const ViewerTracker = (function() {
         stable: '<svg width="16" height="16" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="#ffd43b"/></svg>'
     };
 
-    // NEW: Preset configuration
     const TREND_PRESETS = {
         'last': { label: 'Last', ms: 0 },
         '5min': { label: '5m', ms: 5 * 60 * 1000 },
@@ -204,7 +198,14 @@ const ViewerTracker = (function() {
     };
 
     function log(msg) {
-        console.log('[TierTracker] ' + msg);
+        console.log('[TierScope ' + TIERSCOPE_VERSION + '] ' + msg);
+    }
+
+    function getTierMarker(tier) {
+        var config = TIERS[tier];
+        if (tier === 'female-trans') return config.name;
+        return '<span role="img" aria-label="' + config.name + '" title="' + config.name + '" ' +
+            'style="display:inline-block;width:10px;height:10px;border-radius:50%;vertical-align:middle;background:' + config.color + ';"></span>';
     }
 
     function getModelNameFromUrl(url) {
@@ -212,6 +213,8 @@ const ViewerTracker = (function() {
         var path = new URL(url).pathname;
         var bMatch = path.match(/\/b\/([^\/\?#]+)/);
         if (bMatch) return bMatch[1];
+        var camMatch = path.match(/^\/([^\/]+)\/cam\/?$/);
+        if (camMatch) return camMatch[1];
         var normalMatch = path.match(/\/([^\/\?#]+)\/?$/);
         if (normalMatch) {
             var name = normalMatch[1];
@@ -229,9 +232,207 @@ const ViewerTracker = (function() {
         return STORAGE_KEY_PREFIX + model.toLowerCase();
     }
 
+    function isStorageObject(value) {
+        return value !== null && typeof value === 'object' && !Array.isArray(value);
+    }
+
+    function hasStorageField(data, field) {
+        return Object.prototype.hasOwnProperty.call(data, field);
+    }
+
+    function isStorageNumber(value) {
+        return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER;
+    }
+
+    function isStorageTimestamp(value) {
+        return Number.isSafeInteger(value) && value >= 0 && value <= 8640000000000000;
+    }
+
+    function readSavedSession(key) {
+        return GM_getValue(key, undefined);
+    }
+
+    function determineStorageSchema(data) {
+        if (!isStorageObject(data)) throw new Error('Saved session must be an object');
+        if (!hasStorageField(data, 'schemaVersion')) return { version: 1, legacy: true };
+        if (!Number.isSafeInteger(data.schemaVersion) || data.schemaVersion < 0) {
+            throw new Error('Invalid storage schemaVersion');
+        }
+        return { version: data.schemaVersion, legacy: false };
+    }
+
+    function migrateStoredSession(data, schema) {
+        if (schema.version > STORAGE_SCHEMA_VERSION) {
+            throw new Error('Newer storage schema ' + schema.version + '; this build supports ' + STORAGE_SCHEMA_VERSION);
+        }
+        if (schema.version !== STORAGE_SCHEMA_VERSION) {
+            throw new Error('Unsupported storage schema ' + schema.version + '; no migration path to ' + STORAGE_SCHEMA_VERSION);
+        }
+        return data;
+    }
+
+    function validateStoredSession(data) {
+        function requireField(condition, field) {
+            if (!condition) throw new Error('Invalid saved-session field: ' + field);
+        }
+        requireField(isStorageObject(data), 'record');
+        if (hasStorageField(data, 'schemaVersion')) {
+            requireField(data.schemaVersion === STORAGE_SCHEMA_VERSION, 'schemaVersion');
+        }
+        if (hasStorageField(data, 'producerVersion')) {
+            requireField(typeof data.producerVersion === 'string', 'producerVersion');
+        }
+        requireField(isStorageTimestamp(data.timestamp), 'timestamp');
+        requireField(isStorageObject(data.history), 'history');
+        requireField(Array.isArray(data.history.timestamps), 'history.timestamps');
+        requireField(data.history.timestamps.length <= MAX_HISTORY_LENGTH, 'history length');
+        requireField(data.history.timestamps.every(isStorageTimestamp), 'history.timestamps');
+        STORAGE_HISTORY_SERIES.forEach(function(field) {
+            var series = data.history[field];
+            requireField(Array.isArray(series) && series.length === data.history.timestamps.length &&
+                series.every(isStorageNumber), 'history.' + field);
+        });
+        if (hasStorageField(data, 'previousCounts')) {
+            requireField(isStorageObject(data.previousCounts), 'previousCounts');
+            STORAGE_HISTORY_SERIES.forEach(function(field) {
+                requireField(isStorageNumber(data.previousCounts[field]), 'previousCounts.' + field);
+            });
+        }
+        ['sessionUniqueUsers', 'sessionFemaleTransUsers'].forEach(function(field) {
+            if (!hasStorageField(data, field)) return;
+            var entries = data[field];
+            requireField(isStorageObject(entries), field);
+            Object.keys(entries).forEach(function(username) {
+                requireField(username.length > 0 && (field === 'sessionUniqueUsers' ? entries[username] === true :
+                    entries[username] === 'female' || entries[username] === 'trans'), field + ' entry');
+            });
+        });
+        if (hasStorageField(data, 'tierHighTimes')) {
+            requireField(isStorageObject(data.tierHighTimes), 'tierHighTimes');
+            Object.keys(data.tierHighTimes).forEach(function(tier) {
+                requireField(hasStorageField(TIERS, tier) &&
+                    (data.tierHighTimes[tier] === null || isStorageTimestamp(data.tierHighTimes[tier])), 'tierHighTimes.' + tier);
+            });
+        }
+        STORAGE_NULLABLE_TIMES.forEach(function(field) {
+            if (hasStorageField(data, field)) {
+                requireField(data[field] === null || isStorageTimestamp(data[field]), field);
+            }
+        });
+        if (hasStorageField(data, 'roomTotalHigh')) requireField(isStorageNumber(data.roomTotalHigh), 'roomTotalHigh');
+        if (hasStorageField(data, 'pausedElapsedTime')) {
+            requireField(isStorageTimestamp(data.pausedElapsedTime) &&
+                data.pausedElapsedTime <= Math.min(data.timestamp, Date.now()), 'pausedElapsedTime');
+        }
+        if (hasStorageField(data, 'trendComparisonMode')) {
+            requireField(typeof data.trendComparisonMode === 'string' &&
+                hasStorageField(TREND_PRESETS, data.trendComparisonMode), 'trendComparisonMode');
+        }
+        ['isPaused', 'hasTrendBaseline', 'autoTrendEscalation'].forEach(function(field) {
+            if (hasStorageField(data, field)) requireField(typeof data[field] === 'boolean', field);
+        });
+    }
+
+    function normalizeStoredSession(data) {
+        var normalized = {
+            timestamp: data.timestamp,
+            history: Object.fromEntries(['timestamps'].concat(STORAGE_HISTORY_SERIES).map(function(field) {
+                return [field, data.history[field].slice()];
+            })),
+            previousCounts: Object.fromEntries(STORAGE_HISTORY_SERIES.map(function(field) {
+                return [field, hasStorageField(data, 'previousCounts') ? data.previousCounts[field] : 0];
+            })),
+            hasTrendBaseline: hasStorageField(data, 'previousCounts') && data.hasTrendBaseline === true,
+            isPaused: data.isPaused === true,
+            trendComparisonMode: hasStorageField(data, 'trendComparisonMode') ? data.trendComparisonMode : 'last',
+            autoTrendEscalation: !hasStorageField(data, 'autoTrendEscalation') || data.autoTrendEscalation,
+            roomTotalHigh: hasStorageField(data, 'roomTotalHigh') ? data.roomTotalHigh : 0,
+            pausedElapsedTime: hasStorageField(data, 'pausedElapsedTime') ? data.pausedElapsedTime : 0
+        };
+        ['tierHighTimes', 'sessionUniqueUsers', 'sessionFemaleTransUsers'].forEach(function(field) {
+            normalized[field] = hasStorageField(data, field) ? Object.fromEntries(Object.entries(data[field])) : {};
+        });
+        STORAGE_NULLABLE_TIMES.forEach(function(field) {
+            normalized[field] = hasStorageField(data, field) ? data[field] : null;
+        });
+        return normalized;
+    }
+
+    function protectSessionStorage(key, reason, producerVersion) {
+        var prior = sessionStorageStatus.get(key);
+        if (prior && prior.protected) return prior;
+        var status = { protected: true, reason: reason, producerVersion: producerVersion == null ? null : producerVersion };
+        sessionStorageStatus.set(key, status);
+        log('Storage protected for ' + key + ': ' + reason +
+            '. Saved data retained; automatic writes disabled until explicit Reset. Using a clean in-memory session on load.');
+        return status;
+    }
+
+    function inspectStoredSession(model, restore) {
+        var key = getStorageKey(model);
+        var prior = sessionStorageStatus.get(key);
+        if (prior && prior.protected) return prior;
+        var producerVersion = null;
+        try {
+            var raw = readSavedSession(key);
+            if (!restore && prior && prior.raw === raw) return prior;
+            if (typeof raw === 'undefined') {
+                var empty = { protected: false, raw: raw, producerVersion: null };
+                sessionStorageStatus.set(key, empty);
+                return empty;
+            }
+            if (typeof raw !== 'string') throw new Error('Saved session must be JSON text');
+            var parsed = JSON.parse(raw);
+            if (isStorageObject(parsed) && typeof parsed.producerVersion === 'string') producerVersion = parsed.producerVersion;
+            var schema = determineStorageSchema(parsed);
+            var migrated = migrateStoredSession(parsed, schema);
+            validateStoredSession(migrated);
+            var status = { protected: false, raw: raw, producerVersion: producerVersion, legacy: schema.legacy };
+            sessionStorageStatus.set(key, status);
+            return restore ? Object.assign({}, status, { data: normalizeStoredSession(migrated) }) : status;
+        } catch (e) {
+            return protectSessionStorage(key, e.message, producerVersion);
+        }
+    }
+
+    function restoreSessionState(data) {
+        history = data.history;
+        tierHighTimes = data.tierHighTimes;
+        withTokensHighTime = data.withTokensHighTime;
+        totalHighTime = data.totalHighTime;
+        anonHighTime = data.anonHighTime;
+        femaleTransHighTime = data.femaleTransHighTime;
+        roomTotalHigh = data.roomTotalHigh;
+        roomTotalHighTime = data.roomTotalHighTime;
+        trackingStartTime = data.trackingStartTime;
+        isPaused = data.isPaused;
+        pausedElapsedTime = data.pausedElapsedTime;
+        sessionFemaleTransUsers = data.sessionFemaleTransUsers;
+        sessionUniqueUsers = data.sessionUniqueUsers;
+        previousCounts = data.previousCounts;
+        hasTrendBaseline = data.hasTrendBaseline;
+        trendComparisonMode = data.trendComparisonMode;
+        autoTrendEscalation = data.autoTrendEscalation;
+    }
+
+    function getStorageReportStatus(model) {
+        if (!model || model === 'unknown') return { producer: 'Unknown (no saved session)', access: 'No room' };
+        var status = inspectStoredSession(model, false);
+        return {
+            producer: status.producerVersion === null ? (status.legacy ? 'Unknown (legacy session)' : 'Unknown') :
+                (status.producerVersion || '(empty string)'),
+            access: status.protected ? 'Protected / read-only: ' + status.reason :
+                (activeSessionStorageKey === getStorageKey(model) ? 'Writable' : 'Not initialized')
+        };
+    }
+
     function saveSession(model) {
         if (!model || model === 'unknown') return;
+        var key = getStorageKey(model);
+        if (inspectStoredSession(model, false).protected || activeSessionStorageKey !== key) return;
         var saveData = {
+            schemaVersion: STORAGE_SCHEMA_VERSION,
+            producerVersion: TIERSCOPE_VERSION,
             timestamp: Date.now(),
             history: history,
             tierHighTimes: tierHighTimes,
@@ -252,8 +453,11 @@ const ViewerTracker = (function() {
             autoTrendEscalation: autoTrendEscalation
         };
         try {
-            GM_setValue(getStorageKey(model), JSON.stringify(saveData));
-            log('Session saved for ' + model);
+            validateStoredSession(saveData);
+            var raw = JSON.stringify(saveData);
+            GM_setValue(key, raw);
+            sessionStorageStatus.set(key, { protected: false, raw: raw, producerVersion: TIERSCOPE_VERSION, legacy: false });
+            log('Session saved for ' + model + ' (storage schema ' + STORAGE_SCHEMA_VERSION + ', producer ' + TIERSCOPE_VERSION + ')');
         } catch (e) {
             log('Failed to save session: ' + e);
         }
@@ -262,50 +466,39 @@ const ViewerTracker = (function() {
     function loadSession(model) {
         if (!model || model === 'unknown') return false;
         var key = getStorageKey(model);
-        var saved = GM_getValue(key, null);
-        if (!saved) return false;
-        try {
-            var data = JSON.parse(saved);
-            var age = Date.now() - data.timestamp;
-            if (age > STORAGE_MAX_AGE_MS) {
-                log('Saved session expired (' + Math.round(age/60000) + ' min old), deleting');
+        activeSessionStorageKey = key;
+        var saved = inspectStoredSession(model, true);
+        if (saved.protected || !saved.data) return false;
+        var age = Date.now() - saved.data.timestamp;
+        if (age > STORAGE_MAX_AGE_MS) {
+            try {
                 GM_deleteValue(key);
-                return false;
+                sessionStorageStatus.delete(key);
+                log('Compatible saved session expired (' + Math.round(age/60000) + ' min old), deleting');
+            } catch (e) {
+                protectSessionStorage(key, 'Failed to delete expired session: ' + e.message, saved.producerVersion);
             }
-            history = data.history || { timestamps: [], 'red': [], 'green': [], 'purple': [], 'pink': [], 'dark-blue': [], 'light-blue': [], 'gray': [], 'female-trans': [], 'withTokens': [], 'total': [], 'anonymous': [] };
-            tierHighTimes = data.tierHighTimes || {};
-            withTokensHighTime = data.withTokensHighTime || null;
-            totalHighTime = data.totalHighTime || null;
-            anonHighTime = data.anonHighTime || null;
-            femaleTransHighTime = data.femaleTransHighTime || null;
-            roomTotalHigh = data.roomTotalHigh || 0;
-            roomTotalHighTime = data.roomTotalHighTime || null;
-            trackingStartTime = data.trackingStartTime || null;
-            isPaused = data.isPaused || false;
-            pausedElapsedTime = data.pausedElapsedTime || 0;
-            sessionFemaleTransUsers = data.sessionFemaleTransUsers || {};
-            sessionUniqueUsers = data.sessionUniqueUsers || {};
-            previousCounts = data.previousCounts || {
-                'red': 0, 'green': 0, 'purple': 0, 'pink': 0,
-                'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0,
-                'withTokens': 0, 'total': 0, 'anonymous': 0
-            };
-            hasTrendBaseline = data.hasTrendBaseline || false;
-            trendComparisonMode = data.trendComparisonMode || 'last';
-            autoTrendEscalation = data.autoTrendEscalation !== false; // Default to true if not saved
-            log('Session restored for ' + model + ' (' + Math.round(age/60000) + ' min old)');
-            return true;
-        } catch (e) {
-            log('Failed to load session: ' + e);
-            GM_deleteValue(key);
             return false;
         }
+        restoreSessionState(saved.data);
+        log('Session restored for ' + model + ' (' + Math.round(age/60000) + ' min old; ' +
+            (saved.legacy ? 'validated legacy schema 1' : 'storage schema ' + STORAGE_SCHEMA_VERSION) +
+            '; producer ' + (saved.producerVersion === null ? 'unknown' : saved.producerVersion) + ')');
+        return true;
     }
 
     function deleteSession(model) {
         if (!model || model === 'unknown') return;
-        GM_deleteValue(getStorageKey(model));
-        log('Session deleted for ' + model);
+        var key = getStorageKey(model);
+        try {
+            GM_deleteValue(key);
+            sessionStorageStatus.delete(key);
+            log('Session deleted for ' + model);
+        } catch (e) {
+            protectSessionStorage(key, 'Explicit Reset could not delete saved session: ' + e.message,
+                (sessionStorageStatus.get(key) || {}).producerVersion);
+            log('Reset cleared live tracking but saved storage remains protected: ' + e.message);
+        }
     }
 
     function isBroadcastRoom() {
@@ -341,7 +534,6 @@ const ViewerTracker = (function() {
         return getModelNameFromUrl(location.href);
     }
 
-    // NEW: Check and auto-escalate trend mode based on elapsed time
     function checkTrendAutoEscalation() {
         if (!autoTrendEscalation || !trackingStartTime) return;
         
@@ -357,11 +549,10 @@ const ViewerTracker = (function() {
         if (targetMode !== trendComparisonMode) {
             log('Auto-escalating trend mode: ' + trendComparisonMode + ' -> ' + targetMode + ' (' + Math.floor(elapsedMin) + ' min elapsed)');
             
-            // FIXED: If users map is empty (restored session, no scan yet), just update mode and buttons without redrawing
             if (users.size === 0) {
                 trendComparisonMode = targetMode;
                 updateTrendPresetButtons();
-                updateAutoTrendButton(); // Update the AUTO button visual state
+                updateAutoTrendButton();
                 saveSession(getModelName());
                 return;
             }
@@ -386,7 +577,6 @@ const ViewerTracker = (function() {
             controlTimerEl.style.color = displayColor;
         }
         
-        // NEW: Check for auto-escalation every second
         checkTrendAutoEscalation();
     }
 
@@ -439,24 +629,21 @@ const ViewerTracker = (function() {
         };
         hasTrendBaseline = false;
         trendComparisonMode = 'last';
-        autoTrendEscalation = true; // Reset auto-escalation
+        autoTrendEscalation = true;
         updateTrackingTimer();
     }
 
-    // NEW: Toggle auto trend escalation
     function toggleAutoTrendEscalation() {
         autoTrendEscalation = !autoTrendEscalation;
         updateAutoTrendButton();
         log('Auto trend escalation ' + (autoTrendEscalation ? 'enabled' : 'disabled'));
         saveSession(getModelName());
         
-        // FIXED: If just turned on, check immediately for catch-up (in case timer isn't running while paused)
         if (autoTrendEscalation) {
             checkTrendAutoEscalation();
         }
     }
 
-    // NEW: Update the AUTO button visual state
     function updateAutoTrendButton() {
         var btn = document.getElementById('btn-trend-auto');
         if (btn) {
@@ -481,11 +668,16 @@ const ViewerTracker = (function() {
         var modelName = getModelName();
         log('Performing main reset...');
         deleteSession(modelName);
+        activeSessionStorageKey = getStorageKey(modelName);
         scanEpoch++;
         isScanning = false;
         stopCountdown();
         stopTrackingTimer();
         users.clear();
+        lastAcceptedAcquisition = null;
+        lastAcquisitionAttemptSource = 'API';
+        domHealthStatus.consecutiveFailures = 0;
+        updateAcquisitionStatus();
         previousUserCount = 0;
         previousRoomTotal = 0;
         roomTotal = 0;
@@ -498,7 +690,7 @@ const ViewerTracker = (function() {
         };
         hasTrendBaseline = false;
         trendComparisonMode = 'last';
-        autoTrendEscalation = true; // Reset auto-escalation on manual reset
+        autoTrendEscalation = true;
         history = {
             timestamps: [],
             'red': [], 'green': [], 'purple': [], 'pink': [], 'dark-blue': [], 'light-blue': [], 'gray': [], 'female-trans': [],
@@ -512,7 +704,7 @@ const ViewerTracker = (function() {
         totalHighTime = null;
         anonHighTime = null;
         femaleTransHighTime = null;
-        countdownSeconds = scanIntervalSeconds;
+        resetCountdown();
         updateDisplay();
         updateTrendDisplay();
         updateTrackingTimer();
@@ -522,11 +714,11 @@ const ViewerTracker = (function() {
             startTrackingTimer();
             startCountdown();
         }
+        var resetContext = { epoch: scanEpoch, generation: initGuard, url: location.href };
         setTimeout(function() {
-            performScanThenReturn(true);
+            if (isAcquisitionCurrent(resetContext)) performScanThenReturn(true);
         }, 500);
         
-        // FIXED: Repaint buttons after reset so AUTO shows green and Last is highlighted
         updateTrendPresetButtons();
         updateAutoTrendButton();
         
@@ -594,6 +786,9 @@ const ViewerTracker = (function() {
     }
 
     function getAnonymousCount() {
+        if (lastAcceptedAcquisition && lastAcceptedAcquisition.source === 'API') {
+            return lastAcceptedAcquisition.api.anonymousCount;
+        }
         var tracked = users.size;
         if (roomTotal > tracked) return roomTotal - tracked;
         return 0;
@@ -651,6 +846,7 @@ const ViewerTracker = (function() {
         var sessionStart = trackingStartTime ? formatDateTime(trackingStartTime) : 'Not started';
         var totalTime = trackingStartTime ? formatElapsedTime(isPaused ? pausedElapsedTime : (Date.now() - trackingStartTime)) : '00:00:00';
         var now = Date.now();
+        var storageReport = getStorageReportStatus(modelName);
         var report = [
             '================================',
             'CHATURBATE TRACKING REPORT',
@@ -659,9 +855,23 @@ const ViewerTracker = (function() {
             'Model: ' + modelName,
             'Session Start: ' + sessionStart,
             'Report Generated: ' + formatDateTime(now),
+            'TierScope Version: ' + TIERSCOPE_VERSION,
+            'Storage Schema Version: ' + STORAGE_SCHEMA_VERSION,
+            'Saved Session Producer Version: ' + storageReport.producer,
+            'Session Storage: ' + storageReport.access,
+            'Last Accepted Acquisition Source: ' + (lastAcceptedAcquisition ? lastAcceptedAcquisition.source : 'None'),
+            'Last Accepted Sample Time: ' + (lastAcceptedAcquisition ? new Date(lastAcceptedAcquisition.timestamp).toISOString() : 'None'),
             'Total Tracking Time: ' + totalTime,
             ''
         ];
+        if (lastAcceptedAcquisition && lastAcceptedAcquisition.api) {
+            report.push('API Anonymous Count: ' + lastAcceptedAcquisition.api.anonymousCount);
+            report.push('API Registered Record Count: ' + lastAcceptedAcquisition.api.registeredCount);
+            report.push('API Total Users: ' + lastAcceptedAcquisition.api.totalUsers);
+            report.push('API Owner Record Present: ' + (lastAcceptedAcquisition.api.ownerCount > 0 ? 'yes' : 'no'));
+            report.push('Registered includes broadcaster/owner and unclassified records outside the seven viewer tiers.');
+            report.push('');
+        }
         report.push('--- ALL-TIME HIGHS ---');
         report.push('');
         if (roomTotalHigh > 0 && roomTotalHighTime) {
@@ -782,138 +992,337 @@ const ViewerTracker = (function() {
         URL.revokeObjectURL(url);
     }
 
-    function performScanThenReturn(returnToChat) {
+    function parseGetChatUserListResponse(text) {
+        if (typeof text !== 'string' || !text.trim()) throw new Error('Empty API response');
+        var parts = text.trim().split(',');
+        if (!/^\d+$/.test(parts[0])) throw new Error('Invalid API anonymous count');
+        var anonymousCount = Number(parts[0]);
+        if (!Number.isSafeInteger(anonymousCount)) throw new Error('Unsafe API anonymous count');
+        var classTiers = { m: 'red', f: 'green', l: 'purple', p: 'pink', tr: 'dark-blue', t: 'light-blue', g: 'gray' };
+        var genders = { m: 'male', f: 'female', s: 'trans', c: 'couple' };
+        var seen = new Set();
+        var parsedUsers = [];
+        var unknownClasses = Object.create(null);
+        var unknownGenders = Object.create(null);
+        for (var i = 1; i < parts.length; i++) {
+            var fields = parts[i].split('|');
+            if (fields.length !== 4 || !/^[A-Za-z0-9_-]{2,30}$/.test(fields[0]) ||
+                fields.slice(1).some(function(field) { return !/^[^\s|,<>\x00-\x1f]+$/.test(field); })) {
+                throw new Error('Malformed API record at index ' + i);
+            }
+            var username = fields[0];
+            var key = username.toLowerCase();
+            if (seen.has(key)) throw new Error('Duplicate API username at index ' + i);
+            seen.add(key);
+            var rawClass = fields[1];
+            var genderCode = fields[2];
+            var isOwner = rawClass === 'o';
+            var tier = Object.prototype.hasOwnProperty.call(classTiers, rawClass) ? classTiers[rawClass] : null;
+            var gender = Object.prototype.hasOwnProperty.call(genders, genderCode) ? genders[genderCode] : 'unknown';
+            if (!tier && !isOwner) unknownClasses[rawClass] = (unknownClasses[rawClass] || 0) + 1;
+            if (gender === 'unknown') unknownGenders[genderCode] = (unknownGenders[genderCode] || 0) + 1;
+            parsedUsers.push({ username: username, rawClass: rawClass, tier: tier,
+                genderCode: genderCode, gender: gender, rawFlag: fields[3], isOwner: isOwner });
+        }
+        var registeredCount = parsedUsers.length;
+        var totalUsers = anonymousCount + registeredCount;
+        if (!Number.isSafeInteger(totalUsers)) throw new Error('Unsafe API total users');
+        return { anonymousCount: anonymousCount, registeredCount: registeredCount,
+            totalUsers: totalUsers, users: parsedUsers,
+            diagnostics: { unknownClasses: unknownClasses, unknownGenders: unknownGenders } };
+    }
+
+    function isAcquisitionCurrent(context) {
+        return context.epoch === scanEpoch && context.generation === initGuard &&
+            context.url === location.href;
+    }
+
+    function validateRoomSnapshot(snapshot) {
+        if (!snapshot || !Number.isSafeInteger(snapshot.roomTotal) || snapshot.roomTotal < 0 ||
+            !Array.isArray(snapshot.users)) throw new Error('Invalid room snapshot');
+        if (snapshot.source === 'API' &&
+            (!Number.isSafeInteger(snapshot.anonymousCount) || snapshot.anonymousCount < 0 ||
+             snapshot.registeredCount !== snapshot.users.length ||
+             snapshot.totalUsers !== snapshot.anonymousCount + snapshot.registeredCount ||
+             snapshot.roomTotal !== snapshot.totalUsers)) {
+            throw new Error('Inconsistent API anonymous, registered, or total user counts');
+        }
+        if (!isScanValid(snapshot.users.length, snapshot.roomTotal)) {
+            throw new Error('Sample rejected by 3.0.0 scan-validity checks');
+        }
+    }
+
+    async function acquireAPISnapshot(context) {
+        if (!context.room || context.room === 'unknown') throw new Error('No current room username');
+        var url = new URL('/api/getchatuserlist/', location.origin);
+        url.searchParams.set('roomname', context.room);
+        url.searchParams.set('private', 'false');
+        url.searchParams.set('sort_by', 'a');
+        url.searchParams.set('exclude_staff', 'false');
+        var controller = new AbortController();
+        var timeout;
+        try {
+            var text = await Promise.race([
+                (async function() {
+                    var response = await fetch(url.href, { method: 'GET', credentials: 'same-origin',
+                        mode: 'same-origin', cache: 'no-store', redirect: 'error', signal: controller.signal });
+                    if (!response.ok) throw new Error('API HTTP ' + response.status);
+                    return response.text();
+                })(),
+                new Promise(function(resolve, reject) {
+                    timeout = setTimeout(function() {
+                        reject(new Error('API request timed out after ' + API_TIMEOUT_MS + ' ms'));
+                        controller.abort();
+                    }, API_TIMEOUT_MS);
+                })
+            ]);
+            var snapshot = parseGetChatUserListResponse(text);
+            snapshot.roomTotal = snapshot.totalUsers;
+            snapshot.source = 'API';
+            snapshot.timestamp = Date.now();
+            return snapshot;
+        } finally {
+            clearTimeout(timeout);
+        }
+    }
+
+    async function acquireDOMSnapshot(context, returnToChat) {
+        var usersTab = findTab('users');
+        var chatTab = findTab('chat');
+        if (!usersTab) throw new Error('USERS tab not found');
+        var openedUsers = false;
+        try {
+            usersTab.click();
+            openedUsers = true;
+            await new Promise(function(resolve) { setTimeout(resolve, 800); });
+            if (!isAcquisitionCurrent(context)) return null;
+            return scanUsers();
+        } finally {
+            if (openedUsers && isAcquisitionCurrent(context) && returnToChat && chatTab) {
+                try { chatTab.click(); }
+                catch (err) { log('DOM fallback could not return to CHAT: ' + err.message); }
+            }
+        }
+    }
+
+    function getDOMFallbackWaitSeconds(modelName) {
+        var readyAt = domFallbackReadyAtByRoom.get(modelName.toLowerCase()) || 0;
+        return Math.max(0, Math.ceil((readyAt - Date.now()) / 1000));
+    }
+
+    async function acquireRoomSnapshot(context, returnToChat) {
+        lastAcquisitionAttemptSource = 'API';
+        try {
+            var snapshot = await acquireAPISnapshot(context);
+            if (!isAcquisitionCurrent(context)) return null;
+            validateRoomSnapshot(snapshot);
+            domHealthStatus.consecutiveFailures = 0;
+            return snapshot;
+        } catch (err) {
+            if (!isAcquisitionCurrent(context)) return null;
+            console.warn('[TierScope ' + TIERSCOPE_VERSION + '] API failed: ' + err.message);
+        }
+        lastAcquisitionAttemptSource = 'DOM';
+        var fallbackWait = getDOMFallbackWaitSeconds(context.room);
+        if (fallbackWait > 0) {
+            log('DOM fallback deferred for ' + fallbackWait + 's; retaining previous valid data (no history point)');
+            return null;
+        }
+        var roomKey = context.room.toLowerCase();
+        var fallbackIntervalMs = Math.max(DOM_FALLBACK_INTERVAL_SECONDS, scanIntervalSeconds) * 1000;
+        domFallbackReadyAtByRoom.set(roomKey, Date.now() + fallbackIntervalMs);
+        log('Attempting DOM fallback; room=' + context.room);
+        try {
+            var fallback = await acquireDOMSnapshot(context, returnToChat);
+            if (!isAcquisitionCurrent(context)) return null;
+            validateRoomSnapshot(fallback);
+            log('DOM fallback succeeded; room=' + context.room + ' records=' + fallback.users.length);
+            return fallback;
+        } catch (err) {
+            if (!isAcquisitionCurrent(context)) return null;
+            console.warn('[TierScope ' + TIERSCOPE_VERSION + '] DOM fallback failed: ' + err.message +
+                '; retaining previous valid data (no history point)');
+            return null;
+        } finally {
+            domFallbackReadyAtByRoom.set(roomKey, Math.max(domFallbackReadyAtByRoom.get(roomKey) || 0,
+                Date.now() + fallbackIntervalMs));
+        }
+    }
+
+    function acceptRoomSnapshot(snapshot, modelName) {
+        users = new Map(snapshot.users.map(function(user) { return [user.username, user]; }));
+        roomTotal = snapshot.roomTotal;
+        femaleTransUsernames = [];
+        var model = modelName.toLowerCase();
+        users.forEach(function(user) {
+            if (user.username.toLowerCase() !== model) {
+                Object.defineProperty(sessionUniqueUsers, user.username.toLowerCase(),
+                    { value: true, enumerable: true, configurable: true, writable: true });
+                if (user.gender === 'female' || user.gender === 'trans') {
+                    femaleTransUsernames.push(user.username);
+                    Object.defineProperty(sessionFemaleTransUsers, user.username,
+                        { value: user.gender, enumerable: true, configurable: true, writable: true });
+                }
+            }
+        });
+        lastAcceptedAcquisition = { source: snapshot.source, timestamp: snapshot.timestamp, api: null };
+        if (snapshot.source === 'API') {
+            var owners = snapshot.users.filter(function(user) { return user.isOwner; });
+            var tierSum = snapshot.users.filter(function(user) { return user.tier !== null; }).length;
+            var unknownClasses = snapshot.diagnostics.unknownClasses;
+            var unknownGenders = snapshot.diagnostics.unknownGenders;
+            lastAcceptedAcquisition.api = { anonymousCount: snapshot.anonymousCount,
+                registeredCount: snapshot.registeredCount, totalUsers: snapshot.totalUsers, ownerCount: owners.length };
+            return {
+                room: modelName, anonymousCount: snapshot.anonymousCount,
+                registeredCount: snapshot.registeredCount, totalUsers: snapshot.totalUsers,
+                owner: owners.map(function(user) { return user.username; }).join(', ') || 'none',
+                ownerRecords: owners,
+                unknownClasses: Object.values(unknownClasses).reduce(function(a, b) { return a + b; }, 0),
+                unknownGenders: Object.values(unknownGenders).reduce(function(a, b) { return a + b; }, 0),
+                unknownClassCodes: unknownClasses, unknownGenderCodes: unknownGenders,
+                viewerTierSum: tierSum, registeredMinusTierSum: users.size - tierSum,
+                viewerTierGapExplanation: 'Owner and unknown-class records count toward Registered, outside the seven viewer tiers',
+                timestamp: new Date(snapshot.timestamp).toISOString()
+            };
+        }
+        return null;
+    }
+
+    function updateAcquisitionStatus() {
+        var el = document.getElementById('acquisition-status');
+        if (!el) return;
+        if (!lastAcceptedAcquisition) {
+            el.textContent = 'No sample';
+            el.title = 'No accepted sample in this page session';
+            return;
+        }
+        var age = Math.max(0, Math.floor((Date.now() - lastAcceptedAcquisition.timestamp) / 1000));
+        el.textContent = lastAcceptedAcquisition.source + ' • ' + age + 's';
+        el.title = 'Last accepted sample: ' + new Date(lastAcceptedAcquisition.timestamp).toISOString() +
+            '. TierScope and the USERS tab refresh independently.';
+    }
+
+    async function performScanThenReturn(returnToChat) {
         if (typeof returnToChat === 'undefined') returnToChat = true;
         if (isScanning) return;
         isScanning = true;
-        var myScanEpoch = ++scanEpoch;
-        var scanGeneration = initGuard;
+        var context = { epoch: ++scanEpoch, generation: initGuard, url: location.href, room: getModelName() };
+        var priorState = null;
         var statusEl = document.getElementById('auto-status');
-        if (statusEl) {
-            statusEl.textContent = 'Scanning...';
-            statusEl.style.color = '#ffd43b';
-        }
-        var usersTab = findTab('users');
-        var chatTab = findTab('chat');
-        if (!usersTab) {
-            isScanning = false;
-            resetCountdown();
-            return;
-        }
+        updateCountdownDisplay();
         try {
-            usersTab.click();
-        } catch (e) {
-            log('Error clicking users tab: ' + e);
-            isScanning = false;
-            resetCountdown();
-            return;
-        }
-        setTimeout(function() {
-            if (scanGeneration !== initGuard || myScanEpoch !== scanEpoch) {
-                log('Scan callback: generation/epoch changed, aborting');
+            var snapshot = await acquireRoomSnapshot(context, returnToChat);
+            if (!isAcquisitionCurrent(context)) return;
+            if (!snapshot) {
+                if (statusEl) {
+                    statusEl.textContent = 'Scan skipped (unreliable)';
+                    statusEl.style.color = '#ff4444';
+                }
                 return;
             }
-            var tempUsers = new Map(users);
-            var tempPreviousCount = previousUserCount;
-            var tempPreviousRoomTotal = previousRoomTotal;
-            var tempRoomTotal = roomTotal;
-            var scanRejected = false;
-            try {
-                users.clear();
-                scanUsers();
-                var counts = { 'red': 0, 'green': 0, 'purple': 0, 'pink': 0, 'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0 };
-                users.forEach(function(data) {
-                    if (counts[data.tier] !== undefined) counts[data.tier]++;
-                    if (data.gender === 'female' || data.gender === 'trans') {
-                        counts['female-trans']++;
-                    }
-                });
-                var total = users.size;
-                var withTokens = counts['red'] + counts['green'] + counts['purple'] + counts['pink'] + counts['dark-blue'] + counts['light-blue'];
-                var anonymousCount = getAnonymousCount();
-                if (myScanEpoch !== scanEpoch) {
-                    log('Scan data processing: epoch changed, aborting write');
-                    users = tempUsers;
-                    previousUserCount = tempPreviousCount;
-                    previousRoomTotal = tempPreviousRoomTotal;
-                    roomTotal = tempRoomTotal;
-                    return;
+            priorState = {
+                users: users, roomTotal: roomTotal, previousUserCount: previousUserCount,
+                previousRoomTotal: previousRoomTotal, previousCounts: previousCounts,
+                hasTrendBaseline: hasTrendBaseline, lastAcceptedAcquisition: lastAcceptedAcquisition,
+                femaleTransUsernames: femaleTransUsernames,
+                trendHTML: (document.getElementById('trend-container') || {}).innerHTML,
+                trendHeaderText: (document.getElementById('trend-header-label') || {}).textContent,
+                sessionUniqueUsers: Object.fromEntries(Object.entries(sessionUniqueUsers)),
+                sessionFemaleTransUsers: Object.fromEntries(Object.entries(sessionFemaleTransUsers)),
+                history: Object.fromEntries(Object.keys(history).map(function(key) { return [key, history[key].slice()]; })),
+                roomTotalHigh: roomTotalHigh, roomTotalHighTime: roomTotalHighTime,
+                tierHighTimes: Object.fromEntries(Object.entries(tierHighTimes)),
+                withTokensHighTime: withTokensHighTime, totalHighTime: totalHighTime,
+                anonHighTime: anonHighTime, femaleTransHighTime: femaleTransHighTime
+            };
+            var diagnostics = acceptRoomSnapshot(snapshot, context.room);
+            var counts = { 'red': 0, 'green': 0, 'purple': 0, 'pink': 0, 'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0 };
+            users.forEach(function(data) {
+                if (counts[data.tier] !== undefined) counts[data.tier]++;
+                if (data.gender === 'female' || data.gender === 'trans') {
+                    counts['female-trans']++;
                 }
-                if (!isScanValid(total, roomTotal)) {
-                    users = tempUsers;
-                    previousUserCount = tempPreviousCount;
-                    previousRoomTotal = tempPreviousRoomTotal;
-                    roomTotal = tempRoomTotal;
-                    scanRejected = true;
-                    log('Scan rejected - keeping previous data');
-                    if (statusEl) {
-                        statusEl.textContent = 'Scan skipped (unreliable)';
-                        statusEl.style.color = '#ff4444';
-                    }
-                } else {
-                    previousUserCount = total;
-                    previousRoomTotal = roomTotal;
-                    var currentRoomTotal = roomTotal > 0 ? roomTotal : (total + anonymousCount);
-                    if (currentRoomTotal > roomTotalHigh) {
-                        roomTotalHigh = currentRoomTotal;
-                        roomTotalHighTime = Date.now();
-                    }
-
-                    // FIXED: Save to history BEFORE updating display so 'last' preset can access it
-                    saveToHistory();
-                    hasTrendBaseline = true;
-
-                    updateDisplay();
-                    updateTrendDisplay();
-
-                    // Keep previousCounts for session save/load compatibility
-                    previousCounts = {
-                        'red': counts['red'] || 0,
-                        'green': counts['green'] || 0,
-                        'purple': counts['purple'] || 0,
-                        'pink': counts['pink'] || 0,
-                        'dark-blue': counts['dark-blue'] || 0,
-                        'light-blue': counts['light-blue'] || 0,
-                        'gray': counts['gray'] || 0,
-                        'female-trans': counts['female-trans'] || 0,
-                        'withTokens': withTokens || 0,
-                        'total': total || 0,
-                        'anonymous': anonymousCount || 0
-                    };
-
-                    saveSession(getModelName());
-                }
-            } catch (err) {
-                log('Error during scan: ' + err);
-                users = tempUsers;
-                previousUserCount = tempPreviousCount;
-                previousRoomTotal = tempPreviousRoomTotal;
-                roomTotal = tempRoomTotal;
-            } finally {
-                if (scanGeneration !== initGuard || myScanEpoch !== scanEpoch) {
-                    log('Scan finally: generation/epoch changed, skipping cleanup');
-                    return;
-                }
-                if (returnToChat && chatTab) {
-                    chatTab.click();
-                }
-                isScanning = false;
-                countdownSeconds = scanIntervalSeconds;
+            });
+            var total = users.size;
+            var withTokens = counts['red'] + counts['green'] + counts['purple'] + counts['pink'] + counts['dark-blue'] + counts['light-blue'];
+            var anonymousCount = getAnonymousCount();
+            previousUserCount = total;
+            previousRoomTotal = roomTotal;
+            var currentRoomTotal = roomTotal > 0 ? roomTotal : (total + anonymousCount);
+            if (currentRoomTotal > roomTotalHigh) {
+                roomTotalHigh = currentRoomTotal;
+                roomTotalHighTime = Date.now();
             }
-        }, 800);
+
+            saveToHistory();
+            hasTrendBaseline = true;
+            updateDisplay();
+            updateTrendDisplay();
+
+            previousCounts = {
+                'red': counts['red'] || 0,
+                'green': counts['green'] || 0,
+                'purple': counts['purple'] || 0,
+                'pink': counts['pink'] || 0,
+                'dark-blue': counts['dark-blue'] || 0,
+                'light-blue': counts['light-blue'] || 0,
+                'gray': counts['gray'] || 0,
+                'female-trans': counts['female-trans'] || 0,
+                'withTokens': withTokens || 0,
+                'total': total || 0,
+                'anonymous': anonymousCount || 0
+            };
+
+            updateAcquisitionStatus();
+            saveSession(context.room);
+            if (diagnostics) console.log('[TierScope ' + TIERSCOPE_VERSION + '] API scan accepted', diagnostics);
+        } catch (err) {
+            if (priorState) {
+                users = priorState.users;
+                roomTotal = priorState.roomTotal;
+                previousUserCount = priorState.previousUserCount;
+                previousRoomTotal = priorState.previousRoomTotal;
+                previousCounts = priorState.previousCounts;
+                hasTrendBaseline = priorState.hasTrendBaseline;
+                lastAcceptedAcquisition = priorState.lastAcceptedAcquisition;
+                femaleTransUsernames = priorState.femaleTransUsernames;
+                sessionUniqueUsers = priorState.sessionUniqueUsers;
+                sessionFemaleTransUsers = priorState.sessionFemaleTransUsers;
+                history = priorState.history;
+                roomTotalHigh = priorState.roomTotalHigh;
+                roomTotalHighTime = priorState.roomTotalHighTime;
+                tierHighTimes = priorState.tierHighTimes;
+                withTokensHighTime = priorState.withTokensHighTime;
+                totalHighTime = priorState.totalHighTime;
+                anonHighTime = priorState.anonHighTime;
+                femaleTransHighTime = priorState.femaleTransHighTime;
+                try {
+                    var trendEl = document.getElementById('trend-container');
+                    if (trendEl && typeof priorState.trendHTML === 'string') trendEl.innerHTML = priorState.trendHTML;
+                    var trendHeader = document.getElementById('trend-header-label');
+                    if (trendHeader && typeof priorState.trendHeaderText === 'string') trendHeader.textContent = priorState.trendHeaderText;
+                    updateDisplay();
+                    updateAcquisitionStatus();
+                    if (!isMinimized) drawAllSparklines();
+                }
+                catch (displayError) { log('Could not repaint previous data: ' + displayError.message); }
+            }
+            log('Error during scan; retaining previous valid data: ' + err.message);
+        } finally {
+            if (isAcquisitionCurrent(context)) {
+                isScanning = false;
+                resetCountdown();
+            }
+        }
     }
 
-    // FIXED: Helper function to get comparison counts based on selected time mode
-    // Returns { counts: {}, short: boolean, actualMinutes: number }
     function getComparisonCounts() {
         if (trendComparisonMode === 'last') {
-            // FIXED: Use history instead of previousCounts to avoid stale data when switching presets
             if (history.timestamps.length < 2) {
-                // Not enough history (need at least 1 previous scan) - return null to indicate "not ready"
                 return { counts: null, short: false, actualMinutes: 0 };
             }
             
-            // Get the second-to-last entry (the scan before current)
             var lastIdx = history.timestamps.length - 2;
             var actualMinutes = Math.round((Date.now() - history.timestamps[lastIdx]) / 60000);
             
@@ -937,7 +1346,6 @@ const ViewerTracker = (function() {
         }
         
         if (trendComparisonMode === 'start') {
-            // Return first history entry or zeros if no history
             if (history.timestamps.length === 0) {
                 return {
                     counts: {
@@ -969,30 +1377,27 @@ const ViewerTracker = (function() {
             };
         }
         
-        // Time-based modes - find latest scan at or before target time
         var preset = TREND_PRESETS[trendComparisonMode];
         if (!preset || preset.ms <= 0) return { counts: previousCounts, short: false, actualMinutes: 0 };
         
         var targetTime = Date.now() - preset.ms;
         var idx = -1;
         
-        // Find the latest scan that is at or before the target time
         for (var i = 0; i < history.timestamps.length; i++) {
             if (history.timestamps[i] <= targetTime) {
                 idx = i;
             } else {
-                break; // Timestamps are in order, so we can stop once we pass the target
+                break;
             }
         }
         
-        var short = idx === -1; // No scan old enough means session is shorter than preset
-        if (short) idx = 0; // Use the oldest scan we have
+        var short = idx === -1;
+        if (short) idx = 0;
         
         if (idx === -1 || history.timestamps.length === 0) {
             return { counts: previousCounts, short: false, actualMinutes: 0 };
         }
         
-        // Calculate actual age of the comparison scan
         var actualMs = Date.now() - history.timestamps[idx];
         var actualMinutes = Math.round(actualMs / 60000);
         
@@ -1015,7 +1420,6 @@ const ViewerTracker = (function() {
         };
     }
 
-    // NEW: Function to set trend comparison mode
     function setTrendComparisonMode(mode) {
         if (!TREND_PRESETS[mode] && mode !== 'last') return;
         trendComparisonMode = mode;
@@ -1024,7 +1428,6 @@ const ViewerTracker = (function() {
         saveSession(getModelName());
     }
 
-    // NEW: Update preset button visual states
     function updateTrendPresetButtons() {
         var buttons = document.querySelectorAll('.trend-preset-btn');
         buttons.forEach(function(btn) {
@@ -1047,7 +1450,6 @@ const ViewerTracker = (function() {
         
         if (!trendContainer) return;
 
-        // FIXED: Clear header label on early exit (Reset can leave "vs 4m" stuck)
         if (!hasTrendBaseline) {
             trendContainer.innerHTML = '<div style="font-size:8px;color:#666;text-align:center;padding:8px;">Waiting for scan...</div>';
             if (trendHeaderLabel) trendHeaderLabel.textContent = '📈 TREND';
@@ -1065,20 +1467,17 @@ const ViewerTracker = (function() {
         var withTokens = counts['red'] + counts['green'] + counts['purple'] + counts['pink'] + counts['dark-blue'] + counts['light-blue'];
         var anonymousCount = getAnonymousCount();
         
-        // FIXED: Get comparison counts and metadata
         var comparison = getComparisonCounts();
         var comparisonCounts = comparison.counts;
         var shortSession = comparison.short;
         var actualMinutes = comparison.actualMinutes;
 
-        // FIXED: Handle "not ready" state (e.g., "Last" preset with fewer than 2 history points)
         if (!comparisonCounts) {
             trendContainer.innerHTML = '<div style="font-size:8px;color:#666;text-align:center;padding:8px;">Waiting for scan...</div>';
             if (trendHeaderLabel) trendHeaderLabel.textContent = '📈 TREND';
             return;
         }
 
-        // Helper to format short session label
         var getShortLabel = function() {
             if (!shortSession || actualMinutes <= 0) return '';
             if (actualMinutes < 60) return ' vs ' + actualMinutes + 'm';
@@ -1100,13 +1499,11 @@ const ViewerTracker = (function() {
             var fontSize = isLarge ? '12px' : '10px';
             var containerSize = isLarge ? '28px' : '22px';
             
-            // FIXED: Apply dynamic font sizing to ALL delta numbers based on digit count
             var deltaFont = fontSize;
             if (deltaText) {
                 var dlen = String(Math.abs(diff)).length;
                 if (dlen >= 4) deltaFont = '8px';
                 else if (dlen === 3) deltaFont = '10px';
-                // 1-2 digits stay at default fontSize
             }
             
             return '<div style="display:flex;align-items:center;gap:4px;' + bgStyle + 'padding:' + padding + ';border-radius:4px;">' +
@@ -1116,27 +1513,23 @@ const ViewerTracker = (function() {
                 '</div>';
         }
 
-        // Build trend header with optional short session label
         var headerLabel = '📈 TREND';
         var shortLabel = getShortLabel();
         
-        // Row 1: red, green, purple, pink
         var html = '<div style="display:flex;justify-content:center;gap:6px;padding:4px 0;">';
-        html += buildTrendItem(TIERS['red'].name, counts['red'] || 0, comparisonCounts['red'] || 0, false, false);
-        html += buildTrendItem(TIERS['green'].name, counts['green'] || 0, comparisonCounts['green'] || 0, false, false);
-        html += buildTrendItem(TIERS['purple'].name, counts['purple'] || 0, comparisonCounts['purple'] || 0, false, false);
-        html += buildTrendItem(TIERS['pink'].name, counts['pink'] || 0, comparisonCounts['pink'] || 0, false, false);
+        html += buildTrendItem(getTierMarker('red'), counts['red'] || 0, comparisonCounts['red'] || 0, false, false);
+        html += buildTrendItem(getTierMarker('green'), counts['green'] || 0, comparisonCounts['green'] || 0, false, false);
+        html += buildTrendItem(getTierMarker('purple'), counts['purple'] || 0, comparisonCounts['purple'] || 0, false, false);
+        html += buildTrendItem(getTierMarker('pink'), counts['pink'] || 0, comparisonCounts['pink'] || 0, false, false);
         html += '</div>';
 
-        // Row 2: dark-blue, light-blue, gray, female-trans
         html += '<div style="display:flex;justify-content:center;gap:6px;padding:4px 0;">';
-        html += buildTrendItem(TIERS['dark-blue'].name, counts['dark-blue'] || 0, comparisonCounts['dark-blue'] || 0, false, false);
-        html += buildTrendItem(TIERS['light-blue'].name, counts['light-blue'] || 0, comparisonCounts['light-blue'] || 0, false, false);
-        html += buildTrendItem(TIERS['gray'].name, counts['gray'] || 0, comparisonCounts['gray'] || 0, false, false);
-        html += buildTrendItem(TIERS['female-trans'].name, counts['female-trans'] || 0, comparisonCounts['female-trans'] || 0, false, false);
+        html += buildTrendItem(getTierMarker('dark-blue'), counts['dark-blue'] || 0, comparisonCounts['dark-blue'] || 0, false, false);
+        html += buildTrendItem(getTierMarker('light-blue'), counts['light-blue'] || 0, comparisonCounts['light-blue'] || 0, false, false);
+        html += buildTrendItem(getTierMarker('gray'), counts['gray'] || 0, comparisonCounts['gray'] || 0, false, false);
+        html += buildTrendItem(getTierMarker('female-trans'), counts['female-trans'] || 0, comparisonCounts['female-trans'] || 0, false, false);
         html += '</div>';
 
-        // Row 3: WithTokens, Total, Anonymous (LARGER)
         html += '<div style="display:flex;justify-content:center;gap:8px;padding:6px 0;">';
         html += buildTrendItem('💎', withTokens || 0, comparisonCounts.withTokens || 0, true, true);
         html += buildTrendItem('📊', total || 0, comparisonCounts.total || 0, false, true);
@@ -1145,7 +1538,6 @@ const ViewerTracker = (function() {
 
         trendContainer.innerHTML = html;
         
-        // Update header label if needed (we need to update the DOM outside this container)
         if (trendHeaderLabel) {
             trendHeaderLabel.textContent = headerLabel + shortLabel;
         }
@@ -1259,14 +1651,26 @@ const ViewerTracker = (function() {
 
     function resetCountdown() {
         countdownSeconds = scanIntervalSeconds;
+        nextScanAt = Date.now() + scanIntervalSeconds * 1000;
         updateCountdownDisplay();
     }
 
     function updateCountdownDisplay() {
+        if (isAutoRefreshOn && !isScanning && nextScanAt) {
+            countdownSeconds = Math.max(0, Math.ceil((nextScanAt - Date.now()) / 1000));
+        }
+        var fallbackWait = getDOMFallbackWaitSeconds(getModelName());
+        var timingTitle = 'Next API attempt after the countdown. ' + (fallbackWait > 0 ?
+            'DOM fallback eligible in ' + fallbackWait + 's if the API fails.' :
+            'DOM fallback eligible if the API fails.');
         var statusEl = document.getElementById('auto-status');
         var timerDisplay = document.getElementById('timer-display');
         var expandedCountdown = document.getElementById('expanded-countdown');
         var controlNextScan = document.getElementById('control-next-scan');
+        [statusEl, expandedCountdown, controlNextScan].forEach(function(el) {
+            if (el) el.title = isAutoRefreshOn ? timingTitle :
+                'Automatic scans paused. An in-flight scan may finish. ' + timingTitle;
+        });
         if (timerDisplay) {
             timerDisplay.textContent = scanIntervalSeconds + 's';
         }
@@ -1331,9 +1735,10 @@ const ViewerTracker = (function() {
             clearInterval(countdownInterval);
             countdownInterval = null;
         }
+        if (!nextScanAt) resetCountdown();
+        updateCountdownDisplay();
         countdownInterval = setInterval(function() {
             if (!isAutoRefreshOn || isScanning) return;
-            countdownSeconds--;
             updateCountdownDisplay();
             if (countdownSeconds <= 0) {
                 performScanThenReturn(true);
@@ -1518,7 +1923,7 @@ const ViewerTracker = (function() {
             html +=
                 '<div style="display:flex;align-items:center;padding:1px 3px;margin:1px 0;background:rgba(255,255,255,0.05);border-radius:3px;border-left:3px solid ' + t.color + ';">' +
                     '<div style="width:30px;flex-shrink:0;text-align:center;">' +
-                        '<span style="font-size:14px;">' + t.name + '</span>' +
+                        '<span style="font-size:14px;">' + getTierMarker(key) + '</span>' +
                     '</div>' +
                     '<canvas id="spark-' + key + '" width="105" height="28" style="flex:1;margin:0 4px;"></canvas>' +
                     '<div style="text-align:right;width:48px;flex-shrink:0;">' +
@@ -1566,7 +1971,6 @@ const ViewerTracker = (function() {
                     '</div>' +
                 '</div>' +
 
-                // FIXED: Trend section with preset buttons, AUTO toggle, and dynamic header label
                 '<div style="border-top:1px solid #4169E1;margin-top:5px;padding-top:5px;">' +
                     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;flex-wrap:wrap;gap:2px;">' +
                         '<span id="trend-header-label" style="font-size:9px;font-weight:bold;color:#4169E1;">📈 TREND</span>' +
@@ -1585,14 +1989,11 @@ const ViewerTracker = (function() {
                     '</div>' +
                 '</div>' +
 
-                // FIXED: Control field with timer on left, buttons centered
                 '<div id="control-field" style="margin-top:5px;padding:4px;background:rgba(65,105,225,0.15);border-radius:3px;border:1px solid #4169E1;">' +
-                    // Top row: CONTROLS title left, Next countdown right
                     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">' +
                         '<span style="font-size:9px;font-weight:bold;color:#4169E1;">🎛️ CONTROLS</span>' +
                         '<span style="font-size:11px;color:#32CD32;font-weight:bold;" id="control-next-scan">Next: 60s</span>' +
                     '</div>' +
-                    // Bottom row: Timer absolute left, buttons centered
                     '<div style="display:flex;justify-content:center;align-items:center;position:relative;">' +
                         '<span style="font-size:12px;color:#ffd43b;font-family:monospace;font-weight:bold;position:absolute;left:0;" id="control-tracking-timer">00:00:00</span>' +
                         '<div style="display:flex;gap:3px;">' +
@@ -1615,6 +2016,8 @@ const ViewerTracker = (function() {
                         '</div>' +
                     '</div>' +
                 '</div>' +
+
+                '<div id="acquisition-status" style="margin-top:2px;font-size:7px;color:#aaa;" title="No accepted sample yet">No sample</div>' +
 
                 '<div style="position:absolute;bottom:4px;right:6px;display:flex;align-items:center;gap:3px;opacity:0.6;transition:opacity 0.2s;" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0.6">' +
                     '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#ff69b4" stroke-width="2" style="flex-shrink:0;">' +
@@ -1678,25 +2081,23 @@ const ViewerTracker = (function() {
             };
         }
         
-        // NEW: Setup trend preset buttons - disable auto-escalation on manual click
         var trendPresetBtns = document.querySelectorAll('.trend-preset-btn');
         for (var k = 0; k < trendPresetBtns.length; k++) {
             trendPresetBtns[k].onclick = function() {
-                autoTrendEscalation = false; // User manually selected - disable auto-escalation
-                updateAutoTrendButton(); // Update the AUTO button to show disabled state
+                autoTrendEscalation = false;
+                updateAutoTrendButton();
                 var mode = this.dataset.mode;
                 setTrendComparisonMode(mode);
             };
         }
         
-        // NEW: Setup AUTO trend escalation toggle button
         var btnTrendAuto = document.getElementById('btn-trend-auto');
         if (btnTrendAuto) {
             btnTrendAuto.onclick = toggleAutoTrendEscalation;
         }
         
         updateTrendPresetButtons();
-        updateAutoTrendButton(); // Set initial state
+        updateAutoTrendButton();
     }
 
     function toggleAutoRefresh() {
@@ -1810,10 +2211,10 @@ const ViewerTracker = (function() {
 
     function scanUsers() {
         var userListTab = document.querySelector(DOM_SELECTORS.userListTab);
-        if (!userListTab) return;
-        roomTotal = getRoomTotal();
-        femaleTransUsernames = [];
-        var modelName = getModelName().toLowerCase();
+        if (!userListTab) throw new Error('UserListTab not found');
+        var snapshotUsers = new Map();
+        var snapshotRoomTotal = getRoomTotal();
+        if (!snapshotRoomTotal) throw new Error('DOM room total missing or zero');
         var userElements = [];
         for (var i = 0; i < DOM_SELECTORS.usernameElements.length; i++) {
             var found = userListTab.querySelectorAll(DOM_SELECTORS.usernameElements[i]);
@@ -1825,19 +2226,16 @@ const ViewerTracker = (function() {
             var el = userElements[i];
             var rawText = (el.textContent || '').trim() || (el.getAttribute('data-username') || '').trim();
             var username = extractUsername(rawText);
-            if (username && !users.has(username)) {
+            if (username && !snapshotUsers.has(username)) {
                 var tier = getTierFromElement(el);
                 var gender = getGenderFromElement(el);
-                users.set(username, { tier: tier, gender: gender });
-                if (username.toLowerCase() !== modelName) {
-                    sessionUniqueUsers[username.toLowerCase()] = true;
-                }
-                if ((gender === 'female' || gender === 'trans') && username.toLowerCase() !== modelName) {
-                    femaleTransUsernames.push(username);
-                    sessionFemaleTransUsers[username] = gender;
-                }
+                snapshotUsers.set(username, { username: username, rawClass: null, tier: tier,
+                    genderCode: null, gender: gender, rawFlag: null, isOwner: null });
             }
         }
+        if (!snapshotUsers.size) throw new Error('DOM sample contains no readable users');
+        return { source: 'DOM', timestamp: Date.now(), roomTotal: snapshotRoomTotal,
+            users: Array.from(snapshotUsers.values()) };
     }
 
     function updateDisplay() {
@@ -1902,7 +2300,6 @@ const ViewerTracker = (function() {
             if (totalEl) totalEl.textContent = total;
             if (totalHighEl) totalHighEl.textContent = 'H:' + totalResult.value.toLocaleString();
             
-            // Scale anon number font size based on digit count
             var fullAnonText = document.getElementById('anon-ratio-full');
             var anonHighEl = document.getElementById('high-anon');
             if (fullAnonText) {
@@ -1915,21 +2312,32 @@ const ViewerTracker = (function() {
         }
     }
 
+    function scheduleInit(delay) {
+        var generation = initGuard;
+        var url = location.href;
+        setTimeout(function() {
+            if (generation === initGuard && url === location.href) init();
+        }, delay);
+    }
+
     function init() {
         var myGeneration = ++initGuard;
+        isScanning = false;
         log('Initializing... (generation ' + myGeneration + ')');
         if (healthCheckInterval) {
             clearInterval(healthCheckInterval);
             healthCheckInterval = null;
         }
+        if (freshnessInterval) clearInterval(freshnessInterval);
+        freshnessInterval = setInterval(function() {
+            updateAcquisitionStatus();
+            updateCountdownDisplay();
+        }, 1000);
         var isRoom = isBroadcastRoom();
         var modelName = getModelName();
         var loaded = false;
         if (isRoom && modelName !== 'unknown') {
             loaded = loadSession(modelName);
-            if (loaded) {
-                log('Restored session for ' + modelName);
-            }
         }
         if (!loaded) {
             isMinimized = !isRoom;
@@ -1971,9 +2379,9 @@ const ViewerTracker = (function() {
                 return;
             }
             attempts++;
-            if (document.querySelector(DOM_SELECTORS.userListTab) || attempts >= maxAttempts) {
+            if ((isRoom && modelName !== 'unknown') || document.querySelector(DOM_SELECTORS.userListTab) || attempts >= maxAttempts) {
                 clearInterval(checkInterval);
-                if (attempts >= maxAttempts && !document.querySelector(DOM_SELECTORS.userListTab)) {
+                if (!isRoom && attempts >= maxAttempts && !document.querySelector(DOM_SELECTORS.userListTab)) {
                     log('UserListTab not found after 30s, giving up');
                     var statusEl = document.getElementById('auto-status');
                     if (statusEl) {
@@ -2014,7 +2422,7 @@ const ViewerTracker = (function() {
             }
         }, 1000);
         healthCheckInterval = setInterval(function() {
-            if (myGeneration === initGuard) {
+            if (myGeneration === initGuard && lastAcquisitionAttemptSource === 'DOM' && !isScanning) {
                 validateDOMHealth();
             }
         }, 30000);
@@ -2028,7 +2436,10 @@ const ViewerTracker = (function() {
             if (oldModel && oldModel !== 'unknown') {
                 saveSession(oldModel);
             }
+            activeSessionStorageKey = null;
             stopCountdown();
+            nextScanAt = 0;
+            countdownSeconds = scanIntervalSeconds;
             stopTrackingTimer();
             cleanupDragListeners();
             isScanning = false;
@@ -2038,6 +2449,11 @@ const ViewerTracker = (function() {
             }
             currentScale = 1.0;
             users.clear();
+            roomTotal = 0;
+            lastAcceptedAcquisition = null;
+            lastAcquisitionAttemptSource = 'API';
+            domHealthStatus.consecutiveFailures = 0;
+            updateAcquisitionStatus();
             previousUserCount = 0;
             previousRoomTotal = 0;
             Object.keys(history).forEach(function(k) { history[k] = []; });
@@ -2048,7 +2464,7 @@ const ViewerTracker = (function() {
             };
             hasTrendBaseline = false;
             trendComparisonMode = 'last';
-            autoTrendEscalation = true; // Reset on URL change
+            autoTrendEscalation = true;
             roomTotalHigh = 0;
             sessionUniqueUsers = {};
             roomTotalHighTime = null;
@@ -2060,7 +2476,7 @@ const ViewerTracker = (function() {
             femaleTransUsernames = [];
             sessionFemaleTransUsers = {};
             initGuard++;
-            setTimeout(init, 2002);
+            scheduleInit(2002);
         }
     }
     urlCheckInterval = setInterval(checkUrlChange, 500);
@@ -2074,17 +2490,18 @@ const ViewerTracker = (function() {
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', function() {
-            setTimeout(init, 2000);
+            scheduleInit(2000);
         });
     } else {
-        setTimeout(init, 2000);
+        scheduleInit(2000);
     }
     log('Script loaded and waiting for init');
 
     return {
         downloadTrackingReport: downloadTrackingReport,
         resetAllTracking: resetAllTracking,
-        getHealth: function() { return domHealthStatus; }
+        getHealth: function() { return domHealthStatus; },
+        parseGetChatUserListResponse: parseGetChatUserListResponse
     };
 })();
 
