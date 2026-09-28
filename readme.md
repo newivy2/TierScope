@@ -18,7 +18,7 @@ A Tampermonkey userscript that tracks viewer tiers on a Chaturbate broadcast and
 - **Female / trans overlay**: ♀⚧ is counted on top of the color tiers. It is not its own color.
 - **Session report**: Downloads a text file with highs and when they were hit, the current breakdown, and diagnostic info including the last acquisition source.
 - **Reload proof**: Tracking is saved per model for 3 hours using a versioned storage schema. A refresh, navigation away, or closed tab doesn't erase it. Reset starts a new session.
-- **Panel**: Draggable, resizable, and collapsible to a small view. Shows acquisition source (API or DOM) and sample freshness.
+- **Panel**: Draggable, resizable, and collapsible to a small view.
 
 ---
 
