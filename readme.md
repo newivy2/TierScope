@@ -4,7 +4,6 @@ A Tampermonkey userscript that tracks viewer tiers on a Chaturbate broadcast and
 
 ---
 
-![Tracking example 1](Tracking%20example%201.jpg)
 ![Tracking example 2](Tracking%20example%202.jpg)
 
 ---
