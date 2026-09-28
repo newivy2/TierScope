@@ -11,7 +11,7 @@ A Tampermonkey userscript that tracks viewer tiers on a Chaturbate broadcast and
 ## Features
 
 - **API-first acquisition**: Uses Chaturbate's `/api/getchatuserlist/` endpoint as the primary data source for accurate, instant counts.
-- **Tier tracking**: Counts the same color order Chaturbate shows: red, green, purple, pink, dark blue, light blue, gray and anonymous.
+- **Tier tracking**: Counts the color order Chaturbate shows: red, green, purple, pink, dark blue, light blue, gray and anonymous.
 - **Trend display**: After the first scan, each tier gets an arrow. Green is up, red is down, a yellow dot is unchanged. The number next to the arrow is the change since the previous scan. Trend comparison can be set to Last, 5m, 15m, 30m, 1h, or Start, with standard auto-escalation as the session grows.
 - **Sparklines and highs**: Every tier, the colored-user total, the registered total, and anonymous viewers keep a sparkline and an all-time high for the session.
 - **Unique viewers**: The header `U:` count is every distinct registered username seen during the session, not the size of the current list.
