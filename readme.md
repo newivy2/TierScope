@@ -4,6 +4,11 @@ A Tampermonkey userscript that tracks viewer tiers on a Chaturbate broadcast and
 
 ---
 
+![Tracking example 1](Tracking%20example%201.jpg)
+![Tracking example 2](Tracking%20example%202.jpg)
+
+---
+
 ## Features
 
 - **API-first acquisition**: Uses Chaturbate's `/api/getchatuserlist/` endpoint as the primary data source for accurate, instant counts without manipulating the UI. DOM scanning is a conservative fallback when the API fails or returns invalid data.
