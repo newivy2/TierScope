@@ -159,9 +159,6 @@ These are the same classes Chaturbate uses:
 | 2.9.8.2 | Legacy | Minor fix |
 | 2.9.8.1 | Legacy | Anonymous canvas adjustment |
 | 2.9.8.0 | Legacy | Broadcaster detection, tracking keys, CSS |
-| 2.9.7.8 | Legacy | Female / trans overlay |
-| 2.9.7.6 | Legacy | Gender report tuning |
-| 2.9.7.5 | Legacy | Baseline before the overlay |
 | 2.9.7.3 | Legacy | Base reference |
 
 ---
