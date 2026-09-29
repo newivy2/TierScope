@@ -72,7 +72,7 @@ The default scan is **60 seconds**. Chaturbate does not always refresh the user 
 * **Expand**: The full panel shows one row per tier, then the colored total (💎), registered total (📊), and anonymous count (👻).
 * **Trend**: Displays the change since the selected comparison point (Last, 5m, 15m, 30m, 1h, Start). Clicking a preset turns auto-escalation off. AUTO turns it back on.
 * **Replay**: In Controls, **Replay** plays the history saved for this room. The header switches to `PLAYBACK`. Pause, the scrubber, and 0.5× / 1× / 2× control only the replay. Recorded time runs at 60×, and a long session is capped at 30 seconds. One saved scan has no span to play, so Play stays off and that point is shown. Samples that arrive while you are watching are kept for the live session, not added to this replay. **Return to Live** paints the current session again. Minimize is locked until you return.
-* **Report**: Downloads the session as a text file. Highs, the current breakdown, and the ♀⚧ totals are included. Usernames are not.
+* **Report**: Downloads the session as a text file. Highs, the current breakdown, and the ♀⚧ totals are included.
 * **Reset**: Clears history, trends, the timer, and the female / trans totals, then starts a new scan. Replay stops if it was running.
 
 The line at the bottom of the panel shows the last accepted sample: `API` or `DOM`, and how many seconds ago it was accepted.
