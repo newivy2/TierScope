@@ -158,7 +158,8 @@ These follow the classes Chaturbate shows in the Users tab:
 
 | Version | Status | Notes |
 | --- | --- | --- |
-| **3.1.1.1** | **Current** | Session-high highlight. A row is light green while its count is above zero and at the session high, including a return to that high after a dip |
+| **3.1.1.2** | **Current** | Session-high highlights now also show in the replay mode |
+| 3.1.1.1 | Legacy | Session-high highlight. A row is light green while its count is above zero and at the session high, including a return to that high after a dip |
 | 3.1.1.0 | Legacy | Replay added. Replay copies the saved history and does not stop live scanning. Unique-viewer count removed from the header and the report |
 | 3.1.0 | Legacy | API-first acquisition with DOM fallback. Storage schema v1. Acquisition status line. |
 | 3.0.7 | Legacy | Trend preset auto-escalation. |
