@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.1.1.2
+// @version      3.1.1.3
 // @description  TierScope - Viewer visualizer with trend tracking and reports
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -16,7 +16,7 @@
 const ViewerTracker = (function() {
     'use strict';
 
-    const TIERSCOPE_VERSION = '3.1.1.1';
+    const TIERSCOPE_VERSION = '3.1.1.2';
     const API_TIMEOUT_MS = 10000;
     const DEFAULT_API_INTERVAL_SECONDS = 60;
     const DOM_FALLBACK_INTERVAL_SECONDS = 60;
@@ -255,14 +255,12 @@ const ViewerTracker = (function() {
         var frameHistory = { timestamps: snapshot.history.timestamps.slice(0, index + 1) };
         var frameHighs = {};
         var counts = {};
-        // NEW: Compute which tiers are at their high for this playback frame
         var playbackNewHighTiers = {};
         STORAGE_HISTORY_SERIES.forEach(function(key) {
             frameHistory[key] = snapshot.history[key].slice(0, index + 1);
             frameHighs[key] = snapshot.highs[key][index];
             var count = snapshot.history[key][index];
             if (hasStorageField(TIERS, key)) counts[key] = count;
-            // A tier is "at high" in playback if count > 0 and count >= the running high
             if (count > 0 && count >= snapshot.highs[key][index]) {
                 playbackNewHighTiers[key] = true;
             }
@@ -274,7 +272,7 @@ const ViewerTracker = (function() {
             anonymousCount: anonymousCount, fullRoomTotal: total + anonymousCount,
             roomTotalHigh: frameHighs.roomTotal, history: frameHistory, highs: frameHighs,
             uniqueCount: null, index: index, timestamp: snapshot.history.timestamps[index],
-            playbackNewHighTiers: playbackNewHighTiers }; // Pass the computed highlights
+            playbackNewHighTiers: playbackNewHighTiers };
     }
 
     function isPlaybackCurrent(state) {
@@ -1768,27 +1766,33 @@ const ViewerTracker = (function() {
             var mins = actualMinutes % 60;
             return ' vs ' + hours + 'h' + (mins > 0 ? mins : '');
         };
+        // UPDATED: Removed arrows/dots, using color-coded backgrounds only
         function buildTrendItem(name, current, prev, isSpecial, isLarge) {
             var diff = current - prev;
-            var trend = diff > 0 ? 'up' : diff < 0 ? 'down' : 'stable';
-            var trendIcon = TREND_ICONS[trend];
             var deltaText = diff !== 0 ? (diff > 0 ? '+' + diff : diff) : '';
             var deltaColor = diff > 0 ? '#32CD32' : '#ff4444';
-            var bgStyle = isSpecial ?
-                'background:rgba(255,105,180,0.15);border:1px solid #ff69b4;' :
-                'background:rgba(255,255,255,0.05);';
+            // Color-coded background based on delta direction
+            var bgStyle;
+            if (isSpecial) {
+                bgStyle = 'background:rgba(255,105,180,0.15);border:1px solid #ff69b4;';
+            } else if (diff > 0) {
+                bgStyle = 'background:rgba(50, 205, 50, 0.15);';  // Green for positive
+            } else if (diff < 0) {
+                bgStyle = 'background:rgba(255, 85, 85, 0.15);';   // Red for negative
+            } else {
+                bgStyle = 'background:rgba(255, 215, 0, 0.15);';   // Yellow for stable
+            }
             var padding = isLarge ? '4px 10px' : '2px 6px';
             var fontSize = isLarge ? '12px' : '10px';
-            var containerSize = isLarge ? '28px' : '22px';
             var deltaFont = fontSize;
             if (deltaText) {
                 var dlen = String(Math.abs(diff)).length;
                 if (dlen >= 4) deltaFont = '8px';
                 else if (dlen === 3) deltaFont = '10px';
             }
+            // Removed the trendIcon span - only colors indicate direction now
             return '<div style="display:flex;align-items:center;gap:4px;' + bgStyle + 'padding:' + padding + ';border-radius:4px;">' +
                 '<span style="font-size:' + fontSize + ';">' + name + '</span>' +
-                '<span style="display:flex;align-items:center;justify-content:center;width:' + containerSize + ';height:' + containerSize + ';">' + trendIcon + '</span>' +
                 (deltaText ? '<span style="font-size:' + deltaFont + ';font-weight:bold;color:' + deltaColor + ';">' + deltaText + '</span>' : '') +
                 '</div>';
         }
@@ -2584,7 +2588,6 @@ const ViewerTracker = (function() {
             history: history, uniqueCount: null, isPlayback: false });
     }
 
-    // FIXED: Updated renderDisplayFrame to use playbackNewHighTiers when in playback mode
     function renderDisplayFrame(frame) {
         var counts = frame.counts;
         var total = frame.total;
@@ -2593,7 +2596,6 @@ const ViewerTracker = (function() {
         var fullRoomTotal = frame.fullRoomTotal;
         var roomTotalHigh = frame.roomTotalHigh;
         var displayHistory = frame.history;
-        // FIXED: Use playback-specific highlights when in playback mode
         var highlights = frame.isPlayback ? frame.playbackNewHighTiers : newHighTiers;
         var withTokensPct = total > 0 ? Math.round((withTokens / total) * 100) + '%' : '0%';
         var registeredPct = fullRoomTotal > 0 ? Math.round((total / fullRoomTotal) * 100) + '%' : '0%';
@@ -2623,7 +2625,6 @@ const ViewerTracker = (function() {
                 var highVal = highResult.value;
                 if (countEl) countEl.textContent = currentVal;
                 if (highEl) highEl.textContent = 'H:' + highVal.toLocaleString();
-                // FIXED: Use highlights object (works for both live and playback)
                 if (rowEl) {
                     if (highlights && highlights[tier]) {
                         rowEl.style.background = 'rgba(50, 205, 50, 0.15)';
