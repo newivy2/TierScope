@@ -9,6 +9,7 @@ A Tampermonkey userscript that tracks viewer tiers on a Chaturbate broadcast and
 * **Tier tracking**: Counts the color order Chaturbate shows: red, green, dark purple, light purple, dark blue, light blue, grey, plus anonymous.
 * **Trend display**: After the first scan, each tier gets an arrow. Green is up, red is down, a yellow dot is unchanged. The number next to the arrow is the change since the selected point. Comparison can be Last, 5m, 15m, 30m, 1h, or Start. Auto-escalation moves that window as the session grows, and it stops at 1h.
 * **Sparklines and highs**: Every tier, the colored-user total, the registered total, and anonymous viewers keep a sparkline and a session high.
+* **Session-high highlight**: A row turns light green while its count is above zero and equal to the session high. A dip clears it. Returning to that same high turns it green again.
 * **Female / trans overlay**: ♀⚧ is counted on top of the color tiers. It is not its own color.
 * **Replay**: Plays the history already saved for this room. Counts, highs, and sparklines follow the replay cursor. Live scanning keeps running and is not written into the replay you started.
 * **Session report**: Downloads a text file with highs and when they were hit, the current breakdown, and the last acquisition source.
@@ -69,6 +70,7 @@ The default scan is **60 seconds**. Chaturbate does not always refresh the user 
 * **Pause / play**: The button in the mini view and the one in Controls do the same thing. Pausing stops the timer and the scans. The session stays saved.
 * **Timer**: The mini view has − / + and presets (30s, 60s, 2m, 5m).
 * **Expand**: The full panel shows one row per tier, then the colored total (💎), registered total (📊), and anonymous count (👻).
+* **Session high**: A light green row means that count is at its high for this session, and the count is above zero. 
 * **Trend**: Displays the change since the selected comparison point (Last, 5m, 15m, 30m, 1h, Start). Clicking a preset turns auto-escalation off. AUTO turns it back on.
 * **Replay**: In Controls, **Replay** plays the history saved for this room. The header switches to `PLAYBACK`. Pause, the scrubber, and 0.5× / 1× / 2× control only the replay. Recorded time runs at 60×, and a long session is capped at 30 seconds. One saved scan has no span to play, so Play stays off and that point is shown. Samples that arrive while you are watching are kept for the live session, not added to this replay. **Return to Live** paints the current session again. Minimize is locked until you return.
 * **Report**: Downloads the session as a text file. Highs, the current breakdown, and the ♀⚧ totals are included.
@@ -156,7 +158,8 @@ These follow the classes Chaturbate shows in the Users tab:
 
 | Version | Status | Notes |
 | --- | --- | --- |
-| **3.1.1.0** | **Current** | Replay added. Replay copies the saved history and does not stop live scanning. Unique-viewer count removed from the header and the report |
+| **3.1.1.1** | **Current** | Session-high highlight. A row is light green while its count is above zero and at the session high, including a return to that high after a dip |
+| 3.1.1.0 | Legacy | Replay added. Replay copies the saved history and does not stop live scanning. Unique-viewer count removed from the header and the report |
 | 3.1.0 | Legacy | API-first acquisition with DOM fallback. Storage schema v1. Acquisition status line. |
 | 3.0.7 | Legacy | Trend preset auto-escalation. |
 | 3.0.4 | Legacy | Trend presets: Last, 5m, 15m, 30m, 1h, Start. |
