@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.1.1.0
+// @version      3.1.1.2
 // @description  TierScope - Viewer visualizer with trend tracking and reports
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -13,82 +13,13 @@
 // @run-at       document-end
 // ==/UserScript==
 
-/*
- * TierScope 3.1 architecture
- *
- * A Chaturbate room audience visualizer/tracker. Normal acquisition uses the
- * same-origin /api/getchatuserlist/ API, with a default interval of 60 seconds
- * after the preceding acquisition completes. Accepted API samples do not require
- * chat-tab manipulation. DOM scanning is a conservative fallback after API failure
- * or invalidity. Each room waits at least 60 seconds after a fallback completes
- * before its next fallback attempt; API retries keep their own cadence.
- *
- * Validated, current-room samples feed counts, trend deltas, sparklines, highs,
- * unique-user/session statistics and reports. Rejected samples leave accepted
- * data intact and add no history point. Per-room history/session state is saved
- * through Tampermonkey storage under tierscope:v1:<room>.
- *
- * LIVE and PLAYBACK select presentation only. Replay takes a room-bound copy of
- * the retained history, derives counts/highs through its cursor, and paints the
- * same rows/canvases without replacing live acquisition or saved-session state.
- * Its separate clock compresses recorded time at 60x, capped at 30 seconds for
- * the automatic whole-range replay. Video export is a future downstream layer.
- *
- * Storage schema version describes structural compatibility; producer version
- * identifies the TierScope application that last saved the record. Legacy
- * 3.0-format records qualify as schema 1 only after structural validation and
- * gain metadata on their next successful save, without rewriting history.
- * Corrupt, unsupported and newer-schema records are retained and protected
- * against automatic overwrite. Live users and their acquisition source/time
- * are intentionally not restored as though a saved session were a current sample.
- *
- * Compact API interpretation:
- *   response   := anonymousCount,userRecord,userRecord,...
- *   userRecord := username|class|gender|flag
- *   A scalar-only response represents zero named records; validity checks still apply.
- *
- *   class:  o  Orange broadcaster/room owner (not a viewer tier)
- *           m  Red             f  Green
- *           l  Dark Purple     p  Light Purple
- *           tr Dark Blue       t  Light Blue       g  Grey
- *   These class/color names follow Chaturbate terminology, not historical
- *   TierScope labels. Internal purple/pink/gray keys remain storage-compatible.
- *
- *   gender: m  Man    f  Woman    c  Couple    s  Trans
- *   flag:   retained as rawFlag; its meaning is not inferred by TierScope.
- *
- * API Total Users = Anonymous + Registered. Registered includes every accepted
- * named record, including the owner. The seven viewer-tier counts exclude the
- * owner and unknown-class records, so their sum need not equal Registered.
- *
- * Known semantic limits:
- * - rawFlag is preserved without assigning it product meaning.
- * - The site's Trans category does not give this project enough information to
- *   distinguish Transfemme / Transmasc / Non-binary.
- * - The original Woman + Trans (♀⚧) overlay is preserved pending clarification
- *   of the combined metric's product meaning by the original author.
- * - DOM fallback depends on Chaturbate's page structure and remains secondary
- *   to API acquisition.
- * - Room-state/HLS/JPEG and offline/private/hidden detection are future work,
- *   outside this beta.
- */
-
 const ViewerTracker = (function() {
     'use strict';
 
-    // ---------------------------------------------------------------------------
-    // Constants and configuration
-    // ---------------------------------------------------------------------------
-
-    const TIERSCOPE_VERSION = '3.1.0-beta.2';
+    const TIERSCOPE_VERSION = '3.1.1.1';
     const API_TIMEOUT_MS = 10000;
-    // API-first acquisition keeps the author-requested 60-second normal cadence.
-    // Trend comparison windows are independent; DOM acquisition is fallback-only.
     const DEFAULT_API_INTERVAL_SECONDS = 60;
     const DOM_FALLBACK_INTERVAL_SECONDS = 60;
-
-    // Schema changes follow persisted structure, not application release numbers.
-    // Producer metadata alone never authorizes interpreting an unfamiliar schema.
     const STORAGE_SCHEMA_VERSION = 1;
     const STORAGE_KEY_PREFIX = 'tierscope:v1:';
     const STORAGE_MAX_AGE_MS = 3 * 60 * 60 * 1000;
@@ -96,7 +27,6 @@ const ViewerTracker = (function() {
         'female-trans', 'withTokens', 'total', 'anonymous'];
     const STORAGE_NULLABLE_TIMES = ['withTokensHighTime', 'totalHighTime', 'anonHighTime',
         'femaleTransHighTime', 'roomTotalHighTime', 'trackingStartTime'];
-    // Per-key protection survives room navigation for the lifetime of this page.
     var sessionStorageStatus = new Map();
     var activeSessionStorageKey = null;
 
@@ -134,10 +64,6 @@ const ViewerTracker = (function() {
         }
     };
 
-    // ---------------------------------------------------------------------------
-    // Runtime/session state and DOM health
-    // ---------------------------------------------------------------------------
-
     let domHealthStatus = {
         lastCheck: 0,
         userListTabFound: false,
@@ -148,15 +74,10 @@ const ViewerTracker = (function() {
     var healthCheckInterval = null;
     var initGuard = 0;
     var urlCheckInterval = null;
-    // initGuard retires room initialization; scanEpoch retires individual scans.
-    // Late work must satisfy both guards and the captured URL before acceptance.
     var scanEpoch = 0;
     var sessionUniqueUsers = {};
-    // Historical state survives reload; acquisition source/age describes live data.
-    // Never make a restored history look like a newly acquired sample.
     var lastAcceptedAcquisition = null;
     var lastAcquisitionAttemptSource = 'API';
-    // Request pacing survives Reset and returning to a room during this page session.
     var domFallbackReadyAtByRoom = new Map();
     var freshnessInterval = null;
     var nextScanAt = 0;
@@ -169,12 +90,9 @@ const ViewerTracker = (function() {
     };
 
     var hasTrendBaseline = false;
-    
-    // Trend comparison mode - 'last', '5min', '15min', '30min', '1hour', 'start'
     var trendComparisonMode = 'last';
-    
-    // Auto-escalation flag - set to false when user manually selects a preset
     var autoTrendEscalation = true;
+    var newHighTiers = {};
 
     function validateDOMHealth() {
         const now = Date.now();
@@ -229,10 +147,6 @@ const ViewerTracker = (function() {
         return health;
     }
 
-    // ---------------------------------------------------------------------------
-    // Accepted sample and presentation state
-    // ---------------------------------------------------------------------------
-
     var users = new Map();
     var previousUserCount = 0;
     var previousRoomTotal = 0;
@@ -275,17 +189,11 @@ const ViewerTracker = (function() {
     };
     var MAX_HISTORY_LENGTH = 10000;
 
-    // ---------------------------------------------------------------------------
-    // Tier presentation
-    // ---------------------------------------------------------------------------
-
     var TIERS = {
         'red': { name: 'Red', desc: '', color: '#DC0000' },
         'green': { name: 'Green', desc: '', color: '#69BE45' },
-        // Keep schema-1 keys; use Chaturbate category names for presentation.
         'purple': { name: 'Dark Purple', desc: '', color: '#804BAA' },
         'pink': { name: 'Light Purple', desc: '', color: '#BE6AFF' },
-        // Preserve 3.0.7 categories: tr/tippedRecently is Dark Blue; t/hasTokens is Light Blue.
         'dark-blue': { name: 'Dark Blue', desc: '', color: '#393993' },
         'light-blue': { name: 'Light Blue', desc: '', color: '#1E5FC8' },
         'gray': { name: 'Grey', desc: '', color: '#6B6A6F' },
@@ -298,7 +206,6 @@ const ViewerTracker = (function() {
         stable: '<svg width="16" height="16" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="#ffd43b"/></svg>'
     };
 
-    // Preset configuration
     const TREND_PRESETS = {
         'last': { label: 'Last', ms: 0 },
         '5min': { label: '5m', ms: 5 * 60 * 1000 },
@@ -307,10 +214,6 @@ const ViewerTracker = (function() {
         '1hour': { label: '1h', ms: 60 * 60 * 1000 },
         'start': { label: 'Start', ms: -1 }
     };
-
-    // ---------------------------------------------------------------------------
-    // Playback: volatile presentation state, independent of acquisition/storage
-    // ---------------------------------------------------------------------------
 
     var presentationMode = 'LIVE';
     var playback = null;
@@ -325,8 +228,6 @@ const ViewerTracker = (function() {
             highs[key] = [];
         });
         copiedHistory.timestamps.forEach(function(timestamp, index) {
-            // Existing sessions may contain duplicate times or a wall-clock correction.
-            // Clamp only this presentation timeline; never rewrite saved timestamps.
             timeline.push(Math.max(index ? timeline[index - 1] : 0, timestamp - firstTimestamp));
             STORAGE_HISTORY_SERIES.forEach(function(key) {
                 highs[key].push(Math.max(index ? highs[key][index - 1] : 0, copiedHistory[key][index]));
@@ -343,7 +244,6 @@ const ViewerTracker = (function() {
         if (!snapshot || !snapshot.timeline.length) return null;
         var position = Number(positionMs);
         position = Number.isFinite(position) ? Math.max(0, Math.min(snapshot.durationMs, position)) : 0;
-        // Upper-bound lookup keeps recorded order for samples sharing a timestamp.
         var low = 0;
         var high = snapshot.timeline.length;
         while (low < high) {
@@ -355,10 +255,17 @@ const ViewerTracker = (function() {
         var frameHistory = { timestamps: snapshot.history.timestamps.slice(0, index + 1) };
         var frameHighs = {};
         var counts = {};
+        // NEW: Compute which tiers are at their high for this playback frame
+        var playbackNewHighTiers = {};
         STORAGE_HISTORY_SERIES.forEach(function(key) {
             frameHistory[key] = snapshot.history[key].slice(0, index + 1);
             frameHighs[key] = snapshot.highs[key][index];
-            if (hasStorageField(TIERS, key)) counts[key] = snapshot.history[key][index];
+            var count = snapshot.history[key][index];
+            if (hasStorageField(TIERS, key)) counts[key] = count;
+            // A tier is "at high" in playback if count > 0 and count >= the running high
+            if (count > 0 && count >= snapshot.highs[key][index]) {
+                playbackNewHighTiers[key] = true;
+            }
         });
         frameHighs.roomTotal = snapshot.highs.roomTotal[index];
         var total = snapshot.history.total[index];
@@ -366,7 +273,8 @@ const ViewerTracker = (function() {
         return { counts: counts, total: total, withTokens: snapshot.history.withTokens[index],
             anonymousCount: anonymousCount, fullRoomTotal: total + anonymousCount,
             roomTotalHigh: frameHighs.roomTotal, history: frameHistory, highs: frameHighs,
-            uniqueCount: null, index: index, timestamp: snapshot.history.timestamps[index] };
+            uniqueCount: null, index: index, timestamp: snapshot.history.timestamps[index],
+            playbackNewHighTiers: playbackNewHighTiers }; // Pass the computed highlights
     }
 
     function isPlaybackCurrent(state) {
@@ -385,7 +293,6 @@ const ViewerTracker = (function() {
     function startPlaybackClock(state) {
         if (!state.playing || state.timer !== null) return;
         state.timer = setInterval(function() {
-            // A queued callback from a departed room or previous replay is inert.
             if (playback === state) tickPlayback(state);
         }, 50);
     }
@@ -397,11 +304,10 @@ const ViewerTracker = (function() {
             updatePlaybackControls();
             return true;
         } catch (error) {
-            // Replay failure may pause presentation, but never enter a scan rollback.
             state.playing = false;
             stopPlaybackClock(state);
             log('Playback paused after a presentation error: ' + error.message);
-            try { updatePlaybackControls(); } catch (controlError) { /* Keep live acquisition independent. */ }
+            try { updatePlaybackControls(); } catch (controlError) { }
             return false;
         }
     }
@@ -437,7 +343,6 @@ const ViewerTracker = (function() {
     function leavePlayback(renderLive) {
         if (typeof renderLive === 'undefined') renderLive = true;
         if (!playback && presentationMode === 'LIVE') return false;
-        // Navigation can precede its polling callback; do not repaint the prior room.
         var canRenderLive = renderLive && isPlaybackCurrent(playback);
         stopPlaybackClock(playback);
         playback = null;
@@ -523,8 +428,6 @@ const ViewerTracker = (function() {
         return paintPlayback(state);
     }
 
-    // Replay changes only presentation. Hidden LIVE elements retain their footprint
-    // and continue receiving timer/control updates while the trend layer is frozen.
     var playbackLayoutState = null;
 
     function updateReplayAvailability() {
@@ -624,10 +527,6 @@ const ViewerTracker = (function() {
         console.log('[TierScope ' + TIERSCOPE_VERSION + '] ' + msg);
     }
 
-    // ---------------------------------------------------------------------------
-    // Room/URL identification
-    // ---------------------------------------------------------------------------
-
     function getModelNameFromUrl(url) {
         if (!url) return 'unknown';
         var path = new URL(url).pathname;
@@ -647,10 +546,6 @@ const ViewerTracker = (function() {
         }
         return 'unknown';
     }
-
-    // ---------------------------------------------------------------------------
-    // Storage schema and persistence
-    // ---------------------------------------------------------------------------
 
     function getStorageKey(model) {
         return STORAGE_KEY_PREFIX + model.toLowerCase();
@@ -678,8 +573,6 @@ const ViewerTracker = (function() {
 
     function determineStorageSchema(data) {
         if (!isStorageObject(data)) throw new Error('Saved session must be an object');
-        // Missing metadata is only a candidate for the known 3.0/schema-1 layout.
-        // Blindly defaulting to schema 1 would make corrupt data look compatible.
         if (!hasStorageField(data, 'schemaVersion')) return { version: 1, legacy: true };
         if (!Number.isSafeInteger(data.schemaVersion) || data.schemaVersion < 0) {
             throw new Error('Invalid storage schemaVersion');
@@ -688,8 +581,6 @@ const ViewerTracker = (function() {
     }
 
     function migrateStoredSession(data, schema) {
-        // Add explicit migration steps here when a future representation is introduced.
-        // Producer version is provenance, not structural or semantic compatibility.
         if (schema.version > STORAGE_SCHEMA_VERSION) {
             throw new Error('Newer storage schema ' + schema.version + '; this build supports ' + STORAGE_SCHEMA_VERSION);
         }
@@ -749,11 +640,9 @@ const ViewerTracker = (function() {
         });
         if (hasStorageField(data, 'roomTotalHigh')) requireField(isStorageNumber(data.roomTotalHigh), 'roomTotalHigh');
         if (hasStorageField(data, 'pausedElapsedTime')) {
-            // Resume subtracts elapsed milliseconds from now to construct a timestamp.
             requireField(isStorageTimestamp(data.pausedElapsedTime) &&
                 data.pausedElapsedTime <= Math.min(data.timestamp, Date.now()), 'pausedElapsedTime');
         }
-        // Both trend preferences are existing 3.0.7 fields, not a history migration.
         if (hasStorageField(data, 'trendComparisonMode')) {
             requireField(typeof data.trendComparisonMode === 'string' &&
                 hasStorageField(TREND_PRESETS, data.trendComparisonMode), 'trendComparisonMode');
@@ -764,7 +653,6 @@ const ViewerTracker = (function() {
     }
 
     function normalizeStoredSession(data) {
-        // Defaults apply only to absent optional fields after the record has passed validation.
         var normalized = {
             timestamp: data.timestamp,
             history: Object.fromEntries(['timestamps'].concat(STORAGE_HISTORY_SERIES).map(function(field) {
@@ -781,7 +669,6 @@ const ViewerTracker = (function() {
             pausedElapsedTime: hasStorageField(data, 'pausedElapsedTime') ? data.pausedElapsedTime : 0
         };
         ['tierHighTimes', 'sessionUniqueUsers', 'sessionFemaleTransUsers'].forEach(function(field) {
-            // fromEntries preserves literal own keys such as __proto__ without invoking setters.
             normalized[field] = hasStorageField(data, field) ? Object.fromEntries(Object.entries(data[field])) : {};
         });
         STORAGE_NULLABLE_TIMES.forEach(function(field) {
@@ -790,8 +677,6 @@ const ViewerTracker = (function() {
         return normalized;
     }
 
-    // Refusing a record must not allow the resulting empty session to overwrite it.
-    // Protection is sticky until explicit Reset successfully deletes that room key.
     function protectSessionStorage(key, reason, producerVersion) {
         var prior = sessionStorageStatus.get(key);
         if (prior && prior.protected) return prior;
@@ -863,9 +748,6 @@ const ViewerTracker = (function() {
     function saveSession(model) {
         if (!model || model === 'unknown') return;
         var key = getStorageKey(model);
-        // Recheck changed storage from another tab/build before any write, including
-        // unload and navigation saves. Ownership also blocks uninitialized or wrong-
-        // room state; this read/write check is not an atomic cross-tab transaction.
         if (inspectStoredSession(model, false).protected || activeSessionStorageKey !== key) return;
         var saveData = {
             schemaVersion: STORAGE_SCHEMA_VERSION,
@@ -910,7 +792,6 @@ const ViewerTracker = (function() {
         var age = Date.now() - saved.data.timestamp;
         if (age > STORAGE_MAX_AGE_MS) {
             try {
-                // Only a fully validated, supported record may be destructively expired.
                 GM_deleteValue(key);
                 sessionStorageStatus.delete(key);
                 log('Compatible saved session expired (' + Math.round(age/60000) + ' min old), deleting');
@@ -930,8 +811,6 @@ const ViewerTracker = (function() {
         if (!model || model === 'unknown') return;
         var key = getStorageKey(model);
         try {
-            // Only explicit Reset authorizes discarding an incompatible saved record.
-            // Unlock after successful deletion; a failed delete must stay protected.
             GM_deleteValue(key);
             sessionStorageStatus.delete(key);
             log('Session deleted for ' + model);
@@ -941,10 +820,6 @@ const ViewerTracker = (function() {
             log('Reset cleared live tracking but saved storage remains protected: ' + e.message);
         }
     }
-
-    // ---------------------------------------------------------------------------
-    // Room-page detection and time formatting
-    // ---------------------------------------------------------------------------
 
     function isBroadcastRoom() {
         var path = window.location.pathname;
@@ -979,35 +854,24 @@ const ViewerTracker = (function() {
         return getModelNameFromUrl(location.href);
     }
 
-    // Check and auto-escalate trend mode based on elapsed time
-    // ---------------------------------------------------------------------------
-    // Tracking timer and AUTO trend behavior
-    // ---------------------------------------------------------------------------
-
     function checkTrendAutoEscalation() {
         if (!autoTrendEscalation || !trackingStartTime) return;
-        
         var elapsedMs = isPaused ? pausedElapsedTime : (Date.now() - trackingStartTime);
         var elapsedMin = elapsedMs / 60000;
-        
         var targetMode = 'last';
         if (elapsedMin >= 60) targetMode = '1hour';
         else if (elapsedMin >= 30) targetMode = '30min';
         else if (elapsedMin >= 15) targetMode = '15min';
         else if (elapsedMin >= 5) targetMode = '5min';
-        
         if (targetMode !== trendComparisonMode) {
             log('Auto-escalating trend mode: ' + trendComparisonMode + ' -> ' + targetMode + ' (' + Math.floor(elapsedMin) + ' min elapsed)');
-            
-            // Restored history has no live users yet; update controls without rendering empty counts.
             if (users.size === 0) {
                 trendComparisonMode = targetMode;
                 updateTrendPresetButtons();
-                updateAutoTrendButton(); // Update the AUTO button visual state
+                updateAutoTrendButton();
                 saveSession(getModelName());
                 return;
             }
-            
             setTrendComparisonMode(targetMode);
         }
     }
@@ -1027,8 +891,6 @@ const ViewerTracker = (function() {
             controlTimerEl.textContent = displayTime;
             controlTimerEl.style.color = displayColor;
         }
-        
-        // Check for auto-escalation every second
         checkTrendAutoEscalation();
     }
 
@@ -1081,24 +943,21 @@ const ViewerTracker = (function() {
         };
         hasTrendBaseline = false;
         trendComparisonMode = 'last';
-        autoTrendEscalation = true; // Reset auto-escalation
+        autoTrendEscalation = true;
+        newHighTiers = {};
         updateTrackingTimer();
     }
 
-    // Toggle auto trend escalation
     function toggleAutoTrendEscalation() {
         autoTrendEscalation = !autoTrendEscalation;
         updateAutoTrendButton();
         log('Auto trend escalation ' + (autoTrendEscalation ? 'enabled' : 'disabled'));
         saveSession(getModelName());
-        
-        // If just turned on, check immediately for catch-up (in case timer isn't running while paused)
         if (autoTrendEscalation) {
             checkTrendAutoEscalation();
         }
     }
 
-    // Update the AUTO button visual state
     function updateAutoTrendButton() {
         var btn = document.getElementById('btn-trend-auto');
         if (btn) {
@@ -1115,10 +974,6 @@ const ViewerTracker = (function() {
             }
         }
     }
-
-    // ---------------------------------------------------------------------------
-    // Reset and scan invalidation
-    // ---------------------------------------------------------------------------
 
     function resetAllTracking() {
         if (!confirm('Reset all tracking data?\n\nThis will clear:\n- All session history\n- Trend tracking\n- Elapsed timer\n- Female/Trans user list\n- Unique user count\n\nA new scan will start immediately.')) {
@@ -1150,7 +1005,8 @@ const ViewerTracker = (function() {
         };
         hasTrendBaseline = false;
         trendComparisonMode = 'last';
-        autoTrendEscalation = true; // Reset auto-escalation on manual reset
+        autoTrendEscalation = true;
+        newHighTiers = {};
         history = {
             timestamps: [],
             'red': [], 'green': [], 'purple': [], 'pink': [], 'dark-blue': [], 'light-blue': [], 'gray': [], 'female-trans': [],
@@ -1178,17 +1034,10 @@ const ViewerTracker = (function() {
         setTimeout(function() {
             if (isAcquisitionCurrent(resetContext)) performScanThenReturn(true);
         }, 500);
-        
-        // Repaint buttons after reset so AUTO shows green and Last is highlighted
         updateTrendPresetButtons();
         updateAutoTrendButton();
-        
         log('Reset complete - starting fresh scan (epoch: ' + scanEpoch + ')');
     }
-
-    // ---------------------------------------------------------------------------
-    // DOM classification and count helpers
-    // ---------------------------------------------------------------------------
 
     function getTierFromClassList(classList) {
         for (var i = 0; i < classList.length; i++) {
@@ -1217,8 +1066,6 @@ const ViewerTracker = (function() {
         return 'gray';
     }
 
-    // DOM and API feed the same preserved Woman OR Trans overlay; the product
-    // meaning awaits author clarification, without inferring a Trans subdivision.
     function getGenderFromElement(el) {
         var genderImg = el.querySelector('img[data-testid="gender-icon"], img[title="Trans"], img[title="Female"], img[title="Male"], img[title="Couple"]');
         if (!genderImg) {
@@ -1253,7 +1100,6 @@ const ViewerTracker = (function() {
     }
 
     function getAnonymousCount() {
-        // API supplies Anonymous directly; only DOM samples need a residual.
         if (lastAcceptedAcquisition && lastAcceptedAcquisition.source === 'API') {
             return lastAcceptedAcquisition.api.anonymousCount;
         }
@@ -1291,10 +1137,6 @@ const ViewerTracker = (function() {
         return null;
     }
 
-    // ---------------------------------------------------------------------------
-    // Sample validity
-    // ---------------------------------------------------------------------------
-
     function isScanValid(newUserCount, newRoomTotal) {
         if (previousRoomTotal === 0) return true;
         if (newRoomTotal === 0 && previousRoomTotal > 0) {
@@ -1312,10 +1154,6 @@ const ViewerTracker = (function() {
         }
         return true;
     }
-
-    // ---------------------------------------------------------------------------
-    // Report generation
-    // ---------------------------------------------------------------------------
 
     function downloadTrackingReport() {
         var modelName = getModelName();
@@ -1452,10 +1290,6 @@ const ViewerTracker = (function() {
         URL.revokeObjectURL(url);
     }
 
-    // ---------------------------------------------------------------------------
-    // API parser
-    // ---------------------------------------------------------------------------
-
     function parseGetChatUserListResponse(text) {
         if (typeof text !== 'string' || !text.trim()) throw new Error('Empty API response');
         var parts = text.trim().split(',');
@@ -1463,11 +1297,6 @@ const ViewerTracker = (function() {
         var anonymousCount = Number(parts[0]);
         if (!Number.isSafeInteger(anonymousCount)) throw new Error('Unsafe API anonymous count');
         var classTiers = { m: 'red', f: 'green', l: 'purple', p: 'pink', tr: 'dark-blue', t: 'light-blue', g: 'gray' };
-        // ♀⚧ preserves the original Woman OR Trans metric (internal female/trans).
-        // API s identifies Chaturbate's Trans category; available project evidence
-        // does not distinguish Transfemme / Transmasc / Non-binary. The combined
-        // metric's product meaning awaits clarification from the original author;
-        // preserve the implementation rather than infer a different population.
         var genders = { m: 'male', f: 'female', s: 'trans', c: 'couple' };
         var seen = new Set();
         var parsedUsers = [];
@@ -1477,8 +1306,6 @@ const ViewerTracker = (function() {
             var fields = parts[i].split('|');
             if (fields.length !== 4 || !/^[A-Za-z0-9_-]{2,30}$/.test(fields[0]) ||
                 fields.slice(1).some(function(field) { return !/^[^\s|,<>\x00-\x1f]+$/.test(field); })) {
-                // Partial acceptance would silently undercount Registered and skew
-                // every derived statistic. Reject the entire malformed sample.
                 throw new Error('Malformed API record at index ' + i);
             }
             var username = fields[0];
@@ -1487,9 +1314,6 @@ const ViewerTracker = (function() {
             seen.add(key);
             var rawClass = fields[1];
             var genderCode = fields[2];
-            // Owner and unfamiliar class codes stay outside the seven viewer tiers.
-            // Preserve raw codes for diagnostics instead of assigning a guessed tier
-            // or gender; all structurally accepted records still count as Registered.
             var isOwner = rawClass === 'o';
             var tier = Object.prototype.hasOwnProperty.call(classTiers, rawClass) ? classTiers[rawClass] : null;
             var gender = Object.prototype.hasOwnProperty.call(genders, genderCode) ? genders[genderCode] : 'unknown';
@@ -1498,7 +1322,6 @@ const ViewerTracker = (function() {
             parsedUsers.push({ username: username, rawClass: rawClass, tier: tier,
                 genderCode: genderCode, gender: gender, rawFlag: fields[3], isOwner: isOwner });
         }
-        // Every accepted record, including owners and unknown classes, is registered.
         var registeredCount = parsedUsers.length;
         var totalUsers = anonymousCount + registeredCount;
         if (!Number.isSafeInteger(totalUsers)) throw new Error('Unsafe API total users');
@@ -1507,11 +1330,6 @@ const ViewerTracker = (function() {
             diagnostics: { unknownClasses: unknownClasses, unknownGenders: unknownGenders } };
     }
 
-    // ---------------------------------------------------------------------------
-    // Acquisition identity and validation
-    // ---------------------------------------------------------------------------
-
-    // URL identity closes the navigation-poll gap; generation/epoch retire late work.
     function isAcquisitionCurrent(context) {
         return context.epoch === scanEpoch && context.generation === initGuard &&
             context.url === location.href;
@@ -1532,10 +1350,6 @@ const ViewerTracker = (function() {
         }
     }
 
-    // ---------------------------------------------------------------------------
-    // API acquisition
-    // ---------------------------------------------------------------------------
-
     async function acquireAPISnapshot(context) {
         if (!context.room || context.room === 'unknown') throw new Error('No current room username');
         var url = new URL('/api/getchatuserlist/', location.origin);
@@ -1543,8 +1357,6 @@ const ViewerTracker = (function() {
         url.searchParams.set('private', 'false');
         url.searchParams.set('sort_by', 'a');
         url.searchParams.set('exclude_staff', 'false');
-        // The timeout covers headers and body, so a stalled response cannot hold
-        // acquisition indefinitely. Parsing produces a candidate, not live state.
         var controller = new AbortController();
         var timeout;
         try {
@@ -1563,7 +1375,6 @@ const ViewerTracker = (function() {
                 })
             ]);
             var snapshot = parseGetChatUserListResponse(text);
-            // Normalize the derived total for the shared API/DOM acquisition interface.
             snapshot.roomTotal = snapshot.totalUsers;
             snapshot.source = 'API';
             snapshot.timestamp = Date.now();
@@ -1572,10 +1383,6 @@ const ViewerTracker = (function() {
             clearTimeout(timeout);
         }
     }
-
-    // ---------------------------------------------------------------------------
-    // DOM fallback acquisition
-    // ---------------------------------------------------------------------------
 
     async function acquireDOMSnapshot(context, returnToChat) {
         var usersTab = findTab('users');
@@ -1621,9 +1428,6 @@ const ViewerTracker = (function() {
         }
         var roomKey = context.room.toLowerCase();
         var fallbackIntervalMs = Math.max(DOM_FALLBACK_INTERVAL_SECONDS, scanIntervalSeconds) * 1000;
-        // Reserve before tab access so Reset/resume cannot immediately bypass the
-        // cooldown while an attempt is pending. Completion extends the reservation
-        // even for failed/stale work; this is a deadline, not an indefinite lock.
         domFallbackReadyAtByRoom.set(roomKey, Date.now() + fallbackIntervalMs);
         log('Attempting DOM fallback; room=' + context.room);
         try {
@@ -1638,29 +1442,18 @@ const ViewerTracker = (function() {
                 '; retaining previous valid data (no history point)');
             return null;
         } finally {
-            // Include failed/stale attempts and keep cooldown scoped to their room.
             domFallbackReadyAtByRoom.set(roomKey, Math.max(domFallbackReadyAtByRoom.get(roomKey) || 0,
                 Date.now() + fallbackIntervalMs));
         }
     }
-
-    // ---------------------------------------------------------------------------
-    // Snapshot acceptance
-    // ---------------------------------------------------------------------------
 
     function acceptRoomSnapshot(snapshot, modelName) {
         users = new Map(snapshot.users.map(function(user) { return [user.username, user]; }));
         roomTotal = snapshot.roomTotal;
         femaleTransUsernames = [];
         var model = modelName.toLowerCase();
-        // Session name lists exclude the current room username. Numeric Registered
-        // and the Woman + Trans overlay still include that record when applicable;
-        // this asymmetry preserves the original tracker's session-list behavior.
         users.forEach(function(user) {
             if (user.username.toLowerCase() !== model) {
-                // Usernames are data, including own keys such as __proto__ and
-                // constructor. Define properties without invoking inherited setters,
-                // while retaining the existing plain-object storage representation.
                 Object.defineProperty(sessionUniqueUsers, user.username.toLowerCase(),
                     { value: true, enumerable: true, configurable: true, writable: true });
                 if (user.gender === 'female' || user.gender === 'trans') {
@@ -1694,7 +1487,6 @@ const ViewerTracker = (function() {
         return null;
     }
 
-    // Failed attempts and restored history cannot refresh accepted-sample age.
     function updateAcquisitionStatus() {
         var el = document.getElementById('acquisition-status');
         if (!el) return;
@@ -1708,10 +1500,6 @@ const ViewerTracker = (function() {
         el.title = 'Last accepted sample: ' + new Date(lastAcceptedAcquisition.timestamp).toISOString() +
             '. TierScope and the USERS tab refresh independently.';
     }
-
-    // ---------------------------------------------------------------------------
-    // Acquisition transaction and sample commit
-    // ---------------------------------------------------------------------------
 
     async function performScanThenReturn(returnToChat) {
         if (typeof returnToChat === 'undefined') returnToChat = true;
@@ -1731,8 +1519,6 @@ const ViewerTracker = (function() {
                 }
                 return;
             }
-            // Roll back every accepted-sample field if processing fails. Session
-            // lists, highs and bounded history must not retain a partial sample.
             priorState = {
                 users: users, roomTotal: roomTotal, previousUserCount: previousUserCount,
                 previousRoomTotal: previousRoomTotal, previousCounts: previousCounts,
@@ -1746,7 +1532,8 @@ const ViewerTracker = (function() {
                 roomTotalHigh: roomTotalHigh, roomTotalHighTime: roomTotalHighTime,
                 tierHighTimes: Object.fromEntries(Object.entries(tierHighTimes)),
                 withTokensHighTime: withTokensHighTime, totalHighTime: totalHighTime,
-                anonHighTime: anonHighTime, femaleTransHighTime: femaleTransHighTime
+                anonHighTime: anonHighTime, femaleTransHighTime: femaleTransHighTime,
+                newHighTiers: Object.fromEntries(Object.entries(newHighTiers))
             };
             var diagnostics = acceptRoomSnapshot(snapshot, context.room);
             var counts = { 'red': 0, 'green': 0, 'purple': 0, 'pink': 0, 'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0 };
@@ -1766,14 +1553,10 @@ const ViewerTracker = (function() {
                 roomTotalHigh = currentRoomTotal;
                 roomTotalHighTime = Date.now();
             }
-
-            // The original trend presets read completed history, including this sample.
-            // Keep history before display/trends, inside the rollback transaction.
             saveToHistory();
             hasTrendBaseline = true;
             updateDisplay();
             updateTrendDisplay();
-
             previousCounts = {
                 'red': counts['red'] || 0,
                 'green': counts['green'] || 0,
@@ -1787,7 +1570,6 @@ const ViewerTracker = (function() {
                 'total': total || 0,
                 'anonymous': anonymousCount || 0
             };
-
             updateAcquisitionStatus();
             saveSession(context.room);
             if (diagnostics) console.log('[TierScope ' + TIERSCOPE_VERSION + '] API scan accepted', diagnostics);
@@ -1811,6 +1593,7 @@ const ViewerTracker = (function() {
                 totalHighTime = priorState.totalHighTime;
                 anonHighTime = priorState.anonHighTime;
                 femaleTransHighTime = priorState.femaleTransHighTime;
+                newHighTiers = priorState.newHighTiers || {};
                 try {
                     var trendEl = document.getElementById('trend-container');
                     if (trendEl && typeof priorState.trendHTML === 'string') trendEl.innerHTML = priorState.trendHTML;
@@ -1831,24 +1614,13 @@ const ViewerTracker = (function() {
         }
     }
 
-    // Helper function to get comparison counts based on selected time mode
-    // Returns { counts: {}, short: boolean, actualMinutes: number }
-    // ---------------------------------------------------------------------------
-    // Trend comparison and rendering
-    // ---------------------------------------------------------------------------
-
     function getComparisonCounts() {
         if (trendComparisonMode === 'last') {
-            // Use history instead of previousCounts to avoid stale data when switching presets
             if (history.timestamps.length < 2) {
-                // Not enough history (need at least 1 previous scan) - return null to indicate "not ready"
                 return { counts: null, short: false, actualMinutes: 0 };
             }
-            
-            // Get the second-to-last entry (the scan before current)
             var lastIdx = history.timestamps.length - 2;
             var actualMinutes = Math.round((Date.now() - history.timestamps[lastIdx]) / 60000);
-            
             return {
                 counts: {
                     'red': history['red'][lastIdx] || 0,
@@ -1867,9 +1639,7 @@ const ViewerTracker = (function() {
                 actualMinutes: actualMinutes
             };
         }
-        
         if (trendComparisonMode === 'start') {
-            // Return first history entry or zeros if no history
             if (history.timestamps.length === 0) {
                 return {
                     counts: {
@@ -1900,34 +1670,24 @@ const ViewerTracker = (function() {
                 actualMinutes: startMinutes
             };
         }
-        
-        // Time-based modes - find latest scan at or before target time
         var preset = TREND_PRESETS[trendComparisonMode];
         if (!preset || preset.ms <= 0) return { counts: previousCounts, short: false, actualMinutes: 0 };
-        
         var targetTime = Date.now() - preset.ms;
         var idx = -1;
-        
-        // Find the latest scan that is at or before the target time
         for (var i = 0; i < history.timestamps.length; i++) {
             if (history.timestamps[i] <= targetTime) {
                 idx = i;
             } else {
-                break; // Timestamps are in order, so we can stop once we pass the target
+                break;
             }
         }
-        
-        var short = idx === -1; // No scan old enough means session is shorter than preset
-        if (short) idx = 0; // Use the oldest scan we have
-        
+        var short = idx === -1;
+        if (short) idx = 0;
         if (idx === -1 || history.timestamps.length === 0) {
             return { counts: previousCounts, short: false, actualMinutes: 0 };
         }
-        
-        // Calculate actual age of the comparison scan
         var actualMs = Date.now() - history.timestamps[idx];
         var actualMinutes = Math.round(actualMs / 60000);
-        
         return {
             counts: {
                 'red': history['red'][idx] || 0,
@@ -1947,7 +1707,6 @@ const ViewerTracker = (function() {
         };
     }
 
-    // Function to set trend comparison mode
     function setTrendComparisonMode(mode) {
         if (!TREND_PRESETS[mode] && mode !== 'last') return;
         trendComparisonMode = mode;
@@ -1956,7 +1715,6 @@ const ViewerTracker = (function() {
         saveSession(getModelName());
     }
 
-    // Update preset button visual states
     function updateTrendPresetButtons() {
         var buttons = document.querySelectorAll('.trend-preset-btn');
         buttons.forEach(function(btn) {
@@ -1977,16 +1735,12 @@ const ViewerTracker = (function() {
         if (presentationMode === 'PLAYBACK') return;
         var trendContainer = document.getElementById('trend-container');
         var trendHeaderLabel = document.getElementById('trend-header-label');
-        
         if (!trendContainer) return;
-
-        // Clear header label on early exit (Reset can leave "vs 4m" stuck)
         if (!hasTrendBaseline) {
             trendContainer.innerHTML = '<div style="font-size:8px;color:#666;text-align:center;padding:8px;">Waiting for scan...</div>';
             if (trendHeaderLabel) trendHeaderLabel.textContent = '📈 TREND';
             return;
         }
-
         var counts = { 'red': 0, 'green': 0, 'purple': 0, 'pink': 0, 'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0 };
         users.forEach(function(data) {
             if (counts[data.tier] !== undefined) counts[data.tier]++;
@@ -1997,22 +1751,16 @@ const ViewerTracker = (function() {
         var total = users.size;
         var withTokens = counts['red'] + counts['green'] + counts['purple'] + counts['pink'] + counts['dark-blue'] + counts['light-blue'];
         var anonymousCount = getAnonymousCount();
-        
-        // Get comparison counts and metadata
         var comparison = getComparisonCounts();
         var comparisonCounts = comparison.counts;
         var shortSession = comparison.short;
         var actualMinutes = comparison.actualMinutes;
-
-        // Handle "not ready" state (e.g., "Last" preset with fewer than 2 history points)
         if (!comparisonCounts) {
             var waitingText = history.timestamps.length === 1 ? 'Waiting for second scan...' : 'Waiting for scan...';
             trendContainer.innerHTML = '<div style="font-size:8px;color:#666;text-align:center;padding:8px;">' + waitingText + '</div>';
             if (trendHeaderLabel) trendHeaderLabel.textContent = '📈 TREND';
             return;
         }
-
-        // Helper to format short session label
         var getShortLabel = function() {
             if (!shortSession || actualMinutes <= 0) return '';
             if (actualMinutes < 60) return ' vs ' + actualMinutes + 'm';
@@ -2020,7 +1768,6 @@ const ViewerTracker = (function() {
             var mins = actualMinutes % 60;
             return ' vs ' + hours + 'h' + (mins > 0 ? mins : '');
         };
-
         function buildTrendItem(name, current, prev, isSpecial, isLarge) {
             var diff = current - prev;
             var trend = diff > 0 ? 'up' : diff < 0 ? 'down' : 'stable';
@@ -2033,61 +1780,42 @@ const ViewerTracker = (function() {
             var padding = isLarge ? '4px 10px' : '2px 6px';
             var fontSize = isLarge ? '12px' : '10px';
             var containerSize = isLarge ? '28px' : '22px';
-            
-            // All trend deltas share the original digit-based font sizing.
             var deltaFont = fontSize;
             if (deltaText) {
                 var dlen = String(Math.abs(diff)).length;
                 if (dlen >= 4) deltaFont = '8px';
                 else if (dlen === 3) deltaFont = '10px';
-                // 1-2 digits stay at default fontSize
             }
-            
             return '<div style="display:flex;align-items:center;gap:4px;' + bgStyle + 'padding:' + padding + ';border-radius:4px;">' +
                 '<span style="font-size:' + fontSize + ';">' + name + '</span>' +
                 '<span style="display:flex;align-items:center;justify-content:center;width:' + containerSize + ';height:' + containerSize + ';">' + trendIcon + '</span>' +
                 (deltaText ? '<span style="font-size:' + deltaFont + ';font-weight:bold;color:' + deltaColor + ';">' + deltaText + '</span>' : '') +
                 '</div>';
         }
-
-        // Build trend header with optional short session label
         var headerLabel = '📈 TREND';
         var shortLabel = getShortLabel();
-        
-        // Row 1: Red, Green, Dark Purple, Light Purple
         var html = '<div style="display:flex;justify-content:center;gap:6px;padding:4px 0;">';
         html += buildTrendItem(getTierMarker('red'), counts['red'] || 0, comparisonCounts['red'] || 0, false, false);
         html += buildTrendItem(getTierMarker('green'), counts['green'] || 0, comparisonCounts['green'] || 0, false, false);
         html += buildTrendItem(getTierMarker('purple'), counts['purple'] || 0, comparisonCounts['purple'] || 0, false, false);
         html += buildTrendItem(getTierMarker('pink'), counts['pink'] || 0, comparisonCounts['pink'] || 0, false, false);
         html += '</div>';
-
-        // Row 2: Dark Blue, Light Blue, Grey, Woman + Trans overlay
         html += '<div style="display:flex;justify-content:center;gap:6px;padding:4px 0;">';
         html += buildTrendItem(getTierMarker('dark-blue'), counts['dark-blue'] || 0, comparisonCounts['dark-blue'] || 0, false, false);
         html += buildTrendItem(getTierMarker('light-blue'), counts['light-blue'] || 0, comparisonCounts['light-blue'] || 0, false, false);
         html += buildTrendItem(getTierMarker('gray'), counts['gray'] || 0, comparisonCounts['gray'] || 0, false, false);
         html += buildTrendItem(getTierMarker('female-trans'), counts['female-trans'] || 0, comparisonCounts['female-trans'] || 0, false, false);
         html += '</div>';
-
-        // Larger summary row: With Tokens, Registered, Anonymous
         html += '<div style="display:flex;justify-content:center;gap:8px;padding:6px 0;">';
         html += buildTrendItem('💎', withTokens || 0, comparisonCounts.withTokens || 0, true, true);
         html += buildTrendItem('📊', total || 0, comparisonCounts.total || 0, false, true);
         html += buildTrendItem('👻', anonymousCount || 0, comparisonCounts.anonymous || 0, false, true);
         html += '</div>';
-
         trendContainer.innerHTML = html;
-        
-        // Update header label if needed (we need to update the DOM outside this container)
         if (trendHeaderLabel) {
             trendHeaderLabel.textContent = headerLabel + shortLabel;
         }
     }
-
-    // ---------------------------------------------------------------------------
-    // History and high-water tracking
-    // ---------------------------------------------------------------------------
 
     function saveToHistory() {
         var counts = { 'red': 0, 'green': 0, 'purple': 0, 'pink': 0, 'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0 };
@@ -2101,28 +1829,59 @@ const ViewerTracker = (function() {
         var withTokens = counts['red'] + counts['green'] + counts['purple'] + counts['pink'] + counts['dark-blue'] + counts['light-blue'];
         var anonymousCount = getAnonymousCount();
         var now = Date.now();
+        
         Object.keys(counts).forEach(function(tier) {
             var highResult = getHighValue(history[tier], counts[tier], now);
+            if (counts[tier] > 0 && counts[tier] >= highResult.value) {
+                newHighTiers[tier] = true;
+            } else {
+                delete newHighTiers[tier];
+            }
             if (highResult.isNew && highResult.time) {
                 tierHighTimes[tier] = highResult.time;
             }
         });
+        
         var withTokensResult = getHighValue(history['withTokens'], withTokens, now);
+        if (withTokens > 0 && withTokens >= withTokensResult.value) {
+            newHighTiers['withTokens'] = true;
+        } else {
+            delete newHighTiers['withTokens'];
+        }
         if (withTokensResult.isNew && withTokensResult.time) {
             withTokensHighTime = withTokensResult.time;
         }
+        
         var totalResult = getHighValue(history['total'], total, now);
+        if (total > 0 && total >= totalResult.value) {
+            newHighTiers['total'] = true;
+        } else {
+            delete newHighTiers['total'];
+        }
         if (totalResult.isNew && totalResult.time) {
             totalHighTime = totalResult.time;
         }
+        
         var anonResult = getHighValue(history['anonymous'], anonymousCount, now);
+        if (anonymousCount > 0 && anonymousCount >= anonResult.value) {
+            newHighTiers['anonymous'] = true;
+        } else {
+            delete newHighTiers['anonymous'];
+        }
         if (anonResult.isNew && anonResult.time) {
             anonHighTime = anonResult.time;
         }
+        
         var ftResult = getHighValue(history['female-trans'], counts['female-trans'], now);
+        if (counts['female-trans'] > 0 && counts['female-trans'] >= ftResult.value) {
+            newHighTiers['female-trans'] = true;
+        } else {
+            delete newHighTiers['female-trans'];
+        }
         if (ftResult.isNew && ftResult.time) {
             femaleTransHighTime = ftResult.time;
         }
+        
         history.timestamps.push(now);
         Object.keys(counts).forEach(function(tier) {
             history[tier].push(counts[tier]);
@@ -2142,12 +1901,6 @@ const ViewerTracker = (function() {
         }
     }
 
-    // ---------------------------------------------------------------------------
-    // Sparklines
-    // ---------------------------------------------------------------------------
-
-    // Ivy's original renderer (3.0.7), shared by LIVE and Playback.
-    // Playback selects recorded observations; drawing keeps their original geometry.
     function drawSparkline(canvasId, data, color, customHeight) {
         var canvas = document.getElementById(canvasId);
         if (!canvas) return;
@@ -2205,10 +1958,6 @@ const ViewerTracker = (function() {
         }
         return { value: newHigh, isNew: false };
     }
-
-    // ---------------------------------------------------------------------------
-    // Acquisition countdown
-    // ---------------------------------------------------------------------------
 
     function resetCountdown() {
         countdownSeconds = scanIntervalSeconds;
@@ -2314,10 +2063,6 @@ const ViewerTracker = (function() {
         }
     }
 
-    // ---------------------------------------------------------------------------
-    // Panel geometry and listener lifecycle
-    // ---------------------------------------------------------------------------
-
     function cleanupDragListeners() {
         for (var i = 0; i < dragListeners.length; i++) {
             var listener = dragListeners[i];
@@ -2421,10 +2166,6 @@ const ViewerTracker = (function() {
         window.addEventListener('resize', windowResizeHandler);
     }
 
-    // ---------------------------------------------------------------------------
-    // UI construction and controls
-    // ---------------------------------------------------------------------------
-
     function createPanel() {
         leavePlayback(false);
         cleanupDragListeners();
@@ -2490,7 +2231,7 @@ const ViewerTracker = (function() {
         Object.keys(TIERS).forEach(function(key) {
             var t = TIERS[key];
             html +=
-                '<div style="display:flex;align-items:center;padding:1px 3px;margin:1px 0;background:rgba(255,255,255,0.05);border-radius:3px;border-left:3px solid ' + t.color + ';">' +
+                '<div id="tier-row-' + key + '" data-tier="' + key + '" style="display:flex;align-items:center;padding:1px 3px;margin:1px 0;background:rgba(255,255,255,0.05);border-radius:3px;border-left:3px solid ' + t.color + ';">' +
                     '<div style="width:30px;flex-shrink:0;text-align:center;">' +
                         '<span style="font-size:14px;">' + getTierMarker(key) + '</span>' +
                     '</div>' +
@@ -2504,7 +2245,7 @@ const ViewerTracker = (function() {
 
         html +=
                 '<div style="border-top:1px solid #555;margin-top:4px;padding-top:4px;">' +
-                    '<div style="display:flex;align-items:center;padding:2px 3px;background:rgba(255,105,180,0.15);border-radius:3px;border:1px solid #ff69b4;margin-bottom:3px;">' +
+                    '<div id="tier-row-withtokens" data-tier="withtokens" style="display:flex;align-items:center;padding:2px 3px;background:rgba(255,105,180,0.15);border-radius:3px;border:1px solid #ff69b4;margin-bottom:3px;">' +
                         '<div style="width:30px;flex-shrink:0;text-align:center;">' +
                             '<span style="font-size:14px;">💎</span>' +
                         '</div>' +
@@ -2515,7 +2256,7 @@ const ViewerTracker = (function() {
                             '<div id="high-withtokens" style="font-size:8px;color:#32CD32;margin-top:1px;">H:0</div>' +
                         '</div>' +
                     '</div>' +
-                    '<div style="display:flex;align-items:center;padding:2px 3px;background:rgba(255,255,255,0.1);border-radius:3px;">' +
+                    '<div id="tier-row-total" data-tier="total" style="display:flex;align-items:center;padding:2px 3px;background:rgba(255,255,255,0.1);border-radius:3px;">' +
                         '<div style="width:30px;flex-shrink:0;text-align:center;">' +
                             '<span style="font-size:14px;">📊</span>' +
                         '</div>' +
@@ -2527,7 +2268,7 @@ const ViewerTracker = (function() {
                     '</div>' +
                 '</div>' +
 
-                '<div id="anon-rate-full" style="margin-top:5px;padding:5px;background:rgba(136,136,136,0.15);border-radius:3px;border:1px solid #888;">' +
+                '<div id="tier-row-anon" data-tier="anonymous" style="margin-top:5px;padding:5px;background:rgba(136,136,136,0.15);border-radius:3px;border:1px solid #888;">' +
                     '<div style="display:flex;align-items:center;">' +
                         '<div style="width:30px;flex-shrink:0;text-align:center;">' +
                             '<span style="font-size:14px;">👻</span>' +
@@ -2540,7 +2281,6 @@ const ViewerTracker = (function() {
                     '</div>' +
                 '</div>' +
 
-                // Trend section with preset buttons, AUTO toggle, and dynamic header label
                 '<div id="trend-section" style="position:relative;border-top:1px solid #4169E1;margin-top:5px;padding-top:5px;">' +
                     '<div id="live-trend">' +
                     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;flex-wrap:wrap;gap:2px;">' +
@@ -2571,7 +2311,6 @@ const ViewerTracker = (function() {
                     '</div>' +
                 '</div>' +
 
-                // Control field with timer on left, buttons centered
                 '<div id="control-field" style="margin-top:5px;padding:4px;background:rgba(65,105,225,0.15);border-radius:3px;border:1px solid #4169E1;">' +
                     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">' +
                         '<span style="font-size:9px;font-weight:bold;color:#4169E1;">🎛️ CONTROLS</span>' +
@@ -2667,30 +2406,24 @@ const ViewerTracker = (function() {
             };
         }
         
-        // Setup trend preset buttons - disable auto-escalation on manual click
         var trendPresetBtns = document.querySelectorAll('.trend-preset-btn');
         for (var k = 0; k < trendPresetBtns.length; k++) {
             trendPresetBtns[k].onclick = function() {
-                autoTrendEscalation = false; // User manually selected - disable auto-escalation
-                updateAutoTrendButton(); // Update the AUTO button to show disabled state
+                autoTrendEscalation = false;
+                updateAutoTrendButton();
                 var mode = this.dataset.mode;
                 setTrendComparisonMode(mode);
             };
         }
         
-        // Setup AUTO trend escalation toggle button
         var btnTrendAuto = document.getElementById('btn-trend-auto');
         if (btnTrendAuto) {
             btnTrendAuto.onclick = toggleAutoTrendEscalation;
         }
         
         updateTrendPresetButtons();
-        updateAutoTrendButton(); // Set initial state
+        updateAutoTrendButton();
     }
-
-    // ---------------------------------------------------------------------------
-    // Pause/resume and view controls
-    // ---------------------------------------------------------------------------
 
     function toggleAutoRefresh() {
         isAutoRefreshOn = !isAutoRefreshOn;
@@ -2799,10 +2532,6 @@ const ViewerTracker = (function() {
         updateDisplay();
     }
 
-    // ---------------------------------------------------------------------------
-    // DOM snapshot construction
-    // ---------------------------------------------------------------------------
-
     function scanUsers() {
         var userListTab = document.querySelector(DOM_SELECTORS.userListTab);
         if (!userListTab) throw new Error('UserListTab not found');
@@ -2823,7 +2552,6 @@ const ViewerTracker = (function() {
             if (username && !snapshotUsers.has(username)) {
                 var tier = getTierFromElement(el);
                 var gender = getGenderFromElement(el);
-                // Compact API fields and owner metadata are unavailable in the DOM.
                 snapshotUsers.set(username, { username: username, rawClass: null, tier: tier,
                     genderCode: null, gender: gender, rawFlag: null, isOwner: null });
             }
@@ -2832,10 +2560,6 @@ const ViewerTracker = (function() {
         return { source: 'DOM', timestamp: Date.now(), roomTotal: snapshotRoomTotal,
             users: Array.from(snapshotUsers.values()) };
     }
-
-    // ---------------------------------------------------------------------------
-    // Current-sample UI rendering
-    // ---------------------------------------------------------------------------
 
     function updateDisplay() {
         updateReplayAvailability();
@@ -2854,14 +2578,13 @@ const ViewerTracker = (function() {
             roomTotalHigh = fullRoomTotal;
             roomTotalHighTime = Date.now();
         }
-        // Keep the original live high-water accounting even when its paint is hidden.
         if (presentationMode === 'PLAYBACK') return;
         renderDisplayFrame({ counts: counts, total: total, withTokens: withTokens,
             anonymousCount: anonymousCount, fullRoomTotal: fullRoomTotal, roomTotalHigh: roomTotalHigh,
             history: history, uniqueCount: null, isPlayback: false });
     }
 
-    // Paint explicit values only. Historical frames never replace acquisition globals.
+    // FIXED: Updated renderDisplayFrame to use playbackNewHighTiers when in playback mode
     function renderDisplayFrame(frame) {
         var counts = frame.counts;
         var total = frame.total;
@@ -2870,6 +2593,8 @@ const ViewerTracker = (function() {
         var fullRoomTotal = frame.fullRoomTotal;
         var roomTotalHigh = frame.roomTotalHigh;
         var displayHistory = frame.history;
+        // FIXED: Use playback-specific highlights when in playback mode
+        var highlights = frame.isPlayback ? frame.playbackNewHighTiers : newHighTiers;
         var withTokensPct = total > 0 ? Math.round((withTokens / total) * 100) + '%' : '0%';
         var registeredPct = fullRoomTotal > 0 ? Math.round((total / fullRoomTotal) * 100) + '%' : '0%';
         var headerText = document.getElementById('header-text');
@@ -2892,29 +2617,56 @@ const ViewerTracker = (function() {
             Object.keys(TIERS).forEach(function(tier) {
                 var countEl = document.getElementById('count-' + tier);
                 var highEl = document.getElementById('high-' + tier);
+                var rowEl = document.getElementById('tier-row-' + tier);
                 var currentVal = counts[tier];
                 var highResult = getHighValue(displayHistory[tier], currentVal);
                 var highVal = highResult.value;
                 if (countEl) countEl.textContent = currentVal;
                 if (highEl) highEl.textContent = 'H:' + highVal.toLocaleString();
+                // FIXED: Use highlights object (works for both live and playback)
+                if (rowEl) {
+                    if (highlights && highlights[tier]) {
+                        rowEl.style.background = 'rgba(50, 205, 50, 0.15)';
+                    } else {
+                        rowEl.style.background = 'rgba(255,255,255,0.05)';
+                    }
+                }
             });
+            
             var withTokensCountEl = document.getElementById('count-withtokens');
             var withTokensPctEl = document.getElementById('pct-withtokens');
             var withTokensHighEl = document.getElementById('high-withtokens');
-            var totalEl = document.getElementById('count-total');
-            var totalHighEl = document.getElementById('high-total');
+            var withTokensRowEl = document.getElementById('tier-row-withtokens');
             var withTokensResult = getHighValue(displayHistory['withTokens'], withTokens);
-            var totalResult = getHighValue(displayHistory['total'], total);
-            var anonResult = getHighValue(displayHistory['anonymous'], anonymousCount);
             if (withTokensCountEl) withTokensCountEl.textContent = withTokens;
             if (withTokensPctEl) withTokensPctEl.textContent = withTokensPct;
             if (withTokensHighEl) withTokensHighEl.textContent = 'H:' + withTokensResult.value.toLocaleString();
+            if (withTokensRowEl) {
+                if (highlights && highlights['withTokens']) {
+                    withTokensRowEl.style.background = 'rgba(50, 205, 50, 0.15)';
+                } else {
+                    withTokensRowEl.style.background = 'rgba(255,105,180,0.15)';
+                }
+            }
+            
+            var totalEl = document.getElementById('count-total');
+            var totalHighEl = document.getElementById('high-total');
+            var totalRowEl = document.getElementById('tier-row-total');
+            var totalResult = getHighValue(displayHistory['total'], total);
             if (totalEl) totalEl.textContent = total;
             if (totalHighEl) totalHighEl.textContent = 'H:' + totalResult.value.toLocaleString();
+            if (totalRowEl) {
+                if (highlights && highlights['total']) {
+                    totalRowEl.style.background = 'rgba(50, 205, 50, 0.15)';
+                } else {
+                    totalRowEl.style.background = 'rgba(255,255,255,0.1)';
+                }
+            }
             
-            // Scale anon number font size based on digit count
             var fullAnonText = document.getElementById('anon-ratio-full');
             var anonHighEl = document.getElementById('high-anon');
+            var anonRowEl = document.getElementById('tier-row-anon');
+            var anonResult = getHighValue(displayHistory['anonymous'], anonymousCount);
             if (fullAnonText) {
                 var anonLabel = anonymousCount > 0 ? anonymousCount.toLocaleString() : '0';
                 var digits = String(Math.abs(anonymousCount)).length;
@@ -2922,18 +2674,20 @@ const ViewerTracker = (function() {
                 fullAnonText.style.fontSize = digits >= 6 ? '9px' : digits === 5 ? '11px' : '13px';
             }
             if (anonHighEl) anonHighEl.textContent = 'H:' + anonResult.value.toLocaleString();
+            if (anonRowEl) {
+                if (highlights && highlights['anonymous']) {
+                    anonRowEl.style.background = 'rgba(50, 205, 50, 0.15)';
+                } else {
+                    anonRowEl.style.background = 'rgba(136,136,136,0.15)';
+                }
+            }
         }
     }
-
-    // ---------------------------------------------------------------------------
-    // Navigation, initialization and page lifecycle
-    // ---------------------------------------------------------------------------
 
     function scheduleInit(delay) {
         var generation = initGuard;
         var url = location.href;
         setTimeout(function() {
-            // Navigation/startup timers may outlive the room that scheduled them.
             if (generation === initGuard && url === location.href) init();
         }, delay);
     }
@@ -2941,14 +2695,12 @@ const ViewerTracker = (function() {
     function init() {
         leavePlayback(false);
         var myGeneration = ++initGuard;
-        // Initialization supersedes any older Reset/Resume acquisition latch.
         isScanning = false;
         log('Initializing... (generation ' + myGeneration + ')');
         if (healthCheckInterval) {
             clearInterval(healthCheckInterval);
             healthCheckInterval = null;
         }
-        // Pausing acquisition must not freeze the age of the last accepted sample.
         if (freshnessInterval) clearInterval(freshnessInterval);
         freshnessInterval = setInterval(function() {
             updateAcquisitionStatus();
@@ -3056,6 +2808,7 @@ const ViewerTracker = (function() {
             if (oldModel && oldModel !== 'unknown') {
                 saveSession(oldModel);
             }
+            newHighTiers = {};
             activeSessionStorageKey = null;
             stopCountdown();
             nextScanAt = 0;
@@ -3084,7 +2837,7 @@ const ViewerTracker = (function() {
             };
             hasTrendBaseline = false;
             trendComparisonMode = 'last';
-            autoTrendEscalation = true; // Reset on URL change
+            autoTrendEscalation = true;
             roomTotalHigh = 0;
             sessionUniqueUsers = {};
             roomTotalHighTime = null;
@@ -3122,7 +2875,6 @@ const ViewerTracker = (function() {
         downloadTrackingReport: downloadTrackingReport,
         resetAllTracking: resetAllTracking,
         getHealth: function() { return domHealthStatus; },
-        // Pure parser available for offline comparisons without live-state writes.
         parseGetChatUserListResponse: parseGetChatUserListResponse
     };
 })();
