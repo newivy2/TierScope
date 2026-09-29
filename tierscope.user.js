@@ -1,1 +1,3134 @@
-// ==UserScript==// @name         TierScope - Chaturbate Viewers Visualizer// @namespace    http://tampermonkey.net/// @version      3.1.0// @description  TierScope - Viewer visualizer with trend tracking and reports// @author       newivy// @match        https://chaturbate.com/*// @match        https://*.chaturbate.com/*// @grant        unsafeWindow// @grant        GM_setValue// @grant        GM_getValue// @grant        GM_deleteValue// @run-at       document-end// ==/UserScript==/* * TierScope 3.1.0 * * A Chaturbate room audience visualizer/tracker. Normal acquisition uses the * same-origin /api/getchatuserlist/ API, with a default interval of 60 seconds * after the preceding acquisition completes. Accepted API samples do not require * chat-tab manipulation. DOM scanning is a conservative fallback after API failure * or invalidity. Each room waits at least 60 seconds after a fallback completes * before its next fallback attempt; API retries keep their own cadence. * * Validated, current-room samples feed counts, trend deltas, sparklines, highs, * unique-user/session statistics and reports. Rejected samples leave accepted * data intact and add no history point. Per-room history/session state is saved * through Tampermonkey storage under tierscope:v1:<room>. * * Storage schema version describes structural compatibility; producer version * identifies the TierScope application that last saved the record. Legacy * 3.0-format records qualify as schema 1 only after structural validation and * gain metadata on their next successful save, without rewriting history. * Corrupt, unsupported and newer-schema records are retained and protected * against automatic overwrite. Live users and their acquisition source/time * are intentionally not restored as though a saved session were a current sample. * * Compact API interpretation: *   response   := anonymousCount,userRecord,userRecord,... *   userRecord := username|class|gender|flag *   A scalar-only response represents zero named records; validity checks still apply. * *   class:  o  Orange broadcaster/room owner (not a viewer tier) *           m  Red             f  Green *           l  Dark Purple     p  Light Purple *           tr Dark Blue       t  Light Blue       g  Grey *   These class/color names follow Chaturbate terminology, not historical *   TierScope labels. Internal purple/pink/gray keys remain storage-compatible. * *   gender: m  Man    f  Woman    c  Couple    s  Trans *   flag:   retained as rawFlag; its meaning is not inferred by TierScope. * * API Total Users = Anonymous + Registered. Registered includes every accepted * named record, including the owner. The seven viewer-tier counts exclude the * owner and unknown-class records, so their sum need not equal Registered. */const ViewerTracker = (function() {    'use strict';    const TIERSCOPE_VERSION = '3.1.0';    const API_TIMEOUT_MS = 10000;    const DEFAULT_API_INTERVAL_SECONDS = 60;    const DOM_FALLBACK_INTERVAL_SECONDS = 60;    const STORAGE_SCHEMA_VERSION = 1;    const STORAGE_KEY_PREFIX = 'tierscope:v1:';    const STORAGE_MAX_AGE_MS = 3 * 60 * 60 * 1000;    const STORAGE_HISTORY_SERIES = ['red', 'green', 'purple', 'pink', 'dark-blue', 'light-blue', 'gray',        'female-trans', 'withTokens', 'total', 'anonymous'];    const STORAGE_NULLABLE_TIMES = ['withTokensHighTime', 'totalHighTime', 'anonHighTime',        'femaleTransHighTime', 'roomTotalHighTime', 'trackingStartTime'];    const DOM_SELECTORS = {        userListTab: '#UserListTab',        usernameElements: [            '[data-testid="username-label"]',            '[data-testid="username"]',            '.username',            'a[href^="/b/"]',            'a[href^="/p/"]'        ],        roomTotal: [            '[data-testid="users-tab-default"]',            '.users-tab',            '[data-paction-name="USERS"]',            'button[data-tab="users"]',            '[class*="users"]'        ],        tabs: {            users: [                '[data-tab="users"]',                '[data-testid="users-tab"]',                '[data-testid="users-tab-default"]',                '.users-tab',                'button[data-paction-name="USERS"]'            ],            chat: [                '[data-tab="chat"]',                '[data-testid="chat-tab"]',                '[data-testid="chat-tab-default"]',                '.chat-tab',                'button[data-paction-name="CHAT"]'            ]        }    };    // Runtime state    let domHealthStatus = { lastCheck: 0, userListTabFound: false, consecutiveFailures: 0, isHealthy: true };    var sessionStorageStatus = new Map();    var activeSessionStorageKey = null;    var healthCheckInterval = null;    var initGuard = 0;    var urlCheckInterval = null;    var scanEpoch = 0;    var sessionUniqueUsers = {};    var lastAcceptedAcquisition = null;    var lastAcquisitionAttemptSource = 'API';    var domFallbackReadyAtByRoom = new Map();    var freshnessInterval = null;    var nextScanAt = 0;    var windowResizeHandler = null;    // Presentation state    var users = new Map();    var previousUserCount = 0;    var previousRoomTotal = 0;    var isMinimized = true;    var roomTotal = 0;    var roomTotalHigh = 0;    var isDragging = false;    var dragOffsetX = 0;    var dragOffsetY = 0;    var countdownInterval = null;    var isAutoRefreshOn = true;    var isScanning = false;    var countdownSeconds = DEFAULT_API_INTERVAL_SECONDS;    var scanIntervalSeconds = DEFAULT_API_INTERVAL_SECONDS;    var trackingStartTime = null;    var trackingTimerInterval = null;    var isPaused = false;    var pausedElapsedTime = 0;    var dragListeners = [];    var isResizing = false;    var resizeStartX = 0, resizeStartY = 0, resizeStartWidth = 0, resizeStartHeight = 0;    var currentScale = 1.0;    var BASE_WIDTH_MINI = 140;    var BASE_WIDTH_FULL = 280;    var roomTotalHighTime = null;    var tierHighTimes = {};    var withTokensHighTime = null;    var totalHighTime = null;    var anonHighTime = null;    var sessionFemaleTransUsers = {};    var femaleTransUsernames = [];    var femaleTransHighTime = null;    var history = {        timestamps: [],        'red': [], 'green': [], 'purple': [], 'pink': [], 'dark-blue': [], 'light-blue': [], 'gray': [], 'female-trans': [],        'withTokens': [], 'total': [], 'anonymous': []    };    var MAX_HISTORY_LENGTH = 10000;    var previousCounts = {        'red': 0, 'green': 0, 'purple': 0, 'pink': 0,        'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0,        'withTokens': 0, 'total': 0, 'anonymous': 0    };    var hasTrendBaseline = false;    var trendComparisonMode = 'last';    var autoTrendEscalation = true;    var TIERS = {        'red': { name: 'Red', desc: '', color: '#DC0000' },        'green': { name: 'Green', desc: '', color: '#69BE45' },        'purple': { name: 'Dark Purple', desc: '', color: '#804BAA' },        'pink': { name: 'Light Purple', desc: '', color: '#BE6AFF' },        'dark-blue': { name: 'Dark Blue', desc: '', color: '#393993' },        'light-blue': { name: 'Light Blue', desc: '', color: '#1E5FC8' },        'gray': { name: 'Grey', desc: '', color: '#6B6A6F' },        'female-trans': { name: '♀⚧', desc: '', color: '#FF1493' }    };    const TREND_ICONS = {        up: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#32CD32" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>',        down: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ff4444" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>',        stable: '<svg width="16" height="16" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="#ffd43b"/></svg>'    };    const TREND_PRESETS = {        'last': { label: 'Last', ms: 0 },        '5min': { label: '5m', ms: 5 * 60 * 1000 },        '15min': { label: '15m', ms: 15 * 60 * 1000 },        '30min': { label: '30m', ms: 30 * 60 * 1000 },        '1hour': { label: '1h', ms: 60 * 60 * 1000 },        'start': { label: 'Start', ms: -1 }    };    function log(msg) {        console.log('[TierScope ' + TIERSCOPE_VERSION + '] ' + msg);    }    function getTierMarker(tier) {        var config = TIERS[tier];        if (tier === 'female-trans') return config.name;        return '<span role="img" aria-label="' + config.name + '" title="' + config.name + '" ' +            'style="display:inline-block;width:10px;height:10px;border-radius:50%;vertical-align:middle;background:' + config.color + ';"></span>';    }    function getModelNameFromUrl(url) {        if (!url) return 'unknown';        var path = new URL(url).pathname;        var bMatch = path.match(/\/b\/([^\/\?#]+)/);        if (bMatch) return bMatch[1];        var camMatch = path.match(/^\/([^\/]+)\/cam\/?$/);        if (camMatch) return camMatch[1];        var normalMatch = path.match(/\/([^\/\?#]+)\/?$/);        if (normalMatch) {            var name = normalMatch[1];            var nonRoomPaths = ['followed', 'featured', 'tags', 'accounts', 'login', 'register',                               'supporter', 'settings', 'apps', 'explore', 'trending', 'new',                               'female', 'male', 'couple', 'trans', 'hd', 'north-american',                               'european', 'asian', 'south-american', 'exhibitionist',                               'followed-cams', 'female-cams', 'trans-cams', 'male-cams', 'couple-cams'];            if (nonRoomPaths.indexOf(name) === -1) return name;        }        return 'unknown';    }    function getStorageKey(model) {        return STORAGE_KEY_PREFIX + model.toLowerCase();    }    function isStorageObject(value) {        return value !== null && typeof value === 'object' && !Array.isArray(value);    }    function hasStorageField(data, field) {        return Object.prototype.hasOwnProperty.call(data, field);    }    function isStorageNumber(value) {        return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER;    }    function isStorageTimestamp(value) {        return Number.isSafeInteger(value) && value >= 0 && value <= 8640000000000000;    }    function readSavedSession(key) {        return GM_getValue(key, undefined);    }    function determineStorageSchema(data) {        if (!isStorageObject(data)) throw new Error('Saved session must be an object');        if (!hasStorageField(data, 'schemaVersion')) return { version: 1, legacy: true };        if (!Number.isSafeInteger(data.schemaVersion) || data.schemaVersion < 0) {            throw new Error('Invalid storage schemaVersion');        }        return { version: data.schemaVersion, legacy: false };    }    function migrateStoredSession(data, schema) {        if (schema.version > STORAGE_SCHEMA_VERSION) {            throw new Error('Newer storage schema ' + schema.version + '; this build supports ' + STORAGE_SCHEMA_VERSION);        }        if (schema.version !== STORAGE_SCHEMA_VERSION) {            throw new Error('Unsupported storage schema ' + schema.version + '; no migration path to ' + STORAGE_SCHEMA_VERSION);        }        return data;    }    function validateStoredSession(data) {        function requireField(condition, field) {            if (!condition) throw new Error('Invalid saved-session field: ' + field);        }        requireField(isStorageObject(data), 'record');        if (hasStorageField(data, 'schemaVersion')) {            requireField(data.schemaVersion === STORAGE_SCHEMA_VERSION, 'schemaVersion');        }        if (hasStorageField(data, 'producerVersion')) {            requireField(typeof data.producerVersion === 'string', 'producerVersion');        }        requireField(isStorageTimestamp(data.timestamp), 'timestamp');        requireField(isStorageObject(data.history), 'history');        requireField(Array.isArray(data.history.timestamps), 'history.timestamps');        requireField(data.history.timestamps.length <= MAX_HISTORY_LENGTH, 'history length');        requireField(data.history.timestamps.every(isStorageTimestamp), 'history.timestamps');        STORAGE_HISTORY_SERIES.forEach(function(field) {            var series = data.history[field];            requireField(Array.isArray(series) && series.length === data.history.timestamps.length &&                series.every(isStorageNumber), 'history.' + field);        });        if (hasStorageField(data, 'previousCounts')) {            requireField(isStorageObject(data.previousCounts), 'previousCounts');            STORAGE_HISTORY_SERIES.forEach(function(field) {                requireField(isStorageNumber(data.previousCounts[field]), 'previousCounts.' + field);            });        }        ['sessionUniqueUsers', 'sessionFemaleTransUsers'].forEach(function(field) {            if (!hasStorageField(data, field)) return;            var entries = data[field];            requireField(isStorageObject(entries), field);            Object.keys(entries).forEach(function(username) {                requireField(username.length > 0 && (field === 'sessionUniqueUsers' ? entries[username] === true :                    entries[username] === 'female' || entries[username] === 'trans'), field + ' entry');            });        });        if (hasStorageField(data, 'tierHighTimes')) {            requireField(isStorageObject(data.tierHighTimes), 'tierHighTimes');            Object.keys(data.tierHighTimes).forEach(function(tier) {                requireField(hasStorageField(TIERS, tier) &&                    (data.tierHighTimes[tier] === null || isStorageTimestamp(data.tierHighTimes[tier])), 'tierHighTimes.' + tier);            });        }        STORAGE_NULLABLE_TIMES.forEach(function(field) {            if (hasStorageField(data, field)) {                requireField(data[field] === null || isStorageTimestamp(data[field]), field);            }        });        if (hasStorageField(data, 'roomTotalHigh')) requireField(isStorageNumber(data.roomTotalHigh), 'roomTotalHigh');        if (hasStorageField(data, 'pausedElapsedTime')) {            requireField(isStorageTimestamp(data.pausedElapsedTime) &&                data.pausedElapsedTime <= Math.min(data.timestamp, Date.now()), 'pausedElapsedTime');        }        if (hasStorageField(data, 'trendComparisonMode')) {            requireField(typeof data.trendComparisonMode === 'string' &&                hasStorageField(TREND_PRESETS, data.trendComparisonMode), 'trendComparisonMode');        }        ['isPaused', 'hasTrendBaseline', 'autoTrendEscalation'].forEach(function(field) {            if (hasStorageField(data, field)) requireField(typeof data[field] === 'boolean', field);        });    }    function normalizeStoredSession(data) {        var normalized = {            timestamp: data.timestamp,            history: Object.fromEntries(['timestamps'].concat(STORAGE_HISTORY_SERIES).map(function(field) {                return [field, data.history[field].slice()];            })),            previousCounts: Object.fromEntries(STORAGE_HISTORY_SERIES.map(function(field) {                return [field, hasStorageField(data, 'previousCounts') ? data.previousCounts[field] : 0];            })),            hasTrendBaseline: hasStorageField(data, 'previousCounts') && data.hasTrendBaseline === true,            isPaused: data.isPaused === true,            trendComparisonMode: hasStorageField(data, 'trendComparisonMode') ? data.trendComparisonMode : 'last',            autoTrendEscalation: !hasStorageField(data, 'autoTrendEscalation') || data.autoTrendEscalation,            roomTotalHigh: hasStorageField(data, 'roomTotalHigh') ? data.roomTotalHigh : 0,            pausedElapsedTime: hasStorageField(data, 'pausedElapsedTime') ? data.pausedElapsedTime : 0        };        ['tierHighTimes', 'sessionUniqueUsers', 'sessionFemaleTransUsers'].forEach(function(field) {            normalized[field] = hasStorageField(data, field) ? Object.fromEntries(Object.entries(data[field])) : {};        });        STORAGE_NULLABLE_TIMES.forEach(function(field) {            normalized[field] = hasStorageField(data, field) ? data[field] : null;        });        return normalized;    }    function protectSessionStorage(key, reason, producerVersion) {        var prior = sessionStorageStatus.get(key);        if (prior && prior.protected) return prior;        var status = { protected: true, reason: reason, producerVersion: producerVersion == null ? null : producerVersion };        sessionStorageStatus.set(key, status);        log('Storage protected for ' + key + ': ' + reason +            '. Saved data retained; automatic writes disabled until explicit Reset. Using a clean in-memory session on load.');        return status;    }    function inspectStoredSession(model, restore) {        var key = getStorageKey(model);        var prior = sessionStorageStatus.get(key);        if (prior && prior.protected) return prior;        var producerVersion = null;        try {            var raw = readSavedSession(key);            if (!restore && prior && prior.raw === raw) return prior;            if (typeof raw === 'undefined') {                var empty = { protected: false, raw: raw, producerVersion: null };                sessionStorageStatus.set(key, empty);                return empty;            }            if (typeof raw !== 'string') throw new Error('Saved session must be JSON text');            var parsed = JSON.parse(raw);            if (isStorageObject(parsed) && typeof parsed.producerVersion === 'string') producerVersion = parsed.producerVersion;            var schema = determineStorageSchema(parsed);            var migrated = migrateStoredSession(parsed, schema);            validateStoredSession(migrated);            var status = { protected: false, raw: raw, producerVersion: producerVersion, legacy: schema.legacy };            sessionStorageStatus.set(key, status);            return restore ? Object.assign({}, status, { data: normalizeStoredSession(migrated) }) : status;        } catch (e) {            return protectSessionStorage(key, e.message, producerVersion);        }    }    function restoreSessionState(data) {        history = data.history;        tierHighTimes = data.tierHighTimes;        withTokensHighTime = data.withTokensHighTime;        totalHighTime = data.totalHighTime;        anonHighTime = data.anonHighTime;        femaleTransHighTime = data.femaleTransHighTime;        roomTotalHigh = data.roomTotalHigh;        roomTotalHighTime = data.roomTotalHighTime;        trackingStartTime = data.trackingStartTime;        isPaused = data.isPaused;        pausedElapsedTime = data.pausedElapsedTime;        sessionFemaleTransUsers = data.sessionFemaleTransUsers;        sessionUniqueUsers = data.sessionUniqueUsers;        previousCounts = data.previousCounts;        hasTrendBaseline = data.hasTrendBaseline;        trendComparisonMode = data.trendComparisonMode;        autoTrendEscalation = data.autoTrendEscalation;    }    function getStorageReportStatus(model) {        if (!model || model === 'unknown') return { producer: 'Unknown (no saved session)', access: 'No room' };        var status = inspectStoredSession(model, false);        return {            producer: status.producerVersion === null ? (status.legacy ? 'Unknown (legacy session)' : 'Unknown') :                (status.producerVersion || '(empty string)'),            access: status.protected ? 'Protected / read-only: ' + status.reason :                (activeSessionStorageKey === getStorageKey(model) ? 'Writable' : 'Not initialized')        };    }    function saveSession(model) {        if (!model || model === 'unknown') return;        var key = getStorageKey(model);        if (inspectStoredSession(model, false).protected || activeSessionStorageKey !== key) return;        var saveData = {            schemaVersion: STORAGE_SCHEMA_VERSION,            producerVersion: TIERSCOPE_VERSION,            timestamp: Date.now(),            history: history,            tierHighTimes: tierHighTimes,            withTokensHighTime: withTokensHighTime,            totalHighTime: totalHighTime,            anonHighTime: anonHighTime,            femaleTransHighTime: femaleTransHighTime,            roomTotalHigh: roomTotalHigh,            roomTotalHighTime: roomTotalHighTime,            trackingStartTime: trackingStartTime,            isPaused: isPaused,            pausedElapsedTime: pausedElapsedTime,            sessionFemaleTransUsers: sessionFemaleTransUsers,            sessionUniqueUsers: sessionUniqueUsers,            previousCounts: previousCounts,            hasTrendBaseline: hasTrendBaseline,            trendComparisonMode: trendComparisonMode,            autoTrendEscalation: autoTrendEscalation        };        try {            validateStoredSession(saveData);            var raw = JSON.stringify(saveData);            GM_setValue(key, raw);            sessionStorageStatus.set(key, { protected: false, raw: raw, producerVersion: TIERSCOPE_VERSION, legacy: false });            log('Session saved for ' + model + ' (storage schema ' + STORAGE_SCHEMA_VERSION + ', producer ' + TIERSCOPE_VERSION + ')');        } catch (e) {            log('Failed to save session: ' + e);        }    }    function loadSession(model) {        if (!model || model === 'unknown') return false;        var key = getStorageKey(model);        activeSessionStorageKey = key;        var saved = inspectStoredSession(model, true);        if (saved.protected || !saved.data) return false;        var age = Date.now() - saved.data.timestamp;        if (age > STORAGE_MAX_AGE_MS) {            try {                GM_deleteValue(key);                sessionStorageStatus.delete(key);                log('Compatible saved session expired (' + Math.round(age/60000) + ' min old), deleting');            } catch (e) {                protectSessionStorage(key, 'Failed to delete expired session: ' + e.message, saved.producerVersion);            }            return false;        }        restoreSessionState(saved.data);        log('Session restored for ' + model + ' (' + Math.round(age/60000) + ' min old; ' +            (saved.legacy ? 'validated legacy schema 1' : 'storage schema ' + STORAGE_SCHEMA_VERSION) +            '; producer ' + (saved.producerVersion === null ? 'unknown' : saved.producerVersion) + ')');        return true;    }    function deleteSession(model) {        if (!model || model === 'unknown') return;        var key = getStorageKey(model);        try {            GM_deleteValue(key);            sessionStorageStatus.delete(key);            log('Session deleted for ' + model);        } catch (e) {            protectSessionStorage(key, 'Explicit Reset could not delete saved session: ' + e.message,                (sessionStorageStatus.get(key) || {}).producerVersion);            log('Reset cleared live tracking but saved storage remains protected: ' + e.message);        }    }    function isBroadcastRoom() {        var path = window.location.pathname;        var pathParts = path.split('/').filter(function(p) { return p; });        if (pathParts.length === 0) return false;        var nonRoomPaths = ['followed', 'featured', 'tags', 'accounts', 'login', 'register',                           'supporter', 'settings', 'apps', 'explore', 'trending', 'new',                           'female', 'male', 'couple', 'trans', 'hd', 'north-american',                           'european', 'asian', 'south-american', 'exhibitionist',                           'followed-cams', 'female-cams', 'trans-cams', 'male-cams', 'couple-cams'];        if (nonRoomPaths.indexOf(pathParts[0]) !== -1) return false;        if (pathParts[0] === 'b' && pathParts.length >= 2) return true;        if (pathParts.length === 1) return true;        if (pathParts.length === 2 && pathParts[1] === 'cam') return true;        return false;    }    function formatElapsedTime(ms) {        ms = Math.max(0, ms);        var totalSeconds = Math.floor(ms / 1000);        var hours = Math.floor(totalSeconds / 3600);        var minutes = Math.floor((totalSeconds % 3600) / 60);        var seconds = totalSeconds % 60;        return (hours < 10 ? '0' : '') + hours + ':' + (minutes < 10 ? '0' : '') + minutes + ':' + (seconds < 10 ? '0' : '') + seconds;    }    function formatDateTime(timestamp) {        return new Date(timestamp).toLocaleString();    }    function getModelName() {        return getModelNameFromUrl(location.href);    }    function checkTrendAutoEscalation() {        if (!autoTrendEscalation || !trackingStartTime) return;                var elapsedMs = isPaused ? pausedElapsedTime : (Date.now() - trackingStartTime);        var elapsedMin = elapsedMs / 60000;                var targetMode = 'last';        if (elapsedMin >= 60) targetMode = '1hour';        else if (elapsedMin >= 30) targetMode = '30min';        else if (elapsedMin >= 15) targetMode = '15min';        else if (elapsedMin >= 5) targetMode = '5min';                if (targetMode !== trendComparisonMode) {            log('Auto-escalating trend mode: ' + trendComparisonMode + ' -> ' + targetMode + ' (' + Math.floor(elapsedMin) + ' min elapsed)');                        if (users.size === 0) {                trendComparisonMode = targetMode;                updateTrendPresetButtons();                updateAutoTrendButton();                saveSession(getModelName());                return;            }                        setTrendComparisonMode(targetMode);        }    }    function updateTrackingTimer() {        var controlTimerEl = document.getElementById('control-tracking-timer');        var displayTime = '00:00:00';        var displayColor = '#888';        if (isPaused) {            displayTime = formatElapsedTime(pausedElapsedTime);            displayColor = '#ff4444';        } else if (trackingStartTime) {            displayTime = formatElapsedTime(Date.now() - trackingStartTime);            displayColor = '#ffd43b';        }        if (controlTimerEl) {            controlTimerEl.textContent = displayTime;            controlTimerEl.style.color = displayColor;        }                checkTrendAutoEscalation();    }    function startTrackingTimer() {        if (isPaused) {            isPaused = false;            trackingStartTime = Date.now() - pausedElapsedTime;        } else if (!trackingStartTime) {            trackingStartTime = Date.now();        }        if (trackingTimerInterval) {            clearInterval(trackingTimerInterval);            trackingTimerInterval = null;        }        trackingTimerInterval = setInterval(updateTrackingTimer, 1000);        updateTrackingTimer();        saveSession(getModelName());    }    function pauseTrackingTimer() {        if (!trackingStartTime || isPaused) return;        isPaused = true;        pausedElapsedTime = Date.now() - trackingStartTime;        if (trackingTimerInterval) {            clearInterval(trackingTimerInterval);            trackingTimerInterval = null;        }        updateTrackingTimer();        saveSession(getModelName());    }    function stopTrackingTimer() {        if (trackingTimerInterval) {            clearInterval(trackingTimerInterval);            trackingTimerInterval = null;        }        trackingStartTime = null;        pausedElapsedTime = 0;        isPaused = false;        roomTotalHighTime = null;        tierHighTimes = {};        withTokensHighTime = null;        totalHighTime = null;        anonHighTime = null;        femaleTransHighTime = null;        previousCounts = {            'red': 0, 'green': 0, 'purple': 0, 'pink': 0,            'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0,            'withTokens': 0, 'total': 0, 'anonymous': 0        };        hasTrendBaseline = false;        trendComparisonMode = 'last';        autoTrendEscalation = true;        updateTrackingTimer();    }    function toggleAutoTrendEscalation() {        autoTrendEscalation = !autoTrendEscalation;        updateAutoTrendButton();        log('Auto trend escalation ' + (autoTrendEscalation ? 'enabled' : 'disabled'));        saveSession(getModelName());                if (autoTrendEscalation) {            checkTrendAutoEscalation();        }    }    function updateAutoTrendButton() {        var btn = document.getElementById('btn-trend-auto');        if (btn) {            if (autoTrendEscalation) {                btn.style.background = '#32CD32';                btn.style.color = '#fff';                btn.style.borderColor = '#32CD32';                btn.title = 'Auto-escalation ON - Click to disable';            } else {                btn.style.background = '#333';                btn.style.color = '#aaa';                btn.style.borderColor = '#555';                btn.title = 'Auto-escalation OFF - Click to enable';            }        }    }    function resetAllTracking() {        if (!confirm('Reset all tracking data?\n\nThis will clear:\n- All session history\n- Trend tracking\n- Elapsed timer\n- Female/Trans user list\n- Unique user count\n\nA new scan will start immediately.')) {            return;        }        var modelName = getModelName();        log('Performing main reset...');        deleteSession(modelName);        activeSessionStorageKey = getStorageKey(modelName);        scanEpoch++;        isScanning = false;        stopCountdown();        stopTrackingTimer();        users.clear();        lastAcceptedAcquisition = null;        lastAcquisitionAttemptSource = 'API';        domHealthStatus.consecutiveFailures = 0;        updateAcquisitionStatus();        previousUserCount = 0;        previousRoomTotal = 0;        roomTotal = 0;        roomTotalHigh = 0;        sessionUniqueUsers = {};        previousCounts = {            'red': 0, 'green': 0, 'purple': 0, 'pink': 0,            'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0,            'withTokens': 0, 'total': 0, 'anonymous': 0        };        hasTrendBaseline = false;        trendComparisonMode = 'last';        autoTrendEscalation = true;        history = {            timestamps: [],            'red': [], 'green': [], 'purple': [], 'pink': [], 'dark-blue': [], 'light-blue': [], 'gray': [], 'female-trans': [],            'withTokens': [], 'total': [], 'anonymous': []        };        sessionFemaleTransUsers = {};        femaleTransUsernames = [];        roomTotalHighTime = null;        tierHighTimes = {};        withTokensHighTime = null;        totalHighTime = null;        anonHighTime = null;        femaleTransHighTime = null;        resetCountdown();        updateDisplay();        updateTrendDisplay();        updateTrackingTimer();        updateCountdownDisplay();        drawAllSparklines();        if (isAutoRefreshOn) {            startTrackingTimer();            startCountdown();        }        var resetContext = { epoch: scanEpoch, generation: initGuard, url: location.href };        setTimeout(function() {            if (isAcquisitionCurrent(resetContext)) performScanThenReturn(true);        }, 500);                updateTrendPresetButtons();        updateAutoTrendButton();                log('Reset complete - starting fresh scan (epoch: ' + scanEpoch + ')');    }    function getTierFromClassList(classList) {        for (var i = 0; i < classList.length; i++) {            var className = classList[i];            var lower = className.toLowerCase();            if (className === 'tippedTonsRecently' || lower === 'tippedtonsrecently') return 'purple';            if (className === 'tippedALotRecently' || lower === 'tippedalotrecently') return 'pink';            if (className === 'tippedRecently' || lower === 'tippedrecently') return 'dark-blue';            if (className === 'inFanClub' || lower === 'infanclub') return 'green';            if (className === 'mod' || lower === 'moderator') return 'red';            if (className === 'hasTokens' || lower === 'hastokens') return 'light-blue';            if (className === 'defaultUser' || lower === 'defaultuser') return 'gray';        }        return null;    }    function getTierFromElement(el) {        var tier = getTierFromClassList(el.classList);        if (tier) return tier;        var parent = el.parentElement;        for (var i = 0; i < 4 && parent; i++) {            tier = getTierFromClassList(parent.classList);            if (tier) return tier;            parent = parent.parentElement;        }        return 'gray';    }    function getGenderFromElement(el) {        var genderImg = el.querySelector('img[data-testid="gender-icon"], img[title="Trans"], img[title="Female"], img[title="Male"], img[title="Couple"]');        if (!genderImg) {            var parent = el.parentElement;            for (var i = 0; i < 3 && parent; i++) {                genderImg = parent.querySelector('img[data-testid="gender-icon"], img[title="Trans"], img[title="Female"], img[title="Male"], img[title="Couple"]');                if (genderImg) break;                parent = parent.parentElement;            }        }        if (genderImg) {            var src = genderImg.src || '';            var title = genderImg.title || '';            if (src.indexOf('female') !== -1 || title === 'Female') return 'female';            if (src.indexOf('trans') !== -1 || title === 'Trans') return 'trans';            if (src.indexOf('male') !== -1 || title === 'Male') return 'male';            if (src.indexOf('couple') !== -1 || title === 'Couple') return 'couple';        }        return 'unknown';    }    function getRoomTotal() {        for (var i = 0; i < DOM_SELECTORS.roomTotal.length; i++) {            var el = document.querySelector(DOM_SELECTORS.roomTotal[i]);            if (el) {                var text = el.textContent || '';                var match = text.match(/USERS\s*\(?(\d[\d,]*)\)?/i);                if (match) return parseInt(match[1].replace(/,/g, ''));            }        }        return 0;    }    function getAnonymousCount() {        if (lastAcceptedAcquisition && lastAcceptedAcquisition.source === 'API') {            return lastAcceptedAcquisition.api.anonymousCount;        }        var tracked = users.size;        if (roomTotal > tracked) return roomTotal - tracked;        return 0;    }    function extractUsername(text) {        if (!text) return null;        text = text.trim().split('\n')[0];        var match = text.match(/^([^\s\(\[\<\,]+)/);        if (match) {            var candidate = match[1].trim();            if (candidate.length >= 2 && candidate.length <= 30) {                var clean = candidate.replace(/[^\w\-]+$/, '');                if (clean.length >= 2) return clean;            }        }        return null;    }    function findTab(tabName) {        var selectors = DOM_SELECTORS.tabs[tabName.toLowerCase()] || [];        for (var i = 0; i < selectors.length; i++) {            var el = document.querySelector(selectors[i]);            if (el) return el;        }        var buttons = document.querySelectorAll('button, div[role="tab"]');        for (var j = 0; j < buttons.length; j++) {            var btn = buttons[j];            var text = (btn.textContent || '').toUpperCase();            if (text.indexOf(tabName.toUpperCase()) !== -1) return btn;        }        return null;    }    function isScanValid(newUserCount, newRoomTotal) {        if (previousRoomTotal === 0) return true;        if (newRoomTotal === 0 && previousRoomTotal > 0) {            log('Scan rejected: room total is 0 but previous was ' + previousRoomTotal);            return false;        }        var roomTotalChange = Math.abs(newRoomTotal - previousRoomTotal) / previousRoomTotal;        if (roomTotalChange > 0.10) return true;        var userDrop = previousUserCount > 0 ? (previousUserCount - newUserCount) / previousUserCount : 0;        if (userDrop > 0.50) {            log('Scan rejected: user count dropped ' + Math.round(userDrop * 100) + '% (' +                previousUserCount + ' -> ' + newUserCount + ') while room total stable (' +                previousRoomTotal + ' -> ' + newRoomTotal + ')');            return false;        }        return true;    }    function downloadTrackingReport() {        var modelName = getModelName();        var sessionStart = trackingStartTime ? formatDateTime(trackingStartTime) : 'Not started';        var totalTime = trackingStartTime ? formatElapsedTime(isPaused ? pausedElapsedTime : (Date.now() - trackingStartTime)) : '00:00:00';        var now = Date.now();        var storageReport = getStorageReportStatus(modelName);        var report = [            '================================',            'CHATURBATE TRACKING REPORT',            '================================',            '',            'Model: ' + modelName,            'Session Start: ' + sessionStart,            'Report Generated: ' + formatDateTime(now),            'TierScope Version: ' + TIERSCOPE_VERSION,            'Storage Schema Version: ' + STORAGE_SCHEMA_VERSION,            'Saved Session Producer Version: ' + storageReport.producer,            'Session Storage: ' + storageReport.access,            'Last Accepted Acquisition Source: ' + (lastAcceptedAcquisition ? lastAcceptedAcquisition.source : 'None'),            'Last Accepted Sample Time: ' + (lastAcceptedAcquisition ? new Date(lastAcceptedAcquisition.timestamp).toISOString() : 'None'),            'Total Tracking Time: ' + totalTime,            ''        ];        if (lastAcceptedAcquisition && lastAcceptedAcquisition.api) {            report.push('API Anonymous Count: ' + lastAcceptedAcquisition.api.anonymousCount);            report.push('API Registered Record Count: ' + lastAcceptedAcquisition.api.registeredCount);            report.push('API Total Users: ' + lastAcceptedAcquisition.api.totalUsers);            report.push('API Owner Record Present: ' + (lastAcceptedAcquisition.api.ownerCount > 0 ? 'yes' : 'no'));            report.push('Registered includes broadcaster/owner and unclassified records outside the seven viewer tiers.');            report.push('');        }        report.push('--- ALL-TIME HIGHS ---');        report.push('');        if (roomTotalHigh > 0 && roomTotalHighTime) {            var elapsed = formatElapsedTime(roomTotalHighTime - trackingStartTime);            report.push('Room Total High: ' + roomTotalHigh.toLocaleString() + ' users');            report.push('  Recorded at: ' + formatDateTime(roomTotalHighTime) + ' (' + elapsed + ' into session)');            report.push('');        }        Object.keys(TIERS).forEach(function(tier) {            var highResult = getHighValue(history[tier], 0);            var highVal = highResult.value;            var highTime = tierHighTimes[tier];            if (highVal > 0 && highTime) {                var elapsed = formatElapsedTime(highTime - trackingStartTime);                report.push(TIERS[tier].name + ' High: ' + highVal.toLocaleString());                report.push('  Recorded at: ' + formatDateTime(highTime) + ' (' + elapsed + ' into session)');                report.push('');            }        });        var withTokensResult = getHighValue(history['withTokens'], 0);        var withTokensHigh = withTokensResult.value;        if (withTokensHigh > 0 && withTokensHighTime) {            var elapsed = formatElapsedTime(withTokensHighTime - trackingStartTime);            report.push('With Tokens High: ' + withTokensHigh.toLocaleString());            report.push('  Recorded at: ' + formatDateTime(withTokensHighTime) + ' (' + elapsed + ' into session)');            report.push('');        }        var totalResult = getHighValue(history['total'], 0);        var totalHigh = totalResult.value;        if (totalHigh > 0 && totalHighTime) {            var elapsed = formatElapsedTime(totalHighTime - trackingStartTime);            report.push('Registered Users High: ' + totalHigh.toLocaleString());            report.push('  Recorded at: ' + formatDateTime(totalHighTime) + ' (' + elapsed + ' into session)');            report.push('');        }        var anonResult = getHighValue(history['anonymous'], 0);        var anonHigh = anonResult.value;        if (anonHigh > 0 && anonHighTime) {            var elapsed = formatElapsedTime(anonHighTime - trackingStartTime);            report.push('Anonymous High: ' + anonHigh.toLocaleString());            report.push('  Recorded at: ' + formatDateTime(anonHighTime) + ' (' + elapsed + ' into session)');            report.push('');        }        report.push('Unique Registered This Session: ' + Object.keys(sessionUniqueUsers).length.toLocaleString());        report.push('');        report.push('--- CURRENT STATS ---');        report.push('');        var counts = { 'red': 0, 'green': 0, 'purple': 0, 'pink': 0, 'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0 };        users.forEach(function(data) {            if (counts[data.tier] !== undefined) counts[data.tier]++;            if (data.gender === 'female' || data.gender === 'trans') {                counts['female-trans']++;            }        });        var total = users.size;        var withTokens = counts['red'] + counts['green'] + counts['purple'] + counts['pink'] + counts['dark-blue'] + counts['light-blue'];        var anonymousCount = getAnonymousCount();        var fullRoomTotal = roomTotal > total ? roomTotal : (total + anonymousCount);        var totalHighCurrent = getHighValue(history['total'], total).value;        var withTokensHighCurrent = getHighValue(history['withTokens'], withTokens).value;        var anonHighCurrent = getHighValue(history['anonymous'], anonymousCount).value;        report.push('Current Room Total: ' + fullRoomTotal.toLocaleString() + ' (High: ' + roomTotalHigh.toLocaleString() + ')');        report.push('Current Registered: ' + total.toLocaleString() + ' (High: ' + totalHighCurrent.toLocaleString() + ')');        report.push('Current With Tokens: ' + withTokens.toLocaleString() + ' (High: ' + withTokensHighCurrent.toLocaleString() + ')');        report.push('Current Anonymous: ' + anonymousCount.toLocaleString() + ' (High: ' + anonHighCurrent.toLocaleString() + ')');        report.push('');        report.push('--- TIER BREAKDOWN ---');        report.push('');        Object.keys(TIERS).forEach(function(tier) {            var current = counts[tier] || 0;            var high = getHighValue(history[tier], current).value;            report.push(TIERS[tier].name + ': ' + current.toLocaleString() + ' (High: ' + high.toLocaleString() + ')');        });        report.push('');        report.push('--- ♀⚧ OVERLAY (SESSION) ---');        report.push('');        var sessionFemaleCount = 0;        var sessionTransCount = 0;        Object.keys(sessionFemaleTransUsers).forEach(function(username) {            var gender = sessionFemaleTransUsers[username];            if (gender === 'female') sessionFemaleCount++;            else if (gender === 'trans') sessionTransCount++;        });        var femaleTransTotal = sessionFemaleCount + sessionTransCount;        report.push('Total Unique ♀⚧ Viewers: ' + femaleTransTotal + ' (♀ Female: ' + sessionFemaleCount + ', ⚧ Trans: ' + sessionTransCount + ')');        report.push('');        report.push('================================');        report.push('End of Report');        report.push('================================');        var date = new Date();        var dateStr = date.toISOString().slice(0, 10);        var timeStr = date.getHours().toString().padStart(2, '0') + '-' +                     date.getMinutes().toString().padStart(2, '0') + '-' +                     date.getSeconds().toString().padStart(2, '0');        var filename = modelName + '-tracking-report-' + dateStr + '-' + timeStr + '.txt';        var blob = new Blob([report.join('\n')], { type: 'text/plain' });        var url = URL.createObjectURL(blob);        var a = document.createElement('a');        a.href = url;        a.download = filename;        document.body.appendChild(a);        a.click();        document.body.removeChild(a);        URL.revokeObjectURL(url);    }    function parseGetChatUserListResponse(text) {        if (typeof text !== 'string' || !text.trim()) throw new Error('Empty API response');        var parts = text.trim().split(',');        if (!/^\d+$/.test(parts[0])) throw new Error('Invalid API anonymous count');        var anonymousCount = Number(parts[0]);        if (!Number.isSafeInteger(anonymousCount)) throw new Error('Unsafe API anonymous count');        var classTiers = { m: 'red', f: 'green', l: 'purple', p: 'pink', tr: 'dark-blue', t: 'light-blue', g: 'gray' };        var genders = { m: 'male', f: 'female', s: 'trans', c: 'couple' };        var seen = new Set();        var parsedUsers = [];        var unknownClasses = Object.create(null);        var unknownGenders = Object.create(null);        for (var i = 1; i < parts.length; i++) {            var fields = parts[i].split('|');            if (fields.length !== 4 || !/^[A-Za-z0-9_-]{2,30}$/.test(fields[0]) ||                fields.slice(1).some(function(field) { return !/^[^\s|,<>\x00-\x1f]+$/.test(field); })) {                throw new Error('Malformed API record at index ' + i);            }            var username = fields[0];            var key = username.toLowerCase();            if (seen.has(key)) throw new Error('Duplicate API username at index ' + i);            seen.add(key);            var rawClass = fields[1];            var genderCode = fields[2];            var isOwner = rawClass === 'o';            var tier = Object.prototype.hasOwnProperty.call(classTiers, rawClass) ? classTiers[rawClass] : null;            var gender = Object.prototype.hasOwnProperty.call(genders, genderCode) ? genders[genderCode] : 'unknown';            if (!tier && !isOwner) unknownClasses[rawClass] = (unknownClasses[rawClass] || 0) + 1;            if (gender === 'unknown') unknownGenders[genderCode] = (unknownGenders[genderCode] || 0) + 1;            parsedUsers.push({ username: username, rawClass: rawClass, tier: tier,                genderCode: genderCode, gender: gender, rawFlag: fields[3], isOwner: isOwner });        }        var registeredCount = parsedUsers.length;        var totalUsers = anonymousCount + registeredCount;        if (!Number.isSafeInteger(totalUsers)) throw new Error('Unsafe API total users');        return { anonymousCount: anonymousCount, registeredCount: registeredCount,            totalUsers: totalUsers, users: parsedUsers,            diagnostics: { unknownClasses: unknownClasses, unknownGenders: unknownGenders } };    }    function isAcquisitionCurrent(context) {        return context.epoch === scanEpoch && context.generation === initGuard &&            context.url === location.href;    }    function validateRoomSnapshot(snapshot) {        if (!snapshot || !Number.isSafeInteger(snapshot.roomTotal) || snapshot.roomTotal < 0 ||            !Array.isArray(snapshot.users)) throw new Error('Invalid room snapshot');        if (snapshot.source === 'API' &&            (!Number.isSafeInteger(snapshot.anonymousCount) || snapshot.anonymousCount < 0 ||             snapshot.registeredCount !== snapshot.users.length ||             snapshot.totalUsers !== snapshot.anonymousCount + snapshot.registeredCount ||             snapshot.roomTotal !== snapshot.totalUsers)) {            throw new Error('Inconsistent API anonymous, registered, or total user counts');        }        if (!isScanValid(snapshot.users.length, snapshot.roomTotal)) {            throw new Error('Sample rejected by 3.0.0 scan-validity checks');        }    }    async function acquireAPISnapshot(context) {        if (!context.room || context.room === 'unknown') throw new Error('No current room username');        var url = new URL('/api/getchatuserlist/', location.origin);        url.searchParams.set('roomname', context.room);        url.searchParams.set('private', 'false');        url.searchParams.set('sort_by', 'a');        url.searchParams.set('exclude_staff', 'false');        var controller = new AbortController();        var timeout;        try {            var text = await Promise.race([                (async function() {                    var response = await fetch(url.href, { method: 'GET', credentials: 'same-origin',                        mode: 'same-origin', cache: 'no-store', redirect: 'error', signal: controller.signal });                    if (!response.ok) throw new Error('API HTTP ' + response.status);                    return response.text();                })(),                new Promise(function(resolve, reject) {                    timeout = setTimeout(function() {                        reject(new Error('API request timed out after ' + API_TIMEOUT_MS + ' ms'));                        controller.abort();                    }, API_TIMEOUT_MS);                })            ]);            var snapshot = parseGetChatUserListResponse(text);            snapshot.roomTotal = snapshot.totalUsers;            snapshot.source = 'API';            snapshot.timestamp = Date.now();            return snapshot;        } finally {            clearTimeout(timeout);        }    }    async function acquireDOMSnapshot(context, returnToChat) {        var usersTab = findTab('users');        var chatTab = findTab('chat');        if (!usersTab) throw new Error('USERS tab not found');        var openedUsers = false;        try {            usersTab.click();            openedUsers = true;            await new Promise(function(resolve) { setTimeout(resolve, 800); });            if (!isAcquisitionCurrent(context)) return null;            return scanUsers();        } finally {            if (openedUsers && isAcquisitionCurrent(context) && returnToChat && chatTab) {                try { chatTab.click(); }                catch (err) { log('DOM fallback could not return to CHAT: ' + err.message); }            }        }    }    function getDOMFallbackWaitSeconds(modelName) {        var readyAt = domFallbackReadyAtByRoom.get(modelName.toLowerCase()) || 0;        return Math.max(0, Math.ceil((readyAt - Date.now()) / 1000));    }    async function acquireRoomSnapshot(context, returnToChat) {        lastAcquisitionAttemptSource = 'API';        try {            var snapshot = await acquireAPISnapshot(context);            if (!isAcquisitionCurrent(context)) return null;            validateRoomSnapshot(snapshot);            domHealthStatus.consecutiveFailures = 0;            return snapshot;        } catch (err) {            if (!isAcquisitionCurrent(context)) return null;            console.warn('[TierScope ' + TIERSCOPE_VERSION + '] API failed: ' + err.message);        }        lastAcquisitionAttemptSource = 'DOM';        var fallbackWait = getDOMFallbackWaitSeconds(context.room);        if (fallbackWait > 0) {            log('DOM fallback deferred for ' + fallbackWait + 's; retaining previous valid data (no history point)');            return null;        }        var roomKey = context.room.toLowerCase();        var fallbackIntervalMs = Math.max(DOM_FALLBACK_INTERVAL_SECONDS, scanIntervalSeconds) * 1000;        domFallbackReadyAtByRoom.set(roomKey, Date.now() + fallbackIntervalMs);        log('Attempting DOM fallback; room=' + context.room);        try {            var fallback = await acquireDOMSnapshot(context, returnToChat);            if (!isAcquisitionCurrent(context)) return null;            validateRoomSnapshot(fallback);            log('DOM fallback succeeded; room=' + context.room + ' records=' + fallback.users.length);            return fallback;        } catch (err) {            if (!isAcquisitionCurrent(context)) return null;            console.warn('[TierScope ' + TIERSCOPE_VERSION + '] DOM fallback failed: ' + err.message +                '; retaining previous valid data (no history point)');            return null;        } finally {            domFallbackReadyAtByRoom.set(roomKey, Math.max(domFallbackReadyAtByRoom.get(roomKey) || 0,                Date.now() + fallbackIntervalMs));        }    }    function acceptRoomSnapshot(snapshot, modelName) {        users = new Map(snapshot.users.map(function(user) { return [user.username, user]; }));        roomTotal = snapshot.roomTotal;        femaleTransUsernames = [];        var model = modelName.toLowerCase();        users.forEach(function(user) {            if (user.username.toLowerCase() !== model) {                Object.defineProperty(sessionUniqueUsers, user.username.toLowerCase(),                    { value: true, enumerable: true, configurable: true, writable: true });                if (user.gender === 'female' || user.gender === 'trans') {                    femaleTransUsernames.push(user.username);                    Object.defineProperty(sessionFemaleTransUsers, user.username,                        { value: user.gender, enumerable: true, configurable: true, writable: true });                }            }        });        lastAcceptedAcquisition = { source: snapshot.source, timestamp: snapshot.timestamp, api: null };        if (snapshot.source === 'API') {            var owners = snapshot.users.filter(function(user) { return user.isOwner; });            var tierSum = snapshot.users.filter(function(user) { return user.tier !== null; }).length;            var unknownClasses = snapshot.diagnostics.unknownClasses;            var unknownGenders = snapshot.diagnostics.unknownGenders;            lastAcceptedAcquisition.api = { anonymousCount: snapshot.anonymousCount,                registeredCount: snapshot.registeredCount, totalUsers: snapshot.totalUsers, ownerCount: owners.length };            return {                room: modelName, anonymousCount: snapshot.anonymousCount,                registeredCount: snapshot.registeredCount, totalUsers: snapshot.totalUsers,                owner: owners.map(function(user) { return user.username; }).join(', ') || 'none',                ownerRecords: owners,                unknownClasses: Object.values(unknownClasses).reduce(function(a, b) { return a + b; }, 0),                unknownGenders: Object.values(unknownGenders).reduce(function(a, b) { return a + b; }, 0),                unknownClassCodes: unknownClasses, unknownGenderCodes: unknownGenders,                viewerTierSum: tierSum, registeredMinusTierSum: users.size - tierSum,                viewerTierGapExplanation: 'Owner and unknown-class records count toward Registered, outside the seven viewer tiers',                timestamp: new Date(snapshot.timestamp).toISOString()            };        }        return null;    }    function updateAcquisitionStatus() {        var el = document.getElementById('acquisition-status');        if (!el) return;        if (!lastAcceptedAcquisition) {            el.textContent = 'No sample';            el.title = 'No accepted sample in this page session';            return;        }        var age = Math.max(0, Math.floor((Date.now() - lastAcceptedAcquisition.timestamp) / 1000));        el.textContent = lastAcceptedAcquisition.source + ' • ' + age + 's';        el.title = 'Last accepted sample: ' + new Date(lastAcceptedAcquisition.timestamp).toISOString() +            '. TierScope and the USERS tab refresh independently.';    }    async function performScanThenReturn(returnToChat) {        if (typeof returnToChat === 'undefined') returnToChat = true;        if (isScanning) return;        isScanning = true;        var context = { epoch: ++scanEpoch, generation: initGuard, url: location.href, room: getModelName() };        var priorState = null;        var statusEl = document.getElementById('auto-status');        updateCountdownDisplay();        try {            var snapshot = await acquireRoomSnapshot(context, returnToChat);            if (!isAcquisitionCurrent(context)) return;            if (!snapshot) {                if (statusEl) {                    statusEl.textContent = 'Scan skipped (unreliable)';                    statusEl.style.color = '#ff4444';                }                return;            }            priorState = {                users: users, roomTotal: roomTotal, previousUserCount: previousUserCount,                previousRoomTotal: previousRoomTotal, previousCounts: previousCounts,                hasTrendBaseline: hasTrendBaseline, lastAcceptedAcquisition: lastAcceptedAcquisition,                femaleTransUsernames: femaleTransUsernames,                trendHTML: (document.getElementById('trend-container') || {}).innerHTML,                trendHeaderText: (document.getElementById('trend-header-label') || {}).textContent,                sessionUniqueUsers: Object.fromEntries(Object.entries(sessionUniqueUsers)),                sessionFemaleTransUsers: Object.fromEntries(Object.entries(sessionFemaleTransUsers)),                history: Object.fromEntries(Object.keys(history).map(function(key) { return [key, history[key].slice()]; })),                roomTotalHigh: roomTotalHigh, roomTotalHighTime: roomTotalHighTime,                tierHighTimes: Object.fromEntries(Object.entries(tierHighTimes)),                withTokensHighTime: withTokensHighTime, totalHighTime: totalHighTime,                anonHighTime: anonHighTime, femaleTransHighTime: femaleTransHighTime            };            var diagnostics = acceptRoomSnapshot(snapshot, context.room);            var counts = { 'red': 0, 'green': 0, 'purple': 0, 'pink': 0, 'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0 };            users.forEach(function(data) {                if (counts[data.tier] !== undefined) counts[data.tier]++;                if (data.gender === 'female' || data.gender === 'trans') {                    counts['female-trans']++;                }            });            var total = users.size;            var withTokens = counts['red'] + counts['green'] + counts['purple'] + counts['pink'] + counts['dark-blue'] + counts['light-blue'];            var anonymousCount = getAnonymousCount();            previousUserCount = total;            previousRoomTotal = roomTotal;            var currentRoomTotal = roomTotal > 0 ? roomTotal : (total + anonymousCount);            if (currentRoomTotal > roomTotalHigh) {                roomTotalHigh = currentRoomTotal;                roomTotalHighTime = Date.now();            }            saveToHistory();            hasTrendBaseline = true;            updateDisplay();            updateTrendDisplay();            previousCounts = {                'red': counts['red'] || 0,                'green': counts['green'] || 0,                'purple': counts['purple'] || 0,                'pink': counts['pink'] || 0,                'dark-blue': counts['dark-blue'] || 0,                'light-blue': counts['light-blue'] || 0,                'gray': counts['gray'] || 0,                'female-trans': counts['female-trans'] || 0,                'withTokens': withTokens || 0,                'total': total || 0,                'anonymous': anonymousCount || 0            };            updateAcquisitionStatus();            saveSession(context.room);            if (diagnostics) console.log('[TierScope ' + TIERSCOPE_VERSION + '] API scan accepted', diagnostics);        } catch (err) {            if (priorState) {                users = priorState.users;                roomTotal = priorState.roomTotal;                previousUserCount = priorState.previousUserCount;                previousRoomTotal = priorState.previousRoomTotal;                previousCounts = priorState.previousCounts;                hasTrendBaseline = priorState.hasTrendBaseline;                lastAcceptedAcquisition = priorState.lastAcceptedAcquisition;                femaleTransUsernames = priorState.femaleTransUsernames;                sessionUniqueUsers = priorState.sessionUniqueUsers;                sessionFemaleTransUsers = priorState.sessionFemaleTransUsers;                history = priorState.history;                roomTotalHigh = priorState.roomTotalHigh;                roomTotalHighTime = priorState.roomTotalHighTime;                tierHighTimes = priorState.tierHighTimes;                withTokensHighTime = priorState.withTokensHighTime;                totalHighTime = priorState.totalHighTime;                anonHighTime = priorState.anonHighTime;                femaleTransHighTime = priorState.femaleTransHighTime;                try {                    var trendEl = document.getElementById('trend-container');                    if (trendEl && typeof priorState.trendHTML === 'string') trendEl.innerHTML = priorState.trendHTML;                    var trendHeader = document.getElementById('trend-header-label');                    if (trendHeader && typeof priorState.trendHeaderText === 'string') trendHeader.textContent = priorState.trendHeaderText;                    updateDisplay();                    updateAcquisitionStatus();                    if (!isMinimized) drawAllSparklines();                }                catch (displayError) { log('Could not repaint previous data: ' + displayError.message); }            }            log('Error during scan; retaining previous valid data: ' + err.message);        } finally {            if (isAcquisitionCurrent(context)) {                isScanning = false;                resetCountdown();            }        }    }    function getComparisonCounts() {        if (trendComparisonMode === 'last') {            if (history.timestamps.length < 2) {                return { counts: null, short: false, actualMinutes: 0 };            }                        var lastIdx = history.timestamps.length - 2;            var actualMinutes = Math.round((Date.now() - history.timestamps[lastIdx]) / 60000);                        return {                counts: {                    'red': history['red'][lastIdx] || 0,                    'green': history['green'][lastIdx] || 0,                    'purple': history['purple'][lastIdx] || 0,                    'pink': history['pink'][lastIdx] || 0,                    'dark-blue': history['dark-blue'][lastIdx] || 0,                    'light-blue': history['light-blue'][lastIdx] || 0,                    'gray': history['gray'][lastIdx] || 0,                    'female-trans': history['female-trans'][lastIdx] || 0,                    'withTokens': history['withTokens'][lastIdx] || 0,                    'total': history['total'][lastIdx] || 0,                    'anonymous': history['anonymous'][lastIdx] || 0                },                short: false,                actualMinutes: actualMinutes            };        }                if (trendComparisonMode === 'start') {            if (history.timestamps.length === 0) {                return {                    counts: {                        'red': 0, 'green': 0, 'purple': 0, 'pink': 0,                        'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0,                        'withTokens': 0, 'total': 0, 'anonymous': 0                    },                    short: false,                    actualMinutes: 0                };            }            var startMinutes = Math.round((Date.now() - history.timestamps[0]) / 60000);            return {                counts: {                    'red': history['red'][0] || 0,                    'green': history['green'][0] || 0,                    'purple': history['purple'][0] || 0,                    'pink': history['pink'][0] || 0,                    'dark-blue': history['dark-blue'][0] || 0,                    'light-blue': history['light-blue'][0] || 0,                    'gray': history['gray'][0] || 0,                    'female-trans': history['female-trans'][0] || 0,                    'withTokens': history['withTokens'][0] || 0,                    'total': history['total'][0] || 0,                    'anonymous': history['anonymous'][0] || 0                },                short: false,                actualMinutes: startMinutes            };        }                var preset = TREND_PRESETS[trendComparisonMode];        if (!preset || preset.ms <= 0) return { counts: previousCounts, short: false, actualMinutes: 0 };                var targetTime = Date.now() - preset.ms;        var idx = -1;                for (var i = 0; i < history.timestamps.length; i++) {            if (history.timestamps[i] <= targetTime) {                idx = i;            } else {                break;            }        }                var short = idx === -1;        if (short) idx = 0;                if (idx === -1 || history.timestamps.length === 0) {            return { counts: previousCounts, short: false, actualMinutes: 0 };        }                var actualMs = Date.now() - history.timestamps[idx];        var actualMinutes = Math.round(actualMs / 60000);                return {            counts: {                'red': history['red'][idx] || 0,                'green': history['green'][idx] || 0,                'purple': history['purple'][idx] || 0,                'pink': history['pink'][idx] || 0,                'dark-blue': history['dark-blue'][idx] || 0,                'light-blue': history['light-blue'][idx] || 0,                'gray': history['gray'][idx] || 0,                'female-trans': history['female-trans'][idx] || 0,                'withTokens': history['withTokens'][idx] || 0,                'total': history['total'][idx] || 0,                'anonymous': history['anonymous'][idx] || 0            },            short: short,            actualMinutes: actualMinutes        };    }    function setTrendComparisonMode(mode) {        if (!TREND_PRESETS[mode] && mode !== 'last') return;        trendComparisonMode = mode;        updateTrendDisplay();        updateTrendPresetButtons();        saveSession(getModelName());    }    function updateTrendPresetButtons() {        var buttons = document.querySelectorAll('.trend-preset-btn');        buttons.forEach(function(btn) {            var mode = btn.dataset.mode;            if (mode === trendComparisonMode) {                btn.style.background = '#4169E1';                btn.style.color = '#fff';                btn.style.borderColor = '#4169E1';            } else {                btn.style.background = '#333';                btn.style.color = '#aaa';                btn.style.borderColor = '#555';            }        });    }    function updateTrendDisplay() {        var trendContainer = document.getElementById('trend-container');        var trendHeaderLabel = document.getElementById('trend-header-label');                if (!trendContainer) return;        if (!hasTrendBaseline) {            trendContainer.innerHTML = '<div style="font-size:8px;color:#666;text-align:center;padding:8px;">Waiting for scan...</div>';            if (trendHeaderLabel) trendHeaderLabel.textContent = '📈 TREND';            return;        }        var counts = { 'red': 0, 'green': 0, 'purple': 0, 'pink': 0, 'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0 };        users.forEach(function(data) {            if (counts[data.tier] !== undefined) counts[data.tier]++;            if (data.gender === 'female' || data.gender === 'trans') {                counts['female-trans']++;            }        });        var total = users.size;        var withTokens = counts['red'] + counts['green'] + counts['purple'] + counts['pink'] + counts['dark-blue'] + counts['light-blue'];        var anonymousCount = getAnonymousCount();                var comparison = getComparisonCounts();        var comparisonCounts = comparison.counts;        var shortSession = comparison.short;        var actualMinutes = comparison.actualMinutes;        if (!comparisonCounts) {            trendContainer.innerHTML = '<div style="font-size:8px;color:#666;text-align:center;padding:8px;">Waiting for scan...</div>';            if (trendHeaderLabel) trendHeaderLabel.textContent = '📈 TREND';            return;        }        var getShortLabel = function() {            if (!shortSession || actualMinutes <= 0) return '';            if (actualMinutes < 60) return ' vs ' + actualMinutes + 'm';            var hours = Math.floor(actualMinutes / 60);            var mins = actualMinutes % 60;            return ' vs ' + hours + 'h' + (mins > 0 ? mins : '');        };        function buildTrendItem(name, current, prev, isSpecial, isLarge) {            var diff = current - prev;            var trend = diff > 0 ? 'up' : diff < 0 ? 'down' : 'stable';            var trendIcon = TREND_ICONS[trend];            var deltaText = diff !== 0 ? (diff > 0 ? '+' + diff : diff) : '';            var deltaColor = diff > 0 ? '#32CD32' : '#ff4444';            var bgStyle = isSpecial ?                'background:rgba(255,105,180,0.15);border:1px solid #ff69b4;' :                'background:rgba(255,255,255,0.05);';            var padding = isLarge ? '4px 10px' : '2px 6px';            var fontSize = isLarge ? '12px' : '10px';            var containerSize = isLarge ? '28px' : '22px';                        var deltaFont = fontSize;            if (deltaText) {                var dlen = String(Math.abs(diff)).length;                if (dlen >= 4) deltaFont = '8px';                else if (dlen === 3) deltaFont = '10px';            }                        return '<div style="display:flex;align-items:center;gap:4px;' + bgStyle + 'padding:' + padding + ';border-radius:4px;">' +                '<span style="font-size:' + fontSize + ';">' + name + '</span>' +                '<span style="display:flex;align-items:center;justify-content:center;width:' + containerSize + ';height:' + containerSize + ';">' + trendIcon + '</span>' +                (deltaText ? '<span style="font-size:' + deltaFont + ';font-weight:bold;color:' + deltaColor + ';">' + deltaText + '</span>' : '') +                '</div>';        }        var headerLabel = '📈 TREND';        var shortLabel = getShortLabel();                var html = '<div style="display:flex;justify-content:center;gap:6px;padding:4px 0;">';        html += buildTrendItem(getTierMarker('red'), counts['red'] || 0, comparisonCounts['red'] || 0, false, false);        html += buildTrendItem(getTierMarker('green'), counts['green'] || 0, comparisonCounts['green'] || 0, false, false);        html += buildTrendItem(getTierMarker('purple'), counts['purple'] || 0, comparisonCounts['purple'] || 0, false, false);        html += buildTrendItem(getTierMarker('pink'), counts['pink'] || 0, comparisonCounts['pink'] || 0, false, false);        html += '</div>';        html += '<div style="display:flex;justify-content:center;gap:6px;padding:4px 0;">';        html += buildTrendItem(getTierMarker('dark-blue'), counts['dark-blue'] || 0, comparisonCounts['dark-blue'] || 0, false, false);        html += buildTrendItem(getTierMarker('light-blue'), counts['light-blue'] || 0, comparisonCounts['light-blue'] || 0, false, false);        html += buildTrendItem(getTierMarker('gray'), counts['gray'] || 0, comparisonCounts['gray'] || 0, false, false);        html += buildTrendItem(getTierMarker('female-trans'), counts['female-trans'] || 0, comparisonCounts['female-trans'] || 0, false, false);        html += '</div>';        html += '<div style="display:flex;justify-content:center;gap:8px;padding:6px 0;">';        html += buildTrendItem('💎', withTokens || 0, comparisonCounts.withTokens || 0, true, true);        html += buildTrendItem('📊', total || 0, comparisonCounts.total || 0, false, true);        html += buildTrendItem('👻', anonymousCount || 0, comparisonCounts.anonymous || 0, false, true);        html += '</div>';        trendContainer.innerHTML = html;                if (trendHeaderLabel) {            trendHeaderLabel.textContent = headerLabel + shortLabel;        }    }    function saveToHistory() {        var counts = { 'red': 0, 'green': 0, 'purple': 0, 'pink': 0, 'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0 };        users.forEach(function(data) {            if (counts[data.tier] !== undefined) counts[data.tier]++;            if (data.gender === 'female' || data.gender === 'trans') {                counts['female-trans']++;            }        });        var total = users.size;        var withTokens = counts['red'] + counts['green'] + counts['purple'] + counts['pink'] + counts['dark-blue'] + counts['light-blue'];        var anonymousCount = getAnonymousCount();        var now = Date.now();        Object.keys(counts).forEach(function(tier) {            var highResult = getHighValue(history[tier], counts[tier], now);            if (highResult.isNew && highResult.time) {                tierHighTimes[tier] = highResult.time;            }        });        var withTokensResult = getHighValue(history['withTokens'], withTokens, now);        if (withTokensResult.isNew && withTokensResult.time) {            withTokensHighTime = withTokensResult.time;        }        var totalResult = getHighValue(history['total'], total, now);        if (totalResult.isNew && totalResult.time) {            totalHighTime = totalResult.time;        }        var anonResult = getHighValue(history['anonymous'], anonymousCount, now);        if (anonResult.isNew && anonResult.time) {            anonHighTime = anonResult.time;        }        var ftResult = getHighValue(history['female-trans'], counts['female-trans'], now);        if (ftResult.isNew && ftResult.time) {            femaleTransHighTime = ftResult.time;        }        history.timestamps.push(now);        Object.keys(counts).forEach(function(tier) {            history[tier].push(counts[tier]);        });        history['withTokens'].push(withTokens);        history['total'].push(total);        history['anonymous'].push(anonymousCount);        if (history.timestamps.length > MAX_HISTORY_LENGTH) {            history.timestamps.shift();            Object.keys(counts).forEach(function(tier) { history[tier].shift(); });            history['withTokens'].shift();            history['total'].shift();            history['anonymous'].shift();        }        if (!isMinimized) {            drawAllSparklines();        }    }    function drawSparkline(canvasId, data, color, customHeight) {        var canvas = document.getElementById(canvasId);        if (!canvas) return;        var ctx = canvas.getContext('2d');        var scale = Math.max(1, currentScale || 1);        var displayWidth = 105;        var displayHeight = customHeight || 28;        canvas.width = Math.floor(displayWidth * scale);        canvas.height = Math.floor(displayHeight * scale);        canvas.style.width = displayWidth + 'px';        canvas.style.height = displayHeight + 'px';        ctx.clearRect(0, 0, canvas.width, canvas.height);        if (data.length < 2) return;        ctx.scale(scale, scale);        var width = displayWidth;        var height = displayHeight;        var min = Math.min.apply(null, data);        var max = Math.max.apply(null, data);        var range = max - min || 1;        var padding = 2;        var drawHeight = height - (padding * 2);        ctx.strokeStyle = color;        ctx.lineWidth = 2;        ctx.lineCap = 'round';        ctx.lineJoin = 'round';        ctx.beginPath();        for (var i = 0; i < data.length; i++) {            var x = (i / (data.length - 1)) * width;            var y = height - padding - ((data[i] - min) / range) * drawHeight;            if (i === 0) ctx.moveTo(x, y);            else ctx.lineTo(x, y);        }        ctx.stroke();    }    function drawAllSparklines() {        Object.keys(TIERS).forEach(function(tier) {            drawSparkline('spark-' + tier, history[tier], TIERS[tier].color);        });        drawSparkline('spark-withtokens', history['withTokens'], '#ff69b4');        drawSparkline('spark-total', history['total'], '#ffffff');        drawSparkline('spark-anon', history['anonymous'], '#888888', 50);    }    function getHighValue(data, currentValue, timestamp) {        var historyMax = data && data.length > 0 ? Math.max.apply(null, data) : 0;        var newHigh = Math.max(historyMax, currentValue || 0);        if (timestamp && newHigh > historyMax) {            return { value: newHigh, isNew: true, time: timestamp };        }        return { value: newHigh, isNew: false };    }    function resetCountdown() {        countdownSeconds = scanIntervalSeconds;        nextScanAt = Date.now() + scanIntervalSeconds * 1000;        updateCountdownDisplay();    }    function updateCountdownDisplay() {        if (isAutoRefreshOn && !isScanning && nextScanAt) {            countdownSeconds = Math.max(0, Math.ceil((nextScanAt - Date.now()) / 1000));        }        var fallbackWait = getDOMFallbackWaitSeconds(getModelName());        var timingTitle = 'Next API attempt after the countdown. ' + (fallbackWait > 0 ?            'DOM fallback eligible in ' + fallbackWait + 's if the API fails.' :            'DOM fallback eligible if the API fails.');        var statusEl = document.getElementById('auto-status');        var timerDisplay = document.getElementById('timer-display');        var expandedCountdown = document.getElementById('expanded-countdown');        var controlNextScan = document.getElementById('control-next-scan');        [statusEl, expandedCountdown, controlNextScan].forEach(function(el) {            if (el) el.title = isAutoRefreshOn ? timingTitle :                'Automatic scans paused. An in-flight scan may finish. ' + timingTitle;        });        if (timerDisplay) {            timerDisplay.textContent = scanIntervalSeconds + 's';        }        if (expandedCountdown) {            if (isScanning) {                expandedCountdown.textContent = 'scanning...';                expandedCountdown.style.color = '#ffd43b';            } else if (isAutoRefreshOn) {                expandedCountdown.textContent = 'next: ' + countdownSeconds + 's';                expandedCountdown.style.color = '#32CD32';            } else {                expandedCountdown.textContent = 'paused';                expandedCountdown.style.color = '#ff4444';            }        }        if (controlNextScan) {            if (isScanning) {                controlNextScan.textContent = 'Scanning...';                controlNextScan.style.color = '#ffd43b';            } else if (isAutoRefreshOn) {                controlNextScan.textContent = 'Next: ' + countdownSeconds + 's';                controlNextScan.style.color = '#32CD32';            } else {                controlNextScan.textContent = 'Paused';                controlNextScan.style.color = '#ff4444';            }        }        if (!statusEl) return;        if (isScanning) {            statusEl.textContent = 'Scanning...';            statusEl.style.color = '#ffd43b';        } else if (isAutoRefreshOn) {            statusEl.textContent = 'Next: ' + countdownSeconds + 's';            statusEl.style.color = '#32CD32';        } else {            statusEl.textContent = 'Auto: OFF';            statusEl.style.color = '#ff4444';        }    }    function adjustTimer(delta) {        var newValue = scanIntervalSeconds + delta;        if (newValue < 30) scanIntervalSeconds = 30;        else if (newValue > 300) scanIntervalSeconds = 300;        else scanIntervalSeconds = newValue;        if (isAutoRefreshOn) {            stopCountdown();            resetCountdown();            startCountdown();        } else {            resetCountdown();            var timerDisplay = document.getElementById('timer-display');            if (timerDisplay) {                timerDisplay.textContent = scanIntervalSeconds + 's';            }        }        updateCountdownDisplay();    }    function startCountdown() {        if (countdownInterval) {            clearInterval(countdownInterval);            countdownInterval = null;        }        if (!nextScanAt) resetCountdown();        updateCountdownDisplay();        countdownInterval = setInterval(function() {            if (!isAutoRefreshOn || isScanning) return;            updateCountdownDisplay();            if (countdownSeconds <= 0) {                performScanThenReturn(true);            }        }, 1000);    }    function stopCountdown() {        if (countdownInterval) {            clearInterval(countdownInterval);            countdownInterval = null;        }    }    function cleanupDragListeners() {        for (var i = 0; i < dragListeners.length; i++) {            var listener = dragListeners[i];            document.removeEventListener(listener.type, listener.fn, listener.options);        }        dragListeners = [];    }    function addDragListener(type, fn, options) {        document.addEventListener(type, fn, options);        dragListeners.push({ type: type, fn: fn, options: options });    }    function applyScale(scale) {        currentScale = scale;        var container = document.getElementById('tracker-container');        if (!container) return;        container.style.transform = 'scale(' + scale + ')';        container.style.transformOrigin = 'top left';        container.dataset.scale = scale;    }    function setupResizable() {        var container = document.getElementById('tracker-container');        if (!container) return;        var resizeHandle = document.createElement('div');        resizeHandle.id = 'resize-handle';        resizeHandle.style.cssText =            'position:absolute;top:0;left:0;width:16px;height:16px;' +            'background:linear-gradient(135deg, #ff69b4 50%, transparent 50%);' +            'cursor:nw-resize;z-index:999999;border-top-left-radius:6px;' +            'opacity:0.8;transition:opacity 0.2s;';        resizeHandle.addEventListener('mouseenter', function() {            this.style.opacity = '1';        });        resizeHandle.addEventListener('mouseleave', function() {            this.style.opacity = '0.8';        });        container.appendChild(resizeHandle);        var startResize = function(e) {            if (isDragging) return;            isResizing = true;            resizeStartX = e.clientX;            resizeStartY = e.clientY;            var rect = container.getBoundingClientRect();            resizeStartWidth = rect.width;            resizeStartHeight = rect.height;            e.preventDefault();            e.stopPropagation();        };        var doResize = function(e) {            if (!isResizing) return;            var deltaX = resizeStartX - e.clientX;            var deltaY = resizeStartY - e.clientY;            var newWidth = resizeStartWidth + deltaX;            var baseWidth = isMinimized ? BASE_WIDTH_MINI : BASE_WIDTH_FULL;            var newScale = Math.max(0.5, Math.min(3.0, newWidth / baseWidth));            applyScale(newScale);        };        var stopResize = function() {            if (!isResizing) return;            isResizing = false;        };        resizeHandle.addEventListener('mousedown', startResize);        document.addEventListener('mousemove', doResize);        document.addEventListener('mouseup', stopResize);        window._trackerResizeCleanup = function() {            resizeHandle.removeEventListener('mousedown', startResize);            document.removeEventListener('mousemove', doResize);            document.removeEventListener('mouseup', stopResize);        };    }    function setupResizeHandler() {        if (windowResizeHandler) {            window.removeEventListener('resize', windowResizeHandler);            windowResizeHandler = null;        }        var resizeTimeout;        windowResizeHandler = function() {            clearTimeout(resizeTimeout);            resizeTimeout = setTimeout(function() {                var container = document.getElementById('tracker-container');                if (!container) return;                var rect = container.getBoundingClientRect();                var viewportWidth = window.innerWidth;                var viewportHeight = window.innerHeight;                var currentLeft = parseInt(container.style.left) || rect.left;                var currentTop = parseInt(container.style.top) || rect.top;                var maxX = viewportWidth - rect.width;                var maxY = viewportHeight - rect.height;                var newLeft = Math.max(0, Math.min(currentLeft, maxX));                var newTop = Math.max(0, Math.min(currentTop, maxY));                if (newLeft !== currentLeft || newTop !== currentTop) {                    container.style.left = newLeft + 'px';                    container.style.top = newTop + 'px';                    container.style.right = 'auto';                }            }, 100);        };        window.addEventListener('resize', windowResizeHandler);    }    function createPanel() {        cleanupDragListeners();        if (windowResizeHandler) {            window.removeEventListener('resize', windowResizeHandler);            windowResizeHandler = null;        }        if (window._trackerResizeCleanup) {            window._trackerResizeCleanup();            window._trackerResizeCleanup = null;        }        var existing = document.getElementById('cb-tier-tracker');        if (existing) existing.remove();        var div = document.createElement('div');        div.id = 'cb-tier-tracker';        var html =            '<div id="tracker-container" style="' +                'position:fixed;top:80px;right:20px;background:rgba(20,20,30,0.95);color:white;padding:5px;' +                'border-radius:6px;font-family:Arial,sans-serif;font-size:9px;z-index:999999;width:' + BASE_WIDTH_MINI + 'px;' +                'border:1px solid #ff69b4;transition:width 0.3s ease;cursor:default;user-select:none;' +            '">' +                '<div id="drag-handle" style="' +                    'display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;' +                    'border-bottom:1px solid #ff69b4;padding-bottom:3px;cursor:move;' +                '">' +                    '<span id="header-text" style="font-weight:bold;color:#ff69b4;font-size:10px;">USERS: 0 (H:0)</span>' +                    '<span id="header-unique" style="font-weight:bold;color:#32CD32;font-size:10px;display:none;">U:0</span>' +                    '<button id="btn-toggle" style="background:#333;border:1px solid #555;color:#fff;border-radius:3px;cursor:pointer;font-size:9px;padding:1px 4px;flex-shrink:0;">+</button>' +                '</div>' +                '<div id="minimized-view" style="display:block;text-align:center;">' +                    '<div style="font-size:9px;margin-bottom:3px;">' +                        '<div>💎 <span id="mini-withtokens" style="color:#ff69b4;font-weight:bold;">0</span>' +                        '(<span id="mini-withtokens-pct" style="color:#ff69b4;">0%</span>)</div>' +                        '<div style="margin-top:2px;">📊 <span id="mini-total" style="color:#fff;font-weight:bold;">0</span>' +                        '(<span id="mini-total-pct" style="color:#fff;">0%</span>)</div>' +                    '</div>' +                    '<div style="display:flex;align-items:center;justify-content:center;gap:3px;margin:3px 0;padding:2px;background:rgba(255,255,255,0.05);border-radius:3px;">' +                        '<button id="btn-timer-down" style="background:#444;border:none;color:#fff;border-radius:2px;cursor:pointer;font-size:9px;padding:1px 4px;font-weight:bold;">−</button>' +                        '<span id="timer-display" style="font-size:11px;color:#ffd43b;font-weight:bold;min-width:28px;">60s</span>' +                        '<button id="btn-timer-up" style="background:#444;border:none;color:#fff;border-radius:2px;cursor:pointer;font-size:9px;padding:1px 4px;font-weight:bold;">+</button>' +                    '</div>' +                    '<div style="display:flex;gap:2px;justify-content:center;flex-wrap:wrap;">' +                        '<button id="btn-expand" style="background:#444;border:none;color:white;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 5px;">Expand</button>' +                        '<button id="btn-auto" style="background:#32CD32;border:none;color:white;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 4px;" title="Auto-Refresh ON">⏸</button>' +                    '</div>' +                    '<div style="display:flex;gap:2px;justify-content:center;margin-top:3px;">' +                        '<button class="timer-preset" data-time="30" style="background:#333;border:1px solid #555;color:#aaa;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">30s</button>' +                        '<button class="timer-preset" data-time="60" style="background:#ff69b4;border:1px solid #ff69b4;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">60s</button>' +                        '<button class="timer-preset" data-time="120" style="background:#333;border:1px solid #555;color:#aaa;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">2m</button>' +                        '<button class="timer-preset" data-time="300" style="background:#333;border:1px solid #555;color:#aaa;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">5m</button>' +                    '</div>' +                    '<div id="auto-status" style="margin-top:2px;font-size:7px;color:#32CD32;">Starting...</div>' +                '</div>' +                '<div id="full-view" style="display:none;">';        Object.keys(TIERS).forEach(function(key) {            var t = TIERS[key];            html +=                '<div style="display:flex;align-items:center;padding:1px 3px;margin:1px 0;background:rgba(255,255,255,0.05);border-radius:3px;border-left:3px solid ' + t.color + ';">' +                    '<div style="width:30px;flex-shrink:0;text-align:center;">' +                        '<span style="font-size:14px;">' + getTierMarker(key) + '</span>' +                    '</div>' +                    '<canvas id="spark-' + key + '" width="105" height="28" style="flex:1;margin:0 4px;"></canvas>' +                    '<div style="text-align:right;width:48px;flex-shrink:0;">' +                        '<span id="count-' + key + '" style="font-weight:bold;color:' + t.color + ';font-size:14px;">0</span>' +                        '<div id="high-' + key + '" style="font-size:8px;color:#32CD32;margin-top:1px;">H:0</div>' +                    '</div>' +                '</div>';        });        html +=                '<div style="border-top:1px solid #555;margin-top:4px;padding-top:4px;">' +                    '<div style="display:flex;align-items:center;padding:2px 3px;background:rgba(255,105,180,0.15);border-radius:3px;border:1px solid #ff69b4;margin-bottom:3px;">' +                        '<div style="width:30px;flex-shrink:0;text-align:center;">' +                            '<span style="font-size:14px;">💎</span>' +                        '</div>' +                        '<canvas id="spark-withtokens" width="105" height="28" style="flex:1;margin:0 4px;"></canvas>' +                        '<div style="text-align:right;width:48px;flex-shrink:0;">' +                            '<span id="count-withtokens" style="font-weight:bold;color:#ff69b4;font-size:14px;">0</span>' +                            '<span id="pct-withtokens" style="font-size:8px;color:#ff69b4;margin-left:2px;">0%</span>' +                            '<div id="high-withtokens" style="font-size:8px;color:#32CD32;margin-top:1px;">H:0</div>' +                        '</div>' +                    '</div>' +                    '<div style="display:flex;align-items:center;padding:2px 3px;background:rgba(255,255,255,0.1);border-radius:3px;">' +                        '<div style="width:30px;flex-shrink:0;text-align:center;">' +                            '<span style="font-size:14px;">📊</span>' +                        '</div>' +                        '<canvas id="spark-total" width="105" height="28" style="flex:1;margin:0 4px;"></canvas>' +                        '<div style="text-align:right;width:48px;flex-shrink:0;">' +                            '<span id="count-total" style="font-weight:bold;color:#fff;font-size:14px;">0</span>' +                            '<div id="high-total" style="font-size:8px;color:#32CD32;margin-top:1px;">H:0</div>' +                        '</div>' +                    '</div>' +                '</div>' +                '<div id="anon-rate-full" style="margin-top:5px;padding:5px;background:rgba(136,136,136,0.15);border-radius:3px;border:1px solid #888;">' +                    '<div style="display:flex;align-items:center;">' +                        '<div style="width:30px;flex-shrink:0;text-align:center;">' +                            '<span style="font-size:14px;">👻</span>' +                        '</div>' +                        '<canvas id="spark-anon" width="105" height="50" style="flex:1;margin:0 4px;"></canvas>' +                        '<div style="text-align:right;width:48px;flex-shrink:0;">' +                            '<span id="anon-ratio-full" style="font-size:13px;font-weight:bold;color:#ff69b4;">--</span>' +                            '<div id="high-anon" style="font-size:8px;color:#32CD32;margin-top:1px;">H:0</div>' +                        '</div>' +                    '</div>' +                '</div>' +                '<div style="border-top:1px solid #4169E1;margin-top:5px;padding-top:5px;">' +                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;flex-wrap:wrap;gap:2px;">' +                        '<span id="trend-header-label" style="font-size:9px;font-weight:bold;color:#4169E1;">📈 TREND</span>' +                        '<div style="display:flex;gap:2px;flex-wrap:wrap;">' +                            '<button class="trend-preset-btn" data-mode="last" style="background:#4169E1;border:1px solid #4169E1;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Last</button>' +                            '<button class="trend-preset-btn" data-mode="5min" style="background:#333;border:1px solid #555;color:#aaa;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">5m</button>' +                            '<button class="trend-preset-btn" data-mode="15min" style="background:#333;border:1px solid #555;color:#aaa;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">15m</button>' +                            '<button class="trend-preset-btn" data-mode="30min" style="background:#333;border:1px solid #555;color:#aaa;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">30m</button>' +                            '<button class="trend-preset-btn" data-mode="1hour" style="background:#333;border:1px solid #555;color:#aaa;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">1h</button>' +                            '<button class="trend-preset-btn" data-mode="start" style="background:#333;border:1px solid #555;color:#aaa;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Start</button>' +                            '<button id="btn-trend-auto" style="background:#32CD32;border:1px solid #32CD32;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;" title="Auto-escalation ON - Click to disable">AUTO</button>' +                        '</div>' +                    '</div>' +                    '<div id="trend-container" style="min-height:30px;">' +                        '<div style="font-size:8px;color:#666;text-align:center;padding:8px;">Waiting for scan...</div>' +                    '</div>' +                '</div>' +                '<div id="control-field" style="margin-top:5px;padding:4px;background:rgba(65,105,225,0.15);border-radius:3px;border:1px solid #4169E1;">' +                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">' +                        '<span style="font-size:9px;font-weight:bold;color:#4169E1;">🎛️ CONTROLS</span>' +                        '<span style="font-size:11px;color:#32CD32;font-weight:bold;" id="control-next-scan">Next: 60s</span>' +                    '</div>' +                    '<div style="display:flex;justify-content:center;align-items:center;position:relative;">' +                        '<span style="font-size:12px;color:#ffd43b;font-family:monospace;font-weight:bold;position:absolute;left:0;" id="control-tracking-timer">00:00:00</span>' +                        '<div style="display:flex;gap:3px;">' +                            '<button id="btn-download-report" style="background:#4169E1;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 6px;display:flex;align-items:center;gap:2px;" title="Download tracking report">' +                                '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +                                    '<line x1="12" y1="4" x2="12" y2="16"/>' +                                    '<polyline points="6 10 12 16 18 10"/>' +                                    '<line x1="4" y1="20" x2="20" y2="20"/>' +                                '</svg>' +                                'Report' +                            '</button>' +                            '<button id="btn-control-auto" style="background:#32CD32;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 6px;min-width:24px;" title="Auto-Refresh ON">⏸</button>' +                            '<button id="btn-main-reset" style="background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 6px;display:flex;align-items:center;gap:2px;" title="Reset all tracking data">' +                                '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +                                    '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12"/>' +                                    '<path d="M3 3v9h9"/>' +                                '</svg>' +                                'Reset' +                            '</button>' +                        '</div>' +                    '</div>' +                '</div>' +                '<div id="acquisition-status" style="margin-top:2px;font-size:7px;color:#aaa;" title="No accepted sample yet">No sample</div>' +                '<div style="position:absolute;bottom:4px;right:6px;display:flex;align-items:center;gap:3px;opacity:0.6;transition:opacity 0.2s;" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0.6">' +                    '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#ff69b4" stroke-width="2" style="flex-shrink:0;">' +                        '<circle cx="12" cy="12" r="10"/>' +                        '<line x1="12" y1="2" x2="12" y2="22"/>' +                        '<line x1="2" y1="12" x2="22" y2="12"/>' +                    '</svg>' +                    '<span style="font-size:7px;font-family:\'Courier New\',monospace;font-weight:bold;color:#ff69b4;letter-spacing:1px;">TIERSCOPE</span>' +                '</div>' +            '</div>';        div.innerHTML = html;        document.body.appendChild(div);        var btnDownload = document.getElementById('btn-download-report');        var btnMainReset = document.getElementById('btn-main-reset');        var btnControlAuto = document.getElementById('btn-control-auto');        if (btnDownload) btnDownload.addEventListener('click', downloadTrackingReport);        if (btnMainReset) btnMainReset.addEventListener('click', resetAllTracking);        if (btnControlAuto) btnControlAuto.addEventListener('click', toggleAutoRefresh);        setupDraggable();        setupResizable();        setupResizeHandler();        var btnToggle = document.getElementById('btn-toggle');        var btnExpand = document.getElementById('btn-expand');        var btnAuto = document.getElementById('btn-auto');        var btnTimerDown = document.getElementById('btn-timer-down');        var btnTimerUp = document.getElementById('btn-timer-up');        if (btnToggle) btnToggle.onclick = toggleView;        if (btnExpand) btnExpand.onclick = toggleView;        if (btnAuto) btnAuto.onclick = toggleAutoRefresh;        if (btnTimerDown) btnTimerDown.onclick = function() { adjustTimer(-10); };        if (btnTimerUp) btnTimerUp.onclick = function() { adjustTimer(10); };        var presetBtns = document.querySelectorAll('.timer-preset');        for (var i = 0; i < presetBtns.length; i++) {            presetBtns[i].onclick = function() {                var time = parseInt(this.dataset.time);                scanIntervalSeconds = time;                if (isAutoRefreshOn) {                    stopCountdown();                    resetCountdown();                    startCountdown();                } else {                    resetCountdown();                }                updateCountdownDisplay();                var allPresets = document.querySelectorAll('.timer-preset');                for (var j = 0; j < allPresets.length; j++) {                    allPresets[j].style.background = '#333';                    allPresets[j].style.color = '#aaa';                    allPresets[j].style.borderColor = '#555';                }                this.style.background = '#ff69b4';                this.style.color = '#fff';                this.style.borderColor = '#ff69b4';            };        }                var trendPresetBtns = document.querySelectorAll('.trend-preset-btn');        for (var k = 0; k < trendPresetBtns.length; k++) {            trendPresetBtns[k].onclick = function() {                autoTrendEscalation = false;                updateAutoTrendButton();                var mode = this.dataset.mode;                setTrendComparisonMode(mode);            };        }                var btnTrendAuto = document.getElementById('btn-trend-auto');        if (btnTrendAuto) {            btnTrendAuto.onclick = toggleAutoTrendEscalation;        }                updateTrendPresetButtons();        updateAutoTrendButton();    }    function toggleAutoRefresh() {        isAutoRefreshOn = !isAutoRefreshOn;        var btn = document.getElementById('btn-auto');        var btnControl = document.getElementById('btn-control-auto');        if (isAutoRefreshOn) {            if (btn) {                btn.style.background = '#32CD32';                btn.innerHTML = '⏸';                btn.title = 'Auto-Refresh ON - Click to pause';            }            if (btnControl) {                btnControl.style.background = '#32CD32';                btnControl.innerHTML = '⏸';                btnControl.title = 'Auto-Refresh ON - Click to pause';            }            startTrackingTimer();            startCountdown();            performScanThenReturn(true);        } else {            if (btn) {                btn.style.background = '#ff4444';                btn.innerHTML = '▶';                btn.title = 'Auto-Refresh OFF - Click to start';            }            if (btnControl) {                btnControl.style.background = '#ff4444';                btnControl.innerHTML = '▶';                btnControl.title = 'Auto-Refresh OFF - Click to start';            }            stopCountdown();            pauseTrackingTimer();            updateCountdownDisplay();        }    }    function setupDraggable() {        var container = document.getElementById('tracker-container');        var dragHandle = document.getElementById('drag-handle');        if (!container || !dragHandle) return;        var startDrag = function(e) {            if (isResizing) return;            isDragging = true;            var rect = container.getBoundingClientRect();            var scale = currentScale || 1;            dragOffsetX = (e.clientX - rect.left) / scale;            dragOffsetY = (e.clientY - rect.top) / scale;            if (container.style.right !== 'auto') {                container.style.left = rect.left + 'px';                container.style.right = 'auto';            }            addDragListener('mousemove', doDrag, false);            addDragListener('mouseup', stopDrag, false);            e.preventDefault();        };        var doDrag = function(e) {            if (!isDragging) return;            var scale = currentScale || 1;            var newX = e.clientX - (dragOffsetX * scale);            var newY = e.clientY - (dragOffsetY * scale);            var maxX = window.innerWidth - (container.offsetWidth * scale);            var maxY = window.innerHeight - (container.offsetHeight * scale);            newX = Math.max(0, Math.min(newX, maxX));            newY = Math.max(0, Math.min(newY, maxY));            container.style.left = newX + 'px';            container.style.top = newY + 'px';        };        var stopDrag = function() {            isDragging = false;            cleanupDragListeners();        };        dragHandle.addEventListener('mousedown', startDrag, false);    }    function toggleView() {        isMinimized = !isMinimized;        var fullView = document.getElementById('full-view');        var miniView = document.getElementById('minimized-view');        var toggleBtn = document.getElementById('btn-toggle');        var container = document.getElementById('tracker-container');        var headerText = document.getElementById('header-text');        var headerUnique = document.getElementById('header-unique');        var resizeHandle = document.getElementById('resize-handle');        var anonymousCount = getAnonymousCount();        if (isMinimized) {            if (fullView) fullView.style.display = 'none';            if (miniView) miniView.style.display = 'block';            if (toggleBtn) toggleBtn.textContent = '+';            if (container) container.style.width = BASE_WIDTH_MINI + 'px';            if (resizeHandle) resizeHandle.style.display = 'none';            if (isResizing) isResizing = false;            if (headerUnique) headerUnique.style.display = 'none';            var currentTotal = roomTotal > 0 ? roomTotal : (users.size + anonymousCount);            if (headerText) headerText.textContent = currentTotal.toLocaleString() + ' (H:' + roomTotalHigh.toLocaleString() + ')';        } else {            if (fullView) fullView.style.display = 'block';            if (miniView) miniView.style.display = 'none';            if (toggleBtn) toggleBtn.textContent = '−';            if (container) container.style.width = BASE_WIDTH_FULL + 'px';            if (resizeHandle) resizeHandle.style.display = 'block';            if (headerUnique) headerUnique.style.display = 'inline';            var currentTotal = roomTotal > 0 ? roomTotal : (users.size + anonymousCount);            if (headerText) headerText.textContent = 'USERS: ' + currentTotal.toLocaleString() + ' (H:' + roomTotalHigh.toLocaleString() + ')';            setTimeout(function() {                drawAllSparklines();            }, 100);        }        updateDisplay();    }    function scanUsers() {        var userListTab = document.querySelector(DOM_SELECTORS.userListTab);        if (!userListTab) throw new Error('UserListTab not found');        var snapshotUsers = new Map();        var snapshotRoomTotal = getRoomTotal();        if (!snapshotRoomTotal) throw new Error('DOM room total missing or zero');        var userElements = [];        for (var i = 0; i < DOM_SELECTORS.usernameElements.length; i++) {            var found = userListTab.querySelectorAll(DOM_SELECTORS.usernameElements[i]);            for (var j = 0; j < found.length; j++) {                userElements.push(found[j]);            }        }        for (var i = 0; i < userElements.length; i++) {            var el = userElements[i];            var rawText = (el.textContent || '').trim() || (el.getAttribute('data-username') || '').trim();            var username = extractUsername(rawText);            if (username && !snapshotUsers.has(username)) {                var tier = getTierFromElement(el);                var gender = getGenderFromElement(el);                snapshotUsers.set(username, { username: username, rawClass: null, tier: tier,                    genderCode: null, gender: gender, rawFlag: null, isOwner: null });            }        }        if (!snapshotUsers.size) throw new Error('DOM sample contains no readable users');        return { source: 'DOM', timestamp: Date.now(), roomTotal: snapshotRoomTotal,            users: Array.from(snapshotUsers.values()) };    }    function updateDisplay() {        var counts = { 'red': 0, 'green': 0, 'purple': 0, 'pink': 0, 'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0 };        users.forEach(function(data) {            if (counts[data.tier] !== undefined) counts[data.tier]++;            if (data.gender === 'female' || data.gender === 'trans') {                counts['female-trans']++;            }        });        var total = users.size;        var withTokens = counts['red'] + counts['green'] + counts['purple'] + counts['pink'] + counts['dark-blue'] + counts['light-blue'];        var anonymousCount = getAnonymousCount();        var fullRoomTotal = roomTotal > total ? roomTotal : (total + anonymousCount);        if (fullRoomTotal > roomTotalHigh) {            roomTotalHigh = fullRoomTotal;            roomTotalHighTime = Date.now();        }        var withTokensPct = total > 0 ? Math.round((withTokens / total) * 100) + '%' : '0%';        var registeredPct = fullRoomTotal > 0 ? Math.round((total / fullRoomTotal) * 100) + '%' : '0%';        var headerText = document.getElementById('header-text');        var headerUnique = document.getElementById('header-unique');        if (headerText) {            if (isMinimized) {                headerText.textContent = fullRoomTotal.toLocaleString() + ' (H:' + roomTotalHigh.toLocaleString() + ')';            } else {                headerText.textContent = 'USERS: ' + fullRoomTotal.toLocaleString() + ' (H:' + roomTotalHigh.toLocaleString() + ')';            }        }        if (headerUnique && !isMinimized) {            headerUnique.textContent = 'U:' + Object.keys(sessionUniqueUsers).length.toLocaleString();        }        var miniWithTokens = document.getElementById('mini-withtokens');        var miniWithTokensPct = document.getElementById('mini-withtokens-pct');        var miniTotal = document.getElementById('mini-total');        var miniTotalPct = document.getElementById('mini-total-pct');        if (miniWithTokens) miniWithTokens.textContent = withTokens;        if (miniWithTokensPct) miniWithTokensPct.textContent = withTokensPct;        if (miniTotal) miniTotal.textContent = total;        if (miniTotalPct) miniTotalPct.textContent = registeredPct;        if (!isMinimized) {            Object.keys(TIERS).forEach(function(tier) {                var countEl = document.getElementById('count-' + tier);                var highEl = document.getElementById('high-' + tier);                var currentVal = counts[tier];                var highResult = getHighValue(history[tier], currentVal);                var highVal = highResult.value;                if (countEl) countEl.textContent = currentVal;                if (highEl) highEl.textContent = 'H:' + highVal.toLocaleString();            });            var withTokensCountEl = document.getElementById('count-withtokens');            var withTokensPctEl = document.getElementById('pct-withtokens');            var withTokensHighEl = document.getElementById('high-withtokens');            var totalEl = document.getElementById('count-total');            var totalHighEl = document.getElementById('high-total');            var withTokensResult = getHighValue(history['withTokens'], withTokens);            var totalResult = getHighValue(history['total'], total);            var anonResult = getHighValue(history['anonymous'], anonymousCount);            if (withTokensCountEl) withTokensCountEl.textContent = withTokens;            if (withTokensPctEl) withTokensPctEl.textContent = withTokensPct;            if (withTokensHighEl) withTokensHighEl.textContent = 'H:' + withTokensResult.value.toLocaleString();            if (totalEl) totalEl.textContent = total;            if (totalHighEl) totalHighEl.textContent = 'H:' + totalResult.value.toLocaleString();                        var fullAnonText = document.getElementById('anon-ratio-full');            var anonHighEl = document.getElementById('high-anon');            if (fullAnonText) {                var anonLabel = anonymousCount > 0 ? anonymousCount.toLocaleString() : '0';                var digits = String(Math.abs(anonymousCount)).length;                fullAnonText.textContent = anonLabel;                fullAnonText.style.fontSize = digits >= 6 ? '9px' : digits === 5 ? '11px' : '13px';            }            if (anonHighEl) anonHighEl.textContent = 'H:' + anonResult.value.toLocaleString();        }    }    function scheduleInit(delay) {        var generation = initGuard;        var url = location.href;        setTimeout(function() {            if (generation === initGuard && url === location.href) init();        }, delay);    }    function init() {        var myGeneration = ++initGuard;        isScanning = false;        log('Initializing... (generation ' + myGeneration + ')');        if (healthCheckInterval) {            clearInterval(healthCheckInterval);            healthCheckInterval = null;        }        if (freshnessInterval) clearInterval(freshnessInterval);        freshnessInterval = setInterval(function() {            updateAcquisitionStatus();            updateCountdownDisplay();        }, 1000);        var isRoom = isBroadcastRoom();        var modelName = getModelName();        var loaded = false;        if (isRoom && modelName !== 'unknown') {            loaded = loadSession(modelName);        }        if (!loaded) {            isMinimized = !isRoom;            isAutoRefreshOn = isRoom;        } else {            isMinimized = false;            isAutoRefreshOn = !isPaused;        }        try {            createPanel();        } catch (e) {            log('Error creating panel: ' + e);            return;        }        var resizeHandle = document.getElementById('resize-handle');        if (resizeHandle) {            resizeHandle.style.display = isMinimized ? 'none' : 'block';        }        if (!isMinimized) {            var fullView = document.getElementById('full-view');            var miniView = document.getElementById('minimized-view');            var toggleBtn = document.getElementById('btn-toggle');            var container = document.getElementById('tracker-container');            var headerUnique = document.getElementById('header-unique');            if (fullView) fullView.style.display = 'block';            if (miniView) miniView.style.display = 'none';            if (toggleBtn) toggleBtn.textContent = '−';            if (container) container.style.width = BASE_WIDTH_FULL + 'px';            if (headerUnique) headerUnique.style.display = 'inline';            drawAllSparklines();            updateDisplay();        }        var attempts = 0;        var maxAttempts = 30;        var checkInterval = setInterval(function() {            if (myGeneration !== initGuard) {                clearInterval(checkInterval);                log('Init ' + myGeneration + ' superseded by newer generation');                return;            }            attempts++;            if ((isRoom && modelName !== 'unknown') || document.querySelector(DOM_SELECTORS.userListTab) || attempts >= maxAttempts) {                clearInterval(checkInterval);                if (!isRoom && attempts >= maxAttempts && !document.querySelector(DOM_SELECTORS.userListTab)) {                    log('UserListTab not found after 30s, giving up');                    var statusEl = document.getElementById('auto-status');                    if (statusEl) {                        statusEl.textContent = 'No chat detected';                        statusEl.style.color = '#ff4444';                    }                    return;                }                if (!isPaused) {                    performScanThenReturn(true);                }                setTimeout(function() {                    if (myGeneration !== initGuard) return;                    if (isAutoRefreshOn && !isPaused) {                        startTrackingTimer();                        startCountdown();                    } else {                        var btnAuto = document.getElementById('btn-auto');                        var btnControlAuto = document.getElementById('btn-control-auto');                        if (btnAuto) {                            btnAuto.style.background = '#ff4444';                            btnAuto.innerHTML = '▶';                            btnAuto.title = 'Auto-Refresh OFF - Click to start';                        }                        if (btnControlAuto) {                            btnControlAuto.style.background = '#ff4444';                            btnControlAuto.innerHTML = '▶';                            btnControlAuto.title = 'Auto-Refresh OFF - Click to start';                        }                        var statusEl = document.getElementById('auto-status');                        if (statusEl) {                            statusEl.textContent = isPaused ? 'Paused (restored)' : 'Paused';                            statusEl.style.color = '#ff4444';                        }                        updateTrackingTimer();                    }                }, 2002);            }        }, 1000);        healthCheckInterval = setInterval(function() {            if (myGeneration === initGuard && lastAcquisitionAttemptSource === 'DOM' && !isScanning) {                validateDOMHealth();            }        }, 30000);    }    var lastUrl = location.href;    function checkUrlChange() {        if (location.href !== lastUrl) {            var oldModel = getModelNameFromUrl(lastUrl);            lastUrl = location.href;            if (oldModel && oldModel !== 'unknown') {                saveSession(oldModel);            }            activeSessionStorageKey = null;            stopCountdown();            nextScanAt = 0;            countdownSeconds = scanIntervalSeconds;            stopTrackingTimer();            cleanupDragListeners();            isScanning = false;            if (healthCheckInterval) {                clearInterval(healthCheckInterval);                healthCheckInterval = null;            }            currentScale = 1.0;            users.clear();            roomTotal = 0;            lastAcceptedAcquisition = null;            lastAcquisitionAttemptSource = 'API';            domHealthStatus.consecutiveFailures = 0;            updateAcquisitionStatus();            previousUserCount = 0;            previousRoomTotal = 0;            Object.keys(history).forEach(function(k) { history[k] = []; });            previousCounts = {                'red': 0, 'green': 0, 'purple': 0, 'pink': 0,                'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0,                'withTokens': 0, 'total': 0, 'anonymous': 0            };            hasTrendBaseline = false;            trendComparisonMode = 'last';            autoTrendEscalation = true;            roomTotalHigh = 0;            sessionUniqueUsers = {};            roomTotalHighTime = null;            tierHighTimes = {};            withTokensHighTime = null;            totalHighTime = null;            anonHighTime = null;            femaleTransHighTime = null;            femaleTransUsernames = [];            sessionFemaleTransUsers = {};            initGuard++;            scheduleInit(2002);        }    }    urlCheckInterval = setInterval(checkUrlChange, 500);    window.addEventListener('beforeunload', function() {        var modelName = getModelName();        if (modelName && modelName !== 'unknown') {            saveSession(modelName);        }    });    if (document.readyState === 'loading') {        document.addEventListener('DOMContentLoaded', function() {            scheduleInit(2000);        });    } else {        scheduleInit(2000);    }    log('Script loaded and waiting for init');    return {        downloadTrackingReport: downloadTrackingReport,        resetAllTracking: resetAllTracking,        getHealth: function() { return domHealthStatus; },        parseGetChatUserListResponse: parseGetChatUserListResponse    };})();if (typeof unsafeWindow !== 'undefined') {    unsafeWindow.ViewerTracker = ViewerTracker;} else {    window.ViewerTracker = ViewerTracker;}
+// ==UserScript==
+// @name         TierScope - Chaturbate Viewers Visualizer
+// @namespace    http://tampermonkey.net/
+// @version      3.1.1.0
+// @description  TierScope - Viewer visualizer with trend tracking and reports
+// @author       newivy
+// @match        https://chaturbate.com/*
+// @match        https://*.chaturbate.com/*
+// @grant        unsafeWindow
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @grant        GM_deleteValue
+// @run-at       document-end
+// ==/UserScript==
+
+/*
+ * TierScope 3.1 architecture
+ *
+ * A Chaturbate room audience visualizer/tracker. Normal acquisition uses the
+ * same-origin /api/getchatuserlist/ API, with a default interval of 60 seconds
+ * after the preceding acquisition completes. Accepted API samples do not require
+ * chat-tab manipulation. DOM scanning is a conservative fallback after API failure
+ * or invalidity. Each room waits at least 60 seconds after a fallback completes
+ * before its next fallback attempt; API retries keep their own cadence.
+ *
+ * Validated, current-room samples feed counts, trend deltas, sparklines, highs,
+ * unique-user/session statistics and reports. Rejected samples leave accepted
+ * data intact and add no history point. Per-room history/session state is saved
+ * through Tampermonkey storage under tierscope:v1:<room>.
+ *
+ * LIVE and PLAYBACK select presentation only. Replay takes a room-bound copy of
+ * the retained history, derives counts/highs through its cursor, and paints the
+ * same rows/canvases without replacing live acquisition or saved-session state.
+ * Its separate clock compresses recorded time at 60x, capped at 30 seconds for
+ * the automatic whole-range replay. Video export is a future downstream layer.
+ *
+ * Storage schema version describes structural compatibility; producer version
+ * identifies the TierScope application that last saved the record. Legacy
+ * 3.0-format records qualify as schema 1 only after structural validation and
+ * gain metadata on their next successful save, without rewriting history.
+ * Corrupt, unsupported and newer-schema records are retained and protected
+ * against automatic overwrite. Live users and their acquisition source/time
+ * are intentionally not restored as though a saved session were a current sample.
+ *
+ * Compact API interpretation:
+ *   response   := anonymousCount,userRecord,userRecord,...
+ *   userRecord := username|class|gender|flag
+ *   A scalar-only response represents zero named records; validity checks still apply.
+ *
+ *   class:  o  Orange broadcaster/room owner (not a viewer tier)
+ *           m  Red             f  Green
+ *           l  Dark Purple     p  Light Purple
+ *           tr Dark Blue       t  Light Blue       g  Grey
+ *   These class/color names follow Chaturbate terminology, not historical
+ *   TierScope labels. Internal purple/pink/gray keys remain storage-compatible.
+ *
+ *   gender: m  Man    f  Woman    c  Couple    s  Trans
+ *   flag:   retained as rawFlag; its meaning is not inferred by TierScope.
+ *
+ * API Total Users = Anonymous + Registered. Registered includes every accepted
+ * named record, including the owner. The seven viewer-tier counts exclude the
+ * owner and unknown-class records, so their sum need not equal Registered.
+ *
+ * Known semantic limits:
+ * - rawFlag is preserved without assigning it product meaning.
+ * - The site's Trans category does not give this project enough information to
+ *   distinguish Transfemme / Transmasc / Non-binary.
+ * - The original Woman + Trans (♀⚧) overlay is preserved pending clarification
+ *   of the combined metric's product meaning by the original author.
+ * - DOM fallback depends on Chaturbate's page structure and remains secondary
+ *   to API acquisition.
+ * - Room-state/HLS/JPEG and offline/private/hidden detection are future work,
+ *   outside this beta.
+ */
+
+const ViewerTracker = (function() {
+    'use strict';
+
+    // ---------------------------------------------------------------------------
+    // Constants and configuration
+    // ---------------------------------------------------------------------------
+
+    const TIERSCOPE_VERSION = '3.1.0-beta.2';
+    const API_TIMEOUT_MS = 10000;
+    // API-first acquisition keeps the author-requested 60-second normal cadence.
+    // Trend comparison windows are independent; DOM acquisition is fallback-only.
+    const DEFAULT_API_INTERVAL_SECONDS = 60;
+    const DOM_FALLBACK_INTERVAL_SECONDS = 60;
+
+    // Schema changes follow persisted structure, not application release numbers.
+    // Producer metadata alone never authorizes interpreting an unfamiliar schema.
+    const STORAGE_SCHEMA_VERSION = 1;
+    const STORAGE_KEY_PREFIX = 'tierscope:v1:';
+    const STORAGE_MAX_AGE_MS = 3 * 60 * 60 * 1000;
+    const STORAGE_HISTORY_SERIES = ['red', 'green', 'purple', 'pink', 'dark-blue', 'light-blue', 'gray',
+        'female-trans', 'withTokens', 'total', 'anonymous'];
+    const STORAGE_NULLABLE_TIMES = ['withTokensHighTime', 'totalHighTime', 'anonHighTime',
+        'femaleTransHighTime', 'roomTotalHighTime', 'trackingStartTime'];
+    // Per-key protection survives room navigation for the lifetime of this page.
+    var sessionStorageStatus = new Map();
+    var activeSessionStorageKey = null;
+
+    const DOM_SELECTORS = {
+        userListTab: '#UserListTab',
+        usernameElements: [
+            '[data-testid="username-label"]',
+            '[data-testid="username"]',
+            '.username',
+            'a[href^="/b/"]',
+            'a[href^="/p/"]'
+        ],
+        roomTotal: [
+            '[data-testid="users-tab-default"]',
+            '.users-tab',
+            '[data-paction-name="USERS"]',
+            'button[data-tab="users"]',
+            '[class*="users"]'
+        ],
+        tabs: {
+            users: [
+                '[data-tab="users"]',
+                '[data-testid="users-tab"]',
+                '[data-testid="users-tab-default"]',
+                '.users-tab',
+                'button[data-paction-name="USERS"]'
+            ],
+            chat: [
+                '[data-tab="chat"]',
+                '[data-testid="chat-tab"]',
+                '[data-testid="chat-tab-default"]',
+                '.chat-tab',
+                'button[data-paction-name="CHAT"]'
+            ]
+        }
+    };
+
+    // ---------------------------------------------------------------------------
+    // Runtime/session state and DOM health
+    // ---------------------------------------------------------------------------
+
+    let domHealthStatus = {
+        lastCheck: 0,
+        userListTabFound: false,
+        consecutiveFailures: 0,
+        isHealthy: true
+    };
+
+    var healthCheckInterval = null;
+    var initGuard = 0;
+    var urlCheckInterval = null;
+    // initGuard retires room initialization; scanEpoch retires individual scans.
+    // Late work must satisfy both guards and the captured URL before acceptance.
+    var scanEpoch = 0;
+    var sessionUniqueUsers = {};
+    // Historical state survives reload; acquisition source/age describes live data.
+    // Never make a restored history look like a newly acquired sample.
+    var lastAcceptedAcquisition = null;
+    var lastAcquisitionAttemptSource = 'API';
+    // Request pacing survives Reset and returning to a room during this page session.
+    var domFallbackReadyAtByRoom = new Map();
+    var freshnessInterval = null;
+    var nextScanAt = 0;
+    var windowResizeHandler = null;
+
+    var previousCounts = {
+        'red': 0, 'green': 0, 'purple': 0, 'pink': 0,
+        'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0,
+        'withTokens': 0, 'total': 0, 'anonymous': 0
+    };
+
+    var hasTrendBaseline = false;
+    
+    // Trend comparison mode - 'last', '5min', '15min', '30min', '1hour', 'start'
+    var trendComparisonMode = 'last';
+    
+    // Auto-escalation flag - set to false when user manually selects a preset
+    var autoTrendEscalation = true;
+
+    function validateDOMHealth() {
+        const now = Date.now();
+        const container = document.getElementById('tracker-container');
+        const userListTab = document.querySelector(DOM_SELECTORS.userListTab);
+        const hasUserList = !!userListTab;
+        let hasUsernameElements = false;
+        for (let i = 0; i < DOM_SELECTORS.usernameElements.length; i++) {
+            if (document.querySelector(DOM_SELECTORS.usernameElements[i])) {
+                hasUsernameElements = true;
+                break;
+            }
+        }
+        const health = {
+            timestamp: now,
+            userListTab: hasUserList,
+            usernameElements: hasUsernameElements,
+            container: !!container,
+            roomTotalSelectors: DOM_SELECTORS.roomTotal.some(sel => !!document.querySelector(sel))
+        };
+        const wasHealthy = domHealthStatus.isHealthy;
+        domHealthStatus.isHealthy = health.userListTab && health.usernameElements;
+        domHealthStatus.lastCheck = now;
+        domHealthStatus.userListTabFound = hasUserList;
+        if (!domHealthStatus.isHealthy) {
+            domHealthStatus.consecutiveFailures++;
+            if (domHealthStatus.consecutiveFailures === 1 || domHealthStatus.consecutiveFailures % 10 === 0) {
+                console.warn('[TierScope ' + TIERSCOPE_VERSION + '] DOM health check failed:', health);
+                if (container) {
+                    const statusEl = document.getElementById('auto-status');
+                    if (statusEl) {
+                        statusEl.textContent = 'DOM mismatch - check console';
+                        statusEl.style.color = '#ff4444';
+                    }
+                }
+            }
+            if (domHealthStatus.consecutiveFailures > 5 && isAutoRefreshOn) {
+                console.warn('[TierScope ' + TIERSCOPE_VERSION + '] Auto-pausing due to DOM health issues');
+                toggleAutoRefresh();
+            }
+        } else {
+            if (!wasHealthy && domHealthStatus.consecutiveFailures > 0) {
+                console.log('[TierScope ' + TIERSCOPE_VERSION + '] DOM health restored');
+                const statusEl = document.getElementById('auto-status');
+                if (statusEl && isAutoRefreshOn) {
+                    statusEl.textContent = 'Next: ' + countdownSeconds + 's';
+                    statusEl.style.color = '#32CD32';
+                }
+            }
+            domHealthStatus.consecutiveFailures = 0;
+        }
+        return health;
+    }
+
+    // ---------------------------------------------------------------------------
+    // Accepted sample and presentation state
+    // ---------------------------------------------------------------------------
+
+    var users = new Map();
+    var previousUserCount = 0;
+    var previousRoomTotal = 0;
+    var isMinimized = true;
+    var roomTotal = 0;
+    var roomTotalHigh = 0;
+    var isDragging = false;
+    var dragOffsetX = 0;
+    var dragOffsetY = 0;
+    var countdownInterval = null;
+    var isAutoRefreshOn = true;
+    var isScanning = false;
+    var countdownSeconds = DEFAULT_API_INTERVAL_SECONDS;
+    var scanIntervalSeconds = DEFAULT_API_INTERVAL_SECONDS;
+    var trackingStartTime = null;
+    var trackingTimerInterval = null;
+    var isPaused = false;
+    var pausedElapsedTime = 0;
+    var dragListeners = [];
+    var isResizing = false;
+    var resizeStartX = 0;
+    var resizeStartY = 0;
+    var resizeStartWidth = 0;
+    var resizeStartHeight = 0;
+    var currentScale = 1.0;
+    var BASE_WIDTH_MINI = 140;
+    var BASE_WIDTH_FULL = 280;
+    var roomTotalHighTime = null;
+    var tierHighTimes = {};
+    var withTokensHighTime = null;
+    var totalHighTime = null;
+    var anonHighTime = null;
+    var sessionFemaleTransUsers = {};
+    var femaleTransUsernames = [];
+    var femaleTransHighTime = null;
+    var history = {
+        timestamps: [],
+        'red': [], 'green': [], 'purple': [], 'pink': [], 'dark-blue': [], 'light-blue': [], 'gray': [], 'female-trans': [],
+        'withTokens': [], 'total': [], 'anonymous': []
+    };
+    var MAX_HISTORY_LENGTH = 10000;
+
+    // ---------------------------------------------------------------------------
+    // Tier presentation
+    // ---------------------------------------------------------------------------
+
+    var TIERS = {
+        'red': { name: 'Red', desc: '', color: '#DC0000' },
+        'green': { name: 'Green', desc: '', color: '#69BE45' },
+        // Keep schema-1 keys; use Chaturbate category names for presentation.
+        'purple': { name: 'Dark Purple', desc: '', color: '#804BAA' },
+        'pink': { name: 'Light Purple', desc: '', color: '#BE6AFF' },
+        // Preserve 3.0.7 categories: tr/tippedRecently is Dark Blue; t/hasTokens is Light Blue.
+        'dark-blue': { name: 'Dark Blue', desc: '', color: '#393993' },
+        'light-blue': { name: 'Light Blue', desc: '', color: '#1E5FC8' },
+        'gray': { name: 'Grey', desc: '', color: '#6B6A6F' },
+        'female-trans': { name: '♀⚧', desc: '', color: '#FF1493' }
+    };
+
+    const TREND_ICONS = {
+        up: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#32CD32" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>',
+        down: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ff4444" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>',
+        stable: '<svg width="16" height="16" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="#ffd43b"/></svg>'
+    };
+
+    // Preset configuration
+    const TREND_PRESETS = {
+        'last': { label: 'Last', ms: 0 },
+        '5min': { label: '5m', ms: 5 * 60 * 1000 },
+        '15min': { label: '15m', ms: 15 * 60 * 1000 },
+        '30min': { label: '30m', ms: 30 * 60 * 1000 },
+        '1hour': { label: '1h', ms: 60 * 60 * 1000 },
+        'start': { label: 'Start', ms: -1 }
+    };
+
+    // ---------------------------------------------------------------------------
+    // Playback: volatile presentation state, independent of acquisition/storage
+    // ---------------------------------------------------------------------------
+
+    var presentationMode = 'LIVE';
+    var playback = null;
+
+    function createPlaybackSnapshot(sourceHistory) {
+        var copiedHistory = { timestamps: sourceHistory.timestamps.slice() };
+        var timeline = [];
+        var highs = { roomTotal: [] };
+        var firstTimestamp = copiedHistory.timestamps.length ? copiedHistory.timestamps[0] : 0;
+        STORAGE_HISTORY_SERIES.forEach(function(key) {
+            copiedHistory[key] = sourceHistory[key].slice();
+            highs[key] = [];
+        });
+        copiedHistory.timestamps.forEach(function(timestamp, index) {
+            // Existing sessions may contain duplicate times or a wall-clock correction.
+            // Clamp only this presentation timeline; never rewrite saved timestamps.
+            timeline.push(Math.max(index ? timeline[index - 1] : 0, timestamp - firstTimestamp));
+            STORAGE_HISTORY_SERIES.forEach(function(key) {
+                highs[key].push(Math.max(index ? highs[key][index - 1] : 0, copiedHistory[key][index]));
+            });
+            var total = copiedHistory.total[index] + copiedHistory.anonymous[index];
+            highs.roomTotal.push(Math.max(index ? highs.roomTotal[index - 1] : 0, total));
+        });
+        var durationMs = timeline.length ? timeline[timeline.length - 1] : 0;
+        return { history: copiedHistory, timeline: timeline, highs: highs,
+            durationMs: durationMs, replayDurationMs: Math.min(30000, durationMs / 60) };
+    }
+
+    function getPlaybackFrame(snapshot, positionMs) {
+        if (!snapshot || !snapshot.timeline.length) return null;
+        var position = Number(positionMs);
+        position = Number.isFinite(position) ? Math.max(0, Math.min(snapshot.durationMs, position)) : 0;
+        // Upper-bound lookup keeps recorded order for samples sharing a timestamp.
+        var low = 0;
+        var high = snapshot.timeline.length;
+        while (low < high) {
+            var middle = Math.floor((low + high) / 2);
+            if (snapshot.timeline[middle] <= position) low = middle + 1;
+            else high = middle;
+        }
+        var index = Math.max(0, low - 1);
+        var frameHistory = { timestamps: snapshot.history.timestamps.slice(0, index + 1) };
+        var frameHighs = {};
+        var counts = {};
+        STORAGE_HISTORY_SERIES.forEach(function(key) {
+            frameHistory[key] = snapshot.history[key].slice(0, index + 1);
+            frameHighs[key] = snapshot.highs[key][index];
+            if (hasStorageField(TIERS, key)) counts[key] = snapshot.history[key][index];
+        });
+        frameHighs.roomTotal = snapshot.highs.roomTotal[index];
+        var total = snapshot.history.total[index];
+        var anonymousCount = snapshot.history.anonymous[index];
+        return { counts: counts, total: total, withTokens: snapshot.history.withTokens[index],
+            anonymousCount: anonymousCount, fullRoomTotal: total + anonymousCount,
+            roomTotalHigh: frameHighs.roomTotal, history: frameHistory, highs: frameHighs,
+            uniqueCount: null, index: index, timestamp: snapshot.history.timestamps[index] };
+    }
+
+    function isPlaybackCurrent(state) {
+        return !!state && state === playback && presentationMode === 'PLAYBACK' &&
+            state.url === location.href && lastUrl === location.href && state.generation === initGuard &&
+            state.key === activeSessionStorageKey && state.key === getStorageKey(getModelName());
+    }
+
+    function stopPlaybackClock(state) {
+        if (state && state.timer !== null) {
+            clearInterval(state.timer);
+            state.timer = null;
+        }
+    }
+
+    function startPlaybackClock(state) {
+        if (!state.playing || state.timer !== null) return;
+        state.timer = setInterval(function() {
+            // A queued callback from a departed room or previous replay is inert.
+            if (playback === state) tickPlayback(state);
+        }, 50);
+    }
+
+    function paintPlayback(state) {
+        if (!isPlaybackCurrent(state)) return false;
+        try {
+            renderPlaybackFrame(getPlaybackFrame(state.snapshot, state.positionMs));
+            updatePlaybackControls();
+            return true;
+        } catch (error) {
+            // Replay failure may pause presentation, but never enter a scan rollback.
+            state.playing = false;
+            stopPlaybackClock(state);
+            log('Playback paused after a presentation error: ' + error.message);
+            try { updatePlaybackControls(); } catch (controlError) { /* Keep live acquisition independent. */ }
+            return false;
+        }
+    }
+
+    function enterPlayback() {
+        if (playback) {
+            if (isPlaybackCurrent(playback)) return true;
+            leavePlayback(false);
+        }
+        var model = getModelName();
+        if (!model || model === 'unknown' || lastUrl !== location.href ||
+            activeSessionStorageKey !== getStorageKey(model) || !history.timestamps.length) return false;
+        try {
+            var snapshot = createPlaybackSnapshot(history);
+            playback = { url: location.href, key: activeSessionStorageKey, generation: initGuard,
+                snapshot: snapshot, positionMs: 0, speed: 1, lastTickAt: Date.now(),
+                playing: snapshot.durationMs > 0, timer: null };
+            presentationMode = 'PLAYBACK';
+            setPlaybackLayout(true);
+            if (!paintPlayback(playback)) return false;
+            startPlaybackClock(playback);
+            return true;
+        } catch (error) {
+            if (playback) {
+                playback.playing = false;
+                stopPlaybackClock(playback);
+            }
+            log('Could not start playback: ' + error.message);
+            return false;
+        }
+    }
+
+    function leavePlayback(renderLive) {
+        if (typeof renderLive === 'undefined') renderLive = true;
+        if (!playback && presentationMode === 'LIVE') return false;
+        // Navigation can precede its polling callback; do not repaint the prior room.
+        var canRenderLive = renderLive && isPlaybackCurrent(playback);
+        stopPlaybackClock(playback);
+        playback = null;
+        presentationMode = 'LIVE';
+        try {
+            setPlaybackLayout(false);
+            if (canRenderLive) repaintLivePresentation();
+            else clearPlaybackPresentation();
+        } catch (error) {
+            log('Could not repaint after playback: ' + error.message);
+        }
+        return true;
+    }
+
+    function tickPlayback(expectedState) {
+        if (expectedState && expectedState !== playback) return false;
+        var state = playback;
+        if (!isPlaybackCurrent(state)) {
+            if (state) leavePlayback(false);
+            return false;
+        }
+        if (!state.playing) return false;
+        var now = Date.now();
+        var elapsed = Math.max(0, now - state.lastTickAt);
+        state.lastTickAt = now;
+        var rate = state.snapshot.replayDurationMs > 0 ?
+            state.snapshot.durationMs / state.snapshot.replayDurationMs : 0;
+        state.positionMs = Math.min(state.snapshot.durationMs, state.positionMs + elapsed * rate * state.speed);
+        if (state.positionMs >= state.snapshot.durationMs) {
+            state.playing = false;
+            stopPlaybackClock(state);
+        }
+        return paintPlayback(state);
+    }
+
+    function togglePlayback() {
+        var state = playback;
+        if (!isPlaybackCurrent(state)) {
+            if (state) leavePlayback(false);
+            return false;
+        }
+        if (!state.snapshot.durationMs) return false;
+        if (state.playing) {
+            tickPlayback(state);
+            state.playing = false;
+            stopPlaybackClock(state);
+        } else {
+            if (state.positionMs >= state.snapshot.durationMs) state.positionMs = 0;
+            state.playing = true;
+            state.lastTickAt = Date.now();
+        }
+        if (!paintPlayback(state)) return false;
+        startPlaybackClock(state);
+        return true;
+    }
+
+    function scrubPlayback(positionMs) {
+        var state = playback;
+        if (!isPlaybackCurrent(state)) {
+            if (state) leavePlayback(false);
+            return false;
+        }
+        var position = Number(positionMs);
+        if (!Number.isFinite(position)) return false;
+        state.playing = false;
+        stopPlaybackClock(state);
+        state.positionMs = Math.max(0, Math.min(state.snapshot.durationMs, position));
+        state.lastTickAt = Date.now();
+        return paintPlayback(state);
+    }
+
+    function setPlaybackSpeed(value) {
+        var state = playback;
+        if (!isPlaybackCurrent(state)) {
+            if (state) leavePlayback(false);
+            return false;
+        }
+        var speed = Number(value);
+        if ([0.5, 1, 2].indexOf(speed) === -1) return false;
+        if (state.playing) tickPlayback(state);
+        state.speed = speed;
+        state.lastTickAt = Date.now();
+        return paintPlayback(state);
+    }
+
+    // Replay changes only presentation. Hidden LIVE elements retain their footprint
+    // and continue receiving timer/control updates while the trend layer is frozen.
+    var playbackLayoutState = null;
+
+    function updateReplayAvailability() {
+        var button = document.getElementById('btn-replay');
+        if (!button) return;
+        button.disabled = !history.timestamps.length || activeSessionStorageKey !== getStorageKey(getModelName()) || location.href !== lastUrl;
+        button.title = button.disabled ? 'No recorded history for this room yet' : 'Replay recorded history; live acquisition continues';
+    }
+
+    function bindPlaybackControls() {
+        var bindings = { 'btn-replay': enterPlayback, 'playback-play': togglePlayback,
+            'playback-return': function() { leavePlayback(true); } };
+        Object.keys(bindings).forEach(function(id) {
+            var button = document.getElementById(id);
+            if (button) button.onclick = bindings[id];
+        });
+        var slider = document.getElementById('playback-scrubber');
+        if (slider) slider.oninput = function() { scrubPlayback(Number(this.value)); };
+        var speed = document.getElementById('playback-speed');
+        if (speed) speed.onchange = function() { setPlaybackSpeed(Number(this.value)); };
+    }
+
+    function setPlaybackLayout(active) {
+        if (active) {
+            playbackLayoutState = [];
+            var toggle = document.getElementById('btn-toggle');
+            if (toggle) toggle.disabled = true;
+            [['live-trend', 'visibility', 'hidden'], ['control-field', 'visibility', 'hidden'],
+                ['acquisition-status', 'visibility', 'hidden'],
+                ['btn-toggle', 'visibility', 'hidden'], ['playback-controls', 'display', 'grid']].forEach(function(change) {
+                var element = document.getElementById(change[0]);
+                if (!element) return;
+                playbackLayoutState.push({ element: element, property: change[1], value: element.style[change[1]] || '' });
+                element.style[change[1]] = change[2];
+            });
+        } else if (playbackLayoutState) {
+            playbackLayoutState.forEach(function(saved) { saved.element.style[saved.property] = saved.value; });
+            playbackLayoutState = null;
+            var toggle = document.getElementById('btn-toggle');
+            if (toggle) toggle.disabled = false;
+        }
+    }
+
+    function updatePlaybackControls() {
+        if (!playback) return;
+        var button = document.getElementById('playback-play');
+        if (button) {
+            button.textContent = playback.playing ? 'Pause' : 'Play';
+            button.disabled = playback.snapshot.durationMs === 0;
+            button.title = playback.playing ? 'Pause playback only' : 'Play recorded history';
+        }
+        var slider = document.getElementById('playback-scrubber');
+        if (slider) {
+            slider.max = String(playback.snapshot.durationMs);
+            slider.value = String(playback.positionMs);
+            slider.disabled = playback.snapshot.durationMs === 0;
+        }
+        var speed = document.getElementById('playback-speed');
+        if (speed) speed.value = String(playback.speed);
+        var position = document.getElementById('playback-position');
+        if (position) {
+            position.textContent = formatElapsedTime(playback.positionMs) + ' / ' + formatElapsedTime(playback.snapshot.durationMs);
+            position.title = 'Recorded range captured on Replay entry. Highs are through the selected sample. Live acquisition continues independently.';
+        }
+    }
+
+    function renderPlaybackFrame(frame) {
+        renderDisplayFrame(Object.assign({}, frame, { isPlayback: true }));
+        drawHistorySparklines(frame.history);
+    }
+
+    function clearPlaybackPresentation() {
+        var emptyHistory = { timestamps: [] };
+        var counts = {};
+        STORAGE_HISTORY_SERIES.forEach(function(key) { emptyHistory[key] = []; counts[key] = 0; });
+        renderDisplayFrame({ counts: counts, total: 0, withTokens: 0, anonymousCount: 0,
+            fullRoomTotal: 0, roomTotalHigh: 0, history: emptyHistory, uniqueCount: 0, isPlayback: false });
+        drawHistorySparklines(emptyHistory);
+    }
+
+    function repaintLivePresentation() {
+        updateDisplay();
+        updateTrendDisplay();
+        drawAllSparklines();
+        updateAcquisitionStatus();
+        updateCountdownDisplay();
+    }
+
+    function getTierMarker(tier) {
+        var config = TIERS[tier];
+        if (tier === 'female-trans') return config.name;
+        return '<span role="img" aria-label="' + config.name + '" title="' + config.name + '" ' +
+            'style="display:inline-block;width:10px;height:10px;border-radius:50%;vertical-align:middle;background:' + config.color + ';"></span>';
+    }
+
+    function log(msg) {
+        console.log('[TierScope ' + TIERSCOPE_VERSION + '] ' + msg);
+    }
+
+    // ---------------------------------------------------------------------------
+    // Room/URL identification
+    // ---------------------------------------------------------------------------
+
+    function getModelNameFromUrl(url) {
+        if (!url) return 'unknown';
+        var path = new URL(url).pathname;
+        var bMatch = path.match(/\/b\/([^\/\?#]+)/);
+        if (bMatch) return bMatch[1];
+        var camMatch = path.match(/^\/([^\/]+)\/cam\/?$/);
+        if (camMatch) return camMatch[1];
+        var normalMatch = path.match(/\/([^\/\?#]+)\/?$/);
+        if (normalMatch) {
+            var name = normalMatch[1];
+            var nonRoomPaths = ['followed', 'featured', 'tags', 'accounts', 'login', 'register',
+                               'supporter', 'settings', 'apps', 'explore', 'trending', 'new',
+                               'female', 'male', 'couple', 'trans', 'hd', 'north-american',
+                               'european', 'asian', 'south-american', 'exhibitionist',
+                               'followed-cams', 'female-cams', 'trans-cams', 'male-cams', 'couple-cams'];
+            if (nonRoomPaths.indexOf(name) === -1) return name;
+        }
+        return 'unknown';
+    }
+
+    // ---------------------------------------------------------------------------
+    // Storage schema and persistence
+    // ---------------------------------------------------------------------------
+
+    function getStorageKey(model) {
+        return STORAGE_KEY_PREFIX + model.toLowerCase();
+    }
+
+    function isStorageObject(value) {
+        return value !== null && typeof value === 'object' && !Array.isArray(value);
+    }
+
+    function hasStorageField(data, field) {
+        return Object.prototype.hasOwnProperty.call(data, field);
+    }
+
+    function isStorageNumber(value) {
+        return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER;
+    }
+
+    function isStorageTimestamp(value) {
+        return Number.isSafeInteger(value) && value >= 0 && value <= 8640000000000000;
+    }
+
+    function readSavedSession(key) {
+        return GM_getValue(key, undefined);
+    }
+
+    function determineStorageSchema(data) {
+        if (!isStorageObject(data)) throw new Error('Saved session must be an object');
+        // Missing metadata is only a candidate for the known 3.0/schema-1 layout.
+        // Blindly defaulting to schema 1 would make corrupt data look compatible.
+        if (!hasStorageField(data, 'schemaVersion')) return { version: 1, legacy: true };
+        if (!Number.isSafeInteger(data.schemaVersion) || data.schemaVersion < 0) {
+            throw new Error('Invalid storage schemaVersion');
+        }
+        return { version: data.schemaVersion, legacy: false };
+    }
+
+    function migrateStoredSession(data, schema) {
+        // Add explicit migration steps here when a future representation is introduced.
+        // Producer version is provenance, not structural or semantic compatibility.
+        if (schema.version > STORAGE_SCHEMA_VERSION) {
+            throw new Error('Newer storage schema ' + schema.version + '; this build supports ' + STORAGE_SCHEMA_VERSION);
+        }
+        if (schema.version !== STORAGE_SCHEMA_VERSION) {
+            throw new Error('Unsupported storage schema ' + schema.version + '; no migration path to ' + STORAGE_SCHEMA_VERSION);
+        }
+        return data;
+    }
+
+    function validateStoredSession(data) {
+        function requireField(condition, field) {
+            if (!condition) throw new Error('Invalid saved-session field: ' + field);
+        }
+        requireField(isStorageObject(data), 'record');
+        if (hasStorageField(data, 'schemaVersion')) {
+            requireField(data.schemaVersion === STORAGE_SCHEMA_VERSION, 'schemaVersion');
+        }
+        if (hasStorageField(data, 'producerVersion')) {
+            requireField(typeof data.producerVersion === 'string', 'producerVersion');
+        }
+        requireField(isStorageTimestamp(data.timestamp), 'timestamp');
+        requireField(isStorageObject(data.history), 'history');
+        requireField(Array.isArray(data.history.timestamps), 'history.timestamps');
+        requireField(data.history.timestamps.length <= MAX_HISTORY_LENGTH, 'history length');
+        requireField(data.history.timestamps.every(isStorageTimestamp), 'history.timestamps');
+        STORAGE_HISTORY_SERIES.forEach(function(field) {
+            var series = data.history[field];
+            requireField(Array.isArray(series) && series.length === data.history.timestamps.length &&
+                series.every(isStorageNumber), 'history.' + field);
+        });
+        if (hasStorageField(data, 'previousCounts')) {
+            requireField(isStorageObject(data.previousCounts), 'previousCounts');
+            STORAGE_HISTORY_SERIES.forEach(function(field) {
+                requireField(isStorageNumber(data.previousCounts[field]), 'previousCounts.' + field);
+            });
+        }
+        ['sessionUniqueUsers', 'sessionFemaleTransUsers'].forEach(function(field) {
+            if (!hasStorageField(data, field)) return;
+            var entries = data[field];
+            requireField(isStorageObject(entries), field);
+            Object.keys(entries).forEach(function(username) {
+                requireField(username.length > 0 && (field === 'sessionUniqueUsers' ? entries[username] === true :
+                    entries[username] === 'female' || entries[username] === 'trans'), field + ' entry');
+            });
+        });
+        if (hasStorageField(data, 'tierHighTimes')) {
+            requireField(isStorageObject(data.tierHighTimes), 'tierHighTimes');
+            Object.keys(data.tierHighTimes).forEach(function(tier) {
+                requireField(hasStorageField(TIERS, tier) &&
+                    (data.tierHighTimes[tier] === null || isStorageTimestamp(data.tierHighTimes[tier])), 'tierHighTimes.' + tier);
+            });
+        }
+        STORAGE_NULLABLE_TIMES.forEach(function(field) {
+            if (hasStorageField(data, field)) {
+                requireField(data[field] === null || isStorageTimestamp(data[field]), field);
+            }
+        });
+        if (hasStorageField(data, 'roomTotalHigh')) requireField(isStorageNumber(data.roomTotalHigh), 'roomTotalHigh');
+        if (hasStorageField(data, 'pausedElapsedTime')) {
+            // Resume subtracts elapsed milliseconds from now to construct a timestamp.
+            requireField(isStorageTimestamp(data.pausedElapsedTime) &&
+                data.pausedElapsedTime <= Math.min(data.timestamp, Date.now()), 'pausedElapsedTime');
+        }
+        // Both trend preferences are existing 3.0.7 fields, not a history migration.
+        if (hasStorageField(data, 'trendComparisonMode')) {
+            requireField(typeof data.trendComparisonMode === 'string' &&
+                hasStorageField(TREND_PRESETS, data.trendComparisonMode), 'trendComparisonMode');
+        }
+        ['isPaused', 'hasTrendBaseline', 'autoTrendEscalation'].forEach(function(field) {
+            if (hasStorageField(data, field)) requireField(typeof data[field] === 'boolean', field);
+        });
+    }
+
+    function normalizeStoredSession(data) {
+        // Defaults apply only to absent optional fields after the record has passed validation.
+        var normalized = {
+            timestamp: data.timestamp,
+            history: Object.fromEntries(['timestamps'].concat(STORAGE_HISTORY_SERIES).map(function(field) {
+                return [field, data.history[field].slice()];
+            })),
+            previousCounts: Object.fromEntries(STORAGE_HISTORY_SERIES.map(function(field) {
+                return [field, hasStorageField(data, 'previousCounts') ? data.previousCounts[field] : 0];
+            })),
+            hasTrendBaseline: hasStorageField(data, 'previousCounts') && data.hasTrendBaseline === true,
+            isPaused: data.isPaused === true,
+            trendComparisonMode: hasStorageField(data, 'trendComparisonMode') ? data.trendComparisonMode : 'last',
+            autoTrendEscalation: !hasStorageField(data, 'autoTrendEscalation') || data.autoTrendEscalation,
+            roomTotalHigh: hasStorageField(data, 'roomTotalHigh') ? data.roomTotalHigh : 0,
+            pausedElapsedTime: hasStorageField(data, 'pausedElapsedTime') ? data.pausedElapsedTime : 0
+        };
+        ['tierHighTimes', 'sessionUniqueUsers', 'sessionFemaleTransUsers'].forEach(function(field) {
+            // fromEntries preserves literal own keys such as __proto__ without invoking setters.
+            normalized[field] = hasStorageField(data, field) ? Object.fromEntries(Object.entries(data[field])) : {};
+        });
+        STORAGE_NULLABLE_TIMES.forEach(function(field) {
+            normalized[field] = hasStorageField(data, field) ? data[field] : null;
+        });
+        return normalized;
+    }
+
+    // Refusing a record must not allow the resulting empty session to overwrite it.
+    // Protection is sticky until explicit Reset successfully deletes that room key.
+    function protectSessionStorage(key, reason, producerVersion) {
+        var prior = sessionStorageStatus.get(key);
+        if (prior && prior.protected) return prior;
+        var status = { protected: true, reason: reason, producerVersion: producerVersion == null ? null : producerVersion };
+        sessionStorageStatus.set(key, status);
+        log('Storage protected for ' + key + ': ' + reason +
+            '. Saved data retained; automatic writes disabled until explicit Reset. Using a clean in-memory session on load.');
+        return status;
+    }
+
+    function inspectStoredSession(model, restore) {
+        var key = getStorageKey(model);
+        var prior = sessionStorageStatus.get(key);
+        if (prior && prior.protected) return prior;
+        var producerVersion = null;
+        try {
+            var raw = readSavedSession(key);
+            if (!restore && prior && prior.raw === raw) return prior;
+            if (typeof raw === 'undefined') {
+                var empty = { protected: false, raw: raw, producerVersion: null };
+                sessionStorageStatus.set(key, empty);
+                return empty;
+            }
+            if (typeof raw !== 'string') throw new Error('Saved session must be JSON text');
+            var parsed = JSON.parse(raw);
+            if (isStorageObject(parsed) && typeof parsed.producerVersion === 'string') producerVersion = parsed.producerVersion;
+            var schema = determineStorageSchema(parsed);
+            var migrated = migrateStoredSession(parsed, schema);
+            validateStoredSession(migrated);
+            var status = { protected: false, raw: raw, producerVersion: producerVersion, legacy: schema.legacy };
+            sessionStorageStatus.set(key, status);
+            return restore ? Object.assign({}, status, { data: normalizeStoredSession(migrated) }) : status;
+        } catch (e) {
+            return protectSessionStorage(key, e.message, producerVersion);
+        }
+    }
+
+    function restoreSessionState(data) {
+        history = data.history;
+        tierHighTimes = data.tierHighTimes;
+        withTokensHighTime = data.withTokensHighTime;
+        totalHighTime = data.totalHighTime;
+        anonHighTime = data.anonHighTime;
+        femaleTransHighTime = data.femaleTransHighTime;
+        roomTotalHigh = data.roomTotalHigh;
+        roomTotalHighTime = data.roomTotalHighTime;
+        trackingStartTime = data.trackingStartTime;
+        isPaused = data.isPaused;
+        pausedElapsedTime = data.pausedElapsedTime;
+        sessionFemaleTransUsers = data.sessionFemaleTransUsers;
+        sessionUniqueUsers = data.sessionUniqueUsers;
+        previousCounts = data.previousCounts;
+        hasTrendBaseline = data.hasTrendBaseline;
+        trendComparisonMode = data.trendComparisonMode;
+        autoTrendEscalation = data.autoTrendEscalation;
+    }
+
+    function getStorageReportStatus(model) {
+        if (!model || model === 'unknown') return { producer: 'Unknown (no saved session)', access: 'No room' };
+        var status = inspectStoredSession(model, false);
+        return {
+            producer: status.producerVersion === null ? (status.legacy ? 'Unknown (legacy session)' : 'Unknown') :
+                (status.producerVersion || '(empty string)'),
+            access: status.protected ? 'Protected / read-only: ' + status.reason :
+                (activeSessionStorageKey === getStorageKey(model) ? 'Writable' : 'Not initialized')
+        };
+    }
+
+    function saveSession(model) {
+        if (!model || model === 'unknown') return;
+        var key = getStorageKey(model);
+        // Recheck changed storage from another tab/build before any write, including
+        // unload and navigation saves. Ownership also blocks uninitialized or wrong-
+        // room state; this read/write check is not an atomic cross-tab transaction.
+        if (inspectStoredSession(model, false).protected || activeSessionStorageKey !== key) return;
+        var saveData = {
+            schemaVersion: STORAGE_SCHEMA_VERSION,
+            producerVersion: TIERSCOPE_VERSION,
+            timestamp: Date.now(),
+            history: history,
+            tierHighTimes: tierHighTimes,
+            withTokensHighTime: withTokensHighTime,
+            totalHighTime: totalHighTime,
+            anonHighTime: anonHighTime,
+            femaleTransHighTime: femaleTransHighTime,
+            roomTotalHigh: roomTotalHigh,
+            roomTotalHighTime: roomTotalHighTime,
+            trackingStartTime: trackingStartTime,
+            isPaused: isPaused,
+            pausedElapsedTime: pausedElapsedTime,
+            sessionFemaleTransUsers: sessionFemaleTransUsers,
+            sessionUniqueUsers: sessionUniqueUsers,
+            previousCounts: previousCounts,
+            hasTrendBaseline: hasTrendBaseline,
+            trendComparisonMode: trendComparisonMode,
+            autoTrendEscalation: autoTrendEscalation
+        };
+        try {
+            validateStoredSession(saveData);
+            var raw = JSON.stringify(saveData);
+            GM_setValue(key, raw);
+            sessionStorageStatus.set(key, { protected: false, raw: raw, producerVersion: TIERSCOPE_VERSION, legacy: false });
+            log('Session saved for ' + model + ' (storage schema ' + STORAGE_SCHEMA_VERSION + ', producer ' + TIERSCOPE_VERSION + ')');
+        } catch (e) {
+            log('Failed to save session: ' + e);
+        }
+    }
+
+    function loadSession(model) {
+        if (!model || model === 'unknown') return false;
+        leavePlayback(false);
+        var key = getStorageKey(model);
+        activeSessionStorageKey = key;
+        var saved = inspectStoredSession(model, true);
+        if (saved.protected || !saved.data) return false;
+        var age = Date.now() - saved.data.timestamp;
+        if (age > STORAGE_MAX_AGE_MS) {
+            try {
+                // Only a fully validated, supported record may be destructively expired.
+                GM_deleteValue(key);
+                sessionStorageStatus.delete(key);
+                log('Compatible saved session expired (' + Math.round(age/60000) + ' min old), deleting');
+            } catch (e) {
+                protectSessionStorage(key, 'Failed to delete expired session: ' + e.message, saved.producerVersion);
+            }
+            return false;
+        }
+        restoreSessionState(saved.data);
+        log('Session restored for ' + model + ' (' + Math.round(age/60000) + ' min old; ' +
+            (saved.legacy ? 'validated legacy schema 1' : 'storage schema ' + STORAGE_SCHEMA_VERSION) +
+            '; producer ' + (saved.producerVersion === null ? 'unknown' : saved.producerVersion) + ')');
+        return true;
+    }
+
+    function deleteSession(model) {
+        if (!model || model === 'unknown') return;
+        var key = getStorageKey(model);
+        try {
+            // Only explicit Reset authorizes discarding an incompatible saved record.
+            // Unlock after successful deletion; a failed delete must stay protected.
+            GM_deleteValue(key);
+            sessionStorageStatus.delete(key);
+            log('Session deleted for ' + model);
+        } catch (e) {
+            protectSessionStorage(key, 'Explicit Reset could not delete saved session: ' + e.message,
+                (sessionStorageStatus.get(key) || {}).producerVersion);
+            log('Reset cleared live tracking but saved storage remains protected: ' + e.message);
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Room-page detection and time formatting
+    // ---------------------------------------------------------------------------
+
+    function isBroadcastRoom() {
+        var path = window.location.pathname;
+        var pathParts = path.split('/').filter(function(p) { return p; });
+        if (pathParts.length === 0) return false;
+        var nonRoomPaths = ['followed', 'featured', 'tags', 'accounts', 'login', 'register',
+                           'supporter', 'settings', 'apps', 'explore', 'trending', 'new',
+                           'female', 'male', 'couple', 'trans', 'hd', 'north-american',
+                           'european', 'asian', 'south-american', 'exhibitionist',
+                           'followed-cams', 'female-cams', 'trans-cams', 'male-cams', 'couple-cams'];
+        if (nonRoomPaths.indexOf(pathParts[0]) !== -1) return false;
+        if (pathParts[0] === 'b' && pathParts.length >= 2) return true;
+        if (pathParts.length === 1) return true;
+        if (pathParts.length === 2 && pathParts[1] === 'cam') return true;
+        return false;
+    }
+
+    function formatElapsedTime(ms) {
+        ms = Math.max(0, ms);
+        var totalSeconds = Math.floor(ms / 1000);
+        var hours = Math.floor(totalSeconds / 3600);
+        var minutes = Math.floor((totalSeconds % 3600) / 60);
+        var seconds = totalSeconds % 60;
+        return (hours < 10 ? '0' : '') + hours + ':' + (minutes < 10 ? '0' : '') + minutes + ':' + (seconds < 10 ? '0' : '') + seconds;
+    }
+
+    function formatDateTime(timestamp) {
+        return new Date(timestamp).toLocaleString();
+    }
+
+    function getModelName() {
+        return getModelNameFromUrl(location.href);
+    }
+
+    // Check and auto-escalate trend mode based on elapsed time
+    // ---------------------------------------------------------------------------
+    // Tracking timer and AUTO trend behavior
+    // ---------------------------------------------------------------------------
+
+    function checkTrendAutoEscalation() {
+        if (!autoTrendEscalation || !trackingStartTime) return;
+        
+        var elapsedMs = isPaused ? pausedElapsedTime : (Date.now() - trackingStartTime);
+        var elapsedMin = elapsedMs / 60000;
+        
+        var targetMode = 'last';
+        if (elapsedMin >= 60) targetMode = '1hour';
+        else if (elapsedMin >= 30) targetMode = '30min';
+        else if (elapsedMin >= 15) targetMode = '15min';
+        else if (elapsedMin >= 5) targetMode = '5min';
+        
+        if (targetMode !== trendComparisonMode) {
+            log('Auto-escalating trend mode: ' + trendComparisonMode + ' -> ' + targetMode + ' (' + Math.floor(elapsedMin) + ' min elapsed)');
+            
+            // Restored history has no live users yet; update controls without rendering empty counts.
+            if (users.size === 0) {
+                trendComparisonMode = targetMode;
+                updateTrendPresetButtons();
+                updateAutoTrendButton(); // Update the AUTO button visual state
+                saveSession(getModelName());
+                return;
+            }
+            
+            setTrendComparisonMode(targetMode);
+        }
+    }
+
+    function updateTrackingTimer() {
+        var controlTimerEl = document.getElementById('control-tracking-timer');
+        var displayTime = '00:00:00';
+        var displayColor = '#888';
+        if (isPaused) {
+            displayTime = formatElapsedTime(pausedElapsedTime);
+            displayColor = '#ff4444';
+        } else if (trackingStartTime) {
+            displayTime = formatElapsedTime(Date.now() - trackingStartTime);
+            displayColor = '#ffd43b';
+        }
+        if (controlTimerEl) {
+            controlTimerEl.textContent = displayTime;
+            controlTimerEl.style.color = displayColor;
+        }
+        
+        // Check for auto-escalation every second
+        checkTrendAutoEscalation();
+    }
+
+    function startTrackingTimer() {
+        if (isPaused) {
+            isPaused = false;
+            trackingStartTime = Date.now() - pausedElapsedTime;
+        } else if (!trackingStartTime) {
+            trackingStartTime = Date.now();
+        }
+        if (trackingTimerInterval) {
+            clearInterval(trackingTimerInterval);
+            trackingTimerInterval = null;
+        }
+        trackingTimerInterval = setInterval(updateTrackingTimer, 1000);
+        updateTrackingTimer();
+        saveSession(getModelName());
+    }
+
+    function pauseTrackingTimer() {
+        if (!trackingStartTime || isPaused) return;
+        isPaused = true;
+        pausedElapsedTime = Date.now() - trackingStartTime;
+        if (trackingTimerInterval) {
+            clearInterval(trackingTimerInterval);
+            trackingTimerInterval = null;
+        }
+        updateTrackingTimer();
+        saveSession(getModelName());
+    }
+
+    function stopTrackingTimer() {
+        if (trackingTimerInterval) {
+            clearInterval(trackingTimerInterval);
+            trackingTimerInterval = null;
+        }
+        trackingStartTime = null;
+        pausedElapsedTime = 0;
+        isPaused = false;
+        roomTotalHighTime = null;
+        tierHighTimes = {};
+        withTokensHighTime = null;
+        totalHighTime = null;
+        anonHighTime = null;
+        femaleTransHighTime = null;
+        previousCounts = {
+            'red': 0, 'green': 0, 'purple': 0, 'pink': 0,
+            'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0,
+            'withTokens': 0, 'total': 0, 'anonymous': 0
+        };
+        hasTrendBaseline = false;
+        trendComparisonMode = 'last';
+        autoTrendEscalation = true; // Reset auto-escalation
+        updateTrackingTimer();
+    }
+
+    // Toggle auto trend escalation
+    function toggleAutoTrendEscalation() {
+        autoTrendEscalation = !autoTrendEscalation;
+        updateAutoTrendButton();
+        log('Auto trend escalation ' + (autoTrendEscalation ? 'enabled' : 'disabled'));
+        saveSession(getModelName());
+        
+        // If just turned on, check immediately for catch-up (in case timer isn't running while paused)
+        if (autoTrendEscalation) {
+            checkTrendAutoEscalation();
+        }
+    }
+
+    // Update the AUTO button visual state
+    function updateAutoTrendButton() {
+        var btn = document.getElementById('btn-trend-auto');
+        if (btn) {
+            if (autoTrendEscalation) {
+                btn.style.background = '#32CD32';
+                btn.style.color = '#fff';
+                btn.style.borderColor = '#32CD32';
+                btn.title = 'Auto-escalation ON - Click to disable';
+            } else {
+                btn.style.background = '#333';
+                btn.style.color = '#aaa';
+                btn.style.borderColor = '#555';
+                btn.title = 'Auto-escalation OFF - Click to enable';
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Reset and scan invalidation
+    // ---------------------------------------------------------------------------
+
+    function resetAllTracking() {
+        if (!confirm('Reset all tracking data?\n\nThis will clear:\n- All session history\n- Trend tracking\n- Elapsed timer\n- Female/Trans user list\n- Unique user count\n\nA new scan will start immediately.')) {
+            return;
+        }
+        var modelName = getModelName();
+        leavePlayback(false);
+        log('Performing main reset...');
+        deleteSession(modelName);
+        activeSessionStorageKey = getStorageKey(modelName);
+        scanEpoch++;
+        isScanning = false;
+        stopCountdown();
+        stopTrackingTimer();
+        users.clear();
+        lastAcceptedAcquisition = null;
+        lastAcquisitionAttemptSource = 'API';
+        domHealthStatus.consecutiveFailures = 0;
+        updateAcquisitionStatus();
+        previousUserCount = 0;
+        previousRoomTotal = 0;
+        roomTotal = 0;
+        roomTotalHigh = 0;
+        sessionUniqueUsers = {};
+        previousCounts = {
+            'red': 0, 'green': 0, 'purple': 0, 'pink': 0,
+            'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0,
+            'withTokens': 0, 'total': 0, 'anonymous': 0
+        };
+        hasTrendBaseline = false;
+        trendComparisonMode = 'last';
+        autoTrendEscalation = true; // Reset auto-escalation on manual reset
+        history = {
+            timestamps: [],
+            'red': [], 'green': [], 'purple': [], 'pink': [], 'dark-blue': [], 'light-blue': [], 'gray': [], 'female-trans': [],
+            'withTokens': [], 'total': [], 'anonymous': []
+        };
+        sessionFemaleTransUsers = {};
+        femaleTransUsernames = [];
+        roomTotalHighTime = null;
+        tierHighTimes = {};
+        withTokensHighTime = null;
+        totalHighTime = null;
+        anonHighTime = null;
+        femaleTransHighTime = null;
+        resetCountdown();
+        updateDisplay();
+        updateTrendDisplay();
+        updateTrackingTimer();
+        updateCountdownDisplay();
+        drawAllSparklines();
+        if (isAutoRefreshOn) {
+            startTrackingTimer();
+            startCountdown();
+        }
+        var resetContext = { epoch: scanEpoch, generation: initGuard, url: location.href };
+        setTimeout(function() {
+            if (isAcquisitionCurrent(resetContext)) performScanThenReturn(true);
+        }, 500);
+        
+        // Repaint buttons after reset so AUTO shows green and Last is highlighted
+        updateTrendPresetButtons();
+        updateAutoTrendButton();
+        
+        log('Reset complete - starting fresh scan (epoch: ' + scanEpoch + ')');
+    }
+
+    // ---------------------------------------------------------------------------
+    // DOM classification and count helpers
+    // ---------------------------------------------------------------------------
+
+    function getTierFromClassList(classList) {
+        for (var i = 0; i < classList.length; i++) {
+            var className = classList[i];
+            var lower = className.toLowerCase();
+            if (className === 'tippedTonsRecently' || lower === 'tippedtonsrecently') return 'purple';
+            if (className === 'tippedALotRecently' || lower === 'tippedalotrecently') return 'pink';
+            if (className === 'tippedRecently' || lower === 'tippedrecently') return 'dark-blue';
+            if (className === 'inFanClub' || lower === 'infanclub') return 'green';
+            if (className === 'mod' || lower === 'moderator') return 'red';
+            if (className === 'hasTokens' || lower === 'hastokens') return 'light-blue';
+            if (className === 'defaultUser' || lower === 'defaultuser') return 'gray';
+        }
+        return null;
+    }
+
+    function getTierFromElement(el) {
+        var tier = getTierFromClassList(el.classList);
+        if (tier) return tier;
+        var parent = el.parentElement;
+        for (var i = 0; i < 4 && parent; i++) {
+            tier = getTierFromClassList(parent.classList);
+            if (tier) return tier;
+            parent = parent.parentElement;
+        }
+        return 'gray';
+    }
+
+    // DOM and API feed the same preserved Woman OR Trans overlay; the product
+    // meaning awaits author clarification, without inferring a Trans subdivision.
+    function getGenderFromElement(el) {
+        var genderImg = el.querySelector('img[data-testid="gender-icon"], img[title="Trans"], img[title="Female"], img[title="Male"], img[title="Couple"]');
+        if (!genderImg) {
+            var parent = el.parentElement;
+            for (var i = 0; i < 3 && parent; i++) {
+                genderImg = parent.querySelector('img[data-testid="gender-icon"], img[title="Trans"], img[title="Female"], img[title="Male"], img[title="Couple"]');
+                if (genderImg) break;
+                parent = parent.parentElement;
+            }
+        }
+        if (genderImg) {
+            var src = genderImg.src || '';
+            var title = genderImg.title || '';
+            if (src.indexOf('female') !== -1 || title === 'Female') return 'female';
+            if (src.indexOf('trans') !== -1 || title === 'Trans') return 'trans';
+            if (src.indexOf('male') !== -1 || title === 'Male') return 'male';
+            if (src.indexOf('couple') !== -1 || title === 'Couple') return 'couple';
+        }
+        return 'unknown';
+    }
+
+    function getRoomTotal() {
+        for (var i = 0; i < DOM_SELECTORS.roomTotal.length; i++) {
+            var el = document.querySelector(DOM_SELECTORS.roomTotal[i]);
+            if (el) {
+                var text = el.textContent || '';
+                var match = text.match(/USERS\s*\(?(\d[\d,]*)\)?/i);
+                if (match) return parseInt(match[1].replace(/,/g, ''));
+            }
+        }
+        return 0;
+    }
+
+    function getAnonymousCount() {
+        // API supplies Anonymous directly; only DOM samples need a residual.
+        if (lastAcceptedAcquisition && lastAcceptedAcquisition.source === 'API') {
+            return lastAcceptedAcquisition.api.anonymousCount;
+        }
+        var tracked = users.size;
+        if (roomTotal > tracked) return roomTotal - tracked;
+        return 0;
+    }
+
+    function extractUsername(text) {
+        if (!text) return null;
+        text = text.trim().split('\n')[0];
+        var match = text.match(/^([^\s\(\[\<\,]+)/);
+        if (match) {
+            var candidate = match[1].trim();
+            if (candidate.length >= 2 && candidate.length <= 30) {
+                var clean = candidate.replace(/[^\w\-]+$/, '');
+                if (clean.length >= 2) return clean;
+            }
+        }
+        return null;
+    }
+
+    function findTab(tabName) {
+        var selectors = DOM_SELECTORS.tabs[tabName.toLowerCase()] || [];
+        for (var i = 0; i < selectors.length; i++) {
+            var el = document.querySelector(selectors[i]);
+            if (el) return el;
+        }
+        var buttons = document.querySelectorAll('button, div[role="tab"]');
+        for (var j = 0; j < buttons.length; j++) {
+            var btn = buttons[j];
+            var text = (btn.textContent || '').toUpperCase();
+            if (text.indexOf(tabName.toUpperCase()) !== -1) return btn;
+        }
+        return null;
+    }
+
+    // ---------------------------------------------------------------------------
+    // Sample validity
+    // ---------------------------------------------------------------------------
+
+    function isScanValid(newUserCount, newRoomTotal) {
+        if (previousRoomTotal === 0) return true;
+        if (newRoomTotal === 0 && previousRoomTotal > 0) {
+            log('Scan rejected: room total is 0 but previous was ' + previousRoomTotal);
+            return false;
+        }
+        var roomTotalChange = Math.abs(newRoomTotal - previousRoomTotal) / previousRoomTotal;
+        if (roomTotalChange > 0.10) return true;
+        var userDrop = previousUserCount > 0 ? (previousUserCount - newUserCount) / previousUserCount : 0;
+        if (userDrop > 0.50) {
+            log('Scan rejected: user count dropped ' + Math.round(userDrop * 100) + '% (' +
+                previousUserCount + ' -> ' + newUserCount + ') while room total stable (' +
+                previousRoomTotal + ' -> ' + newRoomTotal + ')');
+            return false;
+        }
+        return true;
+    }
+
+    // ---------------------------------------------------------------------------
+    // Report generation
+    // ---------------------------------------------------------------------------
+
+    function downloadTrackingReport() {
+        var modelName = getModelName();
+        var sessionStart = trackingStartTime ? formatDateTime(trackingStartTime) : 'Not started';
+        var totalTime = trackingStartTime ? formatElapsedTime(isPaused ? pausedElapsedTime : (Date.now() - trackingStartTime)) : '00:00:00';
+        var now = Date.now();
+        var storageReport = getStorageReportStatus(modelName);
+        var report = [
+            '================================',
+            'CHATURBATE TRACKING REPORT',
+            '================================',
+            '',
+            'Model: ' + modelName,
+            'Session Start: ' + sessionStart,
+            'Report Generated: ' + formatDateTime(now),
+            'TierScope Version: ' + TIERSCOPE_VERSION,
+            'Storage Schema Version: ' + STORAGE_SCHEMA_VERSION,
+            'Saved Session Producer Version: ' + storageReport.producer,
+            'Session Storage: ' + storageReport.access,
+            'Last Accepted Acquisition Source: ' + (lastAcceptedAcquisition ? lastAcceptedAcquisition.source : 'None'),
+            'Last Accepted Sample Time: ' + (lastAcceptedAcquisition ? new Date(lastAcceptedAcquisition.timestamp).toISOString() : 'None'),
+            'Total Tracking Time: ' + totalTime,
+            ''
+        ];
+        if (lastAcceptedAcquisition && lastAcceptedAcquisition.api) {
+            report.push('API Anonymous Count: ' + lastAcceptedAcquisition.api.anonymousCount);
+            report.push('API Registered Record Count: ' + lastAcceptedAcquisition.api.registeredCount);
+            report.push('API Total Users: ' + lastAcceptedAcquisition.api.totalUsers);
+            report.push('API Owner Record Present: ' + (lastAcceptedAcquisition.api.ownerCount > 0 ? 'yes' : 'no'));
+            report.push('Registered includes broadcaster/owner and unclassified records outside the seven viewer tiers.');
+            report.push('');
+        }
+        report.push('--- ALL-TIME HIGHS ---');
+        report.push('');
+        if (roomTotalHigh > 0 && roomTotalHighTime) {
+            var elapsed = formatElapsedTime(roomTotalHighTime - trackingStartTime);
+            report.push('Room Total High: ' + roomTotalHigh.toLocaleString() + ' users');
+            report.push('  Recorded at: ' + formatDateTime(roomTotalHighTime) + ' (' + elapsed + ' into session)');
+            report.push('');
+        }
+        Object.keys(TIERS).forEach(function(tier) {
+            var highResult = getHighValue(history[tier], 0);
+            var highVal = highResult.value;
+            var highTime = tierHighTimes[tier];
+            if (highVal > 0 && highTime) {
+                var elapsed = formatElapsedTime(highTime - trackingStartTime);
+                report.push(TIERS[tier].name + ' High: ' + highVal.toLocaleString());
+                report.push('  Recorded at: ' + formatDateTime(highTime) + ' (' + elapsed + ' into session)');
+                report.push('');
+            }
+        });
+        var withTokensResult = getHighValue(history['withTokens'], 0);
+        var withTokensHigh = withTokensResult.value;
+        if (withTokensHigh > 0 && withTokensHighTime) {
+            var elapsed = formatElapsedTime(withTokensHighTime - trackingStartTime);
+            report.push('With Tokens High: ' + withTokensHigh.toLocaleString());
+            report.push('  Recorded at: ' + formatDateTime(withTokensHighTime) + ' (' + elapsed + ' into session)');
+            report.push('');
+        }
+        var totalResult = getHighValue(history['total'], 0);
+        var totalHigh = totalResult.value;
+        if (totalHigh > 0 && totalHighTime) {
+            var elapsed = formatElapsedTime(totalHighTime - trackingStartTime);
+            report.push('Registered Users High: ' + totalHigh.toLocaleString());
+            report.push('  Recorded at: ' + formatDateTime(totalHighTime) + ' (' + elapsed + ' into session)');
+            report.push('');
+        }
+        var anonResult = getHighValue(history['anonymous'], 0);
+        var anonHigh = anonResult.value;
+        if (anonHigh > 0 && anonHighTime) {
+            var elapsed = formatElapsedTime(anonHighTime - trackingStartTime);
+            report.push('Anonymous High: ' + anonHigh.toLocaleString());
+            report.push('  Recorded at: ' + formatDateTime(anonHighTime) + ' (' + elapsed + ' into session)');
+            report.push('');
+        }
+        report.push('--- CURRENT STATS ---');
+        report.push('');
+        var counts = { 'red': 0, 'green': 0, 'purple': 0, 'pink': 0, 'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0 };
+        users.forEach(function(data) {
+            if (counts[data.tier] !== undefined) counts[data.tier]++;
+            if (data.gender === 'female' || data.gender === 'trans') {
+                counts['female-trans']++;
+            }
+        });
+        var total = users.size;
+        var withTokens = counts['red'] + counts['green'] + counts['purple'] + counts['pink'] + counts['dark-blue'] + counts['light-blue'];
+        var anonymousCount = getAnonymousCount();
+        var fullRoomTotal = roomTotal > total ? roomTotal : (total + anonymousCount);
+        var totalHighCurrent = getHighValue(history['total'], total).value;
+        var withTokensHighCurrent = getHighValue(history['withTokens'], withTokens).value;
+        var anonHighCurrent = getHighValue(history['anonymous'], anonymousCount).value;
+        report.push('Current Room Total: ' + fullRoomTotal.toLocaleString() + ' (High: ' + roomTotalHigh.toLocaleString() + ')');
+        report.push('Current Registered: ' + total.toLocaleString() + ' (High: ' + totalHighCurrent.toLocaleString() + ')');
+        report.push('Current With Tokens: ' + withTokens.toLocaleString() + ' (High: ' + withTokensHighCurrent.toLocaleString() + ')');
+        report.push('Current Anonymous: ' + anonymousCount.toLocaleString() + ' (High: ' + anonHighCurrent.toLocaleString() + ')');
+        report.push('');
+        report.push('--- TIER BREAKDOWN ---');
+        report.push('');
+        Object.keys(TIERS).forEach(function(tier) {
+            var current = counts[tier] || 0;
+            var high = getHighValue(history[tier], current).value;
+            report.push(TIERS[tier].name + ': ' + current.toLocaleString() + ' (High: ' + high.toLocaleString() + ')');
+        });
+        report.push('');
+        report.push('--- ♀⚧ OVERLAY (SESSION) ---');
+        report.push('');
+        var sessionFemaleCount = 0;
+        var sessionTransCount = 0;
+        Object.keys(sessionFemaleTransUsers).forEach(function(username) {
+            var gender = sessionFemaleTransUsers[username];
+            if (gender === 'female') sessionFemaleCount++;
+            else if (gender === 'trans') sessionTransCount++;
+        });
+        var femaleTransTotal = sessionFemaleCount + sessionTransCount;
+        report.push('Total Unique ♀⚧ Viewers: ' + femaleTransTotal + ' (♀ Female: ' + sessionFemaleCount + ', ⚧ Trans: ' + sessionTransCount + ')');
+        report.push('');
+        report.push('================================');
+        report.push('End of Report');
+        report.push('================================');
+        var date = new Date();
+        var dateStr = date.toISOString().slice(0, 10);
+        var timeStr = date.getHours().toString().padStart(2, '0') + '-' +
+                     date.getMinutes().toString().padStart(2, '0') + '-' +
+                     date.getSeconds().toString().padStart(2, '0');
+        var filename = modelName + '-tracking-report-' + dateStr + '-' + timeStr + '.txt';
+        var blob = new Blob([report.join('\n')], { type: 'text/plain' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    // ---------------------------------------------------------------------------
+    // API parser
+    // ---------------------------------------------------------------------------
+
+    function parseGetChatUserListResponse(text) {
+        if (typeof text !== 'string' || !text.trim()) throw new Error('Empty API response');
+        var parts = text.trim().split(',');
+        if (!/^\d+$/.test(parts[0])) throw new Error('Invalid API anonymous count');
+        var anonymousCount = Number(parts[0]);
+        if (!Number.isSafeInteger(anonymousCount)) throw new Error('Unsafe API anonymous count');
+        var classTiers = { m: 'red', f: 'green', l: 'purple', p: 'pink', tr: 'dark-blue', t: 'light-blue', g: 'gray' };
+        // ♀⚧ preserves the original Woman OR Trans metric (internal female/trans).
+        // API s identifies Chaturbate's Trans category; available project evidence
+        // does not distinguish Transfemme / Transmasc / Non-binary. The combined
+        // metric's product meaning awaits clarification from the original author;
+        // preserve the implementation rather than infer a different population.
+        var genders = { m: 'male', f: 'female', s: 'trans', c: 'couple' };
+        var seen = new Set();
+        var parsedUsers = [];
+        var unknownClasses = Object.create(null);
+        var unknownGenders = Object.create(null);
+        for (var i = 1; i < parts.length; i++) {
+            var fields = parts[i].split('|');
+            if (fields.length !== 4 || !/^[A-Za-z0-9_-]{2,30}$/.test(fields[0]) ||
+                fields.slice(1).some(function(field) { return !/^[^\s|,<>\x00-\x1f]+$/.test(field); })) {
+                // Partial acceptance would silently undercount Registered and skew
+                // every derived statistic. Reject the entire malformed sample.
+                throw new Error('Malformed API record at index ' + i);
+            }
+            var username = fields[0];
+            var key = username.toLowerCase();
+            if (seen.has(key)) throw new Error('Duplicate API username at index ' + i);
+            seen.add(key);
+            var rawClass = fields[1];
+            var genderCode = fields[2];
+            // Owner and unfamiliar class codes stay outside the seven viewer tiers.
+            // Preserve raw codes for diagnostics instead of assigning a guessed tier
+            // or gender; all structurally accepted records still count as Registered.
+            var isOwner = rawClass === 'o';
+            var tier = Object.prototype.hasOwnProperty.call(classTiers, rawClass) ? classTiers[rawClass] : null;
+            var gender = Object.prototype.hasOwnProperty.call(genders, genderCode) ? genders[genderCode] : 'unknown';
+            if (!tier && !isOwner) unknownClasses[rawClass] = (unknownClasses[rawClass] || 0) + 1;
+            if (gender === 'unknown') unknownGenders[genderCode] = (unknownGenders[genderCode] || 0) + 1;
+            parsedUsers.push({ username: username, rawClass: rawClass, tier: tier,
+                genderCode: genderCode, gender: gender, rawFlag: fields[3], isOwner: isOwner });
+        }
+        // Every accepted record, including owners and unknown classes, is registered.
+        var registeredCount = parsedUsers.length;
+        var totalUsers = anonymousCount + registeredCount;
+        if (!Number.isSafeInteger(totalUsers)) throw new Error('Unsafe API total users');
+        return { anonymousCount: anonymousCount, registeredCount: registeredCount,
+            totalUsers: totalUsers, users: parsedUsers,
+            diagnostics: { unknownClasses: unknownClasses, unknownGenders: unknownGenders } };
+    }
+
+    // ---------------------------------------------------------------------------
+    // Acquisition identity and validation
+    // ---------------------------------------------------------------------------
+
+    // URL identity closes the navigation-poll gap; generation/epoch retire late work.
+    function isAcquisitionCurrent(context) {
+        return context.epoch === scanEpoch && context.generation === initGuard &&
+            context.url === location.href;
+    }
+
+    function validateRoomSnapshot(snapshot) {
+        if (!snapshot || !Number.isSafeInteger(snapshot.roomTotal) || snapshot.roomTotal < 0 ||
+            !Array.isArray(snapshot.users)) throw new Error('Invalid room snapshot');
+        if (snapshot.source === 'API' &&
+            (!Number.isSafeInteger(snapshot.anonymousCount) || snapshot.anonymousCount < 0 ||
+             snapshot.registeredCount !== snapshot.users.length ||
+             snapshot.totalUsers !== snapshot.anonymousCount + snapshot.registeredCount ||
+             snapshot.roomTotal !== snapshot.totalUsers)) {
+            throw new Error('Inconsistent API anonymous, registered, or total user counts');
+        }
+        if (!isScanValid(snapshot.users.length, snapshot.roomTotal)) {
+            throw new Error('Sample rejected by 3.0.0 scan-validity checks');
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // API acquisition
+    // ---------------------------------------------------------------------------
+
+    async function acquireAPISnapshot(context) {
+        if (!context.room || context.room === 'unknown') throw new Error('No current room username');
+        var url = new URL('/api/getchatuserlist/', location.origin);
+        url.searchParams.set('roomname', context.room);
+        url.searchParams.set('private', 'false');
+        url.searchParams.set('sort_by', 'a');
+        url.searchParams.set('exclude_staff', 'false');
+        // The timeout covers headers and body, so a stalled response cannot hold
+        // acquisition indefinitely. Parsing produces a candidate, not live state.
+        var controller = new AbortController();
+        var timeout;
+        try {
+            var text = await Promise.race([
+                (async function() {
+                    var response = await fetch(url.href, { method: 'GET', credentials: 'same-origin',
+                        mode: 'same-origin', cache: 'no-store', redirect: 'error', signal: controller.signal });
+                    if (!response.ok) throw new Error('API HTTP ' + response.status);
+                    return response.text();
+                })(),
+                new Promise(function(resolve, reject) {
+                    timeout = setTimeout(function() {
+                        reject(new Error('API request timed out after ' + API_TIMEOUT_MS + ' ms'));
+                        controller.abort();
+                    }, API_TIMEOUT_MS);
+                })
+            ]);
+            var snapshot = parseGetChatUserListResponse(text);
+            // Normalize the derived total for the shared API/DOM acquisition interface.
+            snapshot.roomTotal = snapshot.totalUsers;
+            snapshot.source = 'API';
+            snapshot.timestamp = Date.now();
+            return snapshot;
+        } finally {
+            clearTimeout(timeout);
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // DOM fallback acquisition
+    // ---------------------------------------------------------------------------
+
+    async function acquireDOMSnapshot(context, returnToChat) {
+        var usersTab = findTab('users');
+        var chatTab = findTab('chat');
+        if (!usersTab) throw new Error('USERS tab not found');
+        var openedUsers = false;
+        try {
+            usersTab.click();
+            openedUsers = true;
+            await new Promise(function(resolve) { setTimeout(resolve, 800); });
+            if (!isAcquisitionCurrent(context)) return null;
+            return scanUsers();
+        } finally {
+            if (openedUsers && isAcquisitionCurrent(context) && returnToChat && chatTab) {
+                try { chatTab.click(); }
+                catch (err) { log('DOM fallback could not return to CHAT: ' + err.message); }
+            }
+        }
+    }
+
+    function getDOMFallbackWaitSeconds(modelName) {
+        var readyAt = domFallbackReadyAtByRoom.get(modelName.toLowerCase()) || 0;
+        return Math.max(0, Math.ceil((readyAt - Date.now()) / 1000));
+    }
+
+    async function acquireRoomSnapshot(context, returnToChat) {
+        lastAcquisitionAttemptSource = 'API';
+        try {
+            var snapshot = await acquireAPISnapshot(context);
+            if (!isAcquisitionCurrent(context)) return null;
+            validateRoomSnapshot(snapshot);
+            domHealthStatus.consecutiveFailures = 0;
+            return snapshot;
+        } catch (err) {
+            if (!isAcquisitionCurrent(context)) return null;
+            console.warn('[TierScope ' + TIERSCOPE_VERSION + '] API failed: ' + err.message);
+        }
+        lastAcquisitionAttemptSource = 'DOM';
+        var fallbackWait = getDOMFallbackWaitSeconds(context.room);
+        if (fallbackWait > 0) {
+            log('DOM fallback deferred for ' + fallbackWait + 's; retaining previous valid data (no history point)');
+            return null;
+        }
+        var roomKey = context.room.toLowerCase();
+        var fallbackIntervalMs = Math.max(DOM_FALLBACK_INTERVAL_SECONDS, scanIntervalSeconds) * 1000;
+        // Reserve before tab access so Reset/resume cannot immediately bypass the
+        // cooldown while an attempt is pending. Completion extends the reservation
+        // even for failed/stale work; this is a deadline, not an indefinite lock.
+        domFallbackReadyAtByRoom.set(roomKey, Date.now() + fallbackIntervalMs);
+        log('Attempting DOM fallback; room=' + context.room);
+        try {
+            var fallback = await acquireDOMSnapshot(context, returnToChat);
+            if (!isAcquisitionCurrent(context)) return null;
+            validateRoomSnapshot(fallback);
+            log('DOM fallback succeeded; room=' + context.room + ' records=' + fallback.users.length);
+            return fallback;
+        } catch (err) {
+            if (!isAcquisitionCurrent(context)) return null;
+            console.warn('[TierScope ' + TIERSCOPE_VERSION + '] DOM fallback failed: ' + err.message +
+                '; retaining previous valid data (no history point)');
+            return null;
+        } finally {
+            // Include failed/stale attempts and keep cooldown scoped to their room.
+            domFallbackReadyAtByRoom.set(roomKey, Math.max(domFallbackReadyAtByRoom.get(roomKey) || 0,
+                Date.now() + fallbackIntervalMs));
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Snapshot acceptance
+    // ---------------------------------------------------------------------------
+
+    function acceptRoomSnapshot(snapshot, modelName) {
+        users = new Map(snapshot.users.map(function(user) { return [user.username, user]; }));
+        roomTotal = snapshot.roomTotal;
+        femaleTransUsernames = [];
+        var model = modelName.toLowerCase();
+        // Session name lists exclude the current room username. Numeric Registered
+        // and the Woman + Trans overlay still include that record when applicable;
+        // this asymmetry preserves the original tracker's session-list behavior.
+        users.forEach(function(user) {
+            if (user.username.toLowerCase() !== model) {
+                // Usernames are data, including own keys such as __proto__ and
+                // constructor. Define properties without invoking inherited setters,
+                // while retaining the existing plain-object storage representation.
+                Object.defineProperty(sessionUniqueUsers, user.username.toLowerCase(),
+                    { value: true, enumerable: true, configurable: true, writable: true });
+                if (user.gender === 'female' || user.gender === 'trans') {
+                    femaleTransUsernames.push(user.username);
+                    Object.defineProperty(sessionFemaleTransUsers, user.username,
+                        { value: user.gender, enumerable: true, configurable: true, writable: true });
+                }
+            }
+        });
+        lastAcceptedAcquisition = { source: snapshot.source, timestamp: snapshot.timestamp, api: null };
+        if (snapshot.source === 'API') {
+            var owners = snapshot.users.filter(function(user) { return user.isOwner; });
+            var tierSum = snapshot.users.filter(function(user) { return user.tier !== null; }).length;
+            var unknownClasses = snapshot.diagnostics.unknownClasses;
+            var unknownGenders = snapshot.diagnostics.unknownGenders;
+            lastAcceptedAcquisition.api = { anonymousCount: snapshot.anonymousCount,
+                registeredCount: snapshot.registeredCount, totalUsers: snapshot.totalUsers, ownerCount: owners.length };
+            return {
+                room: modelName, anonymousCount: snapshot.anonymousCount,
+                registeredCount: snapshot.registeredCount, totalUsers: snapshot.totalUsers,
+                owner: owners.map(function(user) { return user.username; }).join(', ') || 'none',
+                ownerRecords: owners,
+                unknownClasses: Object.values(unknownClasses).reduce(function(a, b) { return a + b; }, 0),
+                unknownGenders: Object.values(unknownGenders).reduce(function(a, b) { return a + b; }, 0),
+                unknownClassCodes: unknownClasses, unknownGenderCodes: unknownGenders,
+                viewerTierSum: tierSum, registeredMinusTierSum: users.size - tierSum,
+                viewerTierGapExplanation: 'Owner and unknown-class records count toward Registered, outside the seven viewer tiers',
+                timestamp: new Date(snapshot.timestamp).toISOString()
+            };
+        }
+        return null;
+    }
+
+    // Failed attempts and restored history cannot refresh accepted-sample age.
+    function updateAcquisitionStatus() {
+        var el = document.getElementById('acquisition-status');
+        if (!el) return;
+        if (!lastAcceptedAcquisition) {
+            el.textContent = 'No sample';
+            el.title = 'No accepted sample in this page session';
+            return;
+        }
+        var age = Math.max(0, Math.floor((Date.now() - lastAcceptedAcquisition.timestamp) / 1000));
+        el.textContent = lastAcceptedAcquisition.source + ' • ' + age + 's';
+        el.title = 'Last accepted sample: ' + new Date(lastAcceptedAcquisition.timestamp).toISOString() +
+            '. TierScope and the USERS tab refresh independently.';
+    }
+
+    // ---------------------------------------------------------------------------
+    // Acquisition transaction and sample commit
+    // ---------------------------------------------------------------------------
+
+    async function performScanThenReturn(returnToChat) {
+        if (typeof returnToChat === 'undefined') returnToChat = true;
+        if (isScanning) return;
+        isScanning = true;
+        var context = { epoch: ++scanEpoch, generation: initGuard, url: location.href, room: getModelName() };
+        var priorState = null;
+        var statusEl = document.getElementById('auto-status');
+        updateCountdownDisplay();
+        try {
+            var snapshot = await acquireRoomSnapshot(context, returnToChat);
+            if (!isAcquisitionCurrent(context)) return;
+            if (!snapshot) {
+                if (statusEl) {
+                    statusEl.textContent = 'Scan skipped (unreliable)';
+                    statusEl.style.color = '#ff4444';
+                }
+                return;
+            }
+            // Roll back every accepted-sample field if processing fails. Session
+            // lists, highs and bounded history must not retain a partial sample.
+            priorState = {
+                users: users, roomTotal: roomTotal, previousUserCount: previousUserCount,
+                previousRoomTotal: previousRoomTotal, previousCounts: previousCounts,
+                hasTrendBaseline: hasTrendBaseline, lastAcceptedAcquisition: lastAcceptedAcquisition,
+                femaleTransUsernames: femaleTransUsernames,
+                trendHTML: (document.getElementById('trend-container') || {}).innerHTML,
+                trendHeaderText: (document.getElementById('trend-header-label') || {}).textContent,
+                sessionUniqueUsers: Object.fromEntries(Object.entries(sessionUniqueUsers)),
+                sessionFemaleTransUsers: Object.fromEntries(Object.entries(sessionFemaleTransUsers)),
+                history: Object.fromEntries(Object.keys(history).map(function(key) { return [key, history[key].slice()]; })),
+                roomTotalHigh: roomTotalHigh, roomTotalHighTime: roomTotalHighTime,
+                tierHighTimes: Object.fromEntries(Object.entries(tierHighTimes)),
+                withTokensHighTime: withTokensHighTime, totalHighTime: totalHighTime,
+                anonHighTime: anonHighTime, femaleTransHighTime: femaleTransHighTime
+            };
+            var diagnostics = acceptRoomSnapshot(snapshot, context.room);
+            var counts = { 'red': 0, 'green': 0, 'purple': 0, 'pink': 0, 'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0 };
+            users.forEach(function(data) {
+                if (counts[data.tier] !== undefined) counts[data.tier]++;
+                if (data.gender === 'female' || data.gender === 'trans') {
+                    counts['female-trans']++;
+                }
+            });
+            var total = users.size;
+            var withTokens = counts['red'] + counts['green'] + counts['purple'] + counts['pink'] + counts['dark-blue'] + counts['light-blue'];
+            var anonymousCount = getAnonymousCount();
+            previousUserCount = total;
+            previousRoomTotal = roomTotal;
+            var currentRoomTotal = roomTotal > 0 ? roomTotal : (total + anonymousCount);
+            if (currentRoomTotal > roomTotalHigh) {
+                roomTotalHigh = currentRoomTotal;
+                roomTotalHighTime = Date.now();
+            }
+
+            // The original trend presets read completed history, including this sample.
+            // Keep history before display/trends, inside the rollback transaction.
+            saveToHistory();
+            hasTrendBaseline = true;
+            updateDisplay();
+            updateTrendDisplay();
+
+            previousCounts = {
+                'red': counts['red'] || 0,
+                'green': counts['green'] || 0,
+                'purple': counts['purple'] || 0,
+                'pink': counts['pink'] || 0,
+                'dark-blue': counts['dark-blue'] || 0,
+                'light-blue': counts['light-blue'] || 0,
+                'gray': counts['gray'] || 0,
+                'female-trans': counts['female-trans'] || 0,
+                'withTokens': withTokens || 0,
+                'total': total || 0,
+                'anonymous': anonymousCount || 0
+            };
+
+            updateAcquisitionStatus();
+            saveSession(context.room);
+            if (diagnostics) console.log('[TierScope ' + TIERSCOPE_VERSION + '] API scan accepted', diagnostics);
+        } catch (err) {
+            if (priorState) {
+                users = priorState.users;
+                roomTotal = priorState.roomTotal;
+                previousUserCount = priorState.previousUserCount;
+                previousRoomTotal = priorState.previousRoomTotal;
+                previousCounts = priorState.previousCounts;
+                hasTrendBaseline = priorState.hasTrendBaseline;
+                lastAcceptedAcquisition = priorState.lastAcceptedAcquisition;
+                femaleTransUsernames = priorState.femaleTransUsernames;
+                sessionUniqueUsers = priorState.sessionUniqueUsers;
+                sessionFemaleTransUsers = priorState.sessionFemaleTransUsers;
+                history = priorState.history;
+                roomTotalHigh = priorState.roomTotalHigh;
+                roomTotalHighTime = priorState.roomTotalHighTime;
+                tierHighTimes = priorState.tierHighTimes;
+                withTokensHighTime = priorState.withTokensHighTime;
+                totalHighTime = priorState.totalHighTime;
+                anonHighTime = priorState.anonHighTime;
+                femaleTransHighTime = priorState.femaleTransHighTime;
+                try {
+                    var trendEl = document.getElementById('trend-container');
+                    if (trendEl && typeof priorState.trendHTML === 'string') trendEl.innerHTML = priorState.trendHTML;
+                    var trendHeader = document.getElementById('trend-header-label');
+                    if (trendHeader && typeof priorState.trendHeaderText === 'string') trendHeader.textContent = priorState.trendHeaderText;
+                    updateDisplay();
+                    updateAcquisitionStatus();
+                    if (!isMinimized) drawAllSparklines();
+                }
+                catch (displayError) { log('Could not repaint previous data: ' + displayError.message); }
+            }
+            log('Error during scan; retaining previous valid data: ' + err.message);
+        } finally {
+            if (isAcquisitionCurrent(context)) {
+                isScanning = false;
+                resetCountdown();
+            }
+        }
+    }
+
+    // Helper function to get comparison counts based on selected time mode
+    // Returns { counts: {}, short: boolean, actualMinutes: number }
+    // ---------------------------------------------------------------------------
+    // Trend comparison and rendering
+    // ---------------------------------------------------------------------------
+
+    function getComparisonCounts() {
+        if (trendComparisonMode === 'last') {
+            // Use history instead of previousCounts to avoid stale data when switching presets
+            if (history.timestamps.length < 2) {
+                // Not enough history (need at least 1 previous scan) - return null to indicate "not ready"
+                return { counts: null, short: false, actualMinutes: 0 };
+            }
+            
+            // Get the second-to-last entry (the scan before current)
+            var lastIdx = history.timestamps.length - 2;
+            var actualMinutes = Math.round((Date.now() - history.timestamps[lastIdx]) / 60000);
+            
+            return {
+                counts: {
+                    'red': history['red'][lastIdx] || 0,
+                    'green': history['green'][lastIdx] || 0,
+                    'purple': history['purple'][lastIdx] || 0,
+                    'pink': history['pink'][lastIdx] || 0,
+                    'dark-blue': history['dark-blue'][lastIdx] || 0,
+                    'light-blue': history['light-blue'][lastIdx] || 0,
+                    'gray': history['gray'][lastIdx] || 0,
+                    'female-trans': history['female-trans'][lastIdx] || 0,
+                    'withTokens': history['withTokens'][lastIdx] || 0,
+                    'total': history['total'][lastIdx] || 0,
+                    'anonymous': history['anonymous'][lastIdx] || 0
+                },
+                short: false,
+                actualMinutes: actualMinutes
+            };
+        }
+        
+        if (trendComparisonMode === 'start') {
+            // Return first history entry or zeros if no history
+            if (history.timestamps.length === 0) {
+                return {
+                    counts: {
+                        'red': 0, 'green': 0, 'purple': 0, 'pink': 0,
+                        'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0,
+                        'withTokens': 0, 'total': 0, 'anonymous': 0
+                    },
+                    short: false,
+                    actualMinutes: 0
+                };
+            }
+            var startMinutes = Math.round((Date.now() - history.timestamps[0]) / 60000);
+            return {
+                counts: {
+                    'red': history['red'][0] || 0,
+                    'green': history['green'][0] || 0,
+                    'purple': history['purple'][0] || 0,
+                    'pink': history['pink'][0] || 0,
+                    'dark-blue': history['dark-blue'][0] || 0,
+                    'light-blue': history['light-blue'][0] || 0,
+                    'gray': history['gray'][0] || 0,
+                    'female-trans': history['female-trans'][0] || 0,
+                    'withTokens': history['withTokens'][0] || 0,
+                    'total': history['total'][0] || 0,
+                    'anonymous': history['anonymous'][0] || 0
+                },
+                short: false,
+                actualMinutes: startMinutes
+            };
+        }
+        
+        // Time-based modes - find latest scan at or before target time
+        var preset = TREND_PRESETS[trendComparisonMode];
+        if (!preset || preset.ms <= 0) return { counts: previousCounts, short: false, actualMinutes: 0 };
+        
+        var targetTime = Date.now() - preset.ms;
+        var idx = -1;
+        
+        // Find the latest scan that is at or before the target time
+        for (var i = 0; i < history.timestamps.length; i++) {
+            if (history.timestamps[i] <= targetTime) {
+                idx = i;
+            } else {
+                break; // Timestamps are in order, so we can stop once we pass the target
+            }
+        }
+        
+        var short = idx === -1; // No scan old enough means session is shorter than preset
+        if (short) idx = 0; // Use the oldest scan we have
+        
+        if (idx === -1 || history.timestamps.length === 0) {
+            return { counts: previousCounts, short: false, actualMinutes: 0 };
+        }
+        
+        // Calculate actual age of the comparison scan
+        var actualMs = Date.now() - history.timestamps[idx];
+        var actualMinutes = Math.round(actualMs / 60000);
+        
+        return {
+            counts: {
+                'red': history['red'][idx] || 0,
+                'green': history['green'][idx] || 0,
+                'purple': history['purple'][idx] || 0,
+                'pink': history['pink'][idx] || 0,
+                'dark-blue': history['dark-blue'][idx] || 0,
+                'light-blue': history['light-blue'][idx] || 0,
+                'gray': history['gray'][idx] || 0,
+                'female-trans': history['female-trans'][idx] || 0,
+                'withTokens': history['withTokens'][idx] || 0,
+                'total': history['total'][idx] || 0,
+                'anonymous': history['anonymous'][idx] || 0
+            },
+            short: short,
+            actualMinutes: actualMinutes
+        };
+    }
+
+    // Function to set trend comparison mode
+    function setTrendComparisonMode(mode) {
+        if (!TREND_PRESETS[mode] && mode !== 'last') return;
+        trendComparisonMode = mode;
+        updateTrendDisplay();
+        updateTrendPresetButtons();
+        saveSession(getModelName());
+    }
+
+    // Update preset button visual states
+    function updateTrendPresetButtons() {
+        var buttons = document.querySelectorAll('.trend-preset-btn');
+        buttons.forEach(function(btn) {
+            var mode = btn.dataset.mode;
+            if (mode === trendComparisonMode) {
+                btn.style.background = '#4169E1';
+                btn.style.color = '#fff';
+                btn.style.borderColor = '#4169E1';
+            } else {
+                btn.style.background = '#333';
+                btn.style.color = '#aaa';
+                btn.style.borderColor = '#555';
+            }
+        });
+    }
+
+    function updateTrendDisplay() {
+        if (presentationMode === 'PLAYBACK') return;
+        var trendContainer = document.getElementById('trend-container');
+        var trendHeaderLabel = document.getElementById('trend-header-label');
+        
+        if (!trendContainer) return;
+
+        // Clear header label on early exit (Reset can leave "vs 4m" stuck)
+        if (!hasTrendBaseline) {
+            trendContainer.innerHTML = '<div style="font-size:8px;color:#666;text-align:center;padding:8px;">Waiting for scan...</div>';
+            if (trendHeaderLabel) trendHeaderLabel.textContent = '📈 TREND';
+            return;
+        }
+
+        var counts = { 'red': 0, 'green': 0, 'purple': 0, 'pink': 0, 'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0 };
+        users.forEach(function(data) {
+            if (counts[data.tier] !== undefined) counts[data.tier]++;
+            if (data.gender === 'female' || data.gender === 'trans') {
+                counts['female-trans']++;
+            }
+        });
+        var total = users.size;
+        var withTokens = counts['red'] + counts['green'] + counts['purple'] + counts['pink'] + counts['dark-blue'] + counts['light-blue'];
+        var anonymousCount = getAnonymousCount();
+        
+        // Get comparison counts and metadata
+        var comparison = getComparisonCounts();
+        var comparisonCounts = comparison.counts;
+        var shortSession = comparison.short;
+        var actualMinutes = comparison.actualMinutes;
+
+        // Handle "not ready" state (e.g., "Last" preset with fewer than 2 history points)
+        if (!comparisonCounts) {
+            var waitingText = history.timestamps.length === 1 ? 'Waiting for second scan...' : 'Waiting for scan...';
+            trendContainer.innerHTML = '<div style="font-size:8px;color:#666;text-align:center;padding:8px;">' + waitingText + '</div>';
+            if (trendHeaderLabel) trendHeaderLabel.textContent = '📈 TREND';
+            return;
+        }
+
+        // Helper to format short session label
+        var getShortLabel = function() {
+            if (!shortSession || actualMinutes <= 0) return '';
+            if (actualMinutes < 60) return ' vs ' + actualMinutes + 'm';
+            var hours = Math.floor(actualMinutes / 60);
+            var mins = actualMinutes % 60;
+            return ' vs ' + hours + 'h' + (mins > 0 ? mins : '');
+        };
+
+        function buildTrendItem(name, current, prev, isSpecial, isLarge) {
+            var diff = current - prev;
+            var trend = diff > 0 ? 'up' : diff < 0 ? 'down' : 'stable';
+            var trendIcon = TREND_ICONS[trend];
+            var deltaText = diff !== 0 ? (diff > 0 ? '+' + diff : diff) : '';
+            var deltaColor = diff > 0 ? '#32CD32' : '#ff4444';
+            var bgStyle = isSpecial ?
+                'background:rgba(255,105,180,0.15);border:1px solid #ff69b4;' :
+                'background:rgba(255,255,255,0.05);';
+            var padding = isLarge ? '4px 10px' : '2px 6px';
+            var fontSize = isLarge ? '12px' : '10px';
+            var containerSize = isLarge ? '28px' : '22px';
+            
+            // All trend deltas share the original digit-based font sizing.
+            var deltaFont = fontSize;
+            if (deltaText) {
+                var dlen = String(Math.abs(diff)).length;
+                if (dlen >= 4) deltaFont = '8px';
+                else if (dlen === 3) deltaFont = '10px';
+                // 1-2 digits stay at default fontSize
+            }
+            
+            return '<div style="display:flex;align-items:center;gap:4px;' + bgStyle + 'padding:' + padding + ';border-radius:4px;">' +
+                '<span style="font-size:' + fontSize + ';">' + name + '</span>' +
+                '<span style="display:flex;align-items:center;justify-content:center;width:' + containerSize + ';height:' + containerSize + ';">' + trendIcon + '</span>' +
+                (deltaText ? '<span style="font-size:' + deltaFont + ';font-weight:bold;color:' + deltaColor + ';">' + deltaText + '</span>' : '') +
+                '</div>';
+        }
+
+        // Build trend header with optional short session label
+        var headerLabel = '📈 TREND';
+        var shortLabel = getShortLabel();
+        
+        // Row 1: Red, Green, Dark Purple, Light Purple
+        var html = '<div style="display:flex;justify-content:center;gap:6px;padding:4px 0;">';
+        html += buildTrendItem(getTierMarker('red'), counts['red'] || 0, comparisonCounts['red'] || 0, false, false);
+        html += buildTrendItem(getTierMarker('green'), counts['green'] || 0, comparisonCounts['green'] || 0, false, false);
+        html += buildTrendItem(getTierMarker('purple'), counts['purple'] || 0, comparisonCounts['purple'] || 0, false, false);
+        html += buildTrendItem(getTierMarker('pink'), counts['pink'] || 0, comparisonCounts['pink'] || 0, false, false);
+        html += '</div>';
+
+        // Row 2: Dark Blue, Light Blue, Grey, Woman + Trans overlay
+        html += '<div style="display:flex;justify-content:center;gap:6px;padding:4px 0;">';
+        html += buildTrendItem(getTierMarker('dark-blue'), counts['dark-blue'] || 0, comparisonCounts['dark-blue'] || 0, false, false);
+        html += buildTrendItem(getTierMarker('light-blue'), counts['light-blue'] || 0, comparisonCounts['light-blue'] || 0, false, false);
+        html += buildTrendItem(getTierMarker('gray'), counts['gray'] || 0, comparisonCounts['gray'] || 0, false, false);
+        html += buildTrendItem(getTierMarker('female-trans'), counts['female-trans'] || 0, comparisonCounts['female-trans'] || 0, false, false);
+        html += '</div>';
+
+        // Larger summary row: With Tokens, Registered, Anonymous
+        html += '<div style="display:flex;justify-content:center;gap:8px;padding:6px 0;">';
+        html += buildTrendItem('💎', withTokens || 0, comparisonCounts.withTokens || 0, true, true);
+        html += buildTrendItem('📊', total || 0, comparisonCounts.total || 0, false, true);
+        html += buildTrendItem('👻', anonymousCount || 0, comparisonCounts.anonymous || 0, false, true);
+        html += '</div>';
+
+        trendContainer.innerHTML = html;
+        
+        // Update header label if needed (we need to update the DOM outside this container)
+        if (trendHeaderLabel) {
+            trendHeaderLabel.textContent = headerLabel + shortLabel;
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // History and high-water tracking
+    // ---------------------------------------------------------------------------
+
+    function saveToHistory() {
+        var counts = { 'red': 0, 'green': 0, 'purple': 0, 'pink': 0, 'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0 };
+        users.forEach(function(data) {
+            if (counts[data.tier] !== undefined) counts[data.tier]++;
+            if (data.gender === 'female' || data.gender === 'trans') {
+                counts['female-trans']++;
+            }
+        });
+        var total = users.size;
+        var withTokens = counts['red'] + counts['green'] + counts['purple'] + counts['pink'] + counts['dark-blue'] + counts['light-blue'];
+        var anonymousCount = getAnonymousCount();
+        var now = Date.now();
+        Object.keys(counts).forEach(function(tier) {
+            var highResult = getHighValue(history[tier], counts[tier], now);
+            if (highResult.isNew && highResult.time) {
+                tierHighTimes[tier] = highResult.time;
+            }
+        });
+        var withTokensResult = getHighValue(history['withTokens'], withTokens, now);
+        if (withTokensResult.isNew && withTokensResult.time) {
+            withTokensHighTime = withTokensResult.time;
+        }
+        var totalResult = getHighValue(history['total'], total, now);
+        if (totalResult.isNew && totalResult.time) {
+            totalHighTime = totalResult.time;
+        }
+        var anonResult = getHighValue(history['anonymous'], anonymousCount, now);
+        if (anonResult.isNew && anonResult.time) {
+            anonHighTime = anonResult.time;
+        }
+        var ftResult = getHighValue(history['female-trans'], counts['female-trans'], now);
+        if (ftResult.isNew && ftResult.time) {
+            femaleTransHighTime = ftResult.time;
+        }
+        history.timestamps.push(now);
+        Object.keys(counts).forEach(function(tier) {
+            history[tier].push(counts[tier]);
+        });
+        history['withTokens'].push(withTokens);
+        history['total'].push(total);
+        history['anonymous'].push(anonymousCount);
+        if (history.timestamps.length > MAX_HISTORY_LENGTH) {
+            history.timestamps.shift();
+            Object.keys(counts).forEach(function(tier) { history[tier].shift(); });
+            history['withTokens'].shift();
+            history['total'].shift();
+            history['anonymous'].shift();
+        }
+        if (!isMinimized) {
+            drawAllSparklines();
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Sparklines
+    // ---------------------------------------------------------------------------
+
+    // Ivy's original renderer (3.0.7), shared by LIVE and Playback.
+    // Playback selects recorded observations; drawing keeps their original geometry.
+    function drawSparkline(canvasId, data, color, customHeight) {
+        var canvas = document.getElementById(canvasId);
+        if (!canvas) return;
+        var ctx = canvas.getContext('2d');
+        var scale = Math.max(1, currentScale || 1);
+        var displayWidth = 105;
+        var displayHeight = customHeight || 28;
+        canvas.width = Math.floor(displayWidth * scale);
+        canvas.height = Math.floor(displayHeight * scale);
+        canvas.style.width = displayWidth + 'px';
+        canvas.style.height = displayHeight + 'px';
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        if (data.length < 2) return;
+        ctx.scale(scale, scale);
+        var width = displayWidth;
+        var height = displayHeight;
+        var min = Math.min.apply(null, data);
+        var max = Math.max.apply(null, data);
+        var range = max - min || 1;
+        var padding = 2;
+        var drawHeight = height - (padding * 2);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        for (var i = 0; i < data.length; i++) {
+            var x = (i / (data.length - 1)) * width;
+            var y = height - padding - ((data[i] - min) / range) * drawHeight;
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+    }
+
+    function drawAllSparklines() {
+        if (presentationMode === 'PLAYBACK') return;
+        drawHistorySparklines(history);
+    }
+
+    function drawHistorySparklines(displayHistory) {
+        Object.keys(TIERS).forEach(function(tier) {
+            drawSparkline('spark-' + tier, displayHistory[tier], TIERS[tier].color);
+        });
+        drawSparkline('spark-withtokens', displayHistory['withTokens'], '#ff69b4');
+        drawSparkline('spark-total', displayHistory['total'], '#ffffff');
+        drawSparkline('spark-anon', displayHistory['anonymous'], '#888888', 50);
+    }
+
+    function getHighValue(data, currentValue, timestamp) {
+        var historyMax = data && data.length > 0 ? Math.max.apply(null, data) : 0;
+        var newHigh = Math.max(historyMax, currentValue || 0);
+        if (timestamp && newHigh > historyMax) {
+            return { value: newHigh, isNew: true, time: timestamp };
+        }
+        return { value: newHigh, isNew: false };
+    }
+
+    // ---------------------------------------------------------------------------
+    // Acquisition countdown
+    // ---------------------------------------------------------------------------
+
+    function resetCountdown() {
+        countdownSeconds = scanIntervalSeconds;
+        nextScanAt = Date.now() + scanIntervalSeconds * 1000;
+        updateCountdownDisplay();
+    }
+
+    function updateCountdownDisplay() {
+        if (isAutoRefreshOn && !isScanning && nextScanAt) {
+            countdownSeconds = Math.max(0, Math.ceil((nextScanAt - Date.now()) / 1000));
+        }
+        var fallbackWait = getDOMFallbackWaitSeconds(getModelName());
+        var timingTitle = 'Next API attempt after the countdown. ' + (fallbackWait > 0 ?
+            'DOM fallback eligible in ' + fallbackWait + 's if the API fails.' :
+            'DOM fallback eligible if the API fails.');
+        var statusEl = document.getElementById('auto-status');
+        var timerDisplay = document.getElementById('timer-display');
+        var expandedCountdown = document.getElementById('expanded-countdown');
+        var controlNextScan = document.getElementById('control-next-scan');
+        [statusEl, expandedCountdown, controlNextScan].forEach(function(el) {
+            if (el) el.title = isAutoRefreshOn ? timingTitle :
+                'Automatic scans paused. An in-flight scan may finish. ' + timingTitle;
+        });
+        if (timerDisplay) {
+            timerDisplay.textContent = scanIntervalSeconds + 's';
+        }
+        if (expandedCountdown) {
+            if (isScanning) {
+                expandedCountdown.textContent = 'scanning...';
+                expandedCountdown.style.color = '#ffd43b';
+            } else if (isAutoRefreshOn) {
+                expandedCountdown.textContent = 'next: ' + countdownSeconds + 's';
+                expandedCountdown.style.color = '#32CD32';
+            } else {
+                expandedCountdown.textContent = 'paused';
+                expandedCountdown.style.color = '#ff4444';
+            }
+        }
+        if (controlNextScan) {
+            if (isScanning) {
+                controlNextScan.textContent = 'Scanning...';
+                controlNextScan.style.color = '#ffd43b';
+            } else if (isAutoRefreshOn) {
+                controlNextScan.textContent = 'Next: ' + countdownSeconds + 's';
+                controlNextScan.style.color = '#32CD32';
+            } else {
+                controlNextScan.textContent = 'Paused';
+                controlNextScan.style.color = '#ff4444';
+            }
+        }
+        if (!statusEl) return;
+        if (isScanning) {
+            statusEl.textContent = 'Scanning...';
+            statusEl.style.color = '#ffd43b';
+        } else if (isAutoRefreshOn) {
+            statusEl.textContent = 'Next: ' + countdownSeconds + 's';
+            statusEl.style.color = '#32CD32';
+        } else {
+            statusEl.textContent = 'Auto: OFF';
+            statusEl.style.color = '#ff4444';
+        }
+    }
+
+    function adjustTimer(delta) {
+        var newValue = scanIntervalSeconds + delta;
+        if (newValue < 30) scanIntervalSeconds = 30;
+        else if (newValue > 300) scanIntervalSeconds = 300;
+        else scanIntervalSeconds = newValue;
+        if (isAutoRefreshOn) {
+            stopCountdown();
+            resetCountdown();
+            startCountdown();
+        } else {
+            resetCountdown();
+            var timerDisplay = document.getElementById('timer-display');
+            if (timerDisplay) {
+                timerDisplay.textContent = scanIntervalSeconds + 's';
+            }
+        }
+        updateCountdownDisplay();
+    }
+
+    function startCountdown() {
+        if (countdownInterval) {
+            clearInterval(countdownInterval);
+            countdownInterval = null;
+        }
+        if (!nextScanAt) resetCountdown();
+        updateCountdownDisplay();
+        countdownInterval = setInterval(function() {
+            if (!isAutoRefreshOn || isScanning) return;
+            updateCountdownDisplay();
+            if (countdownSeconds <= 0) {
+                performScanThenReturn(true);
+            }
+        }, 1000);
+    }
+
+    function stopCountdown() {
+        if (countdownInterval) {
+            clearInterval(countdownInterval);
+            countdownInterval = null;
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Panel geometry and listener lifecycle
+    // ---------------------------------------------------------------------------
+
+    function cleanupDragListeners() {
+        for (var i = 0; i < dragListeners.length; i++) {
+            var listener = dragListeners[i];
+            document.removeEventListener(listener.type, listener.fn, listener.options);
+        }
+        dragListeners = [];
+    }
+
+    function addDragListener(type, fn, options) {
+        document.addEventListener(type, fn, options);
+        dragListeners.push({ type: type, fn: fn, options: options });
+    }
+
+    function applyScale(scale) {
+        currentScale = scale;
+        var container = document.getElementById('tracker-container');
+        if (!container) return;
+        container.style.transform = 'scale(' + scale + ')';
+        container.style.transformOrigin = 'top left';
+        container.dataset.scale = scale;
+    }
+
+    function setupResizable() {
+        var container = document.getElementById('tracker-container');
+        if (!container) return;
+        var resizeHandle = document.createElement('div');
+        resizeHandle.id = 'resize-handle';
+        resizeHandle.style.cssText =
+            'position:absolute;top:0;left:0;width:16px;height:16px;' +
+            'background:linear-gradient(135deg, #ff69b4 50%, transparent 50%);' +
+            'cursor:nw-resize;z-index:999999;border-top-left-radius:6px;' +
+            'opacity:0.8;transition:opacity 0.2s;';
+        resizeHandle.addEventListener('mouseenter', function() {
+            this.style.opacity = '1';
+        });
+        resizeHandle.addEventListener('mouseleave', function() {
+            this.style.opacity = '0.8';
+        });
+        container.appendChild(resizeHandle);
+        var startResize = function(e) {
+            if (isDragging) return;
+            isResizing = true;
+            resizeStartX = e.clientX;
+            resizeStartY = e.clientY;
+            var rect = container.getBoundingClientRect();
+            resizeStartWidth = rect.width;
+            resizeStartHeight = rect.height;
+            e.preventDefault();
+            e.stopPropagation();
+        };
+        var doResize = function(e) {
+            if (!isResizing) return;
+            var deltaX = resizeStartX - e.clientX;
+            var deltaY = resizeStartY - e.clientY;
+            var newWidth = resizeStartWidth + deltaX;
+            var baseWidth = isMinimized ? BASE_WIDTH_MINI : BASE_WIDTH_FULL;
+            var newScale = Math.max(0.5, Math.min(3.0, newWidth / baseWidth));
+            applyScale(newScale);
+        };
+        var stopResize = function() {
+            if (!isResizing) return;
+            isResizing = false;
+        };
+        resizeHandle.addEventListener('mousedown', startResize);
+        document.addEventListener('mousemove', doResize);
+        document.addEventListener('mouseup', stopResize);
+        window._trackerResizeCleanup = function() {
+            resizeHandle.removeEventListener('mousedown', startResize);
+            document.removeEventListener('mousemove', doResize);
+            document.removeEventListener('mouseup', stopResize);
+        };
+    }
+
+    function setupResizeHandler() {
+        if (windowResizeHandler) {
+            window.removeEventListener('resize', windowResizeHandler);
+            windowResizeHandler = null;
+        }
+        var resizeTimeout;
+        windowResizeHandler = function() {
+            clearTimeout(resizeTimeout);
+            resizeTimeout = setTimeout(function() {
+                var container = document.getElementById('tracker-container');
+                if (!container) return;
+                var rect = container.getBoundingClientRect();
+                var viewportWidth = window.innerWidth;
+                var viewportHeight = window.innerHeight;
+                var currentLeft = parseInt(container.style.left) || rect.left;
+                var currentTop = parseInt(container.style.top) || rect.top;
+                var maxX = viewportWidth - rect.width;
+                var maxY = viewportHeight - rect.height;
+                var newLeft = Math.max(0, Math.min(currentLeft, maxX));
+                var newTop = Math.max(0, Math.min(currentTop, maxY));
+                if (newLeft !== currentLeft || newTop !== currentTop) {
+                    container.style.left = newLeft + 'px';
+                    container.style.top = newTop + 'px';
+                    container.style.right = 'auto';
+                }
+            }, 100);
+        };
+        window.addEventListener('resize', windowResizeHandler);
+    }
+
+    // ---------------------------------------------------------------------------
+    // UI construction and controls
+    // ---------------------------------------------------------------------------
+
+    function createPanel() {
+        leavePlayback(false);
+        cleanupDragListeners();
+        if (windowResizeHandler) {
+            window.removeEventListener('resize', windowResizeHandler);
+            windowResizeHandler = null;
+        }
+        if (window._trackerResizeCleanup) {
+            window._trackerResizeCleanup();
+            window._trackerResizeCleanup = null;
+        }
+        var existing = document.getElementById('cb-tier-tracker');
+        if (existing) existing.remove();
+
+        var div = document.createElement('div');
+        div.id = 'cb-tier-tracker';
+
+        var html =
+            '<div id="tracker-container" style="' +
+                'position:fixed;top:80px;right:20px;background:rgba(20,20,30,0.95);color:white;padding:5px;' +
+                'border-radius:6px;font-family:Arial,sans-serif;font-size:9px;z-index:999999;width:' + BASE_WIDTH_MINI + 'px;' +
+                'border:1px solid #ff69b4;transition:width 0.3s ease;cursor:default;user-select:none;' +
+            '">' +
+                '<div id="drag-handle" style="' +
+                    'display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;' +
+                    'border-bottom:1px solid #ff69b4;padding-bottom:3px;cursor:move;' +
+                '">' +
+                    '<span id="header-text" style="font-weight:bold;color:#ff69b4;font-size:10px;">USERS: 0 (H:0)</span>' +
+                    '<button id="btn-toggle" style="background:#333;border:1px solid #555;color:#fff;border-radius:3px;cursor:pointer;font-size:9px;padding:1px 4px;flex-shrink:0;">+</button>' +
+                '</div>' +
+
+                '<div id="minimized-view" style="display:block;text-align:center;">' +
+                    '<div style="font-size:9px;margin-bottom:3px;">' +
+                        '<div>💎 <span id="mini-withtokens" style="color:#ff69b4;font-weight:bold;">0</span>' +
+                        '(<span id="mini-withtokens-pct" style="color:#ff69b4;">0%</span>)</div>' +
+                        '<div style="margin-top:2px;">📊 <span id="mini-total" style="color:#fff;font-weight:bold;">0</span>' +
+                        '(<span id="mini-total-pct" style="color:#fff;">0%</span>)</div>' +
+                    '</div>' +
+
+                    '<div style="display:flex;align-items:center;justify-content:center;gap:3px;margin:3px 0;padding:2px;background:rgba(255,255,255,0.05);border-radius:3px;">' +
+                        '<button id="btn-timer-down" style="background:#444;border:none;color:#fff;border-radius:2px;cursor:pointer;font-size:9px;padding:1px 4px;font-weight:bold;">−</button>' +
+                        '<span id="timer-display" style="font-size:11px;color:#ffd43b;font-weight:bold;min-width:28px;">60s</span>' +
+                        '<button id="btn-timer-up" style="background:#444;border:none;color:#fff;border-radius:2px;cursor:pointer;font-size:9px;padding:1px 4px;font-weight:bold;">+</button>' +
+                    '</div>' +
+
+                    '<div style="display:flex;gap:2px;justify-content:center;flex-wrap:wrap;">' +
+                        '<button id="btn-expand" style="background:#444;border:none;color:white;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 5px;">Expand</button>' +
+                        '<button id="btn-auto" style="background:#32CD32;border:none;color:white;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 4px;" title="Auto-Refresh ON">⏸</button>' +
+                    '</div>' +
+
+                    '<div style="display:flex;gap:2px;justify-content:center;margin-top:3px;">' +
+                        '<button class="timer-preset" data-time="30" style="background:#333;border:1px solid #555;color:#aaa;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">30s</button>' +
+                        '<button class="timer-preset" data-time="60" style="background:#ff69b4;border:1px solid #ff69b4;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">60s</button>' +
+                        '<button class="timer-preset" data-time="120" style="background:#333;border:1px solid #555;color:#aaa;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">2m</button>' +
+                        '<button class="timer-preset" data-time="300" style="background:#333;border:1px solid #555;color:#aaa;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">5m</button>' +
+                    '</div>' +
+
+                    '<div id="auto-status" style="margin-top:2px;font-size:7px;color:#32CD32;">Starting...</div>' +
+                '</div>' +
+
+                '<div id="full-view" style="display:none;">';
+
+        Object.keys(TIERS).forEach(function(key) {
+            var t = TIERS[key];
+            html +=
+                '<div style="display:flex;align-items:center;padding:1px 3px;margin:1px 0;background:rgba(255,255,255,0.05);border-radius:3px;border-left:3px solid ' + t.color + ';">' +
+                    '<div style="width:30px;flex-shrink:0;text-align:center;">' +
+                        '<span style="font-size:14px;">' + getTierMarker(key) + '</span>' +
+                    '</div>' +
+                    '<canvas id="spark-' + key + '" width="105" height="28" style="flex:1;margin:0 4px;"></canvas>' +
+                    '<div style="text-align:right;width:48px;flex-shrink:0;">' +
+                        '<span id="count-' + key + '" style="font-weight:bold;color:' + t.color + ';font-size:14px;">0</span>' +
+                        '<div id="high-' + key + '" style="font-size:8px;color:#32CD32;margin-top:1px;">H:0</div>' +
+                    '</div>' +
+                '</div>';
+        });
+
+        html +=
+                '<div style="border-top:1px solid #555;margin-top:4px;padding-top:4px;">' +
+                    '<div style="display:flex;align-items:center;padding:2px 3px;background:rgba(255,105,180,0.15);border-radius:3px;border:1px solid #ff69b4;margin-bottom:3px;">' +
+                        '<div style="width:30px;flex-shrink:0;text-align:center;">' +
+                            '<span style="font-size:14px;">💎</span>' +
+                        '</div>' +
+                        '<canvas id="spark-withtokens" width="105" height="28" style="flex:1;margin:0 4px;"></canvas>' +
+                        '<div style="text-align:right;width:48px;flex-shrink:0;">' +
+                            '<span id="count-withtokens" style="font-weight:bold;color:#ff69b4;font-size:14px;">0</span>' +
+                            '<span id="pct-withtokens" style="font-size:8px;color:#ff69b4;margin-left:2px;">0%</span>' +
+                            '<div id="high-withtokens" style="font-size:8px;color:#32CD32;margin-top:1px;">H:0</div>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div style="display:flex;align-items:center;padding:2px 3px;background:rgba(255,255,255,0.1);border-radius:3px;">' +
+                        '<div style="width:30px;flex-shrink:0;text-align:center;">' +
+                            '<span style="font-size:14px;">📊</span>' +
+                        '</div>' +
+                        '<canvas id="spark-total" width="105" height="28" style="flex:1;margin:0 4px;"></canvas>' +
+                        '<div style="text-align:right;width:48px;flex-shrink:0;">' +
+                            '<span id="count-total" style="font-weight:bold;color:#fff;font-size:14px;">0</span>' +
+                            '<div id="high-total" style="font-size:8px;color:#32CD32;margin-top:1px;">H:0</div>' +
+                        '</div>' +
+                    '</div>' +
+                '</div>' +
+
+                '<div id="anon-rate-full" style="margin-top:5px;padding:5px;background:rgba(136,136,136,0.15);border-radius:3px;border:1px solid #888;">' +
+                    '<div style="display:flex;align-items:center;">' +
+                        '<div style="width:30px;flex-shrink:0;text-align:center;">' +
+                            '<span style="font-size:14px;">👻</span>' +
+                        '</div>' +
+                        '<canvas id="spark-anon" width="105" height="50" style="flex:1;margin:0 4px;"></canvas>' +
+                        '<div style="text-align:right;width:48px;flex-shrink:0;">' +
+                            '<span id="anon-ratio-full" style="font-size:13px;font-weight:bold;color:#ff69b4;">--</span>' +
+                            '<div id="high-anon" style="font-size:8px;color:#32CD32;margin-top:1px;">H:0</div>' +
+                        '</div>' +
+                    '</div>' +
+                '</div>' +
+
+                // Trend section with preset buttons, AUTO toggle, and dynamic header label
+                '<div id="trend-section" style="position:relative;border-top:1px solid #4169E1;margin-top:5px;padding-top:5px;">' +
+                    '<div id="live-trend">' +
+                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;flex-wrap:wrap;gap:2px;">' +
+                        '<span id="trend-header-label" style="font-size:9px;font-weight:bold;color:#4169E1;">📈 TREND</span>' +
+                        '<div style="display:flex;gap:2px;flex-wrap:wrap;">' +
+                            '<button class="trend-preset-btn" data-mode="last" style="background:#4169E1;border:1px solid #4169E1;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Last</button>' +
+                            '<button class="trend-preset-btn" data-mode="5min" style="background:#333;border:1px solid #555;color:#aaa;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">5m</button>' +
+                            '<button class="trend-preset-btn" data-mode="15min" style="background:#333;border:1px solid #555;color:#aaa;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">15m</button>' +
+                            '<button class="trend-preset-btn" data-mode="30min" style="background:#333;border:1px solid #555;color:#aaa;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">30m</button>' +
+                            '<button class="trend-preset-btn" data-mode="1hour" style="background:#333;border:1px solid #555;color:#aaa;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">1h</button>' +
+                            '<button class="trend-preset-btn" data-mode="start" style="background:#333;border:1px solid #555;color:#aaa;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Start</button>' +
+                            '<button id="btn-trend-auto" style="background:#32CD32;border:1px solid #32CD32;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;" title="Auto-escalation ON - Click to disable">AUTO</button>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div id="trend-container" style="min-height:30px;">' +
+                        '<div style="font-size:8px;color:#666;text-align:center;padding:8px;">Waiting for scan...</div>' +
+                    '</div>' +
+                    '</div>' +
+                    '<div id="playback-controls" style="display:none;position:absolute;top:5px;left:0;right:0;bottom:0;padding:0 2px;box-sizing:border-box;grid-template-rows:minmax(14px,1fr) 14px 12px;gap:2px;" aria-label="Playback controls">' +
+                        '<div style="display:flex;align-items:center;justify-content:space-between;gap:3px;">' +
+                            '<strong style="font-size:9px;color:#ffd43b;">PLAYBACK</strong>' +
+                            '<button id="playback-play" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#4169E1;color:white;border:1px solid #555;border-radius:2px;cursor:pointer;">Pause</button>' +
+                            '<select id="playback-speed" aria-label="Playback speed" style="font-size:8px;height:15px;margin:0;padding:0;background:#333;color:white;border:1px solid #555;"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select>' +
+                            '<button id="playback-return" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#333;color:white;border:1px solid #555;border-radius:2px;cursor:pointer;">Return to Live</button>' +
+                        '</div>' +
+                        '<input id="playback-scrubber" type="range" min="0" max="0" value="0" step="1" aria-label="Playback timeline" style="width:100%;height:12px;margin:0;accent-color:#ffd43b;cursor:pointer;">' +
+                        '<div id="playback-position" style="font-size:9px;line-height:12px;text-align:center;color:#ddd;font-family:monospace;">00:00:00 / 00:00:00</div>' +
+                    '</div>' +
+                '</div>' +
+
+                // Control field with timer on left, buttons centered
+                '<div id="control-field" style="margin-top:5px;padding:4px;background:rgba(65,105,225,0.15);border-radius:3px;border:1px solid #4169E1;">' +
+                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">' +
+                        '<span style="font-size:9px;font-weight:bold;color:#4169E1;">🎛️ CONTROLS</span>' +
+                        '<button id="btn-replay" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:#333;color:#ffd43b;border:1px solid #555;border-radius:2px;cursor:pointer;" title="Replay recorded history">Replay</button>' +
+                        '<span style="font-size:11px;color:#32CD32;font-weight:bold;" id="control-next-scan">Next: 60s</span>' +
+                    '</div>' +
+                    '<div style="display:flex;justify-content:center;align-items:center;position:relative;">' +
+                        '<span style="font-size:12px;color:#ffd43b;font-family:monospace;font-weight:bold;position:absolute;left:0;" id="control-tracking-timer">00:00:00</span>' +
+                        '<div style="display:flex;gap:3px;">' +
+                            '<button id="btn-download-report" style="background:#4169E1;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 6px;display:flex;align-items:center;gap:2px;" title="Download tracking report">' +
+                                '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
+                                    '<line x1="12" y1="4" x2="12" y2="16"/>' +
+                                    '<polyline points="6 10 12 16 18 10"/>' +
+                                    '<line x1="4" y1="20" x2="20" y2="20"/>' +
+                                '</svg>' +
+                                'Report' +
+                            '</button>' +
+                            '<button id="btn-control-auto" style="background:#32CD32;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 6px;min-width:24px;" title="Auto-Refresh ON">⏸</button>' +
+                            '<button id="btn-main-reset" style="background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 6px;display:flex;align-items:center;gap:2px;" title="Reset all tracking data">' +
+                                '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
+                                    '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12"/>' +
+                                    '<path d="M3 3v9h9"/>' +
+                                '</svg>' +
+                                'Reset' +
+                            '</button>' +
+                        '</div>' +
+                    '</div>' +
+                '</div>' +
+
+                '<div id="acquisition-status" style="margin-top:2px;font-size:7px;color:#aaa;" title="No accepted sample yet">No sample</div>' +
+
+                '<div style="position:absolute;bottom:4px;right:6px;display:flex;align-items:center;gap:3px;opacity:0.6;transition:opacity 0.2s;" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0.6">' +
+                    '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#ff69b4" stroke-width="2" style="flex-shrink:0;">' +
+                        '<circle cx="12" cy="12" r="10"/>' +
+                        '<line x1="12" y1="2" x2="12" y2="22"/>' +
+                        '<line x1="2" y1="12" x2="22" y2="12"/>' +
+                    '</svg>' +
+                    '<span title="TierScope ' + TIERSCOPE_VERSION + '" style="font-size:7px;font-family:\'Courier New\',monospace;font-weight:bold;color:#ff69b4;letter-spacing:1px;">TIERSCOPE</span>' +
+                '</div>' +
+            '</div>';
+
+        div.innerHTML = html;
+        document.body.appendChild(div);
+
+        var btnDownload = document.getElementById('btn-download-report');
+        var btnMainReset = document.getElementById('btn-main-reset');
+        var btnControlAuto = document.getElementById('btn-control-auto');
+
+        if (btnDownload) btnDownload.addEventListener('click', downloadTrackingReport);
+        if (btnMainReset) btnMainReset.addEventListener('click', resetAllTracking);
+        if (btnControlAuto) btnControlAuto.addEventListener('click', toggleAutoRefresh);
+
+        bindPlaybackControls();
+        updateReplayAvailability();
+        setupDraggable();
+        setupResizable();
+        setupResizeHandler();
+
+        var btnToggle = document.getElementById('btn-toggle');
+        var btnExpand = document.getElementById('btn-expand');
+        var btnAuto = document.getElementById('btn-auto');
+        var btnTimerDown = document.getElementById('btn-timer-down');
+        var btnTimerUp = document.getElementById('btn-timer-up');
+
+        if (btnToggle) btnToggle.onclick = toggleView;
+        if (btnExpand) btnExpand.onclick = toggleView;
+        if (btnAuto) btnAuto.onclick = toggleAutoRefresh;
+        if (btnTimerDown) btnTimerDown.onclick = function() { adjustTimer(-10); };
+        if (btnTimerUp) btnTimerUp.onclick = function() { adjustTimer(10); };
+
+        var presetBtns = document.querySelectorAll('.timer-preset');
+        for (var i = 0; i < presetBtns.length; i++) {
+            presetBtns[i].onclick = function() {
+                var time = parseInt(this.dataset.time);
+                scanIntervalSeconds = time;
+                if (isAutoRefreshOn) {
+                    stopCountdown();
+                    resetCountdown();
+                    startCountdown();
+                } else {
+                    resetCountdown();
+                }
+                updateCountdownDisplay();
+                var allPresets = document.querySelectorAll('.timer-preset');
+                for (var j = 0; j < allPresets.length; j++) {
+                    allPresets[j].style.background = '#333';
+                    allPresets[j].style.color = '#aaa';
+                    allPresets[j].style.borderColor = '#555';
+                }
+                this.style.background = '#ff69b4';
+                this.style.color = '#fff';
+                this.style.borderColor = '#ff69b4';
+            };
+        }
+        
+        // Setup trend preset buttons - disable auto-escalation on manual click
+        var trendPresetBtns = document.querySelectorAll('.trend-preset-btn');
+        for (var k = 0; k < trendPresetBtns.length; k++) {
+            trendPresetBtns[k].onclick = function() {
+                autoTrendEscalation = false; // User manually selected - disable auto-escalation
+                updateAutoTrendButton(); // Update the AUTO button to show disabled state
+                var mode = this.dataset.mode;
+                setTrendComparisonMode(mode);
+            };
+        }
+        
+        // Setup AUTO trend escalation toggle button
+        var btnTrendAuto = document.getElementById('btn-trend-auto');
+        if (btnTrendAuto) {
+            btnTrendAuto.onclick = toggleAutoTrendEscalation;
+        }
+        
+        updateTrendPresetButtons();
+        updateAutoTrendButton(); // Set initial state
+    }
+
+    // ---------------------------------------------------------------------------
+    // Pause/resume and view controls
+    // ---------------------------------------------------------------------------
+
+    function toggleAutoRefresh() {
+        isAutoRefreshOn = !isAutoRefreshOn;
+        var btn = document.getElementById('btn-auto');
+        var btnControl = document.getElementById('btn-control-auto');
+        if (isAutoRefreshOn) {
+            if (btn) {
+                btn.style.background = '#32CD32';
+                btn.innerHTML = '⏸';
+                btn.title = 'Auto-Refresh ON - Click to pause';
+            }
+            if (btnControl) {
+                btnControl.style.background = '#32CD32';
+                btnControl.innerHTML = '⏸';
+                btnControl.title = 'Auto-Refresh ON - Click to pause';
+            }
+            startTrackingTimer();
+            startCountdown();
+            performScanThenReturn(true);
+        } else {
+            if (btn) {
+                btn.style.background = '#ff4444';
+                btn.innerHTML = '▶';
+                btn.title = 'Auto-Refresh OFF - Click to start';
+            }
+            if (btnControl) {
+                btnControl.style.background = '#ff4444';
+                btnControl.innerHTML = '▶';
+                btnControl.title = 'Auto-Refresh OFF - Click to start';
+            }
+            stopCountdown();
+            pauseTrackingTimer();
+            updateCountdownDisplay();
+        }
+    }
+
+    function setupDraggable() {
+        var container = document.getElementById('tracker-container');
+        var dragHandle = document.getElementById('drag-handle');
+        if (!container || !dragHandle) return;
+        var startDrag = function(e) {
+            if (isResizing) return;
+            isDragging = true;
+            var rect = container.getBoundingClientRect();
+            var scale = currentScale || 1;
+            dragOffsetX = (e.clientX - rect.left) / scale;
+            dragOffsetY = (e.clientY - rect.top) / scale;
+            if (container.style.right !== 'auto') {
+                container.style.left = rect.left + 'px';
+                container.style.right = 'auto';
+            }
+            addDragListener('mousemove', doDrag, false);
+            addDragListener('mouseup', stopDrag, false);
+            e.preventDefault();
+        };
+        var doDrag = function(e) {
+            if (!isDragging) return;
+            var scale = currentScale || 1;
+            var newX = e.clientX - (dragOffsetX * scale);
+            var newY = e.clientY - (dragOffsetY * scale);
+            var maxX = window.innerWidth - (container.offsetWidth * scale);
+            var maxY = window.innerHeight - (container.offsetHeight * scale);
+            newX = Math.max(0, Math.min(newX, maxX));
+            newY = Math.max(0, Math.min(newY, maxY));
+            container.style.left = newX + 'px';
+            container.style.top = newY + 'px';
+        };
+        var stopDrag = function() {
+            isDragging = false;
+            cleanupDragListeners();
+        };
+        dragHandle.addEventListener('mousedown', startDrag, false);
+    }
+
+    function toggleView() {
+        if (presentationMode === 'PLAYBACK') return;
+        isMinimized = !isMinimized;
+        var fullView = document.getElementById('full-view');
+        var miniView = document.getElementById('minimized-view');
+        var toggleBtn = document.getElementById('btn-toggle');
+        var container = document.getElementById('tracker-container');
+        var headerText = document.getElementById('header-text');
+        var resizeHandle = document.getElementById('resize-handle');
+        var anonymousCount = getAnonymousCount();
+        if (isMinimized) {
+            if (fullView) fullView.style.display = 'none';
+            if (miniView) miniView.style.display = 'block';
+            if (toggleBtn) toggleBtn.textContent = '+';
+            if (container) container.style.width = BASE_WIDTH_MINI + 'px';
+            if (resizeHandle) resizeHandle.style.display = 'none';
+            if (isResizing) isResizing = false;
+            var currentTotal = roomTotal > 0 ? roomTotal : (users.size + anonymousCount);
+            if (headerText) headerText.textContent = currentTotal.toLocaleString() + ' (H:' + roomTotalHigh.toLocaleString() + ')';
+        } else {
+            if (fullView) fullView.style.display = 'block';
+            if (miniView) miniView.style.display = 'none';
+            if (toggleBtn) toggleBtn.textContent = '−';
+            if (container) container.style.width = BASE_WIDTH_FULL + 'px';
+            if (resizeHandle) resizeHandle.style.display = 'block';
+            var currentTotal = roomTotal > 0 ? roomTotal : (users.size + anonymousCount);
+            if (headerText) headerText.textContent = 'USERS: ' + currentTotal.toLocaleString() + ' (H:' + roomTotalHigh.toLocaleString() + ')';
+            setTimeout(function() {
+                drawAllSparklines();
+            }, 100);
+        }
+        updateDisplay();
+    }
+
+    // ---------------------------------------------------------------------------
+    // DOM snapshot construction
+    // ---------------------------------------------------------------------------
+
+    function scanUsers() {
+        var userListTab = document.querySelector(DOM_SELECTORS.userListTab);
+        if (!userListTab) throw new Error('UserListTab not found');
+        var snapshotUsers = new Map();
+        var snapshotRoomTotal = getRoomTotal();
+        if (!snapshotRoomTotal) throw new Error('DOM room total missing or zero');
+        var userElements = [];
+        for (var i = 0; i < DOM_SELECTORS.usernameElements.length; i++) {
+            var found = userListTab.querySelectorAll(DOM_SELECTORS.usernameElements[i]);
+            for (var j = 0; j < found.length; j++) {
+                userElements.push(found[j]);
+            }
+        }
+        for (var i = 0; i < userElements.length; i++) {
+            var el = userElements[i];
+            var rawText = (el.textContent || '').trim() || (el.getAttribute('data-username') || '').trim();
+            var username = extractUsername(rawText);
+            if (username && !snapshotUsers.has(username)) {
+                var tier = getTierFromElement(el);
+                var gender = getGenderFromElement(el);
+                // Compact API fields and owner metadata are unavailable in the DOM.
+                snapshotUsers.set(username, { username: username, rawClass: null, tier: tier,
+                    genderCode: null, gender: gender, rawFlag: null, isOwner: null });
+            }
+        }
+        if (!snapshotUsers.size) throw new Error('DOM sample contains no readable users');
+        return { source: 'DOM', timestamp: Date.now(), roomTotal: snapshotRoomTotal,
+            users: Array.from(snapshotUsers.values()) };
+    }
+
+    // ---------------------------------------------------------------------------
+    // Current-sample UI rendering
+    // ---------------------------------------------------------------------------
+
+    function updateDisplay() {
+        updateReplayAvailability();
+        var counts = { 'red': 0, 'green': 0, 'purple': 0, 'pink': 0, 'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0 };
+        users.forEach(function(data) {
+            if (counts[data.tier] !== undefined) counts[data.tier]++;
+            if (data.gender === 'female' || data.gender === 'trans') {
+                counts['female-trans']++;
+            }
+        });
+        var total = users.size;
+        var withTokens = counts['red'] + counts['green'] + counts['purple'] + counts['pink'] + counts['dark-blue'] + counts['light-blue'];
+        var anonymousCount = getAnonymousCount();
+        var fullRoomTotal = roomTotal > total ? roomTotal : (total + anonymousCount);
+        if (fullRoomTotal > roomTotalHigh) {
+            roomTotalHigh = fullRoomTotal;
+            roomTotalHighTime = Date.now();
+        }
+        // Keep the original live high-water accounting even when its paint is hidden.
+        if (presentationMode === 'PLAYBACK') return;
+        renderDisplayFrame({ counts: counts, total: total, withTokens: withTokens,
+            anonymousCount: anonymousCount, fullRoomTotal: fullRoomTotal, roomTotalHigh: roomTotalHigh,
+            history: history, uniqueCount: null, isPlayback: false });
+    }
+
+    // Paint explicit values only. Historical frames never replace acquisition globals.
+    function renderDisplayFrame(frame) {
+        var counts = frame.counts;
+        var total = frame.total;
+        var withTokens = frame.withTokens;
+        var anonymousCount = frame.anonymousCount;
+        var fullRoomTotal = frame.fullRoomTotal;
+        var roomTotalHigh = frame.roomTotalHigh;
+        var displayHistory = frame.history;
+        var withTokensPct = total > 0 ? Math.round((withTokens / total) * 100) + '%' : '0%';
+        var registeredPct = fullRoomTotal > 0 ? Math.round((total / fullRoomTotal) * 100) + '%' : '0%';
+        var headerText = document.getElementById('header-text');
+        if (headerText) {
+            if (isMinimized) {
+                headerText.textContent = (frame.isPlayback ? 'PLAYBACK: ' : '') + fullRoomTotal.toLocaleString() + ' (H:' + roomTotalHigh.toLocaleString() + ')';
+            } else {
+                headerText.textContent = (frame.isPlayback ? 'PLAYBACK: ' : 'USERS: ') + fullRoomTotal.toLocaleString() + ' (H:' + roomTotalHigh.toLocaleString() + ')';
+            }
+        }
+        var miniWithTokens = document.getElementById('mini-withtokens');
+        var miniWithTokensPct = document.getElementById('mini-withtokens-pct');
+        var miniTotal = document.getElementById('mini-total');
+        var miniTotalPct = document.getElementById('mini-total-pct');
+        if (miniWithTokens) miniWithTokens.textContent = withTokens;
+        if (miniWithTokensPct) miniWithTokensPct.textContent = withTokensPct;
+        if (miniTotal) miniTotal.textContent = total;
+        if (miniTotalPct) miniTotalPct.textContent = registeredPct;
+        if (!isMinimized) {
+            Object.keys(TIERS).forEach(function(tier) {
+                var countEl = document.getElementById('count-' + tier);
+                var highEl = document.getElementById('high-' + tier);
+                var currentVal = counts[tier];
+                var highResult = getHighValue(displayHistory[tier], currentVal);
+                var highVal = highResult.value;
+                if (countEl) countEl.textContent = currentVal;
+                if (highEl) highEl.textContent = 'H:' + highVal.toLocaleString();
+            });
+            var withTokensCountEl = document.getElementById('count-withtokens');
+            var withTokensPctEl = document.getElementById('pct-withtokens');
+            var withTokensHighEl = document.getElementById('high-withtokens');
+            var totalEl = document.getElementById('count-total');
+            var totalHighEl = document.getElementById('high-total');
+            var withTokensResult = getHighValue(displayHistory['withTokens'], withTokens);
+            var totalResult = getHighValue(displayHistory['total'], total);
+            var anonResult = getHighValue(displayHistory['anonymous'], anonymousCount);
+            if (withTokensCountEl) withTokensCountEl.textContent = withTokens;
+            if (withTokensPctEl) withTokensPctEl.textContent = withTokensPct;
+            if (withTokensHighEl) withTokensHighEl.textContent = 'H:' + withTokensResult.value.toLocaleString();
+            if (totalEl) totalEl.textContent = total;
+            if (totalHighEl) totalHighEl.textContent = 'H:' + totalResult.value.toLocaleString();
+            
+            // Scale anon number font size based on digit count
+            var fullAnonText = document.getElementById('anon-ratio-full');
+            var anonHighEl = document.getElementById('high-anon');
+            if (fullAnonText) {
+                var anonLabel = anonymousCount > 0 ? anonymousCount.toLocaleString() : '0';
+                var digits = String(Math.abs(anonymousCount)).length;
+                fullAnonText.textContent = anonLabel;
+                fullAnonText.style.fontSize = digits >= 6 ? '9px' : digits === 5 ? '11px' : '13px';
+            }
+            if (anonHighEl) anonHighEl.textContent = 'H:' + anonResult.value.toLocaleString();
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Navigation, initialization and page lifecycle
+    // ---------------------------------------------------------------------------
+
+    function scheduleInit(delay) {
+        var generation = initGuard;
+        var url = location.href;
+        setTimeout(function() {
+            // Navigation/startup timers may outlive the room that scheduled them.
+            if (generation === initGuard && url === location.href) init();
+        }, delay);
+    }
+
+    function init() {
+        leavePlayback(false);
+        var myGeneration = ++initGuard;
+        // Initialization supersedes any older Reset/Resume acquisition latch.
+        isScanning = false;
+        log('Initializing... (generation ' + myGeneration + ')');
+        if (healthCheckInterval) {
+            clearInterval(healthCheckInterval);
+            healthCheckInterval = null;
+        }
+        // Pausing acquisition must not freeze the age of the last accepted sample.
+        if (freshnessInterval) clearInterval(freshnessInterval);
+        freshnessInterval = setInterval(function() {
+            updateAcquisitionStatus();
+            updateCountdownDisplay();
+        }, 1000);
+        var isRoom = isBroadcastRoom();
+        var modelName = getModelName();
+        var loaded = false;
+        if (isRoom && modelName !== 'unknown') {
+            loaded = loadSession(modelName);
+        }
+        if (!loaded) {
+            isMinimized = !isRoom;
+            isAutoRefreshOn = isRoom;
+        } else {
+            isMinimized = false;
+            isAutoRefreshOn = !isPaused;
+        }
+        try {
+            createPanel();
+        } catch (e) {
+            log('Error creating panel: ' + e);
+            return;
+        }
+        var resizeHandle = document.getElementById('resize-handle');
+        if (resizeHandle) {
+            resizeHandle.style.display = isMinimized ? 'none' : 'block';
+        }
+        if (!isMinimized) {
+            var fullView = document.getElementById('full-view');
+            var miniView = document.getElementById('minimized-view');
+            var toggleBtn = document.getElementById('btn-toggle');
+            var container = document.getElementById('tracker-container');
+            if (fullView) fullView.style.display = 'block';
+            if (miniView) miniView.style.display = 'none';
+            if (toggleBtn) toggleBtn.textContent = '−';
+            if (container) container.style.width = BASE_WIDTH_FULL + 'px';
+            drawAllSparklines();
+            updateDisplay();
+        }
+        var attempts = 0;
+        var maxAttempts = 30;
+        var checkInterval = setInterval(function() {
+            if (myGeneration !== initGuard) {
+                clearInterval(checkInterval);
+                log('Init ' + myGeneration + ' superseded by newer generation');
+                return;
+            }
+            attempts++;
+            if ((isRoom && modelName !== 'unknown') || document.querySelector(DOM_SELECTORS.userListTab) || attempts >= maxAttempts) {
+                clearInterval(checkInterval);
+                if (!isRoom && attempts >= maxAttempts && !document.querySelector(DOM_SELECTORS.userListTab)) {
+                    log('UserListTab not found after 30s, giving up');
+                    var statusEl = document.getElementById('auto-status');
+                    if (statusEl) {
+                        statusEl.textContent = 'No chat detected';
+                        statusEl.style.color = '#ff4444';
+                    }
+                    return;
+                }
+                if (!isPaused) {
+                    performScanThenReturn(true);
+                }
+                setTimeout(function() {
+                    if (myGeneration !== initGuard) return;
+                    if (isAutoRefreshOn && !isPaused) {
+                        startTrackingTimer();
+                        startCountdown();
+                    } else {
+                        var btnAuto = document.getElementById('btn-auto');
+                        var btnControlAuto = document.getElementById('btn-control-auto');
+                        if (btnAuto) {
+                            btnAuto.style.background = '#ff4444';
+                            btnAuto.innerHTML = '▶';
+                            btnAuto.title = 'Auto-Refresh OFF - Click to start';
+                        }
+                        if (btnControlAuto) {
+                            btnControlAuto.style.background = '#ff4444';
+                            btnControlAuto.innerHTML = '▶';
+                            btnControlAuto.title = 'Auto-Refresh OFF - Click to start';
+                        }
+                        var statusEl = document.getElementById('auto-status');
+                        if (statusEl) {
+                            statusEl.textContent = isPaused ? 'Paused (restored)' : 'Paused';
+                            statusEl.style.color = '#ff4444';
+                        }
+                        updateTrackingTimer();
+                    }
+                }, 2002);
+            }
+        }, 1000);
+        healthCheckInterval = setInterval(function() {
+            if (myGeneration === initGuard && lastAcquisitionAttemptSource === 'DOM' && !isScanning) {
+                validateDOMHealth();
+            }
+        }, 30000);
+    }
+
+    var lastUrl = location.href;
+    function checkUrlChange() {
+        if (location.href !== lastUrl) {
+            leavePlayback(false);
+            var oldModel = getModelNameFromUrl(lastUrl);
+            lastUrl = location.href;
+            if (oldModel && oldModel !== 'unknown') {
+                saveSession(oldModel);
+            }
+            activeSessionStorageKey = null;
+            stopCountdown();
+            nextScanAt = 0;
+            countdownSeconds = scanIntervalSeconds;
+            stopTrackingTimer();
+            cleanupDragListeners();
+            isScanning = false;
+            if (healthCheckInterval) {
+                clearInterval(healthCheckInterval);
+                healthCheckInterval = null;
+            }
+            currentScale = 1.0;
+            users.clear();
+            roomTotal = 0;
+            lastAcceptedAcquisition = null;
+            lastAcquisitionAttemptSource = 'API';
+            domHealthStatus.consecutiveFailures = 0;
+            updateAcquisitionStatus();
+            previousUserCount = 0;
+            previousRoomTotal = 0;
+            Object.keys(history).forEach(function(k) { history[k] = []; });
+            previousCounts = {
+                'red': 0, 'green': 0, 'purple': 0, 'pink': 0,
+                'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0,
+                'withTokens': 0, 'total': 0, 'anonymous': 0
+            };
+            hasTrendBaseline = false;
+            trendComparisonMode = 'last';
+            autoTrendEscalation = true; // Reset on URL change
+            roomTotalHigh = 0;
+            sessionUniqueUsers = {};
+            roomTotalHighTime = null;
+            tierHighTimes = {};
+            withTokensHighTime = null;
+            totalHighTime = null;
+            anonHighTime = null;
+            femaleTransHighTime = null;
+            femaleTransUsernames = [];
+            sessionFemaleTransUsers = {};
+            initGuard++;
+            scheduleInit(2002);
+        }
+    }
+    urlCheckInterval = setInterval(checkUrlChange, 500);
+
+    window.addEventListener('beforeunload', function() {
+        leavePlayback(false);
+        var modelName = getModelName();
+        if (modelName && modelName !== 'unknown') {
+            saveSession(modelName);
+        }
+    });
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function() {
+            scheduleInit(2000);
+        });
+    } else {
+        scheduleInit(2000);
+    }
+    log('Script loaded and waiting for init');
+
+    return {
+        downloadTrackingReport: downloadTrackingReport,
+        resetAllTracking: resetAllTracking,
+        getHealth: function() { return domHealthStatus; },
+        // Pure parser available for offline comparisons without live-state writes.
+        parseGetChatUserListResponse: parseGetChatUserListResponse
+    };
+})();
+
+if (typeof unsafeWindow !== 'undefined') {
+    unsafeWindow.ViewerTracker = ViewerTracker;
+} else {
+    window.ViewerTracker = ViewerTracker;
+}
