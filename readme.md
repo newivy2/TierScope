@@ -10,7 +10,7 @@ A Tampermonkey userscript that tracks viewer tiers on a Chaturbate broadcast, sh
 * **Tier tracking**: Counts the color order Chaturbate shows: red, green, dark purple, light purple, dark blue, light blue, grey, plus anonymous.
 * **Trend display**: After the first scan, each tier gets an arrow. Green is up, red is down, a yellow dot is unchanged. The number next to the arrow is the change since the selected point. Comparison can be Last, 5m, 15m, 30m, 1h, or Start. Auto-escalation moves that window as the session grows, and it stops at 1h.
 * **Sparklines and highs**: Every tier, the colored-user total, the registered total, and anonymous viewers keep a sparkline and a session high.
-* **Female / trans overlay**: ♀⚧ is counted on top of the color tiers. It is not its own color. The report gives the female and trans totals only. It does not list usernames.
+* **Female / trans overlay**: ♀⚧ is counted on top of the color tiers. It is not its own color.
 * **Replay**: Plays the history already saved for this room. Counts, highs, and sparklines follow the replay cursor. Live scanning keeps running and is not written into the replay you started.
 * **Session report**: Downloads a text file with highs and when they were hit, the current breakdown, and the last acquisition source.
 * **Reload proof**: Tracking is saved per model for 3 hours. A refresh, a move to another page, or a closed tab does not erase it. Reset starts a new session.
