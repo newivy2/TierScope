@@ -176,4 +176,4 @@ These follow the classes Chaturbate shows in the Users tab:
 
 MIT. See [LICENSE](https://github.com/newivy2/TierScope/blob/main/LICENSE).
 
-**Disclaimer**: For personal use while you watch a room. Not affiliated with Chaturbate.
+**Disclaimer**: For personal use while you broadcast or watch a room. Not affiliated with Chaturbate.
