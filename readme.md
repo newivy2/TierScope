@@ -7,7 +7,7 @@ A Tampermonkey userscript that tracks viewer tiers on a Chaturbate broadcast and
 
 * **API-first acquisition**: Uses Chaturbate's `/api/getchatuserlist/` endpoint as the primary data source. The default interval is 60 seconds after the previous sample finishes.
 * **Tier tracking**: Counts the color order Chaturbate shows: red, green, dark purple, light purple, dark blue, light blue, grey, plus anonymous.
-* **Trend display**: After the first scan, each tier gets an arrow. Green is up, red is down, a yellow dot is unchanged. The number next to the arrow is the change since the selected point. Comparison can be Last, 5m, 15m, 30m, 1h, or Start. Auto-escalation moves that window as the session grows, and it stops at 1h.
+* **Trend display**: After the first scan, each tier gets a color. Green is up, red is down, yellow is unchanged. The number inside each tier is the change since the selected point. Comparison can be Last, 5m, 15m, 30m, 1h, or Start. Auto-escalation moves that window as the session grows, and it stops at 1h.
 * **Sparklines and highs**: Every tier, the colored-user total, the registered total, and anonymous viewers keep a sparkline and a session high.
 * **Session-high highlight**: A row turns light green while its count is above zero and equal to the session high. A dip clears it. Returning to that same high turns it green again.
 * **Female / trans overlay**: ♀⚧ is counted on top of the color tiers. It is not its own color.
@@ -158,7 +158,8 @@ These follow the classes Chaturbate shows in the Users tab:
 
 | Version | Status | Notes |
 | --- | --- | --- |
-| **3.1.1.2** | **Current** | Session-high highlights now also show in the replay mode |
+| **3.1.1.3** | **Current** | Trend Display visual update - Arrows are gone. Each tier lights up green, red or yellow |
+| 3.1.1.2 | Legacy| Session-high highlights now also show in the replay mode |
 | 3.1.1.1 | Legacy | Session-high highlight. A row is light green while its count is above zero and at the session high, including a return to that high after a dip |
 | 3.1.1.0 | Legacy | Replay added. Replay copies the saved history and does not stop live scanning. Unique-viewer count removed from the header and the report |
 | 3.1.0 | Legacy | API-first acquisition with DOM fallback. Storage schema v1. Acquisition status line. |
