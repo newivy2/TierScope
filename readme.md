@@ -80,7 +80,7 @@ The line at the bottom of the panel shows the last accepted sample: `API` or `DO
 
 ## Architecture
 
-Normal acquisition uses the same-origin `/api/getchatuserlist/` API. A valid sample does not open the Users tab.
+Normal acquisition uses the same-origin `/api/getchatuserlist/` API.
 
 1. **Primary**: The response is the anonymous count, then one record per named user (`username|class|gender|flag`). Anonymous plus named records is the room total.
 2. **Validation**: A bad record rejects the whole sample. Rejected samples do not add a history point, and the last good counts stay on screen.
