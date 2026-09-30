@@ -1,6 +1,6 @@
 # TierScope
 
-A Tampermonkey userscript that tracks viewer tiers on a Chaturbate broadcast and shows how each tier is moving.
+A Tampermonkey userscript that tracks viewer tiers on a Chaturbate broadcast and shows how each tier is moving. ** update 3.1.2 added sep/30th **
 ---
 
 ![TierScope panel](Tracking%20example%205.jpg)
