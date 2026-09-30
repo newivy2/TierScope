@@ -15,6 +15,7 @@ A Tampermonkey userscript that tracks viewer tiers on a Chaturbate broadcast and
 * **Session-high highlight**: A row turns light green while its count is above zero and equal to the session high. A dip clears it. Returning to that same high turns it green again.
 * **Female / trans overlay**: ♀⚧ is counted on top of the color tiers. It is not its own color.
 * **Replay**: Plays the history already saved for this room. Counts, highs, and sparklines follow the replay cursor. Live scanning keeps running and is not written into the replay you started.
+* **GIF download**: inside Replay mode, click GIF to generate and export a GIF.
 * **Session report**: Downloads a text file with highs and when they were hit, the current breakdown, and the last acquisition source.
 * **Reload proof**: Tracking is saved per model for 3 hours. A refresh, a move to another page, or a closed tab does not erase it. Reset starts a new session.
 * **Panel**: Draggable, resizable, and collapsible to a small view.
@@ -161,7 +162,7 @@ These follow the classes Chaturbate shows in the Users tab:
 
 | Version | Status | Notes |
 | --- | --- | --- |
-| **3.1.2** | **Current** | Transparency slider added and GIF generation and download function implemented into the Replay mode |
+| **3.1.2** | **Current** | Transparency slider added. GIF generation and download function implemented into the Replay mode |
 | 3.1.1.3 | Legacy | Trend Display visual update - Arrows are gone. Each tier lights up green, red or yellow |
 | 3.1.1.2 | Legacy| Session-high highlights now also show in the replay mode |
 | 3.1.1.1 | Legacy | Session-high highlight. A row is light green while its count is above zero and at the session high, including a return to that high after a dip |
