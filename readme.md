@@ -12,7 +12,7 @@ A Tampermonkey userscript that tracks viewer tiers in a Chaturbate room and show
 
 - **Background opacity control:** a lamp icon and slider added to the footer.
 - **GIF export:** the GIF button lives in the Replay toolbar.
-- **640 × 400 animated summaries:** colored history lines, counts, elapsed time, and charts.
+- **640 × 400 animated summaries:** history lines, counts and elapsed time.
 - **Compact encoding:** up to 60 frames over a 10-second loop, using a fixed palette and crisp bitmap text. Export draws directly from recorded history and uses `omggif`; 
 
 ## Features
