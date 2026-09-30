@@ -126,11 +126,11 @@ See Chaturbate’s [username-color documentation](https://support.chaturbate.com
 | --- | --- |
 | Header / GIF **Total** | Registered plus Anonymous. |
 | 💎 / **With Tokens** | The six non-grey color tiers added together, including moderators and fan club members. This is a classification-based count, not a balance check. |
-| 📊 / **Registered** | Named user records returned in the sample. API records can include the broadcaster and unclassified users. |
-| 👻 / **Anonymous** | The API’s anonymous count; estimated from room total minus named users during DOM fallback. |
-| ♀⚧ / **Female/Trans** | An overlapping gender classification, not an eighth exclusive color tier. Do not add it to the seven tiers. |
+| 📊 / **Registered** | Named user records returned in the sample. |
+| 👻 / **Anonymous** | The API’s anonymous count. |
+| ♀⚧ / **Female/Trans** | An overlapping gender classification, not an eighth exclusive color tier. |
 
-Owner records are excluded from the seven API color tiers, but remain in Registered. The displayed female/trans count can include a matching-gender owner; the report’s unique female/trans viewer totals exclude the room owner.
+Owner records are excluded from the seven color tiers, but remain in Registered. The displayed female/trans count can include a matching-gender owner; the report’s unique female/trans viewer totals exclude the room owner.
 
 ## Reports and saved sessions
 
