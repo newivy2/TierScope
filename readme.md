@@ -179,6 +179,9 @@ These follow the classes Chaturbate shows in the Users tab:
 ## Thanks to
 
 - **Andrew Weed** — for the API acquisition and Replay mode.
+- **checksnmale** - testing and feedback
+
+---
 
 ## License
 
