@@ -153,7 +153,6 @@ Corrupt or unsupported newer-schema records are preserved and protected from aut
 
 The script does not upload reports, GIFs, or tracking history to a TierScope server. It makes room-data requests to Chaturbate; the userscript manager loads the encoder from jsDelivr. Saved session data includes observed usernames used for session bookkeeping.
 
-There is **no verified broadcaster-left AND broadcast-offline auto-pause feature** in this release. Repeated DOM-health failures can separately pause acquisition after fallback problems; that is not proof a broadcast ended.
 
 ## Troubleshooting
 
