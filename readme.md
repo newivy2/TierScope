@@ -1,10 +1,10 @@
 # TierScope
 
-A Tampermonkey userscript that tracks viewer tiers in a Chaturbate room, shows how the audience changes, and turns recorded history into a shareable GIF.
+A Tampermonkey userscript that tracks viewer tiers in a Chaturbate room and shows how the audience changes over time.
 
 **Current release: 3.1.2 — September 30, 2026**
 
-[Install TierScope](https://raw.githubusercontent.com/newivy2/TierScope/main/tierscope.user.js) · [Source](https://github.com/newivy2/TierScope/blob/main/tierscope.user.js) · [Report an issue](https://github.com/newivy2/TierScope/issues)
+· [Report an issue](https://github.com/newivy2/TierScope/issues)
 
 ![TierScope panel](Tracking%20example%205.jpg)
 
