@@ -1,195 +1,225 @@
 # TierScope
 
-A Tampermonkey userscript that tracks viewer tiers on a Chaturbate broadcast and shows how each tier is moving. ** update 3.1.2 added sep/30th **
----
+A Tampermonkey userscript that tracks viewer tiers in a Chaturbate room, shows how the audience changes, and turns recorded history into a shareable GIF.
+
+**Current release: 3.1.2 — September 30, 2026**
+
+[Install TierScope](https://raw.githubusercontent.com/newivy2/TierScope/main/tierscope.user.js) · [Source](https://github.com/newivy2/TierScope/blob/main/tierscope.user.js) · [Report an issue](https://github.com/newivy2/TierScope/issues)
 
 ![TierScope panel](Tracking%20example%205.jpg)
----
+
+## What’s new in 3.1.2
+
+- **Background opacity control:** a lamp icon and slider added to the footer.
+- **GIF export:** the GIF button lives in the Replay toolbar.
+- **640 × 400 animated summaries:** colored history lines, counts, elapsed time, and charts.
+- **Compact encoding:** up to 60 frames over a 10-second loop, using a fixed palette and crisp bitmap text. Export draws directly from recorded history and uses `omggif`; 
 
 ## Features
 
+- Seven viewer color tiers, anonymous counts, and an additional female/trans overlay.
+- Sparklines, high values, and green highlights when a positive count reaches or returns to its recorded high.
+- Trend comparisons against Last, 5m, 15m, 30m, 1h, or Start, with optional automatic window changes.
+- Replay of a frozen history snapshot while live acquisition continues independently.
+- Animated GIF downloads from Replay and text reports from live Controls.
+- Per-room session storage with validation and a three-hour restore window.
+- A draggable, resizable panel with expanded and compact views.
 
-* **Tier tracking**: Counts the color order Chaturbate shows: red, green, dark purple, light purple, dark blue, light blue, grey, plus anonymous.
-* **Trend display**: After the second scan, each tier gets a color. Green is up, red is down, yellow is unchanged. The number inside each tier is the change since the selected point. Comparison can be Last, 5m, 15m, 30m, 1h, or Start. Auto-escalation moves that window as the session grows, and it stops at 1h.
-* **Sparklines and highs**: Every tier, the colored-user total, the registered total, and anonymous viewers keep a sparkline and a session high.
-* **Session-high highlight**: A row turns light green while its count is above zero and equal to the session high. A dip clears it. Returning to that same high turns it green again.
-* **Female / trans overlay**: ♀⚧ is counted on top of the color tiers. It is not its own color.
-* **Replay**: Plays the history already saved for this room. Counts, highs, and sparklines follow the replay cursor. Live scanning keeps running and is not written into the replay you started.
-* **GIF download**: inside Replay mode, click GIF to generate and export a GIF.
-* **Session report**: Downloads a text file with highs and when they were hit, the current breakdown, and the last acquisition source.
-* **Reload proof**: Tracking is saved per model for 3 hours. A refresh, a move to another page, or a closed tab does not erase it. Reset starts a new session.
-* **Panel**: Draggable, resizable, and collapsible to a small view.
+## Installation and updates
 
----
+1. Install [Tampermonkey](https://www.tampermonkey.net/) for your browser.
+2. On Chrome-based browsers, enable Tampermonkey’s **Allow User Scripts** setting where available, or **Developer mode** as described in its [userscript permission instructions](https://www.tampermonkey.net/faq.php?q=Q209).
+3. Open [tierscope.user.js](https://raw.githubusercontent.com/newivy2/TierScope/main/tierscope.user.js) and accept the Tampermonkey installation prompt. Alternatively, open the [GitHub source file](https://github.com/newivy2/TierScope/blob/main/tierscope.user.js) and select **Raw**.
+4. Refresh a Chaturbate broadcast room. TierScope appears near the upper-right corner and begins acquiring samples.
 
-## Installation
+When updating, install the complete userscript, including its metadata header. The header loads the pinned GIF encoder dependency:
 
-### Step 1: Install Tampermonkey
+```javascript
+// @require      https://cdn.jsdelivr.net/npm/omggif@1.0.10/omggif.js
+```
 
-**Chrome / Edge / Brave:**
+Keep only one enabled copy of TierScope. After an update, refresh existing room tabs.
 
-1. Go to [Tampermonkey on the Chrome Web Store](https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo)
-2. Click **Add to Chrome**
-3. Click **Add extension**
+## Live controls
 
-**Firefox:**
+| Control | Action |
+| --- | --- |
+| Header / drag area | Move the panel. |
+| Pink upper-left resize handle | Scale the panel. |
+| **−**, **+**, or **Expand** | Switch between expanded and compact views. |
+| **⏸ / ▶** in Controls or compact view | Pause or resume automatic acquisition and the tracking timer. An already-running scan may finish. |
+| Compact-view timer controls | Adjust the interval from 30 to 300 seconds; presets are 30s, 60s, 2m, and 5m. |
+| **Report** | Download a text report of the current session. |
+| **Replay** | Open recorded history for the current room. |
+| **Reset** | Confirm removal of the current room’s stored tracking session, clear its history and counters, and request a fresh scan. |
 
-1. Go to [Tampermonkey on Firefox Add-ons](https://addons.mozilla.org/en-US/firefox/addon/tampermonkey)
-2. Click **Add to Firefox**
-3. Click **Add**
+The default scan interval is **60 seconds**, counted after a scan finishes. Faster polling does not guarantee fresher data from the site.
 
-**Safari:**
+The footer shows the source and age of the most recently accepted sample, for example `API • 12s`. This is the sample’s age, not the time remaining until the next scan.
 
-1. Install [Tampermonkey from the Mac App Store](https://apps.apple.com/us/app/tampermonkey/id1482490089)
-2. Enable it in Safari Settings, then Extensions
+### Trends and highlights
 
-### Step 2: Allow user scripts (Chrome / Edge / Brave only)
+The trend display uses green for increases, red for decreases, and yellow for unchanged counts. It shows the numeric change when nonzero.
 
-Required on Chrome 138+ and current Edge / Brave. Firefox and Safari can skip this.
+Choose **Last**, **5m**, **15m**, **30m**, **1h**, or **Start**. A manual selection turns automatic escalation off. **AUTO** toggles escalation through Last → 5m → 15m → 30m → 1h as tracking time grows. If a requested window extends before available history, the earliest retained sample is used.
 
-1. Open `chrome://extensions`
-2. Open **Details** on Tampermonkey
-3. Turn **Allow user scripts** on
-4. Refresh any open Chaturbate tab
+A row’s green high-value highlight is separate from its trend indicator: it appears whenever a positive count equals the highest value in its retained history, including a return to that value after a dip.
 
-If that toggle is missing, turn **Developer mode** on at the top of the extensions page instead.
+### Background opacity
 
-### Step 3: Install TierScope
+The lamp slider ranges from **30% to 100%**, starting at **95%**. Moving left makes the main panel fill and normal tier-row fills more transparent.
 
-1. Open [tierscope.user.js](https://github.com/newivy2/TierScope/blob/main/tierscope.user.js)
-2. Click **Raw**
-3. Tampermonkey opens an install page
-4. Click **Install**
+It preserves green high-value highlights, borders, text, charts, buttons, and the summary-row and Controls fills. It does not apply opacity to the whole panel. The setting is retained during navigation in the current page session, but is not saved across a full reload.
 
-### Step 4: Check it
+## Replay
 
-Open a broadcast room. The panel sits at the top right. A room total in the header means it is running.
+1. Let TierScope acquire at least one sample.
+2. Click **Replay** in Controls. The header changes to `PLAYBACK`.
+3. Use **Play / Pause**, the timeline slider, and **0.5× / 1× / 2×** to inspect the recording.
+4. Click **Return to Live** to restore the live view.
 
----
+At 1×, recorded time is compressed by 60×, with playback capped at 30 seconds. The speed selector adjusts that playback duration. The displayed timeline represents recorded elapsed time.
 
-## Usage
+Counts, highs, green highlights, and sparklines follow the selected sample. A single saved sample can be inspected, but has no time span to play. Minimize is disabled during Replay.
 
-The default scan is **60 seconds**. Chaturbate does not always refresh the user list faster than that.
+Replay freezes the available history when opened. New scans continue updating the live session, but do not enter the open Replay. Return to Live and reopen Replay to include them. Replay Pause does not pause live scans; pause acquisition in live Controls first if needed.
 
-* **Pause / play**: The button in the mini view and the one in Controls do the same thing. Pausing stops the timer and the scans. The session stays saved.
-* **Timer**: The mini view has − / + and presets (30s, 60s, 2m, 5m).
-* **Expand**: The full panel shows one row per tier, then the colored total (💎), registered total (📊), and anonymous count (👻).
-* **Session high**: A light green row means that count is at its high for this session, and the count is above zero. 
-* **Trend**: Displays the change since the selected comparison point (Last, 5m, 15m, 30m, 1h, Start). Clicking a preset turns auto-escalation off. AUTO turns it back on.
-* **Replay**: In Controls, **Replay** plays the history saved for this room. The header switches to `PLAYBACK`. Pause, the scrubber, and 0.5× / 1× / 2× control only the replay. Recorded time runs at 60×, and a long session is capped at 30 seconds. One saved scan has no span to play, so Play stays off and that point is shown. Samples that arrive while you are watching are kept for the live session, not added to this replay. **Return to Live** paints the current session again. Minimize is locked until you return.
-* **Report**: Downloads the session as a text file. Highs, the current breakdown, and the ♀⚧ totals are included.
-* **Reset**: Clears history, trends, the timer, and the female / trans totals, then starts a new scan. Replay stops if it was running.
+## Download a GIF
 
-The line at the bottom of the panel shows the last accepted sample: `API` or `DOM`, and how many seconds ago it was accepted.
+Open **Replay**, then click **GIF**. Progress and **Cancel** appear within the existing Replay controls.
 
----
+| Property | Output |
+| --- | --- |
+| Format | Animated `.gif`, looping indefinitely |
+| Dimensions | **640 × 400** |
+| Duration | **10 seconds per loop** |
+| Frames | Up to **60**; one recorded sample produces a single-frame GIF |
+| Tier rows | Seven color tiers plus the female/trans overlay |
+| Summary rows | Total, With Tokens, Registered, Anonymous |
+| Content | Historical lines, counts, and recorded elapsed time |
+| Rendering | Fixed palette, bitmap lettering, two-pixel chart strokes |
+| Encoder | `omggif` 1.0.10, loaded by the userscript manager |
 
-## Architecture
+Export uses the **entire frozen Replay range**, regardless of cursor position or playback speed. With more than 60 samples, it selects moments across the recorded time range and includes the first and last samples. Each chart shows history only through its selected sample and scales independently to its visible minimum and maximum.
 
-Normal acquisition uses the same-origin `/api/getchatuserlist/` API.
+The GIF has a fixed dark background; the panel’s opacity slider does not affect it. Generation happens locally and does not require watching or recording ten seconds of playback. File size and generation time depend on the history and device; there is no fixed file-size guarantee.
 
-1. **Primary**: The response is the anonymous count, then one record per named user (`username|class|gender|flag`). Anonymous plus named records is the room total.
-2. **Validation**: A bad record rejects the whole sample. Rejected samples do not add a history point, and the last good counts stay on screen.
-3. **Fallback**: If the API fails, times out (10 seconds), or returns nothing usable, the script falls back to reading the Users tab. Each room waits at least 60 seconds after a fallback before another one is attempted. API retries keep their own cadence.
-4. **Storage**: Session data is saved under `tierscope:v1:<room>` with schema version 1. Legacy 3.0 sessions load when they pass validation and gain the current metadata on the next successful save. Corrupt or newer-schema records are kept and are not overwritten until you Reset.
-5. **Replay**: Replay copies the history at the moment you click it. That copy is presentation only. It does not replace the live users, the saved session, or the scan timer.
+Leaving Replay, changing rooms, resetting tracking, or unloading the page cancels an active export.
 
-The broadcaster is not one of the seven color tiers. Registered can be higher than the sum of those colors for that reason.
+## Understanding the counts
 
----
+The seven color tiers follow the site’s username classifications:
 
-## Tiers
-
-These follow the classes Chaturbate shows in the Users tab:
-
-| Shown as | Meaning |
+| Color | Classification |
 | --- | --- |
 | Red | Moderator |
-| Green | Fan club |
-| Dark purple | Tipped 1000+ tokens in the past 2 weeks |
-| Light purple | Tipped 250+ |
-| Dark blue | Tipped 50+ |
-| Light blue | Has bought tokens |
-| Grey | Registered, none of the above |
-| 👻 Anonymous | In the room total, not in the named list |
-| 💎 | Everyone in a color tier. Grey is not included |
-| 📊 | Named users in the list, including the broadcaster |
-| ♀⚧ | Female and trans viewers, counted again on top of whatever color they already have |
+| Green | Fan club member |
+| Dark Purple | Tipped at least 1,000 tokens in the past two weeks |
+| Light Purple | Tipped at least 250 tokens in the past two weeks |
+| Dark Blue | Tipped at least 50 tokens in the past two weeks |
+| Light Blue | Owns or has purchased tokens |
+| Grey | No-token classification |
 
----
+See Chaturbate’s [username-color documentation](https://support.chaturbate.com/hc/en-us/articles/360048893011-Username-colors). Users can limit the color they display, so the observed classification is not a measurement of their balance or future spending.
+
+| Display | How TierScope calculates it |
+| --- | --- |
+| Header / GIF **Total** | Registered plus Anonymous. |
+| 💎 / **With Tokens** | The six non-grey color tiers added together, including moderators and fan club members. This is a classification-based count, not a balance check. |
+| 📊 / **Registered** | Named user records returned in the sample. API records can include the broadcaster and unclassified users. |
+| 👻 / **Anonymous** | The API’s anonymous count; estimated from room total minus named users during DOM fallback. |
+| ♀⚧ / **Female/Trans** | An overlapping gender classification, not an eighth exclusive color tier. Do not add it to the seven tiers. |
+
+Owner records are excluded from the seven API color tiers, but remain in Registered. The displayed female/trans count can include a matching-gender owner; the report’s unique female/trans viewer totals exclude the room owner.
+
+## Reports and saved sessions
+
+**Report** downloads a `.txt` file containing current counts, high values and their recorded times, tier breakdowns, unique female/trans viewer totals, acquisition details, and storage/version information. It is a summary, not a raw time-series export.
+
+Sessions are stored per room through Tampermonkey’s storage API. A compatible record is restored if its last save was no more than **three hours ago**. This is a restore window, not a three-hour limit on an active session.
+
+History is capped at **10,000 accepted samples**. Older points are discarded when that limit is reached. Replay and GIF export use the retained history. Tier/summary highs are derived from that history; the room-total high is also tracked separately.
+
+Corrupt or unsupported newer-schema records are preserved and protected from automatic overwrite. **Reset** explicitly clears the current room’s stored record. Deleting the script or its manager data can remove saved sessions.
+
+## Acquisition and dependencies
+
+- **Primary source:** same-origin `/api/getchatuserlist/`, with a 10-second timeout.
+- **Validation:** malformed or duplicate records reject the sample. Additional count-change checks can reject suspicious changes. Rejected samples add no history point.
+- **Fallback:** reads the Users tab if the API is unavailable or rejected, then attempts to return to Chat. Fallback attempts are spaced by at least 60 seconds, or the configured scan interval when longer.
+- **Freshness:** the last accepted data stays visible through failed attempts. The site’s Users tab and TierScope can refresh at different times.
+- **Storage format:** schema version 1 under `tierscope:v1:<room>`. Compatible legacy records are validated before restoration.
+- **GIF dependency:** [omggif](https://github.com/deanm/omggif), version 1.0.10, MIT licensed.
+
+The script does not upload reports, GIFs, or tracking history to a TierScope server. It makes room-data requests to Chaturbate; the userscript manager loads the encoder from jsDelivr. Saved session data includes observed usernames used for session bookkeeping.
+
+There is **no verified broadcaster-left AND broadcast-offline auto-pause feature** in this release. Repeated DOM-health failures can separately pause acquisition after fallback problems; that is not proof a broadcast ended.
 
 ## Troubleshooting
 
-**No panel**
+**No panel or no scans**
 
-* Refresh after installing
-* Confirm Tampermonkey is enabled and TierScope is turned on
-* You have to be in a broadcast room, not the homepage
-* On Chrome / Edge / Brave, confirm **Allow user scripts** is on
+Refresh the room, confirm TierScope and Tampermonkey are enabled, and check userscript permissions. Look for `[TierScope ...]` messages in the browser console. Automatic acquisition is intended for broadcast-room pages.
 
-**"Tampermonkey requires developer mode"**
+**Counts look frozen**
 
-* Open `chrome://extensions`
-* Turn **Developer mode** on
-* Refresh the room
+Check whether acquisition is paused and whether the last-sample age keeps increasing. The source may not have refreshed, or new samples may be failing validation. DOM fallback has its own cooldown. A failed scan does not mean zero viewers.
 
-**The status line stays on DOM, or scans say the fallback was skipped**
+**Replay is unavailable, or Play is disabled**
 
-* The API call failed or was invalid, and the room is still inside the 60-second fallback wait.
-* You need to be on `chaturbate.com`. The request is same-origin.
-* Counts stay on the last accepted sample until a new one is accepted.
+Replay needs a recorded sample for this room. Play needs a nonzero recorded time span. Check the `PLAYBACK` header if you expected current live counts.
 
-**Counts look frozen, or every arrow is a yellow dot**
+**No GIF button**
 
-* The list had not changed yet. Keep the timer at 60 seconds or slower.
-* The first scan has nothing to compare with. Arrows start on the second accepted sample.
-* Changing the trend preset before enough time has passed compares against the earliest sample the session actually has.
+Click **Replay** first. GIF export is deliberately absent from live Controls.
 
-**Replay does nothing, or Play is disabled**
+**“GIF encoder missing”**
 
-* Replay needs at least one saved sample for this room.
-* Play needs two samples with time between them. A single point is shown, not played.
-* Return to Live if the header still says `PLAYBACK` and you expected the live numbers.
+Reinstall the complete script with its `@require` header and refresh the room. Check whether the userscript manager can load the pinned jsDelivr dependency.
 
-**Report did not download**
+**A download does not appear**
 
-* Allow downloads for `chaturbate.com`
-* Turn off the popup blocker for that site
+Check the browser’s downloads list and any blocked-download notification. Allow the requested download for the room and retry.
 
----
+**Storage is “Protected / read-only”**
+
+The saved record failed validation or uses an unsupported schema. It has not been overwritten. Use Reset only if you want to discard that room’s saved record.
+
+### Known issues in the current 3.1.2 source
+
+- The installation header says `3.1.2`, but the internal version constant still says `3.1.1.10`; reports, logs, the logo tooltip, and saved producer metadata show the older value.
+- Reset while acquisition is paused clears the stored pause flag. After the reset is saved, reloading can resume automatic acquisition. Resume and pause again after Reset to save an explicit paused state.
+- Restoring a paused session restores history but not a current user snapshot. Live current counts can show zero until a fresh scan; use Replay to inspect the saved counts.
 
 ## Version history
 
-| Version | Status | Notes |
-| --- | --- | --- |
-| **3.1.2** | **Current** | Transparency slider added. GIF generation and download function implemented into the Replay mode |
-| 3.1.1.3 | Legacy | Trend Display visual update - Arrows are gone. Each tier lights up green, red or yellow |
-| 3.1.1.2 | Legacy| Session-high highlights now also show in the replay mode |
-| 3.1.1.1 | Legacy | Session-high highlight. A row is light green while its count is above zero and at the session high, including a return to that high after a dip |
-| 3.1.1.0 | Legacy | Replay added. Replay copies the saved history and does not stop live scanning. Unique-viewer count removed from the header and the report |
-| 3.1.0 | Legacy | API-first acquisition with DOM fallback. Storage schema v1. Acquisition status line. |
-| 3.0.7 | Legacy | Trend preset auto-escalation. |
-| 3.0.4 | Legacy | Trend presets: Last, 5m, 15m, 30m, 1h, Start. |
-| 3.0.0 | Legacy | Spike detector removed. Trend arrows compare each scan with the one before it. |
-| 2.9.9.3 | Legacy | Visual improvements. |
-| 2.9.9.2 | Legacy | Window resize bug fixed. |
-| 2.9.9.1 | Legacy | Persistent storage, control panel, reset, unique viewers. |
-| 2.9.8.2 | Legacy | Minor fix. |
-| 2.9.8.1 | Legacy | Anonymous canvas adjustment. |
-| 2.9.8.0 | Legacy | Broadcaster detection, tracking keys, CSS. |
-| 2.9.7.3 | Legacy | Base reference. |
+| Version | Notes |
+| --- | --- |
+| **3.1.2** | Background-only opacity slider and compact footer; Replay-only 640 × 400 GIF export with tier and totals line charts. |
+| 3.1.1.3 | Trend display uses green, red, and yellow backgrounds instead of arrows. |
+| 3.1.1.2 | High-value highlights also appear in Replay. |
+| 3.1.1.1 | Green row highlights at positive highs, including returns to a previous high. |
+| 3.1.1.0 | Replay with independent live acquisition; unique-viewer count removed from the header and report. |
+| 3.1.0 | API-first acquisition, DOM fallback, storage schema v1, and acquisition status. |
+| 3.0.7 | Trend comparison auto-escalation. |
+| 3.0.4 | Last, 5m, 15m, 30m, 1h, and Start comparisons. |
+| 3.0.0 | Spike detector removed; trends compare accepted samples. |
+| 2.9.9.3 | Visual improvements. |
+| 2.9.9.2 | Window resize fix. |
+| 2.9.9.1 | Persistent storage, Controls, Reset, and unique-viewer tracking. |
+| 2.9.8.2 | Minor fix. |
+| 2.9.8.1 | Anonymous canvas adjustment. |
+| 2.9.8.0 | Broadcaster detection, tracking keys, and CSS. |
+| 2.9.7.3 | Base reference. |
 
----
+## Thanks
 
-## Thanks to
-
-- **Andrew Weed** — for the API acquisition and Replay mode.
-- **checksnmale** - testing and feedback
-
----
+- **Andrew Weed** — API acquisition and Replay mode.
+- **checksnmale** — testing and feedback.
+- **Dean McNamee** — the omggif encoder.
 
 ## License
 
 MIT. See [LICENSE](https://github.com/newivy2/TierScope/blob/main/LICENSE).
 
-**Disclaimer**: For personal use while you broadcast or watch a room. Not affiliated with Chaturbate.
+For personal use while broadcasting or watching a room. Not affiliated with Chaturbate.
