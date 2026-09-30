@@ -161,7 +161,8 @@ These follow the classes Chaturbate shows in the Users tab:
 
 | Version | Status | Notes |
 | --- | --- | --- |
-| **3.1.1.3** | **Current** | Trend Display visual update - Arrows are gone. Each tier lights up green, red or yellow |
+| **3.1.2** | **Current** | Transparency slider added and GIF generation and download function implemented into the Replay mode |
+| 3.1.1.3 | Legacy | Trend Display visual update - Arrows are gone. Each tier lights up green, red or yellow |
 | 3.1.1.2 | Legacy| Session-high highlights now also show in the replay mode |
 | 3.1.1.1 | Legacy | Session-high highlight. A row is light green while its count is above zero and at the session high, including a return to that high after a dip |
 | 3.1.1.0 | Legacy | Replay added. Replay copies the saved history and does not stop live scanning. Unique-viewer count removed from the header and the report |
