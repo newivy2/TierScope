@@ -186,10 +186,8 @@ The saved record failed validation or uses an unsupported schema. It has not bee
 
 ### Known issues in the current 3.1.2 source
 
-- The installation header says `3.1.2`, but the internal version constant still says `3.1.1.10`; reports, logs, the logo tooltip, and saved producer metadata show the older value.
 - Reset while acquisition is paused clears the stored pause flag. After the reset is saved, reloading can resume automatic acquisition. Resume and pause again after Reset to save an explicit paused state.
-- Restoring a paused session restores history but not a current user snapshot. Live current counts can show zero until a fresh scan; use Replay to inspect the saved counts.
-
+- Restoring a paused session restores history but not a current user snapshot. Live current counts can show zero until a fresh scan.
 ## Version history
 
 | Version | Notes |
