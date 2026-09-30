@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.1.1.3
-// @description  TierScope - Viewer visualizer with trend tracking and reports
+// @version      3.1.1.10
+// @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
 // @match        https://*.chaturbate.com/*
@@ -10,13 +10,14 @@
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_deleteValue
+// @require      https://cdn.jsdelivr.net/npm/omggif@1.0.10/omggif.js
 // @run-at       document-end
 // ==/UserScript==
 
 const ViewerTracker = (function() {
     'use strict';
 
-    const TIERSCOPE_VERSION = '3.1.1.3';
+    const TIERSCOPE_VERSION = '3.1.1.10';
     const API_TIMEOUT_MS = 10000;
     const DEFAULT_API_INTERVAL_SECONDS = 60;
     const DOM_FALLBACK_INTERVAL_SECONDS = 60;
@@ -29,6 +30,9 @@ const ViewerTracker = (function() {
         'femaleTransHighTime', 'roomTotalHighTime', 'trackingStartTime'];
     var sessionStorageStatus = new Map();
     var activeSessionStorageKey = null;
+
+    // GIF Export State
+    var gifExportJob = null;
 
     const DOM_SELECTORS = {
         userListTab: '#UserListTab',
@@ -339,6 +343,7 @@ const ViewerTracker = (function() {
     }
 
     function leavePlayback(renderLive) {
+        cancelGifExport();
         if (typeof renderLive === 'undefined') renderLive = true;
         if (!playback && presentationMode === 'LIVE') return false;
         var canRenderLive = renderLive && isPlaybackCurrent(playback);
@@ -979,6 +984,7 @@ const ViewerTracker = (function() {
         }
         var modelName = getModelName();
         leavePlayback(false);
+        cancelGifExport();
         log('Performing main reset...');
         deleteSession(modelName);
         activeSessionStorageKey = getStorageKey(modelName);
@@ -1286,6 +1292,270 @@ const ViewerTracker = (function() {
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
+    }
+
+    // A small indexed-color renderer: each rectangle updates the canvas and its
+    // matching palette index buffer. Bitmap lettering needs no antialiasing,
+    // RGB matching, dithering or quantizer. Only one frame is retained at a time.
+    const GIF_WIDTH = 640;
+    const GIF_HEIGHT = 400;
+    const GIF_MAX_FRAMES = 60;
+    const GIF_DURATION_CS = 1000; // GIF delay units are hundredths of a second.
+    const GIF_FONT = {
+        ' ': [0,0,0,0,0,0,0],
+        A:[14,17,17,31,17,17,17], B:[30,17,17,30,17,17,30],
+        C:[14,17,16,16,16,17,14], D:[30,17,17,17,17,17,30],
+        E:[31,16,16,30,16,16,31], F:[31,16,16,30,16,16,16],
+        G:[14,17,16,23,17,17,15], H:[17,17,17,31,17,17,17],
+        I:[14,4,4,4,4,4,14], J:[7,2,2,2,18,18,12],
+        K:[17,18,20,24,20,18,17], L:[16,16,16,16,16,16,31],
+        M:[17,27,21,21,17,17,17], N:[17,25,21,19,17,17,17],
+        O:[14,17,17,17,17,17,14], P:[30,17,17,30,16,16,16],
+        Q:[14,17,17,17,21,18,13], R:[30,17,17,30,20,18,17],
+        S:[15,16,16,14,1,1,30], T:[31,4,4,4,4,4,4],
+        U:[17,17,17,17,17,17,14], V:[17,17,17,17,17,10,4],
+        W:[17,17,17,21,21,21,10], X:[17,17,10,4,10,17,17],
+        Y:[17,17,10,4,4,4,4], Z:[31,1,2,4,8,16,31],
+        '0':[14,17,19,21,25,17,14], '1':[4,12,4,4,4,4,14],
+        '2':[14,17,1,2,4,8,31], '3':[30,1,1,14,1,1,30],
+        '4':[2,6,10,18,31,2,2], '5':[31,16,16,30,1,1,30],
+        '6':[14,16,16,30,17,17,14], '7':[31,1,2,4,8,8,8],
+        '8':[14,17,17,14,17,17,14], '9':[14,17,17,15,1,1,14],
+        ':':[0,4,4,0,4,4,0], '/':[1,2,2,4,8,8,16],
+        '-':[0,0,0,31,0,0,0], '.':[0,0,0,0,0,6,6],
+        '+':[0,4,4,31,4,4,0], '?':[14,17,1,2,4,0,4]
+    };
+
+    function createGifSurface(palette) {
+        var canvas = document.createElement('canvas');
+        canvas.width = GIF_WIDTH; canvas.height = GIF_HEIGHT;
+        var ctx = canvas.getContext('2d', { alpha: false });
+        if (!ctx) throw new Error('Canvas is unavailable.');
+        var pixels = new Uint8Array(GIF_WIDTH * GIF_HEIGHT);
+        var colors = palette.map(function(color) { return '#' + color.toString(16).padStart(6, '0'); });
+        function rect(x, y, width, height, color) {
+            x = Math.round(x); y = Math.round(y);
+            width = Math.round(width); height = Math.round(height);
+            var left = Math.max(0, x), top = Math.max(0, y);
+            var right = Math.min(GIF_WIDTH, x + width), bottom = Math.min(GIF_HEIGHT, y + height);
+            if (right <= left || bottom <= top) return;
+            ctx.fillStyle = colors[color];
+            ctx.fillRect(left, top, right - left, bottom - top);
+            for (var row = top; row < bottom; row++) {
+                pixels.fill(color, row * GIF_WIDTH + left, row * GIF_WIDTH + right);
+            }
+        }
+        function text(value, x, y, color, scale, rightAlign) {
+            scale = scale || 1;
+            value = String(value).toUpperCase();
+            if (rightAlign) x -= (value.length * 6 - 1) * scale;
+            for (var i = 0; i < value.length; i++) {
+                var glyph = GIF_FONT[value[i]] || GIF_FONT['?'];
+                for (var row = 0; row < 7; row++) {
+                    for (var col = 0; col < 5; col++) {
+                        if (glyph[row] & (1 << (4 - col))) {
+                            rect(x + (i * 6 + col) * scale, y + row * scale, scale, scale, color);
+                        }
+                    }
+                }
+            }
+        }
+        return { canvas: canvas, pixels: pixels, rect: rect, text: text };
+    }
+
+    function gifCount(value) {
+        value = Math.max(0, Number(value) || 0);
+        var text = String(Math.round(value));
+        return text.length <= 10 ? text : value.toExponential(2);
+    }
+
+    function getGifSampleIndex(snapshot, frameIndex, frameCount) {
+        var last = snapshot.timeline.length - 1;
+        if (snapshot.timeline.length <= GIF_MAX_FRAMES) return frameIndex;
+        if (frameIndex === 0) return 0;
+        if (frameIndex === frameCount - 1) return last;
+        // At most 60 evenly spaced moments in the recorded time range. Keep
+        // the actual saved counts (no interpolation between acquisitions).
+        var position = snapshot.durationMs * frameIndex / (frameCount - 1);
+        var low = 0, high = snapshot.timeline.length;
+        while (low < high) {
+            var middle = Math.floor((low + high) / 2);
+            if (snapshot.timeline[middle] <= position) low = middle + 1;
+            else high = middle;
+        }
+        return Math.max(0, low - 1);
+    }
+
+    function drawGifSparkline(surface, values, lastIndex, color, top) {
+        // Match the panel: show only history through the selected sample, with
+        // each tier scaled to its own visible minimum/maximum and sample index.
+        var left = 212, width = 247, height = 17; // Two-pixel strokes fit a 248 × 18 chart.
+        var minimum = values[0], maximum = values[0];
+        for (var i = 1; i <= lastIndex; i++) {
+            minimum = Math.min(minimum, values[i]);
+            maximum = Math.max(maximum, values[i]);
+        }
+        var range = maximum - minimum || 1;
+        function y(value) { return top + height - 1 - Math.round((value - minimum) / range * (height - 1)); }
+        function line(x0, y0, x1, y1) {
+            // Integer rasterization keeps every pixel in the fixed GIF palette.
+            var dx = Math.abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+            var dy = -Math.abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+            var error = dx + dy;
+            while (true) {
+                surface.rect(x0, y0, 2, 2, color);
+                if (x0 === x1 && y0 === y1) break;
+                var twiceError = 2 * error;
+                if (twiceError >= dy) { error += dy; x0 += sx; }
+                if (twiceError <= dx) { error += dx; y0 += sy; }
+            }
+        }
+        if (lastIndex === 0) {
+            surface.rect(left, y(values[0]), 2, 2, color);
+            return;
+        }
+        // Bucket dense history into pixel columns, preserving first/last points
+        // and extremes. Even 10,000 samples need only 247 rendered columns.
+        var column = -1, firstY = 0, lastY = 0, lowY = 0, highY = 0;
+        var previousX = null, previousY = null;
+        function flush() {
+            if (column < 0) return;
+            var x = left + column;
+            if (previousX !== null) line(previousX, previousY, x, firstY);
+            surface.rect(x, lowY, 2, highY - lowY + 2, color);
+            previousX = x; previousY = lastY;
+        }
+        for (var sample = 0; sample <= lastIndex; sample++) {
+            var nextColumn = Math.round(sample / lastIndex * (width - 1));
+            var nextY = y(values[sample]);
+            if (nextColumn !== column) {
+                flush();
+                column = nextColumn;
+                firstY = lowY = highY = nextY;
+            }
+            lastY = nextY;
+            lowY = Math.min(lowY, nextY);
+            highY = Math.max(highY, nextY);
+        }
+        flush();
+    }
+
+    function drawGifSummary(surface, snapshot, index, tiers) {
+        var data = snapshot.history;
+        surface.rect(0, 0, GIF_WIDTH, GIF_HEIGHT, 0);
+        surface.text('TIERSCOPE REPLAY', 16, 12, 1, 4);
+        surface.text(formatElapsedTime(snapshot.timeline[index]) + ' / ' +
+            formatElapsedTime(snapshot.durationMs), 16, 54, 1, 2);
+        surface.rect(16, 76, 608, 2, 1);
+        function drawRow(label, values, y, color) {
+            surface.rect(16, y, 10, 14, color);
+            surface.text(label, 38, y, 1, 2);
+            drawGifSparkline(surface, values, index, color, y - 2);
+            surface.text(gifCount(values[index]), 622, y, color, 2, true);
+        }
+        tiers.forEach(function(tier, row) {
+            drawRow(tier === 'female-trans' ? 'FEMALE/TRANS' : TIERS[tier].name,
+                data[tier], 86 + row * 26, row + 2);
+        });
+        surface.rect(16, 290, 608, 2, 1);
+        var roomTotals = data.total.map(function(value, i) { return value + data.anonymous[i]; });
+        drawRow('TOTAL', roomTotals, 298, 1);
+        drawRow('WITH TOKENS', data.withTokens, 324, 10);
+        drawRow('REGISTERED', data.total, 350, 1);
+        drawRow('ANONYMOUS', data.anonymous, 376, 11);
+    }
+
+    function cancelGifExport() {
+        if (gifExportJob) gifExportJob.cancelled = true;
+    }
+
+    async function generateGifFromHistory() {
+        if (gifExportJob) return;
+        var button = document.getElementById('btn-export-gif');
+        var status = document.getElementById('gif-export-status');
+        var cancel = document.getElementById('btn-cancel-gif');
+        var progress = document.getElementById('gif-export-controls');
+        var job = { cancelled: false, url: location.href, generation: initGuard,
+            key: activeSessionStorageKey };
+        gifExportJob = job;
+        if (button) button.disabled = true;
+        if (progress) progress.style.display = 'flex';
+        if (cancel) cancel.hidden = false;
+        if (status) status.textContent = 'Preparing GIF…';
+        function checkJob() {
+            if (job.cancelled || location.href !== job.url || initGuard !== job.generation ||
+                activeSessionStorageKey !== job.key) throw new Error('GIF export cancelled.');
+        }
+        try {
+            if (typeof GifWriter !== 'function') {
+                throw new Error('GIF encoder missing. Reinstall the complete script, including its @require header.');
+            }
+            var model = getModelName();
+            if (!model || model === 'unknown' || location.href !== lastUrl ||
+                activeSessionStorageKey !== getStorageKey(model)) {
+                throw new Error('Wait for this room to finish loading before exporting.');
+            }
+            // Playback owns a frozen snapshot. Live acquisition can keep appending
+            // samples without changing the range or counts of this export.
+            if (!isPlaybackCurrent(playback)) throw new Error('Open Replay before downloading a GIF.');
+            var snapshot = playback.snapshot;
+            if (!snapshot.timeline.length) throw new Error('No recorded history to export yet.');
+            var tiers = Object.keys(TIERS);
+            var palette = [0x14141e, 0xffffff].concat(tiers.map(function(tier) {
+                return parseInt(TIERS[tier].color.slice(1), 16);
+            }));
+            palette.push(0xff69b4, 0x888888); // With Tokens and Anonymous summary lines.
+            // GIF color-table lengths must be powers of two. Unused slots stay dark.
+            while ((palette.length & (palette.length - 1)) !== 0) palette.push(palette[0]);
+            var surface = createGifSurface(palette);
+            var frameCount = Math.min(GIF_MAX_FRAMES, snapshot.timeline.length);
+            // Grow only the compressed output. Reserve conservative worst-case LZW
+            // space before addFrame: <2 bytes/pixel plus block/header overhead.
+            var bytes = new Uint8Array(256 * 1024);
+            var writer = new GifWriter(bytes, GIF_WIDTH, GIF_HEIGHT, { palette: palette, loop: 0 });
+            for (var i = 0; i < frameCount; i++) {
+                await new Promise(function(resolve) { setTimeout(resolve, 0); });
+                checkJob();
+                var index = getGifSampleIndex(snapshot, i, frameCount);
+                drawGifSummary(surface, snapshot, index, tiers);
+                var needed = writer.getOutputBufferPosition() + GIF_WIDTH * GIF_HEIGHT * 2 + 1024;
+                if (needed > bytes.length) {
+                    var grown = new Uint8Array(Math.max(bytes.length * 2, needed));
+                    grown.set(bytes); bytes = grown; writer.setOutputBuffer(bytes);
+                }
+                // Integer centiseconds sum to exactly ten seconds, even with 60 frames.
+                var delay = Math.round((i + 1) * GIF_DURATION_CS / frameCount) -
+                    Math.round(i * GIF_DURATION_CS / frameCount);
+                writer.addFrame(0, 0, GIF_WIDTH, GIF_HEIGHT, surface.pixels, { delay: delay, disposal: 1 });
+                if (status) status.textContent = 'GIF ' + Math.round((i + 1) / frameCount * 100) + '%';
+            }
+            checkJob();
+            var length = writer.end();
+            if (length > bytes.length) throw new Error('GIF output buffer overflow.');
+            var blob = new Blob([bytes.subarray(0, length)], { type: 'image/gif' });
+            var url = URL.createObjectURL(blob);
+            try {
+                var link = document.createElement('a');
+                link.href = url;
+                link.download = model.replace(/[^a-z0-9_-]/gi, '_') + '-replay-' + new Date().toISOString().slice(0, 10) + '.gif';
+                document.body.appendChild(link);
+                try { link.click(); } finally { link.remove(); }
+            } finally {
+                setTimeout(function() { URL.revokeObjectURL(url); }, 60000);
+            }
+            if (status) status.textContent = 'GIF downloaded';
+            log('GIF export complete: ' + frameCount + ' frames, ' + length + ' bytes');
+        } catch (error) {
+            if (status) status.textContent = error.message;
+            log('GIF export: ' + error.message);
+            if (!job.cancelled && location.href === job.url && initGuard === job.generation) alert(error.message);
+        } finally {
+            if (button) button.disabled = false;
+            if (cancel) cancel.hidden = true;
+            if (progress) progress.style.display = 'none';
+            if (button && status) button.title = status.textContent;
+            if (gifExportJob === job) gifExportJob = null;
+        }
     }
 
     function parseGetChatUserListResponse(text) {
@@ -2170,7 +2440,29 @@ const ViewerTracker = (function() {
         window.addEventListener('resize', windowResizeHandler);
     }
 
+    var panelBackgroundPercent = 95;
+
+    function updateContainerOpacity(value) {
+        var numeric = Number(value);
+        if (!Number.isFinite(numeric)) return;
+        panelBackgroundPercent = Math.max(30, Math.min(100, numeric));
+        var container = document.getElementById('tracker-container');
+        if (!container) return;
+        container.style.backgroundColor = 'rgba(20,20,30,' + panelBackgroundPercent / 100 + ')';
+        // Only standard tier fills use this variable. Green highlights retain their
+        // original fixed alpha, as do summary rows, controls, text and borders.
+        container.style.setProperty('--tier-background-scale', String(panelBackgroundPercent / 95));
+        var slider = document.getElementById('opacity-slider');
+        if (slider) {
+            slider.value = String(panelBackgroundPercent);
+            slider.setAttribute('aria-valuetext', panelBackgroundPercent + '% background opacity');
+        }
+        var label = document.getElementById('opacity-value');
+        if (label) label.textContent = panelBackgroundPercent + '%';
+    }
+
     function createPanel() {
+        cancelGifExport();
         leavePlayback(false);
         cleanupDragListeners();
         if (windowResizeHandler) {
@@ -2198,7 +2490,9 @@ const ViewerTracker = (function() {
                     'border-bottom:1px solid #ff69b4;padding-bottom:3px;cursor:move;' +
                 '">' +
                     '<span id="header-text" style="font-weight:bold;color:#ff69b4;font-size:10px;">USERS: 0 (H:0)</span>' +
-                    '<button id="btn-toggle" style="background:#333;border:1px solid #555;color:#fff;border-radius:3px;cursor:pointer;font-size:9px;padding:1px 4px;flex-shrink:0;">+</button>' +
+                    '<div style="display:flex;align-items:center;gap:5px;">' +
+                        '<button id="btn-toggle" style="background:#333;border:1px solid #555;color:#fff;border-radius:3px;cursor:pointer;font-size:9px;padding:1px 4px;flex-shrink:0;">+</button>' +
+                    '</div>' +
                 '</div>' +
 
                 '<div id="minimized-view" style="display:block;text-align:center;">' +
@@ -2235,7 +2529,7 @@ const ViewerTracker = (function() {
         Object.keys(TIERS).forEach(function(key) {
             var t = TIERS[key];
             html +=
-                '<div id="tier-row-' + key + '" data-tier="' + key + '" style="display:flex;align-items:center;padding:1px 3px;margin:1px 0;background:rgba(255,255,255,0.05);border-radius:3px;border-left:3px solid ' + t.color + ';">' +
+                '<div id="tier-row-' + key + '" data-tier="' + key + '" style="display:flex;align-items:center;padding:1px 3px;margin:1px 0;background:rgba(255,255,255,calc(0.05 * var(--tier-background-scale, 1)));border-radius:3px;border-left:3px solid ' + t.color + ';">' +
                     '<div style="width:30px;flex-shrink:0;text-align:center;">' +
                         '<span style="font-size:14px;">' + getTierMarker(key) + '</span>' +
                     '</div>' +
@@ -2304,10 +2598,15 @@ const ViewerTracker = (function() {
                     '</div>' +
                     '</div>' +
                     '<div id="playback-controls" style="display:none;position:absolute;top:5px;left:0;right:0;bottom:0;padding:0 2px;box-sizing:border-box;grid-template-rows:minmax(14px,1fr) 14px 12px;gap:2px;" aria-label="Playback controls">' +
+                        '<div id="gif-export-controls" style="display:none;position:absolute;inset:0;z-index:1;align-items:center;justify-content:center;gap:5px;background:#14141e;border-radius:3px;padding:3px;">' +
+                            '<span id="gif-export-status" role="status" style="font-size:8px;color:#ddd;overflow-wrap:anywhere;"></span>' +
+                            '<button id="btn-cancel-gif" hidden style="font-size:8px;cursor:pointer;">Cancel</button>' +
+                        '</div>' +
                         '<div style="display:flex;align-items:center;justify-content:space-between;gap:3px;">' +
                             '<strong style="font-size:9px;color:#ffd43b;">PLAYBACK</strong>' +
                             '<button id="playback-play" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#4169E1;color:white;border:1px solid #555;border-radius:2px;cursor:pointer;">Pause</button>' +
                             '<select id="playback-speed" aria-label="Playback speed" style="font-size:8px;height:15px;margin:0;padding:0;background:#333;color:white;border:1px solid #555;"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select>' +
+                            '<button id="btn-export-gif" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#ff69b4;color:white;border:1px solid #ff69b4;border-radius:2px;cursor:pointer;" title="Download this Replay as a 640 × 400 GIF">GIF</button>' +
                             '<button id="playback-return" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#333;color:white;border:1px solid #555;border-radius:2px;cursor:pointer;">Return to Live</button>' +
                         '</div>' +
                         '<input id="playback-scrubber" type="range" min="0" max="0" value="0" step="1" aria-label="Playback timeline" style="width:100%;height:12px;margin:0;accent-color:#ffd43b;cursor:pointer;">' +
@@ -2344,15 +2643,21 @@ const ViewerTracker = (function() {
                     '</div>' +
                 '</div>' +
 
-                '<div id="acquisition-status" style="margin-top:2px;font-size:7px;color:#aaa;" title="No accepted sample yet">No sample</div>' +
-
-                '<div style="position:absolute;bottom:4px;right:6px;display:flex;align-items:center;gap:3px;opacity:0.6;transition:opacity 0.2s;" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0.6">' +
+                '<div id="tracker-footer" style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:4px;margin-top:5px;min-height:14px;">' +
+                    '<div id="acquisition-status" style="max-width:80px;font-size:7px;color:#aaa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="No accepted sample yet">No sample</div>' +
+                    '<div id="background-slider-controls" style="display:flex;align-items:center;gap:3px;min-width:0;">' +
+                        '<svg width="11" height="13" viewBox="0 0 24 24" fill="none" stroke="#ffd43b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink:0;"><path d="M9 18h6M10 22h4M8 14a6 6 0 1 1 8 0c-1 1-1 2-1 4H9c0-2 0-3-1-4Z"/></svg>' +
+                        '<input type="range" id="opacity-slider" min="30" max="100" value="95" aria-label="Background opacity" style="flex:1;min-width:0;width:100%;height:12px;margin:0;cursor:pointer;accent-color:#ff69b4;" title="Main and standard tier background opacity">' +
+                        '<span id="opacity-value" style="font-size:8px;color:#ddd;min-width:23px;">95%</span>' +
+                    '</div>' +
+                    '<div id="tierscope-logo" style="justify-self:end;display:flex;align-items:center;gap:3px;white-space:nowrap;opacity:0.6;transition:opacity 0.2s;" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0.6">' +
                     '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#ff69b4" stroke-width="2" style="flex-shrink:0;">' +
                         '<circle cx="12" cy="12" r="10"/>' +
                         '<line x1="12" y1="2" x2="12" y2="22"/>' +
                         '<line x1="2" y1="12" x2="22" y2="12"/>' +
                     '</svg>' +
                     '<span title="TierScope ' + TIERSCOPE_VERSION + '" style="font-size:7px;font-family:\'Courier New\',monospace;font-weight:bold;color:#ff69b4;letter-spacing:1px;">TIERSCOPE</span>' +
+                    '</div>' +
                 '</div>' +
             '</div>';
 
@@ -2362,10 +2667,20 @@ const ViewerTracker = (function() {
         var btnDownload = document.getElementById('btn-download-report');
         var btnMainReset = document.getElementById('btn-main-reset');
         var btnControlAuto = document.getElementById('btn-control-auto');
+        var btnExportGif = document.getElementById('btn-export-gif');
+        var opacitySlider = document.getElementById('opacity-slider');
 
         if (btnDownload) btnDownload.addEventListener('click', downloadTrackingReport);
         if (btnMainReset) btnMainReset.addEventListener('click', resetAllTracking);
         if (btnControlAuto) btnControlAuto.addEventListener('click', toggleAutoRefresh);
+        if (btnExportGif) btnExportGif.addEventListener('click', generateGifFromHistory);
+        document.getElementById('btn-cancel-gif').onclick = cancelGifExport;
+        updateContainerOpacity(panelBackgroundPercent);
+        if (opacitySlider) {
+            opacitySlider.addEventListener('input', function() {
+                updateContainerOpacity(this.value);
+            });
+        }
 
         bindPlaybackControls();
         updateReplayAvailability();
@@ -2629,7 +2944,7 @@ const ViewerTracker = (function() {
                     if (highlights && highlights[tier]) {
                         rowEl.style.background = 'rgba(50, 205, 50, 0.15)';
                     } else {
-                        rowEl.style.background = 'rgba(255,255,255,0.05)';
+                        rowEl.style.background = 'rgba(255,255,255,calc(0.05 * var(--tier-background-scale, 1)))';
                     }
                 }
             });
@@ -2856,6 +3171,7 @@ const ViewerTracker = (function() {
     urlCheckInterval = setInterval(checkUrlChange, 500);
 
     window.addEventListener('beforeunload', function() {
+        cancelGifExport();
         leavePlayback(false);
         var modelName = getModelName();
         if (modelName && modelName !== 'unknown') {
@@ -2876,7 +3192,9 @@ const ViewerTracker = (function() {
         downloadTrackingReport: downloadTrackingReport,
         resetAllTracking: resetAllTracking,
         getHealth: function() { return domHealthStatus; },
-        parseGetChatUserListResponse: parseGetChatUserListResponse
+        parseGetChatUserListResponse: parseGetChatUserListResponse,
+        generateGifFromHistory: generateGifFromHistory,
+        cancelGifExport: cancelGifExport
     };
 })();
 
