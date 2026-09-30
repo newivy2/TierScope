@@ -176,6 +176,10 @@ These follow the classes Chaturbate shows in the Users tab:
 
 ---
 
+## Thanks to
+
+- **Andrew Weed** — for the API acquisition and Replay mode.
+
 ## License
 
 MIT. See [LICENSE](https://github.com/newivy2/TierScope/blob/main/LICENSE).
