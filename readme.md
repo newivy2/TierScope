@@ -7,6 +7,7 @@ TierScope turns room viewer counts into a compact panel of live charts, trends, 
 **Current release: 3.1.12**
 
 ![TierScope panel](Tracking%20example%206.jpg)
+![TierScope panel](Tracking%20example%207.jpg)
 
 ## Your room, at a glance
 
