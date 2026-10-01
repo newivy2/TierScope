@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.1.3
+// @version      3.1.5
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -17,7 +17,7 @@
 const ViewerTracker = (function() {
     'use strict';
 
-    const TIERSCOPE_VERSION = '3.1.3';
+    const TIERSCOPE_VERSION = '3.1.5';
     const API_TIMEOUT_MS = 10000;
     const DEFAULT_API_INTERVAL_SECONDS = 60;
     const DOM_FALLBACK_INTERVAL_SECONDS = 60;
@@ -205,6 +205,187 @@ const ViewerTracker = (function() {
         'gray': { name: 'Grey', desc: '', color: '#6B6A6F' },
         'female-trans': { name: '♀⚧', desc: '', color: '#FF1493' }
     };
+
+    // Presentation preferences are shared across rooms and separate from sessions.
+    const COLLAPSED_ROWS_KEY = 'tierscope:ui:collapsedRows:v1';
+    const PANEL_ROWS = Object.keys(TIERS).map(function(key) {
+        return { key: key, label: key === 'red' ? 'Moderators' : key === 'green' ? 'Fan Club' :
+            key === 'female-trans' ? 'Female/Trans' : TIERS[key].name,
+            color: TIERS[key].color, height: 28, display: 'flex' };
+    }).concat([
+        { key: 'withtokens', label: 'With Tokens', icon: '💎', color: '#ff69b4', height: 28, display: 'flex' },
+        { key: 'total', label: 'Registered', icon: '📊', color: '#ffffff', height: 28, display: 'flex' },
+        { key: 'anon', label: 'Anonymous', icon: '👻', color: '#888888', height: 50, display: 'block' }
+    ]);
+    var collapsedRows = loadCollapsedRows();
+    var panelChartHeights = {};
+    var rowLayoutNeedsMeasure = true;
+    var panelChartRegionHeight = null;
+
+    function loadCollapsedRows() {
+        try {
+            var raw = GM_getValue(COLLAPSED_ROWS_KEY, null);
+            if (raw !== null && typeof raw !== 'undefined') {
+                var saved = JSON.parse(raw);
+                if (!Array.isArray(saved) || !saved.every(function(key) {
+                    return PANEL_ROWS.some(function(row) { return row.key === key; });
+                })) throw new Error('Invalid collapsed-row preferences');
+                return new Set(saved);
+            }
+        } catch (error) {
+            log('Could not restore row preferences: ' + error.message);
+        }
+        return new Set(['red', 'green']);
+    }
+
+    function panelRowMarker(row) {
+        return row.icon || getTierMarker(row.key);
+    }
+
+    function collapseMarkerHtml(key) {
+        var row = PANEL_ROWS.find(function(item) { return item.key === key; });
+        return '<button type="button" class="tier-collapse-marker" id="collapse-row-' + key +
+            '" aria-controls="tier-row-' + key + '" aria-expanded="true" aria-label="Collapse ' + row.label +
+            ' row" title="Collapse ' + row.label + ' row" style="display:inline-flex;align-items:center;' +
+            'justify-content:center;width:26px;height:24px;padding:0;border:0;border-radius:3px;' +
+            'background:transparent;color:inherit;font-size:14px;line-height:1;cursor:pointer;">' +
+            panelRowMarker(row) + '</button>';
+    }
+
+    function collapsedTrayHtml() {
+        return '<div id="collapsed-tier-tray" role="group" aria-label="Collapsed rows. Click an icon to restore its row." ' +
+            'style="display:none;flex-wrap:wrap;align-items:center;gap:3px;margin-bottom:4px;">' +
+            PANEL_ROWS.map(function(row) {
+                return '<button type="button" id="restore-row-' + row.key +
+                    '" aria-controls="tier-row-' + row.key + '" aria-expanded="false" ' +
+                    'aria-label="Restore ' + row.label + ' row" title="Restore ' + row.label + ' row" ' +
+                    'style="display:none;align-items:center;justify-content:center;flex:0 0 22px;width:22px;height:22px;' +
+                    'box-sizing:border-box;padding:0;border:1px solid ' + row.color + ';border-radius:3px;' +
+                    'background:rgba(255,255,255,0.05);color:white;font-size:12px;line-height:1;cursor:pointer;">' +
+                    panelRowMarker(row) + '</button>';
+            }).join('') + '</div>';
+    }
+
+    function applyRowLayout() {
+        var region = document.getElementById('tier-chart-region');
+        var tray = document.getElementById('collapsed-tier-tray');
+        var group = document.getElementById('summary-tier-rows');
+        var measurable = region && region.offsetHeight > 0;
+        var visibleCount = PANEL_ROWS.length - collapsedRows.size;
+        // Temporarily restore natural layout to measure actual minimum row
+        // heights. A text column can be taller than the nominal canvas, depending
+        // on inherited line spacing, fonts and the displayed numbers.
+        if (region) region.style.height = 'auto';
+        PANEL_ROWS.forEach(function(row) {
+            panelChartHeights[row.key] = row.height;
+            var canvas = document.getElementById('spark-' + row.key);
+            if (canvas) canvas.style.height = row.height + 'px';
+            var element = document.getElementById('tier-row-' + row.key);
+            if (measurable && element) element.style.display = row.display;
+        });
+        if (measurable && tray) tray.style.display = 'none';
+        if (measurable && group) group.style.display = 'block';
+        if (measurable) {
+            PANEL_ROWS.forEach(function(row) {
+                var canvas = document.getElementById('spark-' + row.key);
+                if (!canvas) return;
+                var parent = canvas.parentElement;
+                var style = window.getComputedStyle(parent);
+                // clientHeight is unaffected by the panel's CSS scale. Subtract
+                // padding to get the flex content height shared with the text.
+                var minimum = parent.clientHeight - (parseFloat(style.paddingTop) || 0) -
+                    (parseFloat(style.paddingBottom) || 0);
+                panelChartHeights[row.key] = Math.max(row.height, minimum);
+                canvas.style.height = panelChartHeights[row.key] + 'px';
+            });
+            if (panelChartRegionHeight === null) panelChartRegionHeight = region.offsetHeight;
+        }
+        if (tray) tray.style.display = collapsedRows.size ? 'flex' : 'none';
+        PANEL_ROWS.forEach(function(row) {
+            var collapsed = collapsedRows.has(row.key);
+            var element = document.getElementById('tier-row-' + row.key);
+            if (element) element.style.display = collapsed ? 'none' : row.display;
+            var restore = document.getElementById('restore-row-' + row.key);
+            if (restore) restore.style.display = collapsed ? 'inline-flex' : 'none';
+            var collapse = document.getElementById('collapse-row-' + row.key);
+            if (collapse) collapse.setAttribute('aria-expanded', String(!collapsed));
+        });
+        if (group) group.style.display = collapsedRows.has('withtokens') && collapsedRows.has('total') ? 'none' : 'block';
+        var extra = measurable && visibleCount ? Math.max(0, panelChartRegionHeight - region.offsetHeight) / visibleCount : 0;
+        PANEL_ROWS.forEach(function(row) {
+            if (collapsedRows.has(row.key)) return;
+            panelChartHeights[row.key] += extra;
+            var canvas = document.getElementById('spark-' + row.key);
+            if (canvas) canvas.style.height = panelChartHeights[row.key] + 'px';
+        });
+        // Pin the region instead of allowing fractional canvas rounding to move
+        // the rest of the panel. With no open rows, let it shrink to the strip.
+        if (region && visibleCount && panelChartRegionHeight !== null) {
+            region.style.height = panelChartRegionHeight + 'px';
+        }
+        // Creation/compact mode may hide the region. Measure once it is visible,
+        // rather than changing row layout on every scan or Replay animation frame.
+        rowLayoutNeedsMeasure = !measurable;
+    }
+
+    function setRowCollapsed(key, collapsed) {
+        if (!PANEL_ROWS.some(function(row) { return row.key === key; })) return;
+        if (collapsed) collapsedRows.add(key);
+        else collapsedRows.delete(key);
+        try { GM_setValue(COLLAPSED_ROWS_KEY, JSON.stringify(Array.from(collapsedRows))); }
+        catch (error) { log('Could not save row preferences: ' + error.message); }
+        applyRowLayout();
+        if (presentationMode === 'PLAYBACK') {
+            // Repaint this exact frame; customizing the panel never advances Replay.
+            paintPlayback(playback);
+        } else {
+            updateDisplay();
+            drawAllSparklines();
+        }
+        var target = document.getElementById((collapsed ? 'restore-row-' : 'collapse-row-') + key);
+        if (target) target.focus({ preventScroll: true });
+    }
+
+    function bindRowControls() {
+        panelChartRegionHeight = null; // A newly created panel gets its own baseline.
+        PANEL_ROWS.forEach(function(row) {
+            [false, true].forEach(function(collapsed) {
+                var button = document.getElementById((collapsed ? 'collapse-row-' : 'restore-row-') + row.key);
+                if (button) button.onclick = function(event) {
+                    event.stopPropagation();
+                    setRowCollapsed(row.key, collapsed);
+                };
+            });
+        });
+        var container = document.getElementById('tracker-container');
+        if (container) container.addEventListener('transitionend', function(event) {
+            if (event.target === container && event.propertyName === 'width') redrawPanelCharts();
+        });
+        applyRowLayout();
+    }
+
+    function redrawPanelCharts() {
+        if (isMinimized) return;
+        if (presentationMode === 'PLAYBACK') paintPlayback(playback);
+        else drawAllSparklines();
+    }
+
+    function updateCollapsedRowStatus(frame, highlights) {
+        PANEL_ROWS.forEach(function(row) {
+            var button = document.getElementById('restore-row-' + row.key);
+            if (!button) return;
+            var value = row.key === 'withtokens' ? frame.withTokens : row.key === 'total' ? frame.total :
+                row.key === 'anon' ? frame.anonymousCount : frame.counts[row.key];
+            var historyKey = row.key === 'withtokens' ? 'withTokens' : row.key === 'anon' ? 'anonymous' : row.key;
+            var high = getHighValue(frame.history[historyKey], value).value;
+            var context = frame.isPlayback ? 'Replay' : frame.isRestored ? 'Saved sample' : 'Latest sample';
+            button.title = row.label + ': ' + value.toLocaleString() + ' (High: ' + high.toLocaleString() +
+                '). ' + context + '. Click to restore row.';
+            button.setAttribute('aria-label', 'Restore ' + row.label + ' row. ' + context + ': ' + value.toLocaleString());
+            button.style.background = highlights && highlights[historyKey] ?
+                'rgba(50, 205, 50, 0.15)' : 'rgba(255,255,255,calc(0.05 * var(--tier-background-scale, 1)))';
+        });
+    }
 
     const TREND_ICONS = {
         up: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#32CD32" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>',
@@ -2252,13 +2433,14 @@ const ViewerTracker = (function() {
         var canvas = document.getElementById(canvasId);
         if (!canvas) return;
         var ctx = canvas.getContext('2d');
-        var scale = Math.max(1, currentScale || 1);
-        var displayWidth = 105;
+        var scale = Math.max(1, (currentScale || 1) * (window.devicePixelRatio || 1));
         var displayHeight = customHeight || 28;
-        canvas.width = Math.floor(displayWidth * scale);
-        canvas.height = Math.floor(displayHeight * scale);
-        canvas.style.width = displayWidth + 'px';
+        canvas.style.width = '105px'; // Stable flex basis; draw at its actual allocated width.
+        canvas.style.minWidth = '0';
         canvas.style.height = displayHeight + 'px';
+        var displayWidth = canvas.clientWidth || 105;
+        canvas.width = Math.ceil(displayWidth * scale);
+        canvas.height = Math.ceil(displayHeight * scale);
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         if (data.length < 2) return;
         ctx.scale(scale, scale);
@@ -2289,12 +2471,12 @@ const ViewerTracker = (function() {
     }
 
     function drawHistorySparklines(displayHistory) {
-        Object.keys(TIERS).forEach(function(tier) {
-            drawSparkline('spark-' + tier, displayHistory[tier], TIERS[tier].color);
+        if (rowLayoutNeedsMeasure) applyRowLayout();
+        PANEL_ROWS.forEach(function(row) {
+            if (collapsedRows.has(row.key)) return;
+            var key = row.key === 'withtokens' ? 'withTokens' : row.key === 'anon' ? 'anonymous' : row.key;
+            drawSparkline('spark-' + row.key, displayHistory[key], row.color, panelChartHeights[row.key] || row.height);
         });
-        drawSparkline('spark-withtokens', displayHistory['withTokens'], '#ff69b4');
-        drawSparkline('spark-total', displayHistory['total'], '#ffffff');
-        drawSparkline('spark-anon', displayHistory['anonymous'], '#888888', 50);
     }
 
     function getHighValue(data, currentValue, timestamp) {
@@ -2472,6 +2654,7 @@ const ViewerTracker = (function() {
         var stopResize = function() {
             if (!isResizing) return;
             isResizing = false;
+            redrawPanelCharts();
         };
         resizeHandle.addEventListener('mousedown', startResize);
         document.addEventListener('mousemove', doResize);
@@ -2597,14 +2780,15 @@ const ViewerTracker = (function() {
                     '<div id="auto-status" style="margin-top:2px;font-size:7px;color:#32CD32;">Starting...</div>' +
                 '</div>' +
 
-                '<div id="full-view" style="display:none;">';
+                '<div id="full-view" style="display:none;">' +
+                '<div id="tier-chart-region" style="display:flow-root;">' + collapsedTrayHtml();
 
         Object.keys(TIERS).forEach(function(key) {
             var t = TIERS[key];
             html +=
                 '<div id="tier-row-' + key + '" data-tier="' + key + '" style="display:flex;align-items:center;padding:1px 3px;margin:1px 0;background:rgba(255,255,255,calc(0.05 * var(--tier-background-scale, 1)));border-radius:3px;border-left:3px solid ' + t.color + ';">' +
                     '<div style="width:30px;flex-shrink:0;text-align:center;">' +
-                        '<span style="font-size:14px;">' + getTierMarker(key) + '</span>' +
+                        collapseMarkerHtml(key) +
                     '</div>' +
                     '<canvas id="spark-' + key + '" width="105" height="28" style="flex:1;margin:0 4px;"></canvas>' +
                     '<div style="text-align:right;width:48px;flex-shrink:0;">' +
@@ -2615,10 +2799,10 @@ const ViewerTracker = (function() {
         });
 
         html +=
-                '<div style="border-top:1px solid #555;margin-top:4px;padding-top:4px;">' +
+                '<div id="summary-tier-rows" style="border-top:1px solid #555;margin-top:4px;padding-top:4px;">' +
                     '<div id="tier-row-withtokens" data-tier="withtokens" style="display:flex;align-items:center;padding:2px 3px;background:rgba(255,105,180,0.15);border-radius:3px;border:1px solid #ff69b4;margin-bottom:3px;">' +
                         '<div style="width:30px;flex-shrink:0;text-align:center;">' +
-                            '<span style="font-size:14px;">💎</span>' +
+                            collapseMarkerHtml('withtokens') +
                         '</div>' +
                         '<canvas id="spark-withtokens" width="105" height="28" style="flex:1;margin:0 4px;"></canvas>' +
                         '<div style="text-align:right;width:48px;flex-shrink:0;">' +
@@ -2629,7 +2813,7 @@ const ViewerTracker = (function() {
                     '</div>' +
                     '<div id="tier-row-total" data-tier="total" style="display:flex;align-items:center;padding:2px 3px;background:rgba(255,255,255,0.1);border-radius:3px;">' +
                         '<div style="width:30px;flex-shrink:0;text-align:center;">' +
-                            '<span style="font-size:14px;">📊</span>' +
+                            collapseMarkerHtml('total') +
                         '</div>' +
                         '<canvas id="spark-total" width="105" height="28" style="flex:1;margin:0 4px;"></canvas>' +
                         '<div style="text-align:right;width:48px;flex-shrink:0;">' +
@@ -2642,7 +2826,7 @@ const ViewerTracker = (function() {
                 '<div id="tier-row-anon" data-tier="anonymous" style="margin-top:5px;padding:5px;background:rgba(136,136,136,0.15);border-radius:3px;border:1px solid #888;">' +
                     '<div style="display:flex;align-items:center;">' +
                         '<div style="width:30px;flex-shrink:0;text-align:center;">' +
-                            '<span style="font-size:14px;">👻</span>' +
+                            collapseMarkerHtml('anon') +
                         '</div>' +
                         '<canvas id="spark-anon" width="105" height="50" style="flex:1;margin:0 4px;"></canvas>' +
                         '<div style="text-align:right;width:48px;flex-shrink:0;">' +
@@ -2652,6 +2836,7 @@ const ViewerTracker = (function() {
                     '</div>' +
                 '</div>' +
 
+                '</div>' +
                 '<div id="trend-section" style="position:relative;border-top:1px solid #4169E1;margin-top:5px;padding-top:5px;">' +
                     '<div id="live-trend">' +
                     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;flex-wrap:wrap;gap:2px;">' +
@@ -2756,6 +2941,7 @@ const ViewerTracker = (function() {
         }
 
         bindPlaybackControls();
+        bindRowControls();
         updateReplayAvailability();
         setupDraggable();
         setupResizable();
@@ -2989,6 +3175,7 @@ const ViewerTracker = (function() {
         var roomTotalHigh = frame.roomTotalHigh;
         var displayHistory = frame.history;
         var highlights = (frame.isPlayback || frame.isRestored) ? frame.playbackNewHighTiers : newHighTiers;
+        updateCollapsedRowStatus(frame, highlights);
         var withTokensPct = total > 0 ? Math.round((withTokens / total) * 100) + '%' : '0%';
         var registeredPct = fullRoomTotal > 0 ? Math.round((total / fullRoomTotal) * 100) + '%' : '0%';
         var headerText = document.getElementById('header-text');
