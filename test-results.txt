@@ -1,60 +1,62 @@
 npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
 
-> tierscope-regression-tests@3.1.15 test
+> tierscope-regression-tests@3.1.16 test
 > npm run test:unit && npm run test:browser && npm run test:firefox
 
 npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
 
-> tierscope-regression-tests@3.1.15 test:unit
+> tierscope-regression-tests@3.1.16 test:unit
 > node --test tests/*.test.cjs
 
-✔ API parser rejects invalid totals, malformed records, duplicate usernames and unsafe numbers (8.813424ms)
-✔ CSV contains retained history in tier order, safe text, UTC times and correct totals (4.936099ms)
-✔ timestamps control chart spacing, breaks preserve gaps, duplicate times remain finite (6.74502ms)
-✔ dense plotting preserves per-column extrema and bounds drawing work (10.499442ms)
-✔ pause/reload gaps persist, with conservative legacy interval inference (5.866729ms)
-✔ old names are ignored on restore and omitted from new saves without rewriting source records (24.68521ms)
-✔ 429 honors Retry-After across manual attempts, Reset, reload and other tabs without DOM fallback (16.833934ms)
-✔ 401/403 pause acquisition until explicit Resume, including in sibling tabs (22.663568ms)
-✔ temporary failures back off to 15 minutes; server waits suppress fallback; successful API resumes normal cadence (9.693809ms)
-✔ older successful requests cannot clear a restriction written by another tab (5.968838ms)
-✔ local retry gate survives an unavailable GM write (2.706684ms)
+✔ API parser rejects invalid totals, malformed records, duplicate usernames and unsafe numbers (8.761958ms)
+✔ CSV contains retained history in tier order, safe text, UTC times and correct totals (5.053465ms)
+✔ timestamps control chart spacing, breaks preserve gaps, duplicate times remain finite (9.581932ms)
+✔ dense plotting preserves per-column extrema and bounds drawing work (12.141253ms)
+✔ pause/reload gaps persist, with conservative legacy interval inference (7.662533ms)
+✔ old names are ignored on restore and omitted from new saves without rewriting source records (33.564827ms)
+✔ 429 honors Retry-After across manual attempts, Reset, reload and other tabs without DOM fallback (18.545581ms)
+✔ 401/403 pause acquisition until explicit Resume, including in sibling tabs (36.412883ms)
+✔ temporary failures back off to 15 minutes; server waits suppress fallback; successful API resumes normal cadence (7.538235ms)
+✔ older successful requests cannot clear a restriction written by another tab (5.548361ms)
+✔ local retry gate survives an unavailable GM write (2.434283ms)
+✔ Resume after access denial still honors an explicit server wait (7.078754ms)
+✔ an older stored policy cannot erase a newer unsaved restriction (3.750405ms)
 PASS age boundaries, future timestamps, saved/API/DOM labels and timestamp explanation
 PASS all 12 chart rows, full 36px vertical range, long labels, zero/flat data and large counts fit
-PASS real omggif exports decode to matching pixels, at most 60 frames and exactly 10 seconds [{"name":"sample","samples":60,"frames":60,"bytes":464850,"encodeMs":948},{"name":"single","samples":1,"frames":1,"bytes":5502,"encodeMs":15},{"name":"dense","samples":10000,"frames":60,"bytes":735346,"encodeMs":9092},{"name":"flat","samples":60,"frames":60,"bytes":336795,"encodeMs":899},{"name":"zero","samples":1,"frames":1,"bytes":5141,"encodeMs":14}]
+PASS real omggif exports decode to matching pixels, at most 60 frames and exactly 10 seconds [{"name":"sample","samples":60,"frames":60,"bytes":464850,"encodeMs":979},{"name":"single","samples":1,"frames":1,"bytes":5502,"encodeMs":15},{"name":"dense","samples":10000,"frames":60,"bytes":735346,"encodeMs":9732},{"name":"flat","samples":60,"frames":60,"bytes":336795,"encodeMs":905},{"name":"zero","samples":1,"frames":1,"bytes":5141,"encodeMs":14}]
 PASS cancellation releases export state and allows retry
-✔ GIF export decodes with exact pixels, bounded drawing, fixed duration, and cancellation (13329.256532ms)
-✔ pause/resume preserves session start and wall-time high offsets while timer excludes pauses (36.445678ms)
-✔ tier and total highs survive history eviction, ties, lower samples, and reload (229.367311ms)
-✔ legacy high timestamps are rebuilt from the matching sample; start is explicitly estimated (3.303161ms)
-✔ stale same-room tabs keep independent records and cannot replace the newest accepted sample (5.290222ms)
-✔ tabs opened before any save also write separate records (3.717956ms)
-✔ Reset invalidates old tabs and immediately persists a paused, empty session (13.474047ms)
-✔ newer schema and malformed records remain untouched while independent saves continue (6.477027ms)
-✔ expired tab data is not restored and returning writers rotate record IDs (1.931177ms)
-✔ saved display remains non-live; failed scan and render rollback retain data and highs (8.486662ms)
-✔ a late network response cannot commit after room navigation (3.357042ms)
-✔ sample ages use seconds, minutes, hours, days and clamp future timestamps (1.193506ms)
-✔ restored highlights compare with persistent session highs; Replay still uses historical highs (235.984204ms)
-✔ explicit Reset recovers from corrupt per-tab storage without retaining the damaged branch (2.444309ms)
-✔ late scan results cannot resurrect pre-Reset data (4.821045ms)
-✔ corrupt siblings, invalid shapes, missing epochs and future schemas cannot block good history (13.44266ms)
-✔ invalid legacy record does not block a current tab record (3.660659ms)
-✔ a corrected record becomes eligible without Reset or deleting healthy data (2.090376ms)
-✔ late old-epoch records never restore and are removed after the three-hour grace period (3.855572ms)
-✔ old-epoch corrupt and unsupported records are never automatically deleted (3.187482ms)
-✔ failure to delete an expired record does not block a healthy sibling (4.256251ms)
-ℹ tests 32
+✔ GIF export decodes with exact pixels, bounded drawing, fixed duration, and cancellation (14006.912367ms)
+✔ pause/resume preserves session start and wall-time high offsets while timer excludes pauses (29.116411ms)
+✔ tier and total highs survive history eviction, ties, lower samples, and reload (212.791642ms)
+✔ legacy high timestamps are rebuilt from the matching sample; start is explicitly estimated (6.338159ms)
+✔ stale same-room tabs keep independent records and cannot replace the newest accepted sample (5.408861ms)
+✔ tabs opened before any save also write separate records (3.730194ms)
+✔ Reset invalidates old tabs and immediately persists a paused, empty session (15.646649ms)
+✔ newer schema and malformed records remain untouched while independent saves continue (6.606964ms)
+✔ expired tab data is not restored and returning writers rotate record IDs (2.03265ms)
+✔ saved display remains non-live; failed scan and render rollback retain data and highs (9.939709ms)
+✔ a late network response cannot commit after room navigation (3.075048ms)
+✔ sample ages use seconds, minutes, hours, days and clamp future timestamps (1.035939ms)
+✔ restored highlights compare with persistent session highs; Replay still uses historical highs (258.292727ms)
+✔ explicit Reset recovers from corrupt per-tab storage without retaining the damaged branch (2.421524ms)
+✔ late scan results cannot resurrect pre-Reset data (3.356582ms)
+✔ corrupt siblings, invalid shapes, missing epochs and future schemas cannot block good history (16.759504ms)
+✔ invalid legacy record does not block a current tab record (5.502972ms)
+✔ a corrected record becomes eligible without Reset or deleting healthy data (2.68466ms)
+✔ late old-epoch records never restore and are removed after the three-hour grace period (5.264493ms)
+✔ old-epoch corrupt and unsupported records are never automatically deleted (3.320277ms)
+✔ failure to delete an expired record does not block a healthy sibling (4.366722ms)
+ℹ tests 34
 ℹ suites 0
-ℹ pass 32
+ℹ pass 34
 ℹ fail 0
 ℹ cancelled 0
 ℹ skipped 0
 ℹ todo 0
-ℹ duration_ms 13428.95603
+ℹ duration_ms 14148.454872
 npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
 
-> tierscope-regression-tests@3.1.15 test:browser
+> tierscope-regression-tests@3.1.16 test:browser
 > node tests/run-browser.cjs chromium
 
 
@@ -93,11 +95,14 @@ PASS reduced-motion preference including mid-pulse changes, Replay isolation, an
 PASS failed acquisition and rendering rollback suppress pulses; Reset cancels active animations
 
 Browser: chromium — charts-browser.cjs
-PASS timestamp spacing, gaps, hover/keyboard inspection, Replay bounds, flat/single samples, brighter strokes and unchanged panel geometry
+PASS timestamp spacing, gaps, hover/keyboard inspection, Replay bounds, flat/single samples, original tier colors and unchanged panel geometry
 PASS rate-limit UI, reload persistence, access-denied pause and explicit recovery
+
+Browser: chromium — theme-browser.cjs
+PASS dark/bright toggle placement, default/persistence, keyboard, opacity, original tier colors, highlights, tooltips, compact/Replay rendering, state preservation and storage failure
 npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
 
-> tierscope-regression-tests@3.1.15 test:firefox
+> tierscope-regression-tests@3.1.16 test:firefox
 > node tests/run-browser.cjs firefox
 
 
@@ -136,42 +141,8 @@ PASS reduced-motion preference including mid-pulse changes, Replay isolation, an
 PASS failed acquisition and rendering rollback suppress pulses; Reset cancels active animations
 
 Browser: firefox — charts-browser.cjs
-PASS timestamp spacing, gaps, hover/keyboard inspection, Replay bounds, flat/single samples, brighter strokes and unchanged panel geometry
-PASS rate-limit UI, reload persistence, access-denied pause and explicit recovery
-
-Additional resize and restriction edge-case checks:
-✔ timestamps control chart spacing, breaks preserve gaps, duplicate times remain finite (6.988499ms)
-✔ dense plotting preserves per-column extrema and bounds drawing work (10.78748ms)
-✔ pause/reload gaps persist, with conservative legacy interval inference (6.343037ms)
-✔ old names are ignored on restore and omitted from new saves without rewriting source records (19.751868ms)
-✔ 429 honors Retry-After across manual attempts, Reset, reload and other tabs without DOM fallback (12.141744ms)
-✔ 401/403 pause acquisition until explicit Resume, including in sibling tabs (14.348254ms)
-✔ temporary failures back off to 15 minutes; server waits suppress fallback; successful API resumes normal cadence (6.609478ms)
-✔ older successful requests cannot clear a restriction written by another tab (5.094097ms)
-✔ local retry gate survives an unavailable GM write (2.929338ms)
-✔ Resume after access denial still honors an explicit server wait (3.821772ms)
-✔ an older stored policy cannot erase a newer unsaved restriction (2.97028ms)
-ℹ tests 11
-ℹ suites 0
-ℹ pass 11
-ℹ fail 0
-ℹ cancelled 0
-ℹ skipped 0
-ℹ todo 0
-ℹ duration_ms 187.476974
-
-chromium
-PASS timestamp spacing, gaps, hover/keyboard inspection, Replay bounds, flat/single samples, brighter strokes and unchanged panel geometry
-PASS rate-limit UI, reload persistence, access-denied pause and explicit recovery
-
-firefox
-PASS timestamp spacing, gaps, hover/keyboard inspection, Replay bounds, flat/single samples, brighter strokes and unchanged panel geometry
-PASS rate-limit UI, reload persistence, access-denied pause and explicit recovery
-
-Original dark-purple and dark-blue colors restored (2026-10-01):
-chromium:
 PASS timestamp spacing, gaps, hover/keyboard inspection, Replay bounds, flat/single samples, original tier colors and unchanged panel geometry
 PASS rate-limit UI, reload persistence, access-denied pause and explicit recovery
-firefox:
-PASS timestamp spacing, gaps, hover/keyboard inspection, Replay bounds, flat/single samples, original tier colors and unchanged panel geometry
-PASS rate-limit UI, reload persistence, access-denied pause and explicit recovery
+
+Browser: firefox — theme-browser.cjs
+PASS dark/bright toggle placement, default/persistence, keyboard, opacity, original tier colors, highlights, tooltips, compact/Replay rendering, state preservation and storage failure

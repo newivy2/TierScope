@@ -42,6 +42,7 @@ npm run test:performance
 | Charts and inspection | Timestamp spacing and gaps; bounded peak-preserving drawing; exact sample hover and keyboard inspection; no future data in Replay; centered flat/single samples; original dark-purple and dark-blue colors; no tooltip layout growth. |
 | Request policy | HTTP 429 and Retry-After, 401/403 pause with explicit recovery, capped exponential retries, no fallback around restrictions, Reset/reload/multi-tab gates, stale-response races, and storage-write failure. |
 | Data minimization | Legacy username fields are ignored on restore without rewriting source records or losing aggregates; new records omit both collections; TXT no longer includes unique female/trans totals; future-schema records remain untouched. |
+| Theme | Dark default; checkbox placement and keyboard activation; no layout or tracking changes; original tier colors and green highlights; background opacity; readable registered chart and tooltips; compact/settings/Replay rendering; persistence across refresh and rooms; Reset and storage-failure behavior. |
 | Controls | Drag/resize/reload, 100% size reset, edge clamping on expansion, centered buttons, and CSV download. |
 | Replay | Previous/next endpoints, pause-on-step, duplicate timestamps, and the selected frame surviving collapse and live scans. |
 | CSV | Column order, every retained sample, UTC timestamps, computed totals, and formula-safe text. |

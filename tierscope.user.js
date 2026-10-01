@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.1.15
+// @version      3.1.16
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -18,7 +18,7 @@
 const ViewerTracker = (function() {
     'use strict';
 
-    const TIERSCOPE_VERSION = '3.1.15';
+    const TIERSCOPE_VERSION = '3.1.16';
     const API_TIMEOUT_MS = 10000;
     const DEFAULT_API_INTERVAL_SECONDS = 60;
     const DOM_FALLBACK_INTERVAL_SECONDS = 60;
@@ -194,7 +194,7 @@ const ViewerTracker = (function() {
                     const statusEl = document.getElementById('auto-status');
                     if (statusEl) {
                         statusEl.textContent = 'DOM mismatch - check console';
-                        statusEl.style.color = '#ff4444';
+                        statusEl.style.color = 'var(--panel-negative)';
                     }
                 }
             }
@@ -208,7 +208,7 @@ const ViewerTracker = (function() {
                 const statusEl = document.getElementById('auto-status');
                 if (statusEl && isAutoRefreshOn) {
                     statusEl.textContent = 'Next: ' + countdownSeconds + 's';
-                    statusEl.style.color = '#32CD32';
+                    statusEl.style.color = 'var(--panel-positive)';
                 }
             }
             domHealthStatus.consecutiveFailures = 0;
@@ -243,6 +243,62 @@ const ViewerTracker = (function() {
     var currentScale = 1.0;
     const PANEL_GEOMETRY_KEY = 'tierscope:ui:geometry:v1';
     var panelGeometry = loadPanelGeometry();
+    const PANEL_THEME_KEY = 'tierscope:ui:theme:v1';
+    // Dark mode is the default; theme is a UI preference, independent of Reset.
+    var isDarkMode = true;
+    try { isDarkMode = GM_getValue(PANEL_THEME_KEY, 'dark') !== 'bright'; }
+    catch (error) { /* Keep dark mode when preferences are unavailable. */ }
+    const PANEL_THEME_COLORS = {
+        rgb: ['20,20,30', '248,249,252'],
+        text: ['#ffffff', '#202330'],
+        muted: ['#aaa', '#596174'],
+        secondary: ['#ddd', '#41485a'],
+        subtle: ['#888', '#626978'],
+        faint: ['#666', '#687183'],
+        button: ['#333', '#e3e6ed'],
+        'button-strong': ['#444', '#d7dce6'],
+        divider: ['#555', '#b6bdca'],
+        'row-rgb': ['255,255,255', '0,0,0'],
+        settings: ['#20202b', '#f0f2f7'],
+        solid: ['#14141e', '#f8f9fc'],
+        tooltip: ['#171722', '#ffffff'],
+        positive: ['#32CD32', '#23751f'],
+        warning: ['#ffd43b', '#825d00'],
+        negative: ['#ff4444', '#b52332'],
+        paused: ['#ff9999', '#b52332'],
+        'delta-up': ['#69BE45', '#357b21'],
+        'delta-down': ['#ff7777', '#b52332'],
+        accent: ['#ff69b4', '#b42370']
+    };
+
+    function themeColor(token) { return PANEL_THEME_COLORS[token][isDarkMode ? 0 : 1]; }
+
+    function setThemeVariables(element) {
+        if (!element) return;
+        Object.keys(PANEL_THEME_COLORS).forEach(function(token) {
+            element.style.setProperty('--panel-' + token, themeColor(token));
+        });
+        element.style.colorScheme = isDarkMode ? 'dark' : 'light';
+    }
+
+    function applyPanelTheme(redraw) {
+        var container = document.getElementById('tracker-container');
+        if (!container) return;
+        setThemeVariables(container);
+        container.setAttribute('data-theme', isDarkMode ? 'dark' : 'bright');
+        setThemeVariables(document.getElementById('tierscope-chart-tooltip'));
+        var toggle = document.getElementById('dark-mode-toggle');
+        if (toggle) toggle.checked = isDarkMode;
+        var control = document.getElementById('dark-mode-control');
+        if (control) control.title = isDarkMode ? 'Dark mode on — switch to bright mode' : 'Bright mode on — switch to dark mode';
+        updateContainerOpacity(panelBackgroundPercent);
+        if (redraw) {
+            hideChartTooltip();
+            updateDisplay();
+            redrawPanelCharts();
+        }
+    }
+
     const MINI_METRIC_KEY = 'tierscope:ui:miniMetric:v1';
     const MINI_METRICS = ['room', 'withTokens', 'total'];
     var miniMetric = 'room';
@@ -263,9 +319,9 @@ const ViewerTracker = (function() {
         var source = lastAcceptedAcquisition ? lastAcceptedAcquisition.source : sample ? 'Saved' : 'No sample';
         el.textContent = sessionStorageNotice ? 'Local only' : (isAutoRefreshOn ? source : 'Paused') +
             (sample ? ' · ' + formatSampleAge(sample.timestamp) : '');
-        el.style.color = sessionStorageNotice ? '#ffd43b' : isAutoRefreshOn ? '#aaa' : '#ff9999';
+        el.style.color = sessionStorageNotice ? 'var(--panel-warning)' : isAutoRefreshOn ? 'var(--panel-muted)' : 'var(--panel-paused)';
         var policyMessage = requestPolicyMessage(readRequestPolicy());
-        if (policyMessage && !sessionStorageNotice) { el.textContent = policyMessage; el.style.color = '#ffd43b'; }
+        if (policyMessage && !sessionStorageNotice) { el.textContent = policyMessage; el.style.color = 'var(--panel-warning)'; }
         el.title = sessionStorageNotice || (policyMessage ? policyMessage + '. ' : '') + source + (sample ? ': ' + new Date(sample.timestamp).toISOString() : '') +
             '. Age of the last accepted sample. ' + (isAutoRefreshOn ? 'Next attempt: ' + countdownSeconds + 's.' : 'Automatic scans paused.');
     }
@@ -280,7 +336,7 @@ const ViewerTracker = (function() {
             var change = comparison ? value - old : null;
             var text = change === null ? '' : change > 0 ? '+' + compactNumber(change) : change < 0 ? '−' + compactNumber(-change) : '0';
             el.textContent = text;
-            el.style.color = change > 0 ? '#69BE45' : change < 0 ? '#ff7777' : '#ffd43b';
+            el.style.color = change > 0 ? 'var(--panel-delta-up)' : change < 0 ? 'var(--panel-delta-down)' : 'var(--panel-warning)';
             el.title = change === null ? 'Waiting for a fresh sample and comparison history' : 'Change versus ' + mode + ': ' + change;
             return text;
         }
@@ -324,7 +380,7 @@ const ViewerTracker = (function() {
         var values = points.map(function(p) { return p.value; });
         var min = Math.min.apply(null, values), max = Math.max.apply(null, values);
         canvas.title += '; range ' + min + '–' + max + '; ' + points.length + ' samples through ' + new Date(end).toISOString();
-        ctx.strokeStyle = miniMetric === 'withTokens' ? '#ff69b4' : miniMetric === 'total' ? '#ffffff' : '#69BE45';
+        ctx.strokeStyle = miniMetric === 'withTokens' ? '#ff69b4' : miniMetric === 'total' ? themeColor('text') : '#69BE45';
         ctx.fillStyle = ctx.strokeStyle; ctx.lineWidth = 2; ctx.lineJoin = 'round';
         ctx.beginPath();
         points.forEach(function(point, i) {
@@ -418,8 +474,8 @@ const ViewerTracker = (function() {
                     '" aria-controls="tier-row-' + row.key + '" aria-expanded="false" ' +
                     'aria-label="Restore ' + row.label + ' row" title="Restore ' + row.label + ' row" ' +
                     'style="display:none;align-items:center;justify-content:center;flex:0 0 22px;width:22px;height:22px;' +
-                    'box-sizing:border-box;padding:0;border:1px solid ' + row.color + ';border-radius:3px;' +
-                    'background:rgba(255,255,255,0.05);color:white;font-size:12px;line-height:1;cursor:pointer;">' +
+                    'box-sizing:border-box;padding:0;border:1px solid ' + (row.key === 'total' ? 'var(--panel-text)' : row.color) + ';border-radius:3px;' +
+                    'background:rgba(var(--panel-row-rgb),0.05);color:var(--panel-text);font-size:12px;line-height:1;cursor:pointer;">' +
                     panelRowMarker(row) + '</button>';
             }).join('') + '</div>';
     }
@@ -546,14 +602,14 @@ const ViewerTracker = (function() {
                 '). ' + context + '. Click to restore row.';
             button.setAttribute('aria-label', 'Restore ' + row.label + ' row. ' + context + ': ' + value.toLocaleString());
             button.style.background = highlights && highlights[historyKey] ?
-                'rgba(50, 205, 50, 0.22)' : 'rgba(255,255,255,calc(0.05 * var(--tier-background-scale, 1)))';
+                'rgba(50, 205, 50, 0.22)' : 'rgba(var(--panel-row-rgb),calc(0.05 * var(--tier-background-scale, 1)))';
         });
     }
 
     const TREND_ICONS = {
-        up: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#32CD32" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>',
-        down: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ff4444" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>',
-        stable: '<svg width="16" height="16" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="#ffd43b"/></svg>'
+        up: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--panel-positive)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>',
+        down: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--panel-negative)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>',
+        stable: '<svg width="16" height="16" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="var(--panel-warning)"/></svg>'
     };
 
     const TREND_PRESETS = {
@@ -1397,13 +1453,13 @@ const ViewerTracker = (function() {
     function updateTrackingTimer() {
         var controlTimerEl = document.getElementById('control-tracking-timer');
         var displayTime = '00:00:00';
-        var displayColor = '#888';
+        var displayColor = 'var(--panel-subtle)';
         if (isPaused) {
             displayTime = formatElapsedTime(pausedElapsedTime);
-            displayColor = '#ff4444';
+            displayColor = 'var(--panel-negative)';
         } else if (trackingStartTime) {
             displayTime = formatElapsedTime(Date.now() - trackingStartTime);
-            displayColor = '#ffd43b';
+            displayColor = 'var(--panel-warning)';
         }
         if (controlTimerEl) {
             controlTimerEl.textContent = displayTime;
@@ -1490,9 +1546,9 @@ const ViewerTracker = (function() {
                 btn.style.borderColor = '#32CD32';
                 btn.title = 'Auto-escalation ON - Click to disable';
             } else {
-                btn.style.background = '#333';
-                btn.style.color = '#aaa';
-                btn.style.borderColor = '#555';
+                btn.style.background = 'var(--panel-button)';
+                btn.style.color = 'var(--panel-muted)';
+                btn.style.borderColor = 'var(--panel-divider)';
                 btn.title = 'Auto-escalation OFF - Click to enable';
             }
         }
@@ -2439,7 +2495,7 @@ const ViewerTracker = (function() {
                 pendingHistoryGap = true;
                 if (statusEl) {
                     statusEl.textContent = 'Scan skipped (unreliable)';
-                    statusEl.style.color = '#ff4444';
+                    statusEl.style.color = 'var(--panel-negative)';
                 }
                 return;
             }
@@ -2652,9 +2708,9 @@ const ViewerTracker = (function() {
                 btn.style.color = '#fff';
                 btn.style.borderColor = '#4169E1';
             } else {
-                btn.style.background = '#333';
-                btn.style.color = '#aaa';
-                btn.style.borderColor = '#555';
+                btn.style.background = 'var(--panel-button)';
+                btn.style.color = 'var(--panel-muted)';
+                btn.style.borderColor = 'var(--panel-divider)';
             }
         });
     }
@@ -2665,12 +2721,12 @@ const ViewerTracker = (function() {
         var trendHeaderLabel = document.getElementById('trend-header-label');
         if (!trendContainer) return;
         if (restoredDisplayFrame) {
-            trendContainer.innerHTML = '<div style="font-size:8px;color:#aaa;text-align:center;padding:8px;">Saved snapshot — trends resume after a new sample.</div>';
+            trendContainer.innerHTML = '<div style="font-size:8px;color:var(--panel-muted);text-align:center;padding:8px;">Saved snapshot — trends resume after a new sample.</div>';
             if (trendHeaderLabel) trendHeaderLabel.textContent = '📈 TREND';
             return;
         }
         if (!hasTrendBaseline) {
-            trendContainer.innerHTML = '<div style="font-size:8px;color:#666;text-align:center;padding:8px;">Waiting for scan...</div>';
+            trendContainer.innerHTML = '<div style="font-size:8px;color:var(--panel-faint);text-align:center;padding:8px;">Waiting for scan...</div>';
             if (trendHeaderLabel) trendHeaderLabel.textContent = '📈 TREND';
             return;
         }
@@ -2690,7 +2746,7 @@ const ViewerTracker = (function() {
         var actualMinutes = comparison.actualMinutes;
         if (!comparisonCounts) {
             var waitingText = history.timestamps.length === 1 ? 'Waiting for second scan...' : 'Waiting for scan...';
-            trendContainer.innerHTML = '<div style="font-size:8px;color:#666;text-align:center;padding:8px;">' + waitingText + '</div>';
+            trendContainer.innerHTML = '<div style="font-size:8px;color:var(--panel-faint);text-align:center;padding:8px;">' + waitingText + '</div>';
             if (trendHeaderLabel) trendHeaderLabel.textContent = '📈 TREND';
             return;
         }
@@ -2705,7 +2761,7 @@ const ViewerTracker = (function() {
         function buildTrendItem(name, current, prev, isSpecial, isLarge) {
             var diff = current - prev;
             var deltaText = diff !== 0 ? (diff > 0 ? '+' + diff : diff) : '';
-            var deltaColor = diff > 0 ? '#32CD32' : '#ff4444';
+            var deltaColor = diff > 0 ? 'var(--panel-positive)' : 'var(--panel-negative)';
             // Color-coded background based on delta direction
             var bgStyle;
             if (diff > 0) {
@@ -2883,9 +2939,10 @@ const ViewerTracker = (function() {
         if (!tooltip) {
             tooltip = document.createElement('div'); tooltip.id = 'tierscope-chart-tooltip';
             tooltip.setAttribute('role', 'tooltip');
-            tooltip.style.cssText = 'position:fixed;z-index:2147483647;pointer-events:none;max-width:310px;padding:7px 9px;background:#171722;color:#fff;border:1px solid #a36acb;border-radius:5px;font:12px/1.5 Arial,sans-serif;white-space:pre-line;box-shadow:0 3px 12px #0008;';
+            tooltip.style.cssText = 'position:fixed;z-index:2147483647;pointer-events:none;max-width:310px;padding:7px 9px;background:var(--panel-tooltip);color:var(--panel-text);border:1px solid #a36acb;border-radius:5px;font:12px/1.5 Arial,sans-serif;white-space:pre-line;box-shadow:0 3px 12px #0008;';
             document.body.appendChild(tooltip);
         }
+        setThemeVariables(tooltip);
         tooltip.textContent = model.label + ' · ' + model.values[index].toLocaleString() + '\n' +
             new Date(model.times[index]).toLocaleString() + '\n' +
             'Range: ' + model.plot.min.toLocaleString() + '–' + model.plot.max.toLocaleString() +
@@ -2969,7 +3026,7 @@ const ViewerTracker = (function() {
         PANEL_ROWS.forEach(function(row) {
             if (collapsedRows.has(row.key)) return;
             var key = row.key === 'withtokens' ? 'withTokens' : row.key === 'anon' ? 'anonymous' : row.key;
-            drawSparkline('spark-' + row.key, displayHistory[key], row.color,
+            drawSparkline('spark-' + row.key, displayHistory[key], row.key === 'total' ? themeColor('text') : row.color,
                 panelChartHeights[row.key] || row.height, displayHistory.timestamps, breaks, lastIndex, row.label);
         });
     }
@@ -3038,31 +3095,31 @@ const ViewerTracker = (function() {
         if (expandedCountdown) {
             if (isScanning) {
                 expandedCountdown.textContent = 'scanning...';
-                expandedCountdown.style.color = '#ffd43b';
+                expandedCountdown.style.color = 'var(--panel-warning)';
             } else if (isAutoRefreshOn) {
                 expandedCountdown.textContent = 'next: ' + countdownSeconds + 's';
-                expandedCountdown.style.color = '#32CD32';
+                expandedCountdown.style.color = 'var(--panel-positive)';
             } else {
                 expandedCountdown.textContent = 'paused';
-                expandedCountdown.style.color = '#ff4444';
+                expandedCountdown.style.color = 'var(--panel-negative)';
             }
         }
         if (controlNextScan) {
             if (isScanning) {
                 controlNextScan.textContent = 'Scanning...';
-                controlNextScan.style.color = '#ffd43b';
+                controlNextScan.style.color = 'var(--panel-warning)';
             } else if (isAutoRefreshOn) {
                 controlNextScan.textContent = 'Next: ' + countdownSeconds + 's';
-                controlNextScan.style.color = '#32CD32';
+                controlNextScan.style.color = 'var(--panel-positive)';
             } else {
                 controlNextScan.textContent = 'Paused';
-                controlNextScan.style.color = '#ff4444';
+                controlNextScan.style.color = 'var(--panel-negative)';
             }
         }
         if (policyMessage) {
             [statusEl, expandedCountdown, controlNextScan].forEach(function(el) {
                 if (!el) return;
-                el.textContent = policyMessage; el.style.color = '#ffd43b';
+                el.textContent = policyMessage; el.style.color = 'var(--panel-warning)';
                 el.title = policyMessage + (policy.blocked ? '. Automatic scans stopped. After resolving access, use Resume to retry.' :
                     '. No API or DOM acquisition before ' + new Date(policy.until).toLocaleString() + '.');
             });
@@ -3071,13 +3128,13 @@ const ViewerTracker = (function() {
         if (!statusEl) return;
         if (isScanning) {
             statusEl.textContent = 'Scanning...';
-            statusEl.style.color = '#ffd43b';
+            statusEl.style.color = 'var(--panel-warning)';
         } else if (isAutoRefreshOn) {
             statusEl.textContent = 'Next: ' + countdownSeconds + 's';
-            statusEl.style.color = '#32CD32';
+            statusEl.style.color = 'var(--panel-positive)';
         } else {
             statusEl.textContent = 'Auto: OFF';
-            statusEl.style.color = '#ff4444';
+            statusEl.style.color = 'var(--panel-negative)';
         }
     }
 
@@ -3272,7 +3329,7 @@ const ViewerTracker = (function() {
         panelBackgroundPercent = Math.max(30, Math.min(100, numeric));
         var container = document.getElementById('tracker-container');
         if (!container) return;
-        container.style.backgroundColor = 'rgba(20,20,30,' + panelBackgroundPercent / 100 + ')';
+        container.style.backgroundColor = 'rgba(' + themeColor('rgb') + ',' + panelBackgroundPercent / 100 + ')';
         // Only standard tier fills use this variable. Green highlights retain their
         // original fixed alpha, as do summary rows, controls, text and borders.
         container.style.setProperty('--tier-background-scale', String(panelBackgroundPercent / 95));
@@ -3310,7 +3367,7 @@ const ViewerTracker = (function() {
 
         var html =
             '<div id="tracker-container" style="' +
-                'position:fixed;top:80px;right:20px;background:rgba(20,20,30,0.95);color:white;padding:5px;' +
+                'position:fixed;top:80px;right:20px;background:rgba(20,20,30,0.95);color:var(--panel-text);padding:5px;' +
                 'border-radius:6px;font-family:Arial,sans-serif;font-size:9px;z-index:999999;width:' + BASE_WIDTH_MINI + 'px;' +
                 'border:1px solid #ff69b4;transition:width 0.3s ease;cursor:default;user-select:none;' +
             '">' +
@@ -3318,18 +3375,18 @@ const ViewerTracker = (function() {
                     'display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;' +
                     'border-bottom:1px solid #ff69b4;padding-bottom:3px;cursor:move;' +
                 '">' +
-                    '<span id="header-text" style="font-weight:bold;color:#ff69b4;font-size:10px;">USERS: 0 (H:0)</span>' +
+                    '<span id="header-text" style="font-weight:bold;color:var(--panel-accent);font-size:10px;">USERS: 0 (H:0)</span>' +
                     '<span id="mini-room-change" style="font-size:8px;margin:0 3px;display:none;"></span>' +
                     '<div style="display:flex;align-items:center;gap:5px;">' +
-                        '<button type="button" id="btn-standard-size" title="Restore standard panel size (100%)" aria-label="Restore standard panel size" style="background:#333;border:1px solid #555;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;">100%</button>' +
-                        '<button id="btn-toggle" style="background:#333;border:1px solid #555;color:#fff;border-radius:3px;cursor:pointer;font-size:9px;padding:1px 4px;flex-shrink:0;">+</button>' +
+                        '<button type="button" id="btn-standard-size" title="Restore standard panel size (100%)" aria-label="Restore standard panel size" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;">100%</button>' +
+                        '<button id="btn-toggle" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:9px;padding:1px 4px;flex-shrink:0;">+</button>' +
                     '</div>' +
                 '</div>' +
 
                 '<div id="minimized-view" style="display:block;position:relative;">' +
                     '<div style="display:flex;align-items:center;justify-content:space-between;gap:3px;">' +
-                        '<button type="button" id="mini-metric" style="background:transparent;border:0;color:#ddd;font:inherit;cursor:pointer;padding:2px 0;" aria-label="Cycle chart metric">Room total ▾</button>' +
-                        '<span id="mini-high" style="color:#888;font-size:8px;"></span>' +
+                        '<button type="button" id="mini-metric" style="background:transparent;border:0;color:var(--panel-secondary);font:inherit;cursor:pointer;padding:2px 0;" aria-label="Cycle chart metric">Room total ▾</button>' +
+                        '<span id="mini-high" style="color:var(--panel-subtle);font-size:8px;"></span>' +
                     '</div>' +
                     '<canvas id="mini-chart" width="140" height="36" style="display:block;width:100%;height:36px;" role="img" aria-label="Recent audience history"></canvas>' +
                     '<div style="display:flex;justify-content:space-between;gap:4px;margin:3px 0;">' +
@@ -3338,26 +3395,26 @@ const ViewerTracker = (function() {
                     '</div>' +
                     '<div style="display:flex;align-items:center;gap:3px;">' +
                         '<span id="mini-freshness" style="flex:1;min-width:0;font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">No sample</span>' +
-                        '<button type="button" id="btn-auto" style="background:#333;border:0;color:#fff;border-radius:3px;cursor:pointer;" title="Pause or resume scans">⏸</button>' +
-                        '<button type="button" id="mini-settings-toggle" style="background:#333;border:0;color:#fff;border-radius:3px;cursor:pointer;" aria-label="Scan interval settings" aria-expanded="false" aria-controls="mini-settings">◷</button>' +
-                        '<button type="button" id="btn-expand" style="background:#333;border:0;color:#fff;border-radius:3px;font-size:9px;cursor:pointer;" title="Expand panel" aria-label="Expand panel">↗</button>' +
+                        '<button type="button" id="btn-auto" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;cursor:pointer;" title="Pause or resume scans">⏸</button>' +
+                        '<button type="button" id="mini-settings-toggle" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;cursor:pointer;" aria-label="Scan interval settings" aria-expanded="false" aria-controls="mini-settings">◷</button>' +
+                        '<button type="button" id="btn-expand" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;font-size:9px;cursor:pointer;" title="Expand panel" aria-label="Expand panel">↗</button>' +
                     '</div>' +
-                    '<div id="mini-settings" style="display:none;position:absolute;left:0;right:0;top:17px;background:#20202b;border:1px solid #ff69b4;border-radius:4px;padding:5px;z-index:2;" role="group" aria-label="Scan interval">' +
-                        '<div style="display:flex;justify-content:space-between;align-items:center;font-size:9px;color:#ddd;">Scan interval <button type="button" id="mini-settings-close" aria-label="Close scan interval settings" title="Close (Escape)" style="background:#333;color:white;border:0;border-radius:3px;cursor:pointer;padding:1px 5px;font-size:13px;">×</button></div>' +
-                    '<div style="display:flex;align-items:center;justify-content:center;gap:3px;margin:3px 0;padding:2px;background:rgba(255,255,255,0.05);border-radius:3px;">' +
-                        '<button id="btn-timer-down" style="background:#444;border:none;color:#fff;border-radius:2px;cursor:pointer;font-size:9px;padding:1px 4px;font-weight:bold;">−</button>' +
-                        '<span id="timer-display" style="font-size:11px;color:#ffd43b;font-weight:bold;min-width:28px;">60s</span>' +
-                        '<button id="btn-timer-up" style="background:#444;border:none;color:#fff;border-radius:2px;cursor:pointer;font-size:9px;padding:1px 4px;font-weight:bold;">+</button>' +
+                    '<div id="mini-settings" style="display:none;position:absolute;left:0;right:0;top:17px;background:var(--panel-settings);border:1px solid #ff69b4;border-radius:4px;padding:5px;z-index:2;" role="group" aria-label="Scan interval">' +
+                        '<div style="display:flex;justify-content:space-between;align-items:center;font-size:9px;color:var(--panel-secondary);">Scan interval <button type="button" id="mini-settings-close" aria-label="Close scan interval settings" title="Close (Escape)" style="background:var(--panel-button);color:var(--panel-text);border:0;border-radius:3px;cursor:pointer;padding:1px 5px;font-size:13px;">×</button></div>' +
+                    '<div style="display:flex;align-items:center;justify-content:center;gap:3px;margin:3px 0;padding:2px;background:rgba(var(--panel-row-rgb),0.05);border-radius:3px;">' +
+                        '<button id="btn-timer-down" style="background:var(--panel-button-strong);border:none;color:var(--panel-text);border-radius:2px;cursor:pointer;font-size:9px;padding:1px 4px;font-weight:bold;">−</button>' +
+                        '<span id="timer-display" style="font-size:11px;color:var(--panel-warning);font-weight:bold;min-width:28px;">60s</span>' +
+                        '<button id="btn-timer-up" style="background:var(--panel-button-strong);border:none;color:var(--panel-text);border-radius:2px;cursor:pointer;font-size:9px;padding:1px 4px;font-weight:bold;">+</button>' +
                     '</div>' +
 
                     '<div style="display:flex;gap:2px;justify-content:center;margin-top:3px;">' +
-                        '<button class="timer-preset" data-time="30" style="background:#333;border:1px solid #555;color:#aaa;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">30s</button>' +
+                        '<button class="timer-preset" data-time="30" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">30s</button>' +
                         '<button class="timer-preset" data-time="60" style="background:#ff69b4;border:1px solid #ff69b4;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">60s</button>' +
-                        '<button class="timer-preset" data-time="120" style="background:#333;border:1px solid #555;color:#aaa;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">2m</button>' +
-                        '<button class="timer-preset" data-time="300" style="background:#333;border:1px solid #555;color:#aaa;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">5m</button>' +
+                        '<button class="timer-preset" data-time="120" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">2m</button>' +
+                        '<button class="timer-preset" data-time="300" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">5m</button>' +
                     '</div>' +
 
-                        '<div id="auto-status" style="margin-top:3px;font-size:8px;color:#aaa;">Starting...</div>' +
+                        '<div id="auto-status" style="margin-top:3px;font-size:8px;color:var(--panel-muted);">Starting...</div>' +
                     '</div>' +
                 '</div>' +
 
@@ -3367,20 +3424,20 @@ const ViewerTracker = (function() {
         Object.keys(TIERS).forEach(function(key) {
             var t = TIERS[key];
             html +=
-                '<div id="tier-row-' + key + '" data-tier="' + key + '" style="display:flex;align-items:center;padding:1px 3px;margin:1px 0;background:rgba(255,255,255,calc(0.05 * var(--tier-background-scale, 1)));border-radius:3px;border-left:3px solid ' + t.color + ';">' +
+                '<div id="tier-row-' + key + '" data-tier="' + key + '" style="display:flex;align-items:center;padding:1px 3px;margin:1px 0;background:rgba(var(--panel-row-rgb),calc(0.05 * var(--tier-background-scale, 1)));border-radius:3px;border-left:3px solid ' + t.color + ';">' +
                     '<div style="width:30px;flex-shrink:0;text-align:center;">' +
                         collapseMarkerHtml(key) +
                     '</div>' +
                     '<canvas id="spark-' + key + '" width="105" height="28" style="flex:1;margin:0 4px;"></canvas>' +
                     '<div style="text-align:right;width:48px;flex-shrink:0;">' +
                         '<span id="count-' + key + '" style="font-weight:bold;color:' + t.color + ';font-size:14px;">0</span>' +
-                        '<div id="high-' + key + '" style="font-size:8px;color:#32CD32;margin-top:1px;">H:0</div>' +
+                        '<div id="high-' + key + '" style="font-size:8px;color:var(--panel-positive);margin-top:1px;">H:0</div>' +
                     '</div>' +
                 '</div>';
         });
 
         html +=
-                '<div id="summary-tier-rows" style="border-top:1px solid #555;margin-top:4px;padding-top:4px;">' +
+                '<div id="summary-tier-rows" style="border-top:1px solid var(--panel-divider);margin-top:4px;padding-top:4px;">' +
                     '<div id="tier-row-withtokens" data-tier="withtokens" style="display:flex;align-items:center;padding:2px 3px;background:rgba(255,105,180,0.15);border-radius:3px;border:1px solid #ff69b4;margin-bottom:3px;">' +
                         '<div style="width:30px;flex-shrink:0;text-align:center;">' +
                             collapseMarkerHtml('withtokens') +
@@ -3389,17 +3446,17 @@ const ViewerTracker = (function() {
                         '<div style="text-align:right;width:48px;flex-shrink:0;">' +
                             '<span id="count-withtokens" style="font-weight:bold;color:#ff69b4;font-size:14px;">0</span>' +
                             '<span id="pct-withtokens" style="font-size:8px;color:#ff69b4;margin-left:2px;">0%</span>' +
-                            '<div id="high-withtokens" style="font-size:8px;color:#32CD32;margin-top:1px;">H:0</div>' +
+                            '<div id="high-withtokens" style="font-size:8px;color:var(--panel-positive);margin-top:1px;">H:0</div>' +
                         '</div>' +
                     '</div>' +
-                    '<div id="tier-row-total" data-tier="total" style="display:flex;align-items:center;padding:2px 3px;background:rgba(255,255,255,0.1);border-radius:3px;">' +
+                    '<div id="tier-row-total" data-tier="total" style="display:flex;align-items:center;padding:2px 3px;background:rgba(var(--panel-row-rgb),0.1);border-radius:3px;">' +
                         '<div style="width:30px;flex-shrink:0;text-align:center;">' +
                             collapseMarkerHtml('total') +
                         '</div>' +
                         '<canvas id="spark-total" width="105" height="28" style="flex:1;margin:0 4px;"></canvas>' +
                         '<div style="text-align:right;width:48px;flex-shrink:0;">' +
-                            '<span id="count-total" style="font-weight:bold;color:#fff;font-size:14px;">0</span>' +
-                            '<div id="high-total" style="font-size:8px;color:#32CD32;margin-top:1px;">H:0</div>' +
+                            '<span id="count-total" style="font-weight:bold;color:var(--panel-text);font-size:14px;">0</span>' +
+                            '<div id="high-total" style="font-size:8px;color:var(--panel-positive);margin-top:1px;">H:0</div>' +
                         '</div>' +
                     '</div>' +
                 '</div>' +
@@ -3412,7 +3469,7 @@ const ViewerTracker = (function() {
                         '<canvas id="spark-anon" width="105" height="50" style="flex:1;margin:0 4px;"></canvas>' +
                         '<div style="text-align:right;width:48px;flex-shrink:0;">' +
                             '<span id="anon-ratio-full" style="font-size:13px;font-weight:bold;color:#ff69b4;">--</span>' +
-                            '<div id="high-anon" style="font-size:8px;color:#32CD32;margin-top:1px;">H:0</div>' +
+                            '<div id="high-anon" style="font-size:8px;color:var(--panel-positive);margin-top:1px;">H:0</div>' +
                         '</div>' +
                     '</div>' +
                 '</div>' +
@@ -3424,46 +3481,46 @@ const ViewerTracker = (function() {
                         '<span id="trend-header-label" style="font-size:9px;font-weight:bold;color:#4169E1;">📈 TREND</span>' +
                         '<div style="display:flex;gap:2px;flex-wrap:wrap;">' +
                             '<button class="trend-preset-btn" data-mode="last" style="background:#4169E1;border:1px solid #4169E1;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Last</button>' +
-                            '<button class="trend-preset-btn" data-mode="5min" style="background:#333;border:1px solid #555;color:#aaa;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">5m</button>' +
-                            '<button class="trend-preset-btn" data-mode="15min" style="background:#333;border:1px solid #555;color:#aaa;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">15m</button>' +
-                            '<button class="trend-preset-btn" data-mode="30min" style="background:#333;border:1px solid #555;color:#aaa;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">30m</button>' +
-                            '<button class="trend-preset-btn" data-mode="1hour" style="background:#333;border:1px solid #555;color:#aaa;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">1h</button>' +
-                            '<button class="trend-preset-btn" data-mode="start" style="background:#333;border:1px solid #555;color:#aaa;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Start</button>' +
+                            '<button class="trend-preset-btn" data-mode="5min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">5m</button>' +
+                            '<button class="trend-preset-btn" data-mode="15min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">15m</button>' +
+                            '<button class="trend-preset-btn" data-mode="30min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">30m</button>' +
+                            '<button class="trend-preset-btn" data-mode="1hour" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">1h</button>' +
+                            '<button class="trend-preset-btn" data-mode="start" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Start</button>' +
                             '<button id="btn-trend-auto" style="background:#32CD32;border:1px solid #32CD32;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;" title="Auto-escalation ON - Click to disable">AUTO</button>' +
                         '</div>' +
                     '</div>' +
                     '<div id="trend-container" style="min-height:30px;">' +
-                        '<div style="font-size:8px;color:#666;text-align:center;padding:8px;">Waiting for scan...</div>' +
+                        '<div style="font-size:8px;color:var(--panel-faint);text-align:center;padding:8px;">Waiting for scan...</div>' +
                     '</div>' +
                     '</div>' +
                     '<div id="playback-controls" style="display:none;position:absolute;top:5px;left:0;right:0;bottom:0;padding:0 2px;box-sizing:border-box;grid-template-rows:minmax(14px,1fr) 14px 12px;gap:2px;" aria-label="Playback controls">' +
-                        '<div id="gif-export-controls" style="display:none;position:absolute;inset:0;z-index:1;align-items:center;justify-content:center;gap:5px;background:#14141e;border-radius:3px;padding:3px;">' +
-                            '<span id="gif-export-status" role="status" style="font-size:8px;color:#ddd;overflow-wrap:anywhere;"></span>' +
-                            '<button id="btn-cancel-gif" hidden style="font-size:8px;cursor:pointer;">Cancel</button>' +
+                        '<div id="gif-export-controls" style="display:none;position:absolute;inset:0;z-index:1;align-items:center;justify-content:center;gap:5px;background:var(--panel-solid);border-radius:3px;padding:3px;">' +
+                            '<span id="gif-export-status" role="status" style="font-size:8px;color:var(--panel-secondary);overflow-wrap:anywhere;"></span>' +
+                            '<button id="btn-cancel-gif" hidden style="font-size:8px;cursor:pointer;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;">Cancel</button>' +
                         '</div>' +
                         '<div style="display:flex;align-items:center;justify-content:space-between;gap:3px;">' +
-                            '<strong style="font-size:9px;color:#ffd43b;">PLAYBACK</strong>' +
-                            '<button id="playback-play" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#4169E1;color:white;border:1px solid #555;border-radius:2px;cursor:pointer;">Pause</button>' +
-                            '<select id="playback-speed" aria-label="Playback speed" style="font-size:8px;height:15px;margin:0;padding:0;background:#333;color:white;border:1px solid #555;"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select>' +
+                            '<strong style="font-size:9px;color:var(--panel-warning);">PLAYBACK</strong>' +
+                            '<button id="playback-play" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#4169E1;color:white;border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Pause</button>' +
+                            '<select id="playback-speed" aria-label="Playback speed" style="font-size:8px;height:15px;margin:0;padding:0;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select>' +
                             '<button id="btn-export-gif" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#ff69b4;color:white;border:1px solid #ff69b4;border-radius:2px;cursor:pointer;" title="Download this Replay as a ' + GIF_WIDTH + ' × ' + GIF_HEIGHT + ' GIF">GIF</button>' +
-                            '<button id="playback-return" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#333;color:white;border:1px solid #555;border-radius:2px;cursor:pointer;">Return to Live</button>' +
+                            '<button id="playback-return" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Return to Live</button>' +
                         '</div>' +
                         '<div style="display:flex;align-items:center;gap:4px;min-width:0;">' +
-                        '<button type="button" id="playback-previous" title="Previous recorded sample (pauses Replay)" aria-label="Previous recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:#333;color:white;border:1px solid #555;border-radius:2px;cursor:pointer;">|&#9664;</button>' +
-                        '<input id="playback-scrubber" type="range" min="0" max="0" value="0" step="1" aria-label="Playback timeline" style="flex:1;min-width:0;width:100%;height:12px;margin:0;accent-color:#ffd43b;cursor:pointer;">' +
-                        '<button type="button" id="playback-next" title="Next recorded sample (pauses Replay)" aria-label="Next recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:#333;color:white;border:1px solid #555;border-radius:2px;cursor:pointer;">&#9654;|</button></div>' +
-                        '<div id="playback-position" style="font-size:9px;line-height:12px;text-align:center;color:#ddd;font-family:monospace;">00:00:00 / 00:00:00</div>' +
+                        '<button type="button" id="playback-previous" title="Previous recorded sample (pauses Replay)" aria-label="Previous recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">|&#9664;</button>' +
+                        '<input id="playback-scrubber" type="range" min="0" max="0" value="0" step="1" aria-label="Playback timeline" style="flex:1;min-width:0;width:100%;height:12px;margin:0;accent-color:var(--panel-warning);cursor:pointer;">' +
+                        '<button type="button" id="playback-next" title="Next recorded sample (pauses Replay)" aria-label="Next recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">&#9654;|</button></div>' +
+                        '<div id="playback-position" style="font-size:9px;line-height:12px;text-align:center;color:var(--panel-secondary);font-family:monospace;">00:00:00 / 00:00:00</div>' +
                     '</div>' +
                 '</div>' +
 
                 '<div id="control-field" style="margin-top:5px;padding:4px;background:rgba(65,105,225,0.15);border-radius:3px;border:1px solid #4169E1;">' +
                     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">' +
                         '<span style="font-size:9px;font-weight:bold;color:#4169E1;">🎛️ CONTROLS</span>' +
-                        '<button id="btn-replay" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:#333;color:#ffd43b;border:1px solid #555;border-radius:2px;cursor:pointer;" title="Replay recorded history">Replay</button>' +
-                        '<span style="font-size:11px;color:#32CD32;font-weight:bold;" id="control-next-scan">Next: 60s</span>' +
+                        '<button id="btn-replay" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-warning);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;" title="Replay recorded history">Replay</button>' +
+                        '<span style="font-size:11px;color:var(--panel-positive);font-weight:bold;" id="control-next-scan">Next: 60s</span>' +
                     '</div>' +
                     '<div id="control-action-row" style="display:grid;grid-template-columns:minmax(max-content,1fr) auto minmax(0,1fr);align-items:center;gap:3px;">' +
-                        '<span style="font-size:12px;color:#ffd43b;font-family:monospace;font-weight:bold;flex-shrink:0;" id="control-tracking-timer">00:00:00</span>' +
+                        '<span style="font-size:12px;color:var(--panel-warning);font-family:monospace;font-weight:bold;flex-shrink:0;" id="control-tracking-timer">00:00:00</span>' +
                         '<div id="control-action-buttons" style="display:flex;gap:3px;align-items:center;">' +
                             '<button id="btn-download-report" style="background:#4169E1;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 4px;display:flex;align-items:center;gap:2px;" title="Download tracking report">' +
                                 '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
@@ -3490,15 +3547,19 @@ const ViewerTracker = (function() {
                                 'Reset' +
                             '</button>' +
                         '</div>' +
+                        '<label id="dark-mode-control" style="justify-self:end;display:inline-flex;align-items:center;gap:2px;cursor:pointer;color:var(--panel-secondary);line-height:1;">' +
+                            '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 13a9 9 0 0 1-10-10 9 9 0 1 0 10 10Z"/></svg>' +
+                            '<input type="checkbox" id="dark-mode-toggle" checked aria-label="Dark mode" style="appearance:auto;width:12px;height:12px;margin:0;cursor:pointer;accent-color:#4169E1;">' +
+                        '</label>' +
                     '</div>' +
                 '</div>' +
 
                 '<div id="tracker-footer" style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:4px;margin-top:5px;min-height:14px;">' +
-                    '<div id="acquisition-status" style="max-width:80px;font-size:7px;color:#aaa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="No accepted sample yet">No sample</div>' +
+                    '<div id="acquisition-status" style="max-width:80px;font-size:7px;color:var(--panel-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="No accepted sample yet">No sample</div>' +
                     '<div id="background-slider-controls" style="display:flex;align-items:center;gap:3px;min-width:0;">' +
-                        '<svg width="11" height="13" viewBox="0 0 24 24" fill="none" stroke="#ffd43b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink:0;"><path d="M9 18h6M10 22h4M8 14a6 6 0 1 1 8 0c-1 1-1 2-1 4H9c0-2 0-3-1-4Z"/></svg>' +
+                        '<svg width="11" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--panel-warning)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink:0;"><path d="M9 18h6M10 22h4M8 14a6 6 0 1 1 8 0c-1 1-1 2-1 4H9c0-2 0-3-1-4Z"/></svg>' +
                         '<input type="range" id="opacity-slider" min="30" max="100" value="95" aria-label="Background opacity" style="flex:1;min-width:0;width:100%;height:12px;margin:0;cursor:pointer;accent-color:#ff69b4;" title="Main and standard tier background opacity">' +
-                        '<span id="opacity-value" style="font-size:8px;color:#ddd;min-width:23px;">95%</span>' +
+                        '<span id="opacity-value" style="font-size:8px;color:var(--panel-secondary);min-width:23px;">95%</span>' +
                     '</div>' +
                     '<div id="tierscope-logo" style="justify-self:end;display:flex;align-items:center;gap:3px;white-space:nowrap;opacity:0.6;transition:opacity 0.2s;" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0.6">' +
                     '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#ff69b4" stroke-width="2" style="flex-shrink:0;">' +
@@ -3506,13 +3567,20 @@ const ViewerTracker = (function() {
                         '<line x1="12" y1="2" x2="12" y2="22"/>' +
                         '<line x1="2" y1="12" x2="22" y2="12"/>' +
                     '</svg>' +
-                    '<span title="TierScope ' + TIERSCOPE_VERSION + '" style="font-size:7px;font-family:\'Courier New\',monospace;font-weight:bold;color:#ff69b4;letter-spacing:1px;">TIERSCOPE</span>' +
+                    '<span title="TierScope ' + TIERSCOPE_VERSION + '" style="font-size:7px;font-family:\'Courier New\',monospace;font-weight:bold;color:var(--panel-accent);letter-spacing:1px;">TIERSCOPE</span>' +
                     '</div>' +
                 '</div>' +
             '</div>';
 
         div.innerHTML = html;
         document.body.appendChild(div);
+        applyPanelTheme(false);
+        document.getElementById('dark-mode-toggle').addEventListener('change', function() {
+            isDarkMode = this.checked;
+            try { GM_setValue(PANEL_THEME_KEY, isDarkMode ? 'dark' : 'bright'); }
+            catch (error) { log('Could not save theme preference'); }
+            applyPanelTheme(true);
+        });
 
         var standardSize = document.getElementById('btn-standard-size');
         if (standardSize) {
@@ -3606,9 +3674,9 @@ const ViewerTracker = (function() {
                 updateCountdownDisplay();
                 var allPresets = document.querySelectorAll('.timer-preset');
                 for (var j = 0; j < allPresets.length; j++) {
-                    allPresets[j].style.background = '#333';
-                    allPresets[j].style.color = '#aaa';
-                    allPresets[j].style.borderColor = '#555';
+                    allPresets[j].style.background = 'var(--panel-button)';
+                    allPresets[j].style.color = 'var(--panel-muted)';
+                    allPresets[j].style.borderColor = 'var(--panel-divider)';
                 }
                 this.style.background = '#ff69b4';
                 this.style.color = '#fff';
@@ -3867,7 +3935,7 @@ const ViewerTracker = (function() {
                     if (highlights && highlights[tier]) {
                         rowEl.style.background = 'rgba(50, 205, 50, 0.22)';
                     } else {
-                        rowEl.style.background = 'rgba(255,255,255,calc(0.05 * var(--tier-background-scale, 1)))';
+                        rowEl.style.background = 'rgba(var(--panel-row-rgb),calc(0.05 * var(--tier-background-scale, 1)))';
                     }
                 }
             });
@@ -3898,7 +3966,7 @@ const ViewerTracker = (function() {
                 if (highlights && highlights['total']) {
                     totalRowEl.style.background = 'rgba(50, 205, 50, 0.22)';
                 } else {
-                    totalRowEl.style.background = 'rgba(255,255,255,0.1)';
+                    totalRowEl.style.background = 'rgba(var(--panel-row-rgb),0.1)';
                 }
             }
             
@@ -4000,7 +4068,7 @@ const ViewerTracker = (function() {
                     var statusEl = document.getElementById('auto-status');
                     if (statusEl) {
                         statusEl.textContent = 'No chat detected';
-                        statusEl.style.color = '#ff4444';
+                        statusEl.style.color = 'var(--panel-negative)';
                     }
                     return;
                 }
@@ -4028,7 +4096,7 @@ const ViewerTracker = (function() {
                         var statusEl = document.getElementById('auto-status');
                         if (statusEl) {
                             statusEl.textContent = isPaused ? 'Paused (restored)' : 'Paused';
-                            statusEl.style.color = '#ff4444';
+                            statusEl.style.color = 'var(--panel-negative)';
                         }
                         updateTrackingTimer();
                     }

@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **version 3.1.15**. For a quick introduction and installation link, see the [README](readme.md).
+Detailed reference for **version 3.1.16**. For a quick introduction and installation link, see the [README](readme.md).
 
 ## Contents
 
@@ -48,6 +48,7 @@ Keep only one enabled copy of TierScope. After an update, refresh existing room 
 | Row circle or icon | Collapse that row into the strip below the header. |
 | Boxed icon in the collapsed-row strip | Restore its row to its original position. |
 | Lamp slider | Adjust the main background and standard tier-row fills. |
+| Moon checkbox at the bottom right of Controls | Checked for dark mode; unchecked for bright mode. |
 | **TXT** | Download a text summary of the current session. |
 | **CSV** | Download every retained history sample, including collapsed tiers. |
 | **Replay** | Open recorded history for the current room. |
@@ -126,6 +127,12 @@ Reduced-motion preferences disable the animation while preserving the steady hig
 The lamp slider ranges from **30% to 100%**, starting at **95%**. Moving left makes the main panel fill, normal tier-row fills, and normal collapsed-marker fills more transparent.
 
 It preserves green high-value highlights, borders, text, charts, and the fills of the summary rows, Controls, and other buttons. It does not apply opacity to the whole panel. The setting is retained during navigation in the current page session, but is not saved across a full reload.
+
+### Dark and bright mode
+
+The moon checkbox at the bottom right of Controls starts checked for **dark mode** when no preference has been saved. Uncheck it for **bright mode**. The choice is remembered across rooms and refreshes, independently of session data; Reset keeps it. Other already-open tabs keep their current theme until reloaded.
+
+The theme applies to expanded and compact views, Replay controls, scan settings, and chart tooltips. Bright mode uses light surfaces and darker neutral/status text. The registered-total chart switches from white to dark so it stays visible; tier colors, including dark purple and dark blue, stay unchanged. High-value backgrounds and pulses retain their green treatment, and the opacity slider keeps the same scope. Switching themes does not resize the panel, change tracking, or move the Replay position. GIF exports keep their existing fixed palette.
 
 ## Request failures and retries
 
@@ -281,7 +288,7 @@ TierScope depends on Chaturbate’s room data and page structure; changes to eit
 - **Validation:** malformed or duplicate records reject the sample. Additional count-change checks can reject suspicious changes. Rejected samples add no history point.
 - **Fallback:** reads the Users tab if the API is unavailable or rejected, then attempts to return to Chat. Fallback attempts are spaced by at least 60 seconds, or the configured scan interval when longer.
 - **Freshness:** the last accepted data stays visible through failed attempts. The site’s Users tab and TierScope can refresh at different times.
-- **Storage format:** session schema version 2, with an optional `history.breaks` boolean array aligned to sample timestamps. Tab records are under `tierscope:tab:v2:<room>:<record-id>` and a Reset generation under `tierscope:epoch:v2:<room>`. Compatible legacy records under `tierscope:v1:<room>` are validated and migrated in memory; new saves use version 2. Releases before 3.1.8 do not read this per-tab format. Builds 3.1.8–3.1.14 can restore aggregate history but ignore the optional gap metadata. Row visibility preferences are stored separately under `tierscope:ui:collapsedRows:v1`, and position/scale under `tierscope:ui:geometry:v1`.
+- **Storage format:** session schema version 2, with an optional `history.breaks` boolean array aligned to sample timestamps. Tab records are under `tierscope:tab:v2:<room>:<record-id>` and a Reset generation under `tierscope:epoch:v2:<room>`. Compatible legacy records under `tierscope:v1:<room>` are validated and migrated in memory; new saves use version 2. Releases before 3.1.8 do not read this per-tab format. Builds 3.1.8–3.1.14 can restore aggregate history but ignore the optional gap metadata. Row visibility preferences are stored separately under `tierscope:ui:collapsedRows:v1`, position/scale under `tierscope:ui:geometry:v1`, and the theme under `tierscope:ui:theme:v1`.
 - **Retry state:** `tierscope:requests:v1:<origin>` stores shared retry timing and access-denial status. It contains no viewer usernames and is separate from room Reset.
 - **GIF dependency:** [omggif](https://github.com/deanm/omggif), version 1.0.10, MIT licensed.
 
@@ -307,7 +314,7 @@ Look for their boxed markers below the header and click to restore them. Moderat
 
 **The panel shrank after collapsing rows**
 
-This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only version 3.1.15 is enabled, refresh the tab, and report the browser and steps that reproduce it.
+This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only version 3.1.16 is enabled, refresh the tab, and report the browser and steps that reproduce it.
 
 **The panel is too large or near a screen edge**
 
@@ -345,7 +352,8 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
-| **3.1.15** | Timestamp-based charts and sampling gaps; hover and keyboard inspection; reduced dense-history drawing and Replay allocation; shared HTTP retry/access handling; remove session username lists and unique female/trans report totals; Chromium and Firefox regression coverage. |
+| **3.1.16** | Remembered dark/bright mode, with a moon checkbox in the existing Controls row and theme-aware panel surfaces, text, and registered-total chart. |
+| 3.1.15 | Timestamp-based charts and sampling gaps; hover and keyboard inspection; reduced dense-history drawing and Replay allocation; shared HTTP retry/access handling; remove session username lists and unique female/trans report totals; Chromium and Firefox regression coverage. |
 | 3.1.14 | Two gentle live high-value pulses on expanded rows and collapsed markers, with reduced-motion support. |
 | 3.1.13 | Compact metric icons; slightly brighter green highlights; larger third-row trend boxes; diamond trend background follows change direction while retaining its pink border. |
 | 3.1.12 | Restored page-based startup: expanded in broadcast rooms, minimized elsewhere; retain position/scale persistence and scan-settings close fixes. |
