@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.1.2
+// @version      3.1.3
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -17,7 +17,7 @@
 const ViewerTracker = (function() {
     'use strict';
 
-    const TIERSCOPE_VERSION = '3.1.2';
+    const TIERSCOPE_VERSION = '3.1.3';
     const API_TIMEOUT_MS = 10000;
     const DEFAULT_API_INTERVAL_SECONDS = 60;
     const DOM_FALLBACK_INTERVAL_SECONDS = 60;
@@ -81,6 +81,8 @@ const ViewerTracker = (function() {
     var scanEpoch = 0;
     var sessionUniqueUsers = {};
     var lastAcceptedAcquisition = null;
+    // Aggregate saved counts are presentation-only until a fresh scan succeeds.
+    var restoredDisplayFrame = null;
     var lastAcquisitionAttemptSource = 'API';
     var domFallbackReadyAtByRoom = new Map();
     var freshnessInterval = null;
@@ -718,6 +720,13 @@ const ViewerTracker = (function() {
     }
 
     function restoreSessionState(data) {
+        users = new Map();
+        roomTotal = 0;
+        previousUserCount = 0;
+        previousRoomTotal = 0;
+        lastAcceptedAcquisition = null;
+        femaleTransUsernames = [];
+        newHighTiers = {};
         history = data.history;
         tierHighTimes = data.tierHighTimes;
         withTokensHighTime = data.withTokensHighTime;
@@ -735,6 +744,12 @@ const ViewerTracker = (function() {
         hasTrendBaseline = data.hasTrendBaseline;
         trendComparisonMode = data.trendComparisonMode;
         autoTrendEscalation = data.autoTrendEscalation;
+        var snapshot = createPlaybackSnapshot(history);
+        restoredDisplayFrame = getPlaybackFrame(snapshot, snapshot.durationMs);
+        if (restoredDisplayFrame) {
+            restoredDisplayFrame.isRestored = true;
+            restoredDisplayFrame.roomTotalHigh = Math.max(roomTotalHigh, restoredDisplayFrame.roomTotalHigh);
+        }
     }
 
     function getStorageReportStatus(model) {
@@ -786,6 +801,7 @@ const ViewerTracker = (function() {
     }
 
     function loadSession(model) {
+        restoredDisplayFrame = null;
         if (!model || model === 'unknown') return false;
         leavePlayback(false);
         var key = getStorageKey(model);
@@ -853,6 +869,17 @@ const ViewerTracker = (function() {
         return new Date(timestamp).toLocaleString();
     }
 
+    function formatSampleAge(timestamp) {
+        var seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+        if (seconds < 60) return seconds + 's';
+        var minutes = Math.floor(seconds / 60);
+        if (minutes < 60) return minutes + 'm';
+        var hours = Math.floor(minutes / 60);
+        if (hours < 24) return hours + 'h' + (minutes % 60 ? ' ' + (minutes % 60) + 'm' : '');
+        var days = Math.floor(hours / 24);
+        return days + 'd' + (hours % 24 ? ' ' + (hours % 24) + 'h' : '');
+    }
+
     function getModelName() {
         return getModelNameFromUrl(location.href);
     }
@@ -914,9 +941,9 @@ const ViewerTracker = (function() {
     }
 
     function pauseTrackingTimer() {
-        if (!trackingStartTime || isPaused) return;
+        if (isPaused) return;
         isPaused = true;
-        pausedElapsedTime = Date.now() - trackingStartTime;
+        pausedElapsedTime = trackingStartTime ? Math.max(0, Date.now() - trackingStartTime) : 0;
         if (trackingTimerInterval) {
             clearInterval(trackingTimerInterval);
             trackingTimerInterval = null;
@@ -992,8 +1019,11 @@ const ViewerTracker = (function() {
         isScanning = false;
         stopCountdown();
         stopTrackingTimer();
+        // Reset the elapsed timer without changing the automatic scanning preference.
+        isPaused = !isAutoRefreshOn;
         users.clear();
         lastAcceptedAcquisition = null;
+        restoredDisplayFrame = null;
         lastAcquisitionAttemptSource = 'API';
         domHealthStatus.consecutiveFailures = 0;
         updateAcquisitionStatus();
@@ -1034,6 +1064,8 @@ const ViewerTracker = (function() {
             startTrackingTimer();
             startCountdown();
         }
+        // Persist even when paused, before the deferred one-off scan can run or fail.
+        saveSession(modelName);
         var resetContext = { epoch: scanEpoch, generation: initGuard, url: location.href };
         setTimeout(function() {
             if (isAcquisitionCurrent(resetContext)) performScanThenReturn(true);
@@ -1161,6 +1193,7 @@ const ViewerTracker = (function() {
 
     function downloadTrackingReport() {
         var modelName = getModelName();
+        var restored = restoredDisplayFrame;
         var sessionStart = trackingStartTime ? formatDateTime(trackingStartTime) : 'Not started';
         var totalTime = trackingStartTime ? formatElapsedTime(isPaused ? pausedElapsedTime : (Date.now() - trackingStartTime)) : '00:00:00';
         var now = Date.now();
@@ -1182,6 +1215,11 @@ const ViewerTracker = (function() {
             'Total Tracking Time: ' + totalTime,
             ''
         ];
+        if (restored) {
+            report.push('Displayed Data: Last saved snapshot; no fresh sample accepted since restore.');
+            report.push('Saved Snapshot Time: ' + new Date(restored.timestamp).toISOString());
+            report.push('');
+        }
         if (lastAcceptedAcquisition && lastAcceptedAcquisition.api) {
             report.push('API Anonymous Count: ' + lastAcceptedAcquisition.api.anonymousCount);
             report.push('API Registered Record Count: ' + lastAcceptedAcquisition.api.registeredCount);
@@ -1233,7 +1271,7 @@ const ViewerTracker = (function() {
             report.push('  Recorded at: ' + formatDateTime(anonHighTime) + ' (' + elapsed + ' into session)');
             report.push('');
         }
-        report.push('--- CURRENT STATS ---');
+        report.push(restored ? '--- LAST SAVED STATS (NOT A LIVE SAMPLE) ---' : '--- CURRENT STATS ---');
         report.push('');
         var counts = { 'red': 0, 'green': 0, 'purple': 0, 'pink': 0, 'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0 };
         users.forEach(function(data) {
@@ -1246,15 +1284,24 @@ const ViewerTracker = (function() {
         var withTokens = counts['red'] + counts['green'] + counts['purple'] + counts['pink'] + counts['dark-blue'] + counts['light-blue'];
         var anonymousCount = getAnonymousCount();
         var fullRoomTotal = roomTotal > total ? roomTotal : (total + anonymousCount);
+        if (restored) {
+            counts = restored.counts;
+            total = restored.total;
+            withTokens = restored.withTokens;
+            anonymousCount = restored.anonymousCount;
+            fullRoomTotal = restored.fullRoomTotal;
+        }
         var totalHighCurrent = getHighValue(history['total'], total).value;
         var withTokensHighCurrent = getHighValue(history['withTokens'], withTokens).value;
         var anonHighCurrent = getHighValue(history['anonymous'], anonymousCount).value;
-        report.push('Current Room Total: ' + fullRoomTotal.toLocaleString() + ' (High: ' + roomTotalHigh.toLocaleString() + ')');
-        report.push('Current Registered: ' + total.toLocaleString() + ' (High: ' + totalHighCurrent.toLocaleString() + ')');
-        report.push('Current With Tokens: ' + withTokens.toLocaleString() + ' (High: ' + withTokensHighCurrent.toLocaleString() + ')');
-        report.push('Current Anonymous: ' + anonymousCount.toLocaleString() + ' (High: ' + anonHighCurrent.toLocaleString() + ')');
+        var statsLabel = restored ? 'Saved ' : 'Current ';
+        var reportedRoomHigh = restored ? restored.roomTotalHigh : roomTotalHigh;
+        report.push(statsLabel + 'Room Total: ' + fullRoomTotal.toLocaleString() + ' (High: ' + reportedRoomHigh.toLocaleString() + ')');
+        report.push(statsLabel + 'Registered: ' + total.toLocaleString() + ' (High: ' + totalHighCurrent.toLocaleString() + ')');
+        report.push(statsLabel + 'With Tokens: ' + withTokens.toLocaleString() + ' (High: ' + withTokensHighCurrent.toLocaleString() + ')');
+        report.push(statsLabel + 'Anonymous: ' + anonymousCount.toLocaleString() + ' (High: ' + anonHighCurrent.toLocaleString() + ')');
         report.push('');
-        report.push('--- TIER BREAKDOWN ---');
+        report.push(restored ? '--- SAVED TIER BREAKDOWN ---' : '--- TIER BREAKDOWN ---');
         report.push('');
         Object.keys(TIERS).forEach(function(tier) {
             var current = counts[tier] || 0;
@@ -1297,8 +1344,8 @@ const ViewerTracker = (function() {
     // A small indexed-color renderer: each rectangle updates the canvas and its
     // matching palette index buffer. Bitmap lettering needs no antialiasing,
     // RGB matching, dithering or quantizer. Only one frame is retained at a time.
-    const GIF_WIDTH = 640;
-    const GIF_HEIGHT = 400;
+    const GIF_WIDTH = 480;
+    const GIF_HEIGHT = 640;
     const GIF_MAX_FRAMES = 60;
     const GIF_DURATION_CS = 1000; // GIF delay units are hundredths of a second.
     const GIF_FONT = {
@@ -1386,17 +1433,19 @@ const ViewerTracker = (function() {
         return Math.max(0, low - 1);
     }
 
-    function drawGifSparkline(surface, values, lastIndex, color, top) {
+    function drawGifSparkline(surface, values, lastIndex, color, bounds) {
         // Match the panel: show only history through the selected sample, with
         // each tier scaled to its own visible minimum/maximum and sample index.
-        var left = 212, width = 247, height = 17; // Two-pixel strokes fit a 248 × 18 chart.
+        // Reserve space for the two-pixel stroke at the right and bottom edges.
+        var left = bounds.left, top = bounds.top;
+        var plotWidth = bounds.width - 2, plotHeight = bounds.height - 2;
         var minimum = values[0], maximum = values[0];
         for (var i = 1; i <= lastIndex; i++) {
             minimum = Math.min(minimum, values[i]);
             maximum = Math.max(maximum, values[i]);
         }
         var range = maximum - minimum || 1;
-        function y(value) { return top + height - 1 - Math.round((value - minimum) / range * (height - 1)); }
+        function y(value) { return top + plotHeight - Math.round((value - minimum) / range * plotHeight); }
         function line(x0, y0, x1, y1) {
             // Integer rasterization keeps every pixel in the fixed GIF palette.
             var dx = Math.abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
@@ -1415,7 +1464,7 @@ const ViewerTracker = (function() {
             return;
         }
         // Bucket dense history into pixel columns, preserving first/last points
-        // and extremes. Even 10,000 samples need only 247 rendered columns.
+        // and extremes. Dense history needs no more columns than the chart width.
         var column = -1, firstY = 0, lastY = 0, lowY = 0, highY = 0;
         var previousX = null, previousY = null;
         function flush() {
@@ -1426,7 +1475,7 @@ const ViewerTracker = (function() {
             previousX = x; previousY = lastY;
         }
         for (var sample = 0; sample <= lastIndex; sample++) {
-            var nextColumn = Math.round(sample / lastIndex * (width - 1));
+            var nextColumn = Math.round(sample / lastIndex * plotWidth);
             var nextY = y(values[sample]);
             if (nextColumn !== column) {
                 flush();
@@ -1442,27 +1491,37 @@ const ViewerTracker = (function() {
 
     function drawGifSummary(surface, snapshot, index, tiers) {
         var data = snapshot.history;
+        var margin = 16, rowStart = 90, rowStep = 44, groupGap = 12;
+        var chartLeft = 176, countWidth = 70, columnGap = 10;
+        var chartWidth = GIF_WIDTH - chartLeft - margin - countWidth - columnGap;
         surface.rect(0, 0, GIF_WIDTH, GIF_HEIGHT, 0);
-        surface.text('TIERSCOPE REPLAY', 16, 12, 1, 4);
+        surface.text('TIERSCOPE REPLAY', margin, 12, 1, 3);
         surface.text(formatElapsedTime(snapshot.timeline[index]) + ' / ' +
-            formatElapsedTime(snapshot.durationMs), 16, 54, 1, 2);
-        surface.rect(16, 76, 608, 2, 1);
-        function drawRow(label, values, y, color) {
-            surface.rect(16, y, 10, 14, color);
-            surface.text(label, 38, y, 1, 2);
-            drawGifSparkline(surface, values, index, color, y - 2);
-            surface.text(gifCount(values[index]), 622, y, color, 2, true);
+            formatElapsedTime(snapshot.durationMs), margin, 46, 1, 2);
+        surface.text('LINES SCALED PER SERIES', margin, 67, 1, 1);
+        surface.rect(margin, 80, GIF_WIDTH - margin * 2, 2, 1);
+        function drawRow(label, values, top, color) {
+            surface.rect(margin, top + 14, 6, 14, color);
+            surface.text(label, 30, top + 14, 1, 2);
+            drawGifSparkline(surface, values, index, color,
+                { left: chartLeft, top: top + 2, width: chartWidth, height: 36 });
+            var count = gifCount(values[index]);
+            // Keep unusually large counts inside their column without truncation.
+            var countScale = (count.length * 6 - 1) * 2 <= countWidth ? 2 : 1;
+            surface.text(count, GIF_WIDTH - margin, top + (countScale === 2 ? 14 : 18), color, countScale, true);
         }
         tiers.forEach(function(tier, row) {
             drawRow(tier === 'female-trans' ? 'FEMALE/TRANS' : TIERS[tier].name,
-                data[tier], 86 + row * 26, row + 2);
+                data[tier], rowStart + row * rowStep, row + 2);
         });
-        surface.rect(16, 290, 608, 2, 1);
+        var totalsStart = rowStart + tiers.length * rowStep;
+        surface.rect(margin, totalsStart, GIF_WIDTH - margin * 2, 2, 1);
+        totalsStart += groupGap;
         var roomTotals = data.total.map(function(value, i) { return value + data.anonymous[i]; });
-        drawRow('TOTAL', roomTotals, 298, 1);
-        drawRow('WITH TOKENS', data.withTokens, 324, 10);
-        drawRow('REGISTERED', data.total, 350, 1);
-        drawRow('ANONYMOUS', data.anonymous, 376, 11);
+        drawRow('TOTAL', roomTotals, totalsStart, 1);
+        drawRow('WITH TOKENS', data.withTokens, totalsStart + rowStep, 10);
+        drawRow('REGISTERED', data.total, totalsStart + rowStep * 2, 1);
+        drawRow('ANONYMOUS', data.anonymous, totalsStart + rowStep * 3, 11);
     }
 
     function cancelGifExport() {
@@ -1716,6 +1775,7 @@ const ViewerTracker = (function() {
     }
 
     function acceptRoomSnapshot(snapshot, modelName) {
+        restoredDisplayFrame = null;
         users = new Map(snapshot.users.map(function(user) { return [user.username, user]; }));
         roomTotal = snapshot.roomTotal;
         femaleTransUsernames = [];
@@ -1759,12 +1819,18 @@ const ViewerTracker = (function() {
         var el = document.getElementById('acquisition-status');
         if (!el) return;
         if (!lastAcceptedAcquisition) {
-            el.textContent = 'No sample';
-            el.title = 'No accepted sample in this page session';
+            if (restoredDisplayFrame) {
+                el.textContent = 'Saved • ' + formatSampleAge(restoredDisplayFrame.timestamp);
+                el.title = 'Saved sample recorded at: ' + new Date(restoredDisplayFrame.timestamp).toISOString() +
+                    '. Age is measured from the sample time, not the session save time.' +
+                    ' Waiting for the first fresh sample since restore.';
+            } else {
+                el.textContent = 'No sample';
+                el.title = 'No accepted sample in this page session';
+            }
             return;
         }
-        var age = Math.max(0, Math.floor((Date.now() - lastAcceptedAcquisition.timestamp) / 1000));
-        el.textContent = lastAcceptedAcquisition.source + ' • ' + age + 's';
+        el.textContent = lastAcceptedAcquisition.source + ' • ' + formatSampleAge(lastAcceptedAcquisition.timestamp);
         el.title = 'Last accepted sample: ' + new Date(lastAcceptedAcquisition.timestamp).toISOString() +
             '. TierScope and the USERS tab refresh independently.';
     }
@@ -1791,6 +1857,7 @@ const ViewerTracker = (function() {
                 users: users, roomTotal: roomTotal, previousUserCount: previousUserCount,
                 previousRoomTotal: previousRoomTotal, previousCounts: previousCounts,
                 hasTrendBaseline: hasTrendBaseline, lastAcceptedAcquisition: lastAcceptedAcquisition,
+                restoredDisplayFrame: restoredDisplayFrame,
                 femaleTransUsernames: femaleTransUsernames,
                 trendHTML: (document.getElementById('trend-container') || {}).innerHTML,
                 trendHeaderText: (document.getElementById('trend-header-label') || {}).textContent,
@@ -1850,6 +1917,7 @@ const ViewerTracker = (function() {
                 previousCounts = priorState.previousCounts;
                 hasTrendBaseline = priorState.hasTrendBaseline;
                 lastAcceptedAcquisition = priorState.lastAcceptedAcquisition;
+                restoredDisplayFrame = priorState.restoredDisplayFrame;
                 femaleTransUsernames = priorState.femaleTransUsernames;
                 sessionUniqueUsers = priorState.sessionUniqueUsers;
                 sessionFemaleTransUsers = priorState.sessionFemaleTransUsers;
@@ -2004,6 +2072,11 @@ const ViewerTracker = (function() {
         var trendContainer = document.getElementById('trend-container');
         var trendHeaderLabel = document.getElementById('trend-header-label');
         if (!trendContainer) return;
+        if (restoredDisplayFrame) {
+            trendContainer.innerHTML = '<div style="font-size:8px;color:#aaa;text-align:center;padding:8px;">Saved snapshot — trends resume after a new sample.</div>';
+            if (trendHeaderLabel) trendHeaderLabel.textContent = '📈 TREND';
+            return;
+        }
         if (!hasTrendBaseline) {
             trendContainer.innerHTML = '<div style="font-size:8px;color:#666;text-align:center;padding:8px;">Waiting for scan...</div>';
             if (trendHeaderLabel) trendHeaderLabel.textContent = '📈 TREND';
@@ -2606,7 +2679,7 @@ const ViewerTracker = (function() {
                             '<strong style="font-size:9px;color:#ffd43b;">PLAYBACK</strong>' +
                             '<button id="playback-play" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#4169E1;color:white;border:1px solid #555;border-radius:2px;cursor:pointer;">Pause</button>' +
                             '<select id="playback-speed" aria-label="Playback speed" style="font-size:8px;height:15px;margin:0;padding:0;background:#333;color:white;border:1px solid #555;"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select>' +
-                            '<button id="btn-export-gif" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#ff69b4;color:white;border:1px solid #ff69b4;border-radius:2px;cursor:pointer;" title="Download this Replay as a 640 × 400 GIF">GIF</button>' +
+                            '<button id="btn-export-gif" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#ff69b4;color:white;border:1px solid #ff69b4;border-radius:2px;cursor:pointer;" title="Download this Replay as a ' + GIF_WIDTH + ' × ' + GIF_HEIGHT + ' GIF">GIF</button>' +
                             '<button id="playback-return" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#333;color:white;border:1px solid #555;border-radius:2px;cursor:pointer;">Return to Live</button>' +
                         '</div>' +
                         '<input id="playback-scrubber" type="range" min="0" max="0" value="0" step="1" aria-label="Playback timeline" style="width:100%;height:12px;margin:0;accent-color:#ffd43b;cursor:pointer;">' +
@@ -2882,6 +2955,10 @@ const ViewerTracker = (function() {
 
     function updateDisplay() {
         updateReplayAvailability();
+        if (restoredDisplayFrame) {
+            if (presentationMode !== 'PLAYBACK') renderDisplayFrame(restoredDisplayFrame);
+            return;
+        }
         var counts = { 'red': 0, 'green': 0, 'purple': 0, 'pink': 0, 'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0 };
         users.forEach(function(data) {
             if (counts[data.tier] !== undefined) counts[data.tier]++;
@@ -2911,15 +2988,15 @@ const ViewerTracker = (function() {
         var fullRoomTotal = frame.fullRoomTotal;
         var roomTotalHigh = frame.roomTotalHigh;
         var displayHistory = frame.history;
-        var highlights = frame.isPlayback ? frame.playbackNewHighTiers : newHighTiers;
+        var highlights = (frame.isPlayback || frame.isRestored) ? frame.playbackNewHighTiers : newHighTiers;
         var withTokensPct = total > 0 ? Math.round((withTokens / total) * 100) + '%' : '0%';
         var registeredPct = fullRoomTotal > 0 ? Math.round((total / fullRoomTotal) * 100) + '%' : '0%';
         var headerText = document.getElementById('header-text');
         if (headerText) {
             if (isMinimized) {
-                headerText.textContent = (frame.isPlayback ? 'PLAYBACK: ' : '') + fullRoomTotal.toLocaleString() + ' (H:' + roomTotalHigh.toLocaleString() + ')';
+                headerText.textContent = (frame.isPlayback ? 'PLAYBACK: ' : (frame.isRestored ? 'SAVED: ' : '')) + fullRoomTotal.toLocaleString() + ' (H:' + roomTotalHigh.toLocaleString() + ')';
             } else {
-                headerText.textContent = (frame.isPlayback ? 'PLAYBACK: ' : 'USERS: ') + fullRoomTotal.toLocaleString() + ' (H:' + roomTotalHigh.toLocaleString() + ')';
+                headerText.textContent = (frame.isPlayback ? 'PLAYBACK: ' : (frame.isRestored ? 'SAVED: ' : 'USERS: ')) + fullRoomTotal.toLocaleString() + ' (H:' + roomTotalHigh.toLocaleString() + ')';
             }
         }
         var miniWithTokens = document.getElementById('mini-withtokens');
@@ -3057,6 +3134,8 @@ const ViewerTracker = (function() {
             drawAllSparklines();
             updateDisplay();
         }
+        updateTrendDisplay();
+        updateAcquisitionStatus();
         var attempts = 0;
         var maxAttempts = 30;
         var checkInterval = setInterval(function() {
@@ -3140,6 +3219,7 @@ const ViewerTracker = (function() {
             users.clear();
             roomTotal = 0;
             lastAcceptedAcquisition = null;
+            restoredDisplayFrame = null;
             lastAcquisitionAttemptSource = 'API';
             domHealthStatus.consecutiveFailures = 0;
             updateAcquisitionStatus();
