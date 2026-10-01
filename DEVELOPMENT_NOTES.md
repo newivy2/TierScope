@@ -2,10 +2,6 @@
 
 Detailed reference for **version 3.1.14**. For a quick introduction and installation link, see the [README](readme.md).
 
-TierScope offers a closer view of how a Chaturbate audience changes throughout a broadcast. Its purpose is to help creators follow the room’s rhythm, revisit a session, and approach the next one with more context. These notes explain what that view includes, how it is assembled, and where its limits are.
-
-TierScope is free and open source. It is an independent project, not affiliated with Chaturbate.
-
 ## Contents
 
 - [Installation and updates](#installation-and-updates)
@@ -38,8 +34,6 @@ The script also requests `GM_listValues` to find the separate saved records for 
 Keep only one enabled copy of TierScope. After an update, refresh existing room tabs.
 
 ## Live controls
-
-Arrange the panel around the broadcast: keep the counts you want in view, give selected charts more space, or use the compact dashboard for a smaller footprint. Layout choices change the presentation, not which tiers are recorded.
 
 | Control | Action |
 | --- | --- |
@@ -101,8 +95,6 @@ Collapsing a row changes presentation only. All rows continue to be tracked and 
 
 ### Trends and highlights
 
-Trends bring changes between samples into focus; highlights mark observed session highs. Both describe viewer counts, rather than explaining why a change happened or measuring a broadcast’s success.
-
 The trend display uses green for increases, red for decreases, and yellow for unchanged counts. It shows the numeric change when nonzero.
 
 Choose **Last**, **5m**, **15m**, **30m**, **1h**, or **Start**. A manual selection turns automatic escalation off. **AUTO** toggles escalation through Last → 5m → 15m → 30m → 1h as tracking time grows. If a requested window extends before available history, the earliest retained sample is used.
@@ -115,7 +107,7 @@ An accepted live sample triggers two gentle pulses when a row sets a new positiv
 
 A count staying at its high does not restart the cue. Collapsing or restoring a row cancels its current pulse and never starts another. Entering Replay, minimizing the panel, resetting, or changing rooms cancels active pulses. Saved snapshots and Replay never pulse, and events while the compact panel or Replay is open are not queued for later. Zero counts do not trigger a pulse.
 
-Reduced-motion preferences disable the animation while preserving the steady highlight. Browsers without the animation API also retain the steady highlight. Highs concern observed tier counts, not individual viewers' activity or purchases.
+Reduced-motion preferences disable the animation while preserving the steady highlight. Browsers without the animation API also retain the steady highlight.
 
 ### Background opacity
 
@@ -125,7 +117,7 @@ It preserves green high-value highlights, borders, text, charts, and the fills o
 
 ## Replay
 
-Replay provides a second look at the recorded audience counts, with time to pause and examine individual moments. It replays sampled data, not the broadcast video or chat.
+Replay displays recorded audience samples. It does not record or play broadcast video or chat.
 
 1. Acquire at least one sample, or restore a saved session containing history.
 2. Click **Replay** in Controls. The header changes to `PLAYBACK`.
@@ -143,7 +135,7 @@ Replay freezes the available history when opened. New scans continue updating th
 
 ## Download a GIF
 
-A GIF turns the session’s audience charts into a short visual recap for later reflection. It is drawn from recorded counts, rather than captured from the broadcast.
+GIFs are drawn from recorded audience counts; they do not capture the broadcast video or panel.
 
 Open **Replay**, then click **GIF**. Progress and **Cancel** appear within the existing Replay controls.
 
@@ -169,8 +161,6 @@ Replay controls belong to the panel. The downloaded GIF does not contain pause, 
 
 ## Understanding the counts
 
-A useful view starts with knowing what the numbers represent. TierScope groups the classifications observed in its samples; it does not establish a viewer’s intent, willingness to tip, or contribution to the room. Read the charts as context for a session, not as a ranking of the people in it.
-
 The seven color tiers follow the site’s username classifications:
 
 | Color | Classification |
@@ -183,7 +173,7 @@ The seven color tiers follow the site’s username classifications:
 | Light Blue | Owns or has purchased tokens |
 | Grey | No-token classification |
 
-See Chaturbate’s [username-color documentation](https://support.chaturbate.com/hc/en-us/articles/360048893011-Username-colors). Users can limit the color they display, so the observed classification is not a measurement of their balance or future spending.
+See Chaturbate’s [username-color documentation](https://support.chaturbate.com/hc/en-us/articles/360048893011-Username-colors). Users can limit the color they display, so the observed classification is not a measurement of their balance or future spending. Trends and session highs describe sampled counts; they do not explain why an audience changed or measure individual viewers’ activity or purchases.
 
 | Display | How TierScope calculates it |
 | --- | --- |
@@ -196,8 +186,6 @@ See Chaturbate’s [username-color documentation](https://support.chaturbate.com
 With API samples, owner records are excluded from the seven color tiers but remain in Registered. The displayed female/trans count can include a matching-gender owner; the report’s unique female/trans viewer totals exclude the room owner.
 
 ## TXT and CSV exports
-
-Use TXT for a session summary or CSV for a closer look at the recorded changes. Both retain the distinction between observed counts and what those counts can tell you about an audience.
 
 ### TXT session summary
 
@@ -222,8 +210,6 @@ The file uses comma-separated fields, a header row, and UTF-8 with a byte-order 
 CSV contains recorded aggregate counts, not usernames, high-value timestamps, or inferred per-sample acquisition sources. Saved history can be exported before a fresh scan. At least one recorded sample is required.
 
 ## Saved sessions
-
-Saved sessions let you pick up the view after a refresh without presenting an earlier snapshot as a fresh observation. The panel distinguishes saved data from newly accepted samples.
 
 Sessions are stored per room through Tampermonkey’s storage API, with a separate record for each tab. A compatible record is eligible for restoration if its last save was no more than **three hours ago**. This is a restore window, not a three-hour limit on an active session. Valid expired tab records are cleaned up when that room's storage is inspected, including records left behind by late writes from an old Reset generation. Old-generation records never participate in restoration. Corrupt or unsupported records are preserved rather than automatically deleted.
 
@@ -251,8 +237,6 @@ On upgrade from older versions, tier/summary highs and their timestamps are rebu
 
 ## Development and testing
 
-The source and tests are available for review. Development emphasizes consistent counts, clear sample status, and predictable storage and playback behavior, so the presentation remains useful without overstating what was observed.
-
 The repository includes a repeatable test suite and a GitHub Actions workflow. See [TESTING.md](TESTING.md) for setup, coverage, and release checks. Tests run during development and add no overhead to the installed userscript.
 
 ```sh
@@ -263,7 +247,7 @@ npm test
 
 ## Acquisition and dependencies
 
-The details below make the sources, request behavior, and dependencies explicit. TierScope depends on Chaturbate’s room data and page structure; changes to either can affect acquisition.
+TierScope depends on Chaturbate’s room data and page structure; changes to either can affect acquisition.
 
 - **Primary source:** same-origin `/api/getchatuserlist/`, with a 10-second timeout.
 - **Validation:** malformed or duplicate records reject the sample. Additional count-change checks can reject suspicious changes. Rejected samples add no history point.
