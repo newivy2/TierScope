@@ -2,19 +2,21 @@
 
 A Tampermonkey userscript that tracks viewer tiers in a Chaturbate room and shows how the audience changes over time.
 
-**Current release: 3.1.5 — September 30, 2026**
+**Current release: 3.1.7 — October 1, 2026**
 
-· [Report an issue](https://github.com/newivy2/TierScope/issues)
+[Report an issue](https://github.com/newivy2/TierScope/issues)
 
-![TierScope panel](Tracking%20example%206.jpg)
+![TierScope panel](Tracking%20example%205.jpg)
 
-## What’s new in 3.1.5
+## What’s new since 3.1.1.0
 
-- **Stable panel height:** collapsing or restoring rows keeps the expanded panel at the same height while at least one row remains open. The remaining charts share the freed vertical space.
-- **All-collapsed view:** when all 11 rows are collapsed, the chart area shrinks to the icon strip directly above Trends. Restoring any row brings back the original chart-area height.
-- **Correct row measurements:** resizing accounts for text height and inherited line spacing, fixing the shrink-then-grow behavior in 3.1.4.
-
-The customizable rows introduced in 3.1.4 remain available: click a row’s marker to collapse it, then click its boxed marker below the header to restore it. Your choices are remembered across rooms and refreshes.
+- **Customizable rows:** collapse any tier or summary row into a small icon strip. The remaining charts gain vertical space, and your visibility choices are remembered.
+- **Remembered panel layout:** position and size return after a refresh, with a **100%** button to restore the standard scale in any tab.
+- **Background transparency:** a lamp slider fades the panel and standard row backgrounds while keeping text, charts, borders, and green highlights clear.
+- **Animated GIF export:** download a **480 × 640** Replay with tier and totals line charts, counts, and elapsed time—up to 60 frames over a 10-second loop.
+- **CSV history export:** download every retained sample for spreadsheet analysis, alongside the **TXT** session summary.
+- **Replay sample stepping:** move backward or forward one recorded sample at a time, pausing on the selected sample for closer inspection.
+- **Clearer visual feedback:** color-coded trend backgrounds and green high-value highlights, including highlights in Replay and on collapsed rows.
 
 ## Features
 
@@ -22,17 +24,17 @@ The customizable rows introduced in 3.1.4 remain available: click a row’s mark
 - Eleven collapsible rows with remembered visibility preferences and taller charts for the rows left open.
 - Sparklines, high values, and green highlights when a positive count reaches or returns to its recorded high.
 - Trend comparisons against Last, 5m, 15m, 30m, 1h, or Start, with optional automatic window changes.
-- Replay of a frozen history snapshot while live acquisition continues independently.
-- 480 × 640 animated GIF downloads from Replay and text reports from live Controls.
+- Replay of a frozen history snapshot, with playback speed, scrubbing, and sample stepping, while live acquisition continues independently.
+- 480 × 640 animated GIF downloads from Replay, plus TXT reports and CSV history exports from live Controls.
 - Per-room session storage with validation, a three-hour restore window, and clearly labeled saved snapshots after a refresh.
-- A draggable, resizable panel with expanded and compact views.
+- A draggable, resizable panel with remembered position and scale, a 100% size reset, and expanded and compact views.
 
 ## Installation and updates
 
 1. Install [Tampermonkey](https://www.tampermonkey.net/) for your browser.
 2. Follow Tampermonkey’s [userscript permission instructions](https://www.tampermonkey.net/faq.php?q=Q209) for your browser so installed scripts can run.
 3. Open [tierscope.user.js](https://raw.githubusercontent.com/newivy2/TierScope/main/tierscope.user.js) and accept the Tampermonkey installation prompt. Alternatively, open the [GitHub source file](https://github.com/newivy2/TierScope/blob/main/tierscope.user.js) and select **Raw**.
-4. Refresh a Chaturbate broadcast room. TierScope appears near the upper-right corner. A new session begins acquiring samples; a restored session keeps its saved pause state.
+4. Refresh a Chaturbate broadcast room. TierScope appears at its saved position, or near the upper-right corner if no layout has been saved. A new session begins acquiring samples; a restored session keeps its saved pause state.
 
 When updating, install the complete userscript, including its metadata header. The header loads the pinned GIF encoder dependency:
 
@@ -46,23 +48,35 @@ Keep only one enabled copy of TierScope. After an update, refresh existing room 
 
 | Control | Action |
 | --- | --- |
-| Header / drag area | Move the panel. |
-| Pink upper-left resize handle | Scale the panel. |
+| Header / drag area | Move the panel; save its position when you release it. |
+| Pink upper-left resize handle | Scale the panel; save its size when you release it. |
+| **100%** in the header | Restore standard scale while keeping row visibility and session data. |
 | **−**, **+**, or **Expand** | Switch between expanded and compact views. |
 | **⏸ / ▶** in Controls or compact view | Pause or resume automatic acquisition and the tracking timer. An already-running scan may finish. |
 | Compact-view timer controls | Adjust the interval from 30 to 300 seconds; presets are 30s, 60s, 2m, and 5m. |
 | Row circle or icon | Collapse that row into the strip below the header. |
 | Boxed icon in the collapsed-row strip | Restore its row to its original position. |
 | Lamp slider | Adjust the main background and standard tier-row fills. |
-| **Report** | Download a text report of the current session. |
+| **TXT** | Download a text summary of the current session. |
+| **CSV** | Download every retained history sample, including collapsed tiers. |
 | **Replay** | Open recorded history for the current room. |
-| **Reset** | Confirm clearing this room’s history, counters, and elapsed time, then request one fresh scan. Keep the automatic-scan pause state and row visibility preferences. |
+| **Reset** | Confirm clearing this room’s history, counters, and elapsed time, then request one fresh scan. Keep the automatic-scan pause state and layout preferences. |
 
 The default scan interval is **60 seconds**, counted after a scan finishes. Faster polling does not guarantee fresher data from the site.
 
 The footer shows the sample source and age, for example `API • 12s`, `DOM • 4m`, or `Saved • 2h 5m`. Ages use seconds, minutes, hours, or days as appropriate. They are measured from the **sample’s timestamp**, not the session’s last save time or the countdown to the next scan. Hover over the status to see the recorded timestamp.
 
 Reset requests a one-off scan even when automatic acquisition is paused. It does not turn automatic acquisition back on, and reloading afterward preserves that paused state.
+
+### Position and size
+
+Drag the header to move the panel, or drag the pink upper-left handle to resize it. Position and scale are saved when you release the mouse and restored after a refresh or room change.
+
+Click **100%** in the header to return to standard scale. Use it in different tabs to give their panels the same scale. It keeps your collapsed-row choices and session data; it does not reset tracking or return the panel to its original position.
+
+Saved layout preferences are shared across rooms and tabs. A newly opened or refreshed tab uses the latest saved position and scale; panels already open in other tabs do not move or resize automatically.
+
+Restoration, window resizing, and expansion from compact view adjust the position to keep the panel within the available viewport. If the chosen scale is larger than the viewport can accommodate, the panel is anchored at the top or left edge so the header remains reachable. Use **100%** or the resize handle to reduce it.
 
 ### Collapsible rows
 
@@ -78,7 +92,7 @@ With at least one row open, the chart area keeps its original height and gives t
 
 Hover over a collapsed marker to see its count, high, and whether the displayed sample is saved, live, or from Replay. Green high-value highlights also appear on collapsed markers.
 
-Collapsing a row changes presentation only. All rows continue to be tracked and remain available in trend comparisons, reports, and GIF exports. In Replay, hiding or restoring rows preserves the selected position and Play/Pause state; it does not seek or restart playback.
+Collapsing a row changes presentation only. All rows continue to be tracked and remain available in trend comparisons, TXT reports, CSV exports, and GIFs. In Replay, hiding or restoring rows preserves the selected position and Play/Pause state; it does not seek or restart playback.
 
 ### Trends and highlights
 
@@ -99,9 +113,12 @@ It preserves green high-value highlights, borders, text, charts, and the fills o
 1. Acquire at least one sample, or restore a saved session containing history.
 2. Click **Replay** in Controls. The header changes to `PLAYBACK`.
 3. Use **Play / Pause**, the timeline slider, and **0.5× / 1× / 2×** to inspect the recording.
-4. Click **Return to Live** to return to the latest accepted sample, or the saved snapshot if no fresh scan has succeeded since restoration.
+4. Use the previous/next sample buttons beside the timeline to step through individual saved samples.
+5. Click **Return to Live** to return to the latest accepted sample, or the saved snapshot if no fresh scan has succeeded since restoration.
 
 At 1×, recorded time is compressed by 60×, with playback capped at 30 seconds. The speed selector adjusts that playback duration. The displayed timeline represents recorded elapsed time.
+
+Each step pauses Replay and moves to the previous or next recorded sample. Step buttons stop at the first and last samples; samples with identical timestamps can still be inspected separately. Hover over the time display to see the selected sample number. With only one sample, both step buttons are disabled.
 
 Counts, highs, green highlights, and sparklines follow the selected sample. A single saved sample can be inspected, but has no time span to play. Minimize is disabled during Replay.
 
@@ -129,6 +146,8 @@ The GIF always includes every tier and all four summary lines, including rows co
 
 Leaving Replay, changing rooms, resetting tracking, or unloading the page cancels an active export.
 
+Replay controls belong to the panel. The downloaded GIF does not contain pause, seeking, or stepping controls; playback controls depend on the app displaying it.
+
 ## Understanding the counts
 
 The seven color tiers follow the site’s username classifications:
@@ -155,9 +174,31 @@ See Chaturbate’s [username-color documentation](https://support.chaturbate.com
 
 With API samples, owner records are excluded from the seven color tiers but remain in Registered. The displayed female/trans count can include a matching-gender owner; the report’s unique female/trans viewer totals exclude the room owner.
 
-## Reports and saved sessions
+## TXT and CSV exports
 
-**Report** downloads a `.txt` file containing the latest displayed session counts, high values and their recorded times, tier breakdowns, unique female/trans viewer totals, acquisition details, and storage/version information. Before the first fresh scan after restoration, it explicitly labels its counts as a saved snapshot. Collapsed rows are included. It is a summary, not a raw time-series export.
+### TXT session summary
+
+**TXT** downloads a `.txt` file containing the latest displayed session counts, high values and their recorded times, tier breakdowns, unique female/trans viewer totals, acquisition details, and storage/version information. Before the first fresh scan after restoration, it explicitly labels its counts as a saved snapshot. Collapsed rows are included. It is a summary, not a raw time-series export.
+
+### CSV history
+
+Click **CSV** next to TXT in live Controls to download the current room’s **entire retained history**, with one row per sample. Unlike the GIF, this export is not limited to 60 frames. It includes all tiers regardless of which panel rows are collapsed.
+
+The CSV columns are:
+
+| Columns | Meaning |
+| --- | --- |
+| `room`, `sample_index` | Room name and sample number, starting at 1 within the exported history. |
+| `timestamp_utc`, `elapsed_seconds` | Sample timestamp in UTC and seconds since the first retained sample. |
+| `room_total`, `registered`, `anonymous`, `with_tokens` | Viewer totals for that sample. |
+| `moderators`, `fan_club`, `dark_purple`, `light_purple`, `dark_blue`, `light_blue`, `grey` | The seven tier counts in panel order. |
+| `female_trans` | The overlapping female/trans count. |
+
+The file uses comma-separated fields, a header row, and UTF-8 with a byte-order mark for spreadsheet compatibility. Text fields are escaped, and potentially formula-like text is prefixed to prevent spreadsheet formula interpretation. If a spreadsheet opens it in one column, import it as UTF-8 and select a comma delimiter.
+
+CSV contains recorded aggregate counts, not usernames, high-value timestamps, or inferred per-sample acquisition sources. Saved history can be exported before a fresh scan. At least one recorded sample is required.
+
+## Saved sessions
 
 Sessions are stored per room through Tampermonkey’s storage API. A compatible record is restored if its last save was no more than **three hours ago**. This is a restore window, not a three-hour limit on an active session.
 
@@ -171,7 +212,7 @@ When restored history contains a sample, TierScope displays that sample until a 
 
 Paused sessions remain paused after restoration. Resume acquisition with **▶** when ready.
 
-History is capped at **10,000 accepted samples**. Older points are discarded when that limit is reached. Replay and GIF export use the retained history. Tier/summary highs are derived from that history; the room-total high is also tracked separately.
+History is capped at **10,000 accepted samples**. Older points are discarded when that limit is reached. Replay, GIF, and CSV exports use the retained history. Tier/summary highs are derived from that history; the room-total high is also tracked separately.
 
 Corrupt or unsupported newer-schema records are preserved and protected from automatic overwrite. **Reset** explicitly clears the current room’s stored record. Deleting the script or its manager data can remove saved sessions.
 
@@ -181,10 +222,10 @@ Corrupt or unsupported newer-schema records are preserved and protected from aut
 - **Validation:** malformed or duplicate records reject the sample. Additional count-change checks can reject suspicious changes. Rejected samples add no history point.
 - **Fallback:** reads the Users tab if the API is unavailable or rejected, then attempts to return to Chat. Fallback attempts are spaced by at least 60 seconds, or the configured scan interval when longer.
 - **Freshness:** the last accepted data stays visible through failed attempts. The site’s Users tab and TierScope can refresh at different times.
-- **Storage format:** session schema version 1 under `tierscope:v1:<room>`. Compatible legacy records are validated before restoration. Row visibility preferences are stored separately under `tierscope:ui:collapsedRows:v1`.
+- **Storage format:** session schema version 1 under `tierscope:v1:<room>`. Compatible legacy records are validated before restoration. Row visibility preferences are stored separately under `tierscope:ui:collapsedRows:v1`, and position/scale under `tierscope:ui:geometry:v1`.
 - **GIF dependency:** [omggif](https://github.com/deanm/omggif), version 1.0.10, MIT licensed.
 
-The script does not upload reports, GIFs, or tracking history to a TierScope server. It makes room-data requests to Chaturbate; the userscript manager loads the encoder from jsDelivr. Saved session data includes observed usernames used for session bookkeeping.
+The script does not upload TXT reports, CSV files, GIFs, or tracking history to a TierScope server. It makes room-data requests to Chaturbate; the userscript manager loads the encoder from jsDelivr. Saved session data includes observed usernames used for session bookkeeping.
 
 ## Troubleshooting
 
@@ -206,11 +247,23 @@ Look for their boxed markers below the header and click to restore them. Moderat
 
 **The panel shrank after collapsing rows**
 
-In 3.1.5, this is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only version 3.1.5 is enabled, refresh the tab, and report the browser and steps that reproduce it.
+This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only version 3.1.7 is enabled, refresh the tab, and report the browser and steps that reproduce it.
+
+**The panel is too large or near a screen edge**
+
+Click **100%** to restore standard scale, or use the resize handle. Expanding from compact view should reposition the panel immediately. On a small viewport, reducing the scale may be necessary to fit the whole panel.
 
 **Replay is unavailable, or Play is disabled**
 
 Replay needs a recorded sample for this room. Play needs a nonzero recorded time span. Check the `PLAYBACK` header if you expected current live counts.
+
+**The step buttons are disabled**
+
+The previous button is disabled at the first sample and the next button at the last. Both are disabled for a single-sample recording. Play may be unavailable when the recording has no time span, even if there are multiple samples to step through.
+
+**No CSV download**
+
+CSV requires at least one recorded sample. Use the **CSV** button in live Controls; return from Replay first if those controls are hidden.
 
 **No GIF button**
 
@@ -232,7 +285,9 @@ The saved record failed validation or uses an unsupported schema. It has not bee
 
 | Version | Notes |
 | --- | --- |
-| **3.1.5** | Fixed panel-height redistribution when collapsing rows, including inherited line-spacing cases. Shrink only when all 11 rows are collapsed. |
+| **3.1.7** | Reposition the panel immediately on expansion; center the live-control buttons. |
+| 3.1.6 | Remember panel position and scale; add the 100% size reset, Replay sample stepping, and CSV history export alongside TXT reports. |
+| 3.1.5 | Fixed panel-height redistribution when collapsing rows, including inherited line-spacing cases. Shrink only when all 11 rows are collapsed. |
 | 3.1.4 | Added collapsible tier and summary rows, a restore strip, remembered visibility preferences, and taller remaining charts. Moderators and Fan Club start collapsed. |
 | 3.1.3 | Fixed pause/reset persistence and saved-count restoration; labeled saved snapshots; added compact sample ages and 480 × 640 GIFs. |
 | 3.1.2 | Background-only opacity slider and compact footer; Replay-only 640 × 400 GIF export with tier and totals line charts. |
