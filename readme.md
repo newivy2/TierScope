@@ -2,11 +2,11 @@
 
 TierScope is a free, open-source userscript that charts how a Chaturbate room’s audience changes over time. It shows viewer tiers, registered and anonymous totals, token classifications, and a female/trans overlay, with trend comparisons and session highs.
 
-**Current release: 3.2.0**
+**Current release: 3.3.0**
 
 ![TierScope in expanded, totals-focused, collapsed, and compact views](tierscope-hero.png)
 
-Charts use periodic room-data samples. Session history is stored locally through your userscript manager, so you can return to a saved session after a refresh. Replay lets you revisit that history while live tracking continues.
+Charts use periodic room-data samples. Session history is stored locally through your userscript manager, so you can return to a saved session after a refresh. Replay lets you revisit that history while live tracking continues, or reopen a session file you kept for later.
 
 ## Who it’s for
 
@@ -19,9 +19,9 @@ Charts use periodic room-data samples. Session history is stored locally through
 - **Compact dashboard:** switch between Room total, With Tokens, and Registered charts, with count changes and sample age.
 - **Collapsible rows:** hide tiers or totals to give the remaining charts more space.
 - **Layout controls:** remembered position, size, and row visibility; a standard-size reset; adjustable background transparency; and dark or bright mode.
-- **Chart inspection:** elapsed-time spacing, orange dashed connections across missing intervals, and sample values on hover or keyboard focus.
+- **Chart views and inspection:** full history, the last hour, or the last 15 minutes; timestamp spacing, orange dashed gaps, and sample values on hover or keyboard focus.
 - **Session controls:** pause or finish a session, with automatic slowdown and Stop during prolonged broadcaster absence.
-- **Replay stepping:** move backward or forward through individual saved samples.
+- **Replay and session files:** step through saved samples, download a session file, and reopen it for review later.
 - **Downloads:** animated GIFs, full retained CSV history, and TXT session summaries.
 - **High-count pulses:** two gentle pulses mark a new session high or a return to it after a dip, on expanded rows and collapsed markers.
 

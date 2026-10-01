@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.2.0
+// @version      3.3.0
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -18,7 +18,7 @@
 const ViewerTracker = (function() {
     'use strict';
 
-    const TIERSCOPE_VERSION = '3.2.0';
+    const TIERSCOPE_VERSION = '3.3.0';
     const API_TIMEOUT_MS = 10000;
     const DEFAULT_API_INTERVAL_SECONDS = 60;
     const DOM_FALLBACK_INTERVAL_SECONDS = 60;
@@ -724,6 +724,184 @@ const ViewerTracker = (function() {
 
     var presentationMode = 'LIVE';
     var playback = null;
+    var sessionFileLoadGeneration = 0;
+    var panelOptionsCleanup = null;
+    const SESSION_FILE_FORMAT = 'TierScopeSession';
+    const SESSION_FILE_VERSION = 1;
+    const SESSION_FILE_MAX_BYTES = 8 * 1024 * 1024;
+    const CHART_WINDOW_KEY = 'tierscope:ui:chartWindow:v1';
+    const CHART_WINDOWS = { full: 0, hour: 60 * 60000, quarter: 15 * 60000 };
+    var chartWindowMode = 'full';
+    try {
+        var savedWindow = GM_getValue(CHART_WINDOW_KEY, 'full');
+        if (typeof savedWindow === 'string' && hasStorageField(CHART_WINDOWS, savedWindow)) chartWindowMode = savedWindow;
+    } catch (error) { /* Full history is the default. */ }
+
+    function setChartWindow(value) {
+        if (!hasStorageField(CHART_WINDOWS, value)) return;
+        chartWindowMode = value;
+        try { GM_setValue(CHART_WINDOW_KEY, value); } catch (error) { log('Could not save chart window preference'); }
+        chartLayoutRevision++;
+        updatePanelOptions();
+        redrawPanelCharts();
+    }
+
+    function captureSessionFile() {
+        if (isPlaybackCurrent(playback) && playback.archive) return playback.archive;
+        if (!history.timestamps.length || activeSessionStorageKey !== getStorageKey(getModelName()) || location.href !== lastUrl) {
+            throw new Error('No recorded session to save yet.');
+        }
+        var now = Date.now();
+        var data = {
+            schemaVersion: STORAGE_SCHEMA_VERSION, timestamp: now,
+            history: { timestamps: history.timestamps.slice(), breaks: getHistoryBreaks(history).slice() },
+            sessionStartedAt: sessionStartedAt, sessionStartEstimated: sessionStartEstimated,
+            sessionHighs: {}, roomTotalHigh: roomTotalHigh, roomTotalHighTime: roomTotalHighTime,
+            pausedElapsedTime: isPaused ? pausedElapsedTime : trackingStartTime ? Math.max(0, now - trackingStartTime) : 0,
+            isPaused: isPaused, isStopped: isStopped, stoppedAt: stoppedAt, stopReason: stopReason
+        };
+        STORAGE_HISTORY_SERIES.forEach(function(key) {
+            data.history[key] = history[key].slice();
+            data.sessionHighs[key] = getSessionHigh(key, 0);
+        });
+        history.timestamps.forEach(function(time, i) {
+            var total = history.total[i] + history.anonymous[i];
+            if (total > data.roomTotalHigh) { data.roomTotalHigh = total; data.roomTotalHighTime = time; }
+        });
+        return validateSessionFile({ format: SESSION_FILE_FORMAT, formatVersion: SESSION_FILE_VERSION,
+            producerVersion: TIERSCOPE_VERSION, room: getModelName(), session: data });
+    }
+
+    function validateSessionFile(file) {
+        if (!isStorageObject(file) || file.format !== SESSION_FILE_FORMAT || file.formatVersion !== SESSION_FILE_VERSION) {
+            throw new Error('This is not a supported TierScope session file.');
+        }
+        if (typeof file.room !== 'string' || !/^[a-z0-9_-]{1,100}$/i.test(file.room) ||
+            typeof file.producerVersion !== 'string' || file.producerVersion.length > 40) {
+            throw new Error('Invalid session file information.');
+        }
+        var data = file.session;
+        validateStoredSession(data);
+        if (data.schemaVersion !== STORAGE_SCHEMA_VERSION || !data.history.timestamps.length ||
+            !isStorageObject(data.sessionHighs) || !isStorageNumber(data.roomTotalHigh) ||
+            !(data.sessionStartedAt === null || isStorageTimestamp(data.sessionStartedAt)) ||
+            typeof data.sessionStartEstimated !== 'boolean' || !isStorageTimestamp(data.pausedElapsedTime) ||
+            typeof data.isPaused !== 'boolean' || typeof data.isStopped !== 'boolean' ||
+            !(data.roomTotalHighTime === null || isStorageTimestamp(data.roomTotalHighTime))) {
+            throw new Error('Session file is incomplete.');
+        }
+        STORAGE_HISTORY_SERIES.forEach(function(key) {
+            if (!data.history[key].every(Number.isSafeInteger) || !Number.isSafeInteger(data.sessionHighs[key].value)) {
+                throw new Error('Session counts must be whole numbers.');
+            }
+        });
+        var roomPeak = 0;
+        data.history.timestamps.forEach(function(_, i) {
+            var total = data.history.total[i] + data.history.anonymous[i];
+            if (!Number.isSafeInteger(total)) throw new Error('Invalid session room total.');
+            roomPeak = Math.max(roomPeak, total);
+        });
+        if (!Number.isSafeInteger(data.roomTotalHigh) || data.roomTotalHigh < roomPeak) throw new Error('Invalid session room high.');
+        // Copy only supported aggregate fields. Ignore extra fields, including
+        // obsolete username collections; imported data never enters live storage.
+        var normalized = normalizeStoredSession(data);
+        var clean = { schemaVersion: STORAGE_SCHEMA_VERSION };
+        ['timestamp', 'history', 'sessionStartedAt', 'sessionStartEstimated', 'sessionHighs',
+            'roomTotalHigh', 'roomTotalHighTime', 'pausedElapsedTime', 'isPaused', 'isStopped', 'stoppedAt', 'stopReason'].forEach(function(key) {
+            clean[key] = normalized[key];
+        });
+        return { format: SESSION_FILE_FORMAT, formatVersion: SESSION_FILE_VERSION,
+            producerVersion: file.producerVersion, room: file.room, session: clean };
+    }
+
+    function downloadSessionFile() {
+        try {
+            var archive = captureSessionFile();
+            var blob = new Blob([JSON.stringify(archive)], { type: 'application/json;charset=utf-8' });
+            var url = URL.createObjectURL(blob), link = document.createElement('a');
+            link.href = url;
+            link.download = archive.room + '-session-' + new Date(archive.session.timestamp).toISOString().replace(/[:.]/g, '-') + '.tierscope.json';
+            document.body.appendChild(link);
+            try { link.click(); } finally { link.remove(); setTimeout(function() { URL.revokeObjectURL(url); }, 60000); }
+        } catch (error) { alert('Could not save session file: ' + error.message); }
+    }
+
+    function openSessionReplay(file) {
+        var archive = validateSessionFile(file);
+        leavePlayback(false);
+        if (isMinimized) toggleView();
+        playback = { url: location.href, key: activeSessionStorageKey, generation: initGuard,
+            imported: true, archive: archive, snapshot: createPlaybackSnapshot(archive.session.history),
+            positionMs: 0, speed: 1, lastTickAt: Date.now(), playing: false, timer: null };
+        cancelHighPulses();
+        presentationMode = 'PLAYBACK';
+        setPlaybackLayout(true);
+        return paintPlayback(playback);
+    }
+
+    async function readSessionFile(file) {
+        if (!file) return false;
+        var request = ++sessionFileLoadGeneration, url = location.href, generation = initGuard;
+        function current() { return request === sessionFileLoadGeneration && url === location.href && generation === initGuard; }
+        try {
+            if (file.size > SESSION_FILE_MAX_BYTES) throw new Error('Session files must be 8 MB or smaller.');
+            var text = await file.text();
+            if (!current()) return false;
+            if (text.length > SESSION_FILE_MAX_BYTES) throw new Error('Session file is too large.');
+            return openSessionReplay(JSON.parse(text.replace(/^\uFEFF/, '')));
+        } catch (error) {
+            if (current()) alert('Could not open session file: ' + error.message);
+            return false;
+        }
+    }
+
+    function updatePanelOptions() {
+        var button = document.getElementById('btn-panel-options');
+        if (button) {
+            button.style.display = isMinimized ? 'none' : '';
+            button.textContent = ({ full: 'Full', hour: '1h', quarter: '15m' })[chartWindowMode] + ' ▾';
+            button.title = 'Chart window and session files. Showing ' + ({ full: 'full history', hour: 'the last hour', quarter: 'the last 15 minutes' })[chartWindowMode] + '.';
+        }
+        var select = document.getElementById('chart-window-select');
+        if (select) select.value = chartWindowMode;
+        var save = document.getElementById('btn-save-session');
+        if (save) save.disabled = !((isPlaybackCurrent(playback) && playback.archive) || history.timestamps.length);
+        var info = document.getElementById('session-file-info');
+        if (info) {
+            var archive = isPlaybackCurrent(playback) && playback.imported ? playback.archive : null;
+            info.style.display = archive ? 'block' : 'none';
+            if (archive) info.textContent = archive.room + ' · ' + archive.session.history.timestamps.length + ' samples\n' +
+                'Saved ' + new Date(archive.session.timestamp).toLocaleString() + '\nSession room high: ' + archive.session.roomTotalHigh.toLocaleString();
+        }
+    }
+
+    function bindPanelOptions() {
+        var button = document.getElementById('btn-panel-options'), menu = document.getElementById('panel-options');
+        var input = document.getElementById('session-file-input');
+        function close(focus) { menu.style.display = 'none'; button.setAttribute('aria-expanded', 'false'); if (focus) button.focus(); }
+        button.onmousedown = function(event) { event.stopPropagation(); };
+        button.onclick = function(event) {
+            event.stopPropagation(); updatePanelOptions();
+            var open = menu.style.display === 'none'; menu.style.display = open ? 'block' : 'none';
+            button.setAttribute('aria-expanded', String(open));
+            if (open) document.getElementById('chart-window-select').focus();
+        };
+        document.getElementById('panel-options-close').onclick = function() { close(true); };
+        document.getElementById('chart-window-select').onchange = function() { setChartWindow(this.value); };
+        document.getElementById('btn-save-session').onclick = function() { downloadSessionFile(); close(true); };
+        document.getElementById('btn-open-session').onclick = function() { input.value = ''; input.click(); };
+        input.onchange = function() { var file = input.files && input.files[0]; if (file) { close(false); readSessionFile(file); } };
+        function outside(event) { if (!menu.contains(event.target) && !button.contains(event.target)) close(false); }
+        function escape(event) {
+            if (event.key === 'Escape' && menu.style.display !== 'none') { close(true); event.stopPropagation(); }
+        }
+        document.addEventListener('pointerdown', outside);
+        document.addEventListener('keydown', escape, true);
+        panelOptionsCleanup = function() {
+            document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape, true);
+        };
+        updatePanelOptions();
+    }
 
     function createPlaybackSnapshot(sourceHistory) {
         var copiedHistory = { timestamps: sourceHistory.timestamps.slice(), breaks: getHistoryBreaks(sourceHistory).slice() };
@@ -789,7 +967,7 @@ const ViewerTracker = (function() {
     function isPlaybackCurrent(state) {
         return !!state && state === playback && presentationMode === 'PLAYBACK' &&
             state.url === location.href && lastUrl === location.href && state.generation === initGuard &&
-            state.key === activeSessionStorageKey && state.key === getStorageKey(getModelName());
+            state.key === activeSessionStorageKey && (state.imported || state.key === getStorageKey(getModelName()));
     }
 
     function stopPlaybackClock(state) {
@@ -835,9 +1013,10 @@ const ViewerTracker = (function() {
         if (!model || model === 'unknown' || lastUrl !== location.href ||
             activeSessionStorageKey !== getStorageKey(model) || !history.timestamps.length) return false;
         try {
-            var snapshot = createPlaybackSnapshot(history);
+            var archive = captureSessionFile();
+            var snapshot = createPlaybackSnapshot(archive.session.history);
             playback = { url: location.href, key: activeSessionStorageKey, generation: initGuard,
-                snapshot: snapshot, positionMs: 0, speed: 1, lastTickAt: Date.now(),
+                archive: archive, snapshot: snapshot, positionMs: 0, speed: 1, lastTickAt: Date.now(),
                 playing: snapshot.durationMs > 0, timer: null };
             cancelHighPulses();
             presentationMode = 'PLAYBACK';
@@ -856,6 +1035,7 @@ const ViewerTracker = (function() {
     }
 
     function leavePlayback(renderLive) {
+        sessionFileLoadGeneration++;
         hideChartTooltip();
         cancelHighPulses();
         cancelGifExport();
@@ -1009,6 +1189,11 @@ const ViewerTracker = (function() {
 
     function updatePlaybackControls() {
         if (!playback) return;
+        updatePanelOptions();
+        var label = document.getElementById('playback-label');
+        if (label) { label.textContent = playback.imported ? 'FILE REPLAY' : 'PLAYBACK'; label.title = playback.archive ? playback.archive.room : ''; }
+        var back = document.getElementById('playback-return');
+        if (back) { back.textContent = playback.imported ? 'Close Replay' : 'Return to Live'; back.title = playback.imported ? 'Close this file and return to the current room session' : 'Return to the current room session'; }
         var index = getPlaybackSampleIndex(playback.snapshot, playback.positionMs, playback.stepIndex);
         var previous = document.getElementById('playback-previous');
         var next = document.getElementById('playback-next');
@@ -1032,6 +1217,9 @@ const ViewerTracker = (function() {
         if (position) {
             position.textContent = formatElapsedTime(playback.positionMs) + ' / ' + formatElapsedTime(playback.snapshot.durationMs);
             position.title = 'Sample ' + (index + 1) + ' of ' + playback.snapshot.timeline.length + '. Recorded range captured on Replay entry. Highs are through the selected sample. Live acquisition continues independently.';
+            if (playback.archive) position.title += '\n' + playback.archive.room + ' · ' +
+                new Date(playback.archive.session.timestamp).toLocaleString() + ' · Active time: ' + formatElapsedTime(playback.archive.session.pausedElapsedTime) +
+                (playback.archive.session.isStopped ? ' · Stopped session' : playback.archive.session.isPaused ? ' · Paused session' : ' · Running session snapshot');
         }
     }
 
@@ -2253,14 +2441,10 @@ const ViewerTracker = (function() {
             if (typeof GifWriter !== 'function') {
                 throw new Error('GIF encoder missing. Reinstall the complete script, including its @require header.');
             }
-            var model = getModelName();
-            if (!model || model === 'unknown' || location.href !== lastUrl ||
-                activeSessionStorageKey !== getStorageKey(model)) {
-                throw new Error('Wait for this room to finish loading before exporting.');
-            }
             // Playback owns a frozen snapshot. Live acquisition can keep appending
             // samples without changing the range or counts of this export.
             if (!isPlaybackCurrent(playback)) throw new Error('Open Replay before downloading a GIF.');
+            var model = playback.archive ? playback.archive.room : getModelName();
             var snapshot = playback.snapshot;
             if (!snapshot.timeline.length) throw new Error('No recorded history to export yet.');
             var tiers = Object.keys(TIERS);
@@ -3052,11 +3236,16 @@ const ViewerTracker = (function() {
 
     // Preserve first/last and extrema in each pixel column, in sample order.
     // Only drawing is reduced; tooltips, histories and exports retain every sample.
-    function buildChartPlot(values, times, breaks, width, lastIndex) {
+    function buildChartPlot(values, times, breaks, width, lastIndex, windowMs) {
         var end = Math.min(values.length, times.length) - 1;
         if (Number.isInteger(lastIndex)) end = Math.min(end, lastIndex);
         if (end < 0) return { points: [], min: 0, max: 0, end: -1 };
-        var axis = getChartTimes(times), startTime = axis[0], span = axis[end] - startTime;
+        var axis = getChartTimes(times), startTime = windowMs ? Math.max(axis[0], axis[end] - windowMs) : axis[0];
+        var start = 0;
+        while (start < end && axis[start] < startTime) start++;
+        // Include the preceding real endpoint for a clipped boundary segment.
+        // It remains outside keyboard sample inspection for the selected window.
+        var firstDrawn = start > 0 && axis[start] > startTime ? start - 1 : start, span = axis[end] - startTime;
         var min = Infinity, max = -Infinity, points = [], bucket = null, breakNext = true;
         function flush() {
             if (!bucket) return;
@@ -3069,7 +3258,7 @@ const ViewerTracker = (function() {
             });
             bucket = null;
         }
-        for (var i = 0; i <= end; i++) {
+        for (var i = firstDrawn; i <= end; i++) {
             var value = values[i]; min = Math.min(min, value); max = Math.max(max, value);
             var column = span ? Math.floor((axis[i] - startTime) / span * width) : 0;
             if (breaks && breaks[i]) { flush(); breakNext = true; }
@@ -3082,7 +3271,7 @@ const ViewerTracker = (function() {
             }
         }
         flush();
-        return { points: points, min: min, max: max, end: end, startTime: startTime, endTime: axis[end] };
+        return { points: points, min: min, max: max, start: start, end: end, startTime: startTime, endTime: axis[end] };
     }
 
     function hideChartTooltip() {
@@ -3194,13 +3383,16 @@ const ViewerTracker = (function() {
         var width = canvas.clientWidth || 105;
         canvas.width = Math.ceil(width * scale); canvas.height = Math.ceil(height * scale);
         ctx.scale(scale, scale); ctx.clearRect(0, 0, width, height);
-        var plot = buildChartPlot(data, times, breaks, Math.max(1, width - 4), lastIndex);
-        bindChartInspection(canvas, { values: data, times: times, breaks: breaks, plot: plot, width: width, label: label });
+        var plot = buildChartPlot(data, times, breaks, Math.max(1, width - 4), lastIndex, CHART_WINDOWS[chartWindowMode]);
+        bindChartInspection(canvas, { values: data, times: times, breaks: breaks, firstIndex: plot.start || 0, plot: plot, width: width, label: label });
+        ctx.strokeStyle = color;
+        ctx.save(); ctx.beginPath(); ctx.rect(2, 0, width - 2, height); ctx.clip();
         drawCanvasChart(ctx, plot.points.map(function(point) {
             return { x: 2 + point.x,
                 y: plot.max === plot.min ? height / 2 : height - 2 - (point.value - plot.min) / (plot.max - plot.min) * (height - 4),
                 move: point.move };
         }), color);
+        ctx.restore();
     }
 
     function drawAllSparklines() {
@@ -3547,6 +3739,7 @@ const ViewerTracker = (function() {
     }
 
     function createPanel() {
+        if (panelOptionsCleanup) { panelOptionsCleanup(); panelOptionsCleanup = null; }
         hideChartTooltip();
         cancelGifExport();
         leavePlayback(false);
@@ -3582,11 +3775,22 @@ const ViewerTracker = (function() {
                     '<span id="header-text" style="font-weight:bold;color:var(--panel-accent);font-size:10px;">USERS: 0 (H:0)</span>' +
                     '<span id="mini-room-change" style="font-size:8px;margin:0 3px;display:none;"></span>' +
                     '<div style="display:flex;align-items:center;gap:5px;">' +
+                        '<button type="button" id="btn-panel-options" aria-label="Chart window and session files" aria-expanded="false" aria-controls="panel-options" style="display:none;background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;white-space:nowrap;">Full ▾</button>' +
                         '<button type="button" id="btn-standard-size" title="Restore standard panel size (100%)" aria-label="Restore standard panel size" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;">100%</button>' +
                         '<button id="btn-toggle" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:9px;padding:1px 4px;flex-shrink:0;">+</button>' +
                     '</div>' +
                 '</div>' +
 
+                '<div id="panel-options" role="group" aria-label="Chart and session options" style="display:none;position:absolute;right:5px;top:29px;width:190px;max-width:calc(100% - 10px);box-sizing:border-box;z-index:5;padding:8px;background:var(--panel-solid);color:var(--panel-text);border:1px solid #ff69b4;border-radius:4px;font-size:11px;box-shadow:0 3px 12px #0008;">' +
+                    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;"><strong>Charts &amp; sessions</strong><button type="button" id="panel-options-close" aria-label="Close chart and session options" style="background:var(--panel-button);color:var(--panel-text);border:0;border-radius:3px;cursor:pointer;">×</button></div>' +
+                    '<label for="chart-window-select">Chart window</label>' +
+                    '<select id="chart-window-select" style="display:block;width:100%;margin:4px 0 6px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);font-size:11px;"><option value="full">Full history</option><option value="hour">Last hour</option><option value="quarter">Last 15 minutes</option></select>' +
+                    '<div style="font-size:10px;color:var(--panel-muted);line-height:1.4;margin-bottom:8px;">Charts only. Downloads keep the full retained history.</div>' +
+                    '<button type="button" id="btn-save-session" style="display:block;width:100%;margin:4px 0;padding:4px;background:#4169E1;color:#fff;border:0;border-radius:3px;cursor:pointer;">Save session file</button>' +
+                    '<button type="button" id="btn-open-session" style="display:block;width:100%;margin:4px 0;padding:4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:3px;cursor:pointer;">Open session file…</button>' +
+                    '<input type="file" id="session-file-input" accept=".json,application/json" style="display:none;">' +
+                    '<div id="session-file-info" style="display:none;margin-top:7px;font-size:10px;line-height:1.4;white-space:pre-line;overflow-wrap:anywhere;color:var(--panel-secondary);"></div>' +
+                '</div>' +
                 '<div id="minimized-view" style="display:block;position:relative;">' +
                     '<div style="display:flex;align-items:center;justify-content:space-between;gap:3px;">' +
                         '<button type="button" id="mini-metric" style="background:transparent;border:0;color:var(--panel-secondary);font:inherit;cursor:pointer;padding:2px 0;" aria-label="Cycle chart metric">Room total ▾</button>' +
@@ -3703,7 +3907,7 @@ const ViewerTracker = (function() {
                             '<button id="btn-cancel-gif" hidden style="font-size:8px;cursor:pointer;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;">Cancel</button>' +
                         '</div>' +
                         '<div style="display:flex;align-items:center;justify-content:space-between;gap:3px;">' +
-                            '<strong style="font-size:9px;color:var(--panel-warning);">PLAYBACK</strong>' +
+                            '<strong id="playback-label" style="font-size:9px;color:var(--panel-warning);">PLAYBACK</strong>' +
                             '<button id="playback-play" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#4169E1;color:white;border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Pause</button>' +
                             '<select id="playback-speed" aria-label="Playback speed" style="font-size:8px;height:15px;margin:0;padding:0;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select>' +
                             '<button id="btn-export-gif" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#ff69b4;color:white;border:1px solid #ff69b4;border-radius:2px;cursor:pointer;" title="Download this Replay as a ' + GIF_WIDTH + ' × ' + GIF_HEIGHT + ' GIF">GIF</button>' +
@@ -3817,6 +4021,7 @@ const ViewerTracker = (function() {
             });
         }
 
+        bindPanelOptions();
         bindPlaybackControls();
         bindRowControls();
         updateReplayAvailability();
@@ -4104,6 +4309,7 @@ const ViewerTracker = (function() {
     }
 
     function renderDisplayFrame(frame) {
+        updatePanelOptions();
         var counts = frame.counts;
         var total = frame.total;
         var withTokens = frame.withTokens;
@@ -4117,12 +4323,13 @@ const ViewerTracker = (function() {
         var registeredPct = fullRoomTotal > 0 ? Math.round((total / fullRoomTotal) * 100) + '%' : '0%';
         var headerText = document.getElementById('header-text');
         if (headerText) {
+            headerText.title = frame.isPlayback && playback && playback.archive ? 'Replay: ' + playback.archive.room : '';
             if (isStopped && !frame.isPlayback) {
                 headerText.textContent = 'STOPPED: ' + fullRoomTotal.toLocaleString() + ' (H:' + roomTotalHigh.toLocaleString() + ')';
             } else if (isMinimized) {
                 headerText.textContent = (frame.isPlayback ? 'PLAYBACK: ' : (frame.isRestored ? 'SAVED: ' : '')) + fullRoomTotal.toLocaleString() + ' (H:' + roomTotalHigh.toLocaleString() + ')';
             } else {
-                headerText.textContent = (frame.isPlayback ? 'PLAYBACK: ' : (frame.isRestored ? 'SAVED: ' : 'USERS: ')) + fullRoomTotal.toLocaleString() + ' (H:' + roomTotalHigh.toLocaleString() + ')';
+                headerText.textContent = (frame.isPlayback ? (playback && playback.imported ? 'FILE: ' : 'PLAYBACK: ') : (frame.isRestored ? 'SAVED: ' : 'USERS: ')) + fullRoomTotal.toLocaleString() + ' (H:' + roomTotalHigh.toLocaleString() + ')';
             }
         }
         var miniWithTokens = document.getElementById('mini-withtokens');
@@ -4345,6 +4552,7 @@ const ViewerTracker = (function() {
     var lastUrl = location.href;
     function checkUrlChange() {
         if (location.href !== lastUrl) {
+            if (panelOptionsCleanup) { panelOptionsCleanup(); panelOptionsCleanup = null; }
             leavePlayback(false);
             var oldModel = getModelNameFromUrl(lastUrl);
             lastUrl = location.href;
