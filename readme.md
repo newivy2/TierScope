@@ -23,7 +23,7 @@ TierScope turns room viewer counts into a compact panel of live charts, trends, 
 - **Make room for what matters.** Collapse tiers and totals to give the remaining charts more space.
 - **Keep your layout.** Position, size, and row visibility are remembered, with a one-click return to standard scale.
 - **Set the background transparency.** Fade the panel backgrounds while keeping text and charts clear.
-- **Share and analyze.** Download animated GIFs, CSV history, and TXT session summaries.
+- **Save and analyze.** Download animated GIFs, CSV history, and TXT session summaries.
 - **Explore Replay sample by sample.** Step backward or forward to inspect individual moments.
 - **Read changes at a glance.** Color-coded trends and high-value highlights make audience changes easier to follow.
 
