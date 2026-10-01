@@ -8,9 +8,9 @@ Keep the broadcast in view, notice the shifts, and return to the moments worth a
 
 **FREE and OPEN SOURCE**
 
-Audience charts are built from periodic room-data samples, with session history stored locally through your userscript manager.
 
 **Current release: 3.1.14**
+(Audience charts are built from periodic room-data samples, with session history stored locally through your userscript manager.)
 
 ![TierScope panel](Tracking%20example%206.jpg)
 ![TierScope panel](Tracking%20example%207.jpg)
