@@ -2826,10 +2826,6 @@ const ViewerTracker = (function() {
         return times.map(function(time, i) { return i > 0 && time - times[i - 1] > threshold; });
     }
 
-    function chartColor(key, original) {
-        return key === 'purple' ? '#A36ACB' : key === 'dark-blue' ? '#7975CF' : original;
-    }
-
     // Preserve first/last and extrema in each pixel column, in sample order.
     // Only drawing is reduced; tooltips, histories and exports retain every sample.
     function buildChartPlot(values, times, breaks, width, lastIndex) {
@@ -2973,7 +2969,7 @@ const ViewerTracker = (function() {
         PANEL_ROWS.forEach(function(row) {
             if (collapsedRows.has(row.key)) return;
             var key = row.key === 'withtokens' ? 'withTokens' : row.key === 'anon' ? 'anonymous' : row.key;
-            drawSparkline('spark-' + row.key, displayHistory[key], chartColor(row.key, row.color),
+            drawSparkline('spark-' + row.key, displayHistory[key], row.color,
                 panelChartHeights[row.key] || row.height, displayHistory.timestamps, breaks, lastIndex, row.label);
         });
     }
@@ -3377,7 +3373,7 @@ const ViewerTracker = (function() {
                     '</div>' +
                     '<canvas id="spark-' + key + '" width="105" height="28" style="flex:1;margin:0 4px;"></canvas>' +
                     '<div style="text-align:right;width:48px;flex-shrink:0;">' +
-                        '<span id="count-' + key + '" style="font-weight:bold;color:' + chartColor(key, t.color) + ';font-size:14px;">0</span>' +
+                        '<span id="count-' + key + '" style="font-weight:bold;color:' + t.color + ';font-size:14px;">0</span>' +
                         '<div id="high-' + key + '" style="font-size:8px;color:#32CD32;margin-top:1px;">H:0</div>' +
                     '</div>' +
                 '</div>';

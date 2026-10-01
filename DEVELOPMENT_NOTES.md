@@ -103,7 +103,7 @@ Known pauses, failed acquisition attempts, refresh boundaries, and unusually lon
 
 Hover over an expanded chart to see the nearest sample’s count and local time, its sample number, and the visible minimum and maximum. Hovering inside a gap explicitly identifies the nearest sample rather than presenting it as a measurement within the gap. Keyboard users can Tab to a chart, use Left/Right to move between samples, Home/End to jump to either end, and Escape to close the tooltip. Inspection adds no panel height.
 
-Dark-purple and dark-blue strokes and count text use slightly lighter shades for contrast; row markers and borders keep their tier colors. Dense charts preserve the first, last, minimum, and maximum samples in each pixel column. This reduces drawing work without discarding stored samples or changing CSV counts. Replay reuses its frozen history and repaints when the selected sample or layout changes.
+Dense charts preserve the first, last, minimum, and maximum samples in each pixel column. This reduces drawing work without discarding stored samples or changing CSV counts. Replay reuses its frozen history and repaints when the selected sample or layout changes.
 
 ### Trends and highlights
 
@@ -345,7 +345,7 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
-| **3.1.15** | Timestamp-based charts and sampling gaps; hover and keyboard inspection; brighter dark-tier strokes/text; reduced dense-history drawing and Replay allocation; shared HTTP retry/access handling; remove session username lists and unique female/trans report totals; Chromium and Firefox regression coverage. |
+| **3.1.15** | Timestamp-based charts and sampling gaps; hover and keyboard inspection; reduced dense-history drawing and Replay allocation; shared HTTP retry/access handling; remove session username lists and unique female/trans report totals; Chromium and Firefox regression coverage. |
 | 3.1.14 | Two gentle live high-value pulses on expanded rows and collapsed markers, with reduced-motion support. |
 | 3.1.13 | Compact metric icons; slightly brighter green highlights; larger third-row trend boxes; diamond trend background follows change direction while retaining its pink border. |
 | 3.1.12 | Restored page-based startup: expanded in broadcast rooms, minimized elsewhere; retain position/scale persistence and scan-settings close fixes. |

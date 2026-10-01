@@ -167,3 +167,11 @@ PASS rate-limit UI, reload persistence, access-denied pause and explicit recover
 firefox
 PASS timestamp spacing, gaps, hover/keyboard inspection, Replay bounds, flat/single samples, brighter strokes and unchanged panel geometry
 PASS rate-limit UI, reload persistence, access-denied pause and explicit recovery
+
+Original dark-purple and dark-blue colors restored (2026-10-01):
+chromium:
+PASS timestamp spacing, gaps, hover/keyboard inspection, Replay bounds, flat/single samples, original tier colors and unchanged panel geometry
+PASS rate-limit UI, reload persistence, access-denied pause and explicit recovery
+firefox:
+PASS timestamp spacing, gaps, hover/keyboard inspection, Replay bounds, flat/single samples, original tier colors and unchanged panel geometry
+PASS rate-limit UI, reload persistence, access-denied pause and explicit recovery
