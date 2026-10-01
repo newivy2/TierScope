@@ -308,8 +308,8 @@ A room-level storage access failure can still make saving read-only. Individual 
 | 3.1.10 | Compact dashboard with a remembered switchable chart, count changes, sample freshness, and scan settings overlay. |
 | 3.1.9 | Isolate corrupt or unsupported saved records; restore healthy siblings; expire valid old-epoch orphan records. |
 | 3.1.8 | Separate session start from active time; preserve session highs beyond history rollover; isolate same-room tab saves; add repeatable regression tests and CI. |
-| 3.1.7 | Reposition the panel immediately on expansion; center the live-control buttons. |
-| 3.1.6 | Remember panel position and scale; add the 100% size reset, Replay sample stepping, and CSV history export alongside TXT reports. |
+| 3.1.7 | Reposition the panel immediately on expansion. |
+| 3.1.6 | Remember panel position and scale; added the 100% size reset, Replay sample stepping, and CSV history export alongside TXT reports. |
 | 3.1.5 | Fixed panel-height redistribution when collapsing rows, including inherited line-spacing cases. Shrink only when all 11 rows are collapsed. |
 | 3.1.4 | Added collapsible tier and summary rows, a restore strip, remembered visibility preferences, and taller remaining charts. Moderators and Fan Club start collapsed. |
 | 3.1.3 | Fixed pause/reset persistence and saved-count restoration; labeled saved snapshots; added compact sample ages and 480 × 640 GIFs. |
