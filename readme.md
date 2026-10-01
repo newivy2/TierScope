@@ -12,7 +12,7 @@ Keep the broadcast in view, notice the shifts, and return to the moments worth a
 (Audience charts are built from periodic room-data samples, with session history stored locally through your userscript manager.)
 
 ![TierScope panel](tierscope-hero.png)
-## A little perspective, at a glance
+## More in view, at a glance
 
 - **See the audience in context:** follow viewer tiers, registered and anonymous totals, token classifications, and a female/trans overlay.
 - **Follow the room’s rhythm:** line charts, trend comparisons, and session-high highlights make changes easier to recognize over time.
