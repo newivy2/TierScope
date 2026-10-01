@@ -6,8 +6,6 @@ Every broadcast has a rhythm. TierScope helps bring it into focus with a compact
 
 Keep the broadcast in view, notice the shifts, and return to the moments worth a closer look. It’s a way to reflect on a session and approach the next one with a clearer picture.
 
-**FREE and OPEN SOURCE**
-
 
 **Current release: 3.1.14**
 
