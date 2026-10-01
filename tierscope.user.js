@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.1.5
+// @version      3.1.7
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -17,7 +17,7 @@
 const ViewerTracker = (function() {
     'use strict';
 
-    const TIERSCOPE_VERSION = '3.1.5';
+    const TIERSCOPE_VERSION = '3.1.7';
     const API_TIMEOUT_MS = 10000;
     const DEFAULT_API_INTERVAL_SECONDS = 60;
     const DOM_FALLBACK_INTERVAL_SECONDS = 60;
@@ -178,6 +178,8 @@ const ViewerTracker = (function() {
     var resizeStartWidth = 0;
     var resizeStartHeight = 0;
     var currentScale = 1.0;
+    const PANEL_GEOMETRY_KEY = 'tierscope:ui:geometry:v1';
+    var panelGeometry = loadPanelGeometry();
     var BASE_WIDTH_MINI = 140;
     var BASE_WIDTH_FULL = 280;
     var roomTotalHighTime = null;
@@ -342,6 +344,7 @@ const ViewerTracker = (function() {
             updateDisplay();
             drawAllSparklines();
         }
+        constrainPanelPosition();
         var target = document.getElementById((collapsed ? 'restore-row-' : 'collapse-row-') + key);
         if (target) target.focus({ preventScroll: true });
     }
@@ -359,7 +362,7 @@ const ViewerTracker = (function() {
         });
         var container = document.getElementById('tracker-container');
         if (container) container.addEventListener('transitionend', function(event) {
-            if (event.target === container && event.propertyName === 'width') redrawPanelCharts();
+            if (event.target === container && event.propertyName === 'width') { redrawPanelCharts(); constrainPanelPosition(); }
         });
         applyRowLayout();
     }
@@ -427,8 +430,8 @@ const ViewerTracker = (function() {
             durationMs: durationMs, replayDurationMs: Math.min(30000, durationMs / 60) };
     }
 
-    function getPlaybackFrame(snapshot, positionMs) {
-        if (!snapshot || !snapshot.timeline.length) return null;
+    function getPlaybackSampleIndex(snapshot, positionMs, exactIndex) {
+        if (!snapshot || !snapshot.timeline.length) return -1;
         var position = Number(positionMs);
         position = Number.isFinite(position) ? Math.max(0, Math.min(snapshot.durationMs, position)) : 0;
         var low = 0;
@@ -438,7 +441,12 @@ const ViewerTracker = (function() {
             if (snapshot.timeline[middle] <= position) low = middle + 1;
             else high = middle;
         }
-        var index = Math.max(0, low - 1);
+        return Number.isInteger(exactIndex) ? Math.max(0, Math.min(snapshot.timeline.length - 1, exactIndex)) : Math.max(0, low - 1);
+    }
+
+    function getPlaybackFrame(snapshot, positionMs, exactIndex) {
+        var index = getPlaybackSampleIndex(snapshot, positionMs, exactIndex);
+        if (index < 0) return null;
         var frameHistory = { timestamps: snapshot.history.timestamps.slice(0, index + 1) };
         var frameHighs = {};
         var counts = {};
@@ -485,7 +493,7 @@ const ViewerTracker = (function() {
     function paintPlayback(state) {
         if (!isPlaybackCurrent(state)) return false;
         try {
-            renderPlaybackFrame(getPlaybackFrame(state.snapshot, state.positionMs));
+            renderPlaybackFrame(getPlaybackFrame(state.snapshot, state.positionMs, state.stepIndex));
             updatePlaybackControls();
             return true;
         } catch (error) {
@@ -551,6 +559,7 @@ const ViewerTracker = (function() {
             return false;
         }
         if (!state.playing) return false;
+        state.stepIndex = null;
         var now = Date.now();
         var elapsed = Math.max(0, now - state.lastTickAt);
         state.lastTickAt = now;
@@ -578,6 +587,7 @@ const ViewerTracker = (function() {
         } else {
             if (state.positionMs >= state.snapshot.durationMs) state.positionMs = 0;
             state.playing = true;
+            state.stepIndex = null;
             state.lastTickAt = Date.now();
         }
         if (!paintPlayback(state)) return false;
@@ -595,7 +605,21 @@ const ViewerTracker = (function() {
         if (!Number.isFinite(position)) return false;
         state.playing = false;
         stopPlaybackClock(state);
+        state.stepIndex = null;
         state.positionMs = Math.max(0, Math.min(state.snapshot.durationMs, position));
+        state.lastTickAt = Date.now();
+        return paintPlayback(state);
+    }
+
+    function stepPlayback(direction) {
+        var state = playback;
+        if (!isPlaybackCurrent(state)) return false;
+        var index = getPlaybackSampleIndex(state.snapshot, state.positionMs, state.stepIndex);
+        if (index < 0) return false;
+        state.playing = false;
+        stopPlaybackClock(state);
+        state.stepIndex = Math.max(0, Math.min(state.snapshot.timeline.length - 1, index + direction));
+        state.positionMs = state.snapshot.timeline[state.stepIndex];
         state.lastTickAt = Date.now();
         return paintPlayback(state);
     }
@@ -625,6 +649,8 @@ const ViewerTracker = (function() {
 
     function bindPlaybackControls() {
         var bindings = { 'btn-replay': enterPlayback, 'playback-play': togglePlayback,
+            'playback-previous': function() { stepPlayback(-1); },
+            'playback-next': function() { stepPlayback(1); },
             'playback-return': function() { leavePlayback(true); } };
         Object.keys(bindings).forEach(function(id) {
             var button = document.getElementById(id);
@@ -659,6 +685,11 @@ const ViewerTracker = (function() {
 
     function updatePlaybackControls() {
         if (!playback) return;
+        var index = getPlaybackSampleIndex(playback.snapshot, playback.positionMs, playback.stepIndex);
+        var previous = document.getElementById('playback-previous');
+        var next = document.getElementById('playback-next');
+        if (previous) previous.disabled = index <= 0;
+        if (next) next.disabled = index < 0 || index === playback.snapshot.timeline.length - 1;
         var button = document.getElementById('playback-play');
         if (button) {
             button.textContent = playback.playing ? 'Pause' : 'Play';
@@ -676,7 +707,7 @@ const ViewerTracker = (function() {
         var position = document.getElementById('playback-position');
         if (position) {
             position.textContent = formatElapsedTime(playback.positionMs) + ' / ' + formatElapsedTime(playback.snapshot.durationMs);
-            position.title = 'Recorded range captured on Replay entry. Highs are through the selected sample. Live acquisition continues independently.';
+            position.title = 'Sample ' + (index + 1) + ' of ' + playback.snapshot.timeline.length + '. Recorded range captured on Replay entry. Highs are through the selected sample. Live acquisition continues independently.';
         }
     }
 
@@ -1520,6 +1551,41 @@ const ViewerTracker = (function() {
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
+    }
+
+    function downloadTrackingCSV() {
+        if (!history.timestamps.length) {
+            alert('No recorded history to export yet.');
+            return;
+        }
+        var model = getModelName();
+        function cell(value) {
+            var text = String(value);
+            // Quoting handles CSV delimiters; the prefix prevents spreadsheet formulas.
+            if (typeof value === 'string' && /^[\s]*[=+@-]/.test(text)) text = "'" + text;
+            return '"' + text.replace(/"/g, '""') + '"';
+        }
+        var rows = [['room', 'sample_index', 'timestamp_utc', 'elapsed_seconds', 'room_total',
+            'registered', 'anonymous', 'with_tokens', 'moderators', 'fan_club', 'dark_purple',
+            'light_purple', 'dark_blue', 'light_blue', 'grey', 'female_trans']];
+        history.timestamps.forEach(function(timestamp, i) {
+            rows.push([model, i + 1, new Date(timestamp).toISOString(),
+                Math.max(0, timestamp - history.timestamps[0]) / 1000,
+                history.total[i] + history.anonymous[i], history.total[i], history.anonymous[i],
+                history.withTokens[i], history.red[i], history.green[i], history.purple[i],
+                history.pink[i], history['dark-blue'][i], history['light-blue'][i], history.gray[i], history['female-trans'][i]]);
+        });
+        var blob = new Blob(['\ufeff' + rows.map(function(row) { return row.map(cell).join(','); }).join('\r\n') + '\r\n'],
+            { type: 'text/csv;charset=utf-8' });
+        var url = URL.createObjectURL(blob);
+        var link = document.createElement('a');
+        link.href = url;
+        link.download = model.replace(/[^a-z0-9_-]/gi, '_') + '-history-' + new Date().toISOString().replace(/[:.]/g, '-') + '.csv';
+        document.body.appendChild(link);
+        try { link.click(); } finally {
+            link.remove();
+            setTimeout(function() { URL.revokeObjectURL(url); }, 60000);
+        }
     }
 
     // A small indexed-color renderer: each rectangle updates the canvas and its
@@ -2605,6 +2671,55 @@ const ViewerTracker = (function() {
         dragListeners.push({ type: type, fn: fn, options: options });
     }
 
+    function loadPanelGeometry() {
+        try {
+            var raw = GM_getValue(PANEL_GEOMETRY_KEY, null);
+            if (raw === null) return null;
+            var data = JSON.parse(raw);
+            if (!data || !Number.isFinite(data.left) || !Number.isFinite(data.top) ||
+                !Number.isFinite(data.scale) || data.scale < 0.5 || data.scale > 3) return null;
+            return { left: data.left, top: data.top, scale: data.scale };
+        } catch (error) { return null; }
+    }
+
+    function constrainPanelPosition() {
+        var container = document.getElementById('tracker-container');
+        if (!container) return;
+        var rect = container.getBoundingClientRect();
+        container.style.left = Math.max(0, Math.min(rect.left, Math.max(0, window.innerWidth - rect.width))) + 'px';
+        container.style.top = Math.max(0, Math.min(rect.top, Math.max(0, window.innerHeight - rect.height))) + 'px';
+        container.style.right = 'auto';
+    }
+
+    function savePanelGeometry() {
+        var container = document.getElementById('tracker-container');
+        if (!container) return;
+        var rect = container.getBoundingClientRect();
+        panelGeometry = { left: rect.left, top: rect.top, scale: currentScale };
+        try { GM_setValue(PANEL_GEOMETRY_KEY, JSON.stringify(panelGeometry)); }
+        catch (error) { log('Could not save panel position/scale: ' + error.message); }
+    }
+
+    function restorePanelGeometry() {
+        var container = document.getElementById('tracker-container');
+        if (!container) return;
+        if (panelGeometry) {
+            container.style.left = panelGeometry.left + 'px';
+            container.style.top = panelGeometry.top + 'px';
+            container.style.right = 'auto';
+            applyScale(panelGeometry.scale);
+        } else applyScale(currentScale);
+        constrainPanelPosition();
+        redrawPanelCharts();
+    }
+
+    function restoreStandardSize() {
+        applyScale(1);
+        redrawPanelCharts();
+        constrainPanelPosition();
+        savePanelGeometry();
+    }
+
     function applyScale(scale) {
         currentScale = scale;
         var container = document.getElementById('tracker-container');
@@ -2647,7 +2762,7 @@ const ViewerTracker = (function() {
             var deltaX = resizeStartX - e.clientX;
             var deltaY = resizeStartY - e.clientY;
             var newWidth = resizeStartWidth + deltaX;
-            var baseWidth = isMinimized ? BASE_WIDTH_MINI : BASE_WIDTH_FULL;
+            var baseWidth = container.offsetWidth;
             var newScale = Math.max(0.5, Math.min(3.0, newWidth / baseWidth));
             applyScale(newScale);
         };
@@ -2655,6 +2770,8 @@ const ViewerTracker = (function() {
             if (!isResizing) return;
             isResizing = false;
             redrawPanelCharts();
+            constrainPanelPosition();
+            savePanelGeometry();
         };
         resizeHandle.addEventListener('mousedown', startResize);
         document.addEventListener('mousemove', doResize);
@@ -2675,22 +2792,8 @@ const ViewerTracker = (function() {
         windowResizeHandler = function() {
             clearTimeout(resizeTimeout);
             resizeTimeout = setTimeout(function() {
-                var container = document.getElementById('tracker-container');
-                if (!container) return;
-                var rect = container.getBoundingClientRect();
-                var viewportWidth = window.innerWidth;
-                var viewportHeight = window.innerHeight;
-                var currentLeft = parseInt(container.style.left) || rect.left;
-                var currentTop = parseInt(container.style.top) || rect.top;
-                var maxX = viewportWidth - rect.width;
-                var maxY = viewportHeight - rect.height;
-                var newLeft = Math.max(0, Math.min(currentLeft, maxX));
-                var newTop = Math.max(0, Math.min(currentTop, maxY));
-                if (newLeft !== currentLeft || newTop !== currentTop) {
-                    container.style.left = newLeft + 'px';
-                    container.style.top = newTop + 'px';
-                    container.style.right = 'auto';
-                }
+                constrainPanelPosition();
+                redrawPanelCharts();
             }, 100);
         };
         window.addEventListener('resize', windowResizeHandler);
@@ -2747,6 +2850,7 @@ const ViewerTracker = (function() {
                 '">' +
                     '<span id="header-text" style="font-weight:bold;color:#ff69b4;font-size:10px;">USERS: 0 (H:0)</span>' +
                     '<div style="display:flex;align-items:center;gap:5px;">' +
+                        '<button type="button" id="btn-standard-size" title="Restore standard panel size (100%)" aria-label="Restore standard panel size" style="background:#333;border:1px solid #555;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;">100%</button>' +
                         '<button id="btn-toggle" style="background:#333;border:1px solid #555;color:#fff;border-radius:3px;cursor:pointer;font-size:9px;padding:1px 4px;flex-shrink:0;">+</button>' +
                     '</div>' +
                 '</div>' +
@@ -2867,7 +2971,10 @@ const ViewerTracker = (function() {
                             '<button id="btn-export-gif" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#ff69b4;color:white;border:1px solid #ff69b4;border-radius:2px;cursor:pointer;" title="Download this Replay as a ' + GIF_WIDTH + ' × ' + GIF_HEIGHT + ' GIF">GIF</button>' +
                             '<button id="playback-return" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#333;color:white;border:1px solid #555;border-radius:2px;cursor:pointer;">Return to Live</button>' +
                         '</div>' +
-                        '<input id="playback-scrubber" type="range" min="0" max="0" value="0" step="1" aria-label="Playback timeline" style="width:100%;height:12px;margin:0;accent-color:#ffd43b;cursor:pointer;">' +
+                        '<div style="display:flex;align-items:center;gap:4px;min-width:0;">' +
+                        '<button type="button" id="playback-previous" title="Previous recorded sample (pauses Replay)" aria-label="Previous recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:#333;color:white;border:1px solid #555;border-radius:2px;cursor:pointer;">|&#9664;</button>' +
+                        '<input id="playback-scrubber" type="range" min="0" max="0" value="0" step="1" aria-label="Playback timeline" style="flex:1;min-width:0;width:100%;height:12px;margin:0;accent-color:#ffd43b;cursor:pointer;">' +
+                        '<button type="button" id="playback-next" title="Next recorded sample (pauses Replay)" aria-label="Next recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:#333;color:white;border:1px solid #555;border-radius:2px;cursor:pointer;">&#9654;|</button></div>' +
                         '<div id="playback-position" style="font-size:9px;line-height:12px;text-align:center;color:#ddd;font-family:monospace;">00:00:00 / 00:00:00</div>' +
                     '</div>' +
                 '</div>' +
@@ -2878,19 +2985,27 @@ const ViewerTracker = (function() {
                         '<button id="btn-replay" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:#333;color:#ffd43b;border:1px solid #555;border-radius:2px;cursor:pointer;" title="Replay recorded history">Replay</button>' +
                         '<span style="font-size:11px;color:#32CD32;font-weight:bold;" id="control-next-scan">Next: 60s</span>' +
                     '</div>' +
-                    '<div style="display:flex;justify-content:center;align-items:center;position:relative;">' +
-                        '<span style="font-size:12px;color:#ffd43b;font-family:monospace;font-weight:bold;position:absolute;left:0;" id="control-tracking-timer">00:00:00</span>' +
-                        '<div style="display:flex;gap:3px;">' +
-                            '<button id="btn-download-report" style="background:#4169E1;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 6px;display:flex;align-items:center;gap:2px;" title="Download tracking report">' +
+                    '<div id="control-action-row" style="display:grid;grid-template-columns:minmax(max-content,1fr) auto minmax(0,1fr);align-items:center;gap:3px;">' +
+                        '<span style="font-size:12px;color:#ffd43b;font-family:monospace;font-weight:bold;flex-shrink:0;" id="control-tracking-timer">00:00:00</span>' +
+                        '<div id="control-action-buttons" style="display:flex;gap:3px;align-items:center;">' +
+                            '<button id="btn-download-report" style="background:#4169E1;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 4px;display:flex;align-items:center;gap:2px;" title="Download tracking report">' +
                                 '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
                                     '<line x1="12" y1="4" x2="12" y2="16"/>' +
                                     '<polyline points="6 10 12 16 18 10"/>' +
                                     '<line x1="4" y1="20" x2="20" y2="20"/>' +
                                 '</svg>' +
-                                'Report' +
+                                'TXT' +
                             '</button>' +
-                            '<button id="btn-control-auto" style="background:#32CD32;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 6px;min-width:24px;" title="Auto-Refresh ON">⏸</button>' +
-                            '<button id="btn-main-reset" style="background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 6px;display:flex;align-items:center;gap:2px;" title="Reset all tracking data">' +
+                            '<button id="btn-download-csv" style="background:#4169E1;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 4px;display:flex;align-items:center;gap:2px;" title="Download all retained history as CSV">' +
+                                '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
+                                    '<line x1="12" y1="4" x2="12" y2="16"/>' +
+                                    '<polyline points="6 10 12 16 18 10"/>' +
+                                    '<line x1="4" y1="20" x2="20" y2="20"/>' +
+                                '</svg>' +
+                                'CSV' +
+                            '</button>' +
+                            '<button id="btn-control-auto" style="background:#32CD32;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 4px;min-width:24px;" title="Auto-Refresh ON">⏸</button>' +
+                            '<button id="btn-main-reset" style="background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 4px;display:flex;align-items:center;gap:2px;" title="Reset all tracking data">' +
                                 '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
                                     '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12"/>' +
                                     '<path d="M3 3v9h9"/>' +
@@ -2922,6 +3037,13 @@ const ViewerTracker = (function() {
         div.innerHTML = html;
         document.body.appendChild(div);
 
+        var standardSize = document.getElementById('btn-standard-size');
+        if (standardSize) {
+            standardSize.onmousedown = function(event) { event.stopPropagation(); };
+            standardSize.onclick = function(event) { event.stopPropagation(); restoreStandardSize(); };
+        }
+        var btnCSV = document.getElementById('btn-download-csv');
+        if (btnCSV) btnCSV.onclick = downloadTrackingCSV;
         var btnDownload = document.getElementById('btn-download-report');
         var btnMainReset = document.getElementById('btn-main-reset');
         var btnControlAuto = document.getElementById('btn-control-auto');
@@ -3072,6 +3194,7 @@ const ViewerTracker = (function() {
         var stopDrag = function() {
             isDragging = false;
             cleanupDragListeners();
+            savePanelGeometry();
         };
         dragHandle.addEventListener('mousedown', startDrag, false);
     }
@@ -3086,6 +3209,10 @@ const ViewerTracker = (function() {
         var headerText = document.getElementById('header-text');
         var resizeHandle = document.getElementById('resize-handle');
         var anonymousCount = getAnonymousCount();
+        var previousTransition = container ? container.style.transition : '';
+        // Measure the final expanded size immediately, not an intermediate
+        // animated width. Clamping must also work without transition events.
+        if (!isMinimized && container) container.style.transition = 'none';
         if (isMinimized) {
             if (fullView) fullView.style.display = 'none';
             if (miniView) miniView.style.display = 'block';
@@ -3103,11 +3230,14 @@ const ViewerTracker = (function() {
             if (resizeHandle) resizeHandle.style.display = 'block';
             var currentTotal = roomTotal > 0 ? roomTotal : (users.size + anonymousCount);
             if (headerText) headerText.textContent = 'USERS: ' + currentTotal.toLocaleString() + ' (H:' + roomTotalHigh.toLocaleString() + ')';
-            setTimeout(function() {
-                drawAllSparklines();
-            }, 100);
+
         }
         updateDisplay();
+        if (!isMinimized) {
+            drawAllSparklines();
+            constrainPanelPosition();
+            if (container) container.style.transition = previousTransition;
+        }
     }
 
     function scanUsers() {
@@ -3323,6 +3453,7 @@ const ViewerTracker = (function() {
         }
         updateTrendDisplay();
         updateAcquisitionStatus();
+        restorePanelGeometry();
         var attempts = 0;
         var maxAttempts = 30;
         var checkInterval = setInterval(function() {
@@ -3402,7 +3533,7 @@ const ViewerTracker = (function() {
                 clearInterval(healthCheckInterval);
                 healthCheckInterval = null;
             }
-            currentScale = 1.0;
+            currentScale = panelGeometry ? panelGeometry.scale : currentScale;
             users.clear();
             roomTotal = 0;
             lastAcceptedAcquisition = null;
@@ -3457,6 +3588,7 @@ const ViewerTracker = (function() {
 
     return {
         downloadTrackingReport: downloadTrackingReport,
+        downloadTrackingCSV: downloadTrackingCSV,
         resetAllTracking: resetAllTracking,
         getHealth: function() { return domHealthStatus; },
         parseGetChatUserListResponse: parseGetChatUserListResponse,
