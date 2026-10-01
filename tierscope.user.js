@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.1.11
+// @version      3.1.12
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -18,7 +18,7 @@
 const ViewerTracker = (function() {
     'use strict';
 
-    const TIERSCOPE_VERSION = '3.1.11';
+    const TIERSCOPE_VERSION = '3.1.12';
     const API_TIMEOUT_MS = 10000;
     const DEFAULT_API_INTERVAL_SECONDS = 60;
     const DOM_FALLBACK_INTERVAL_SECONDS = 60;
@@ -2890,8 +2890,7 @@ const ViewerTracker = (function() {
             var data = JSON.parse(raw);
             if (!data || !Number.isFinite(data.left) || !Number.isFinite(data.top) ||
                 !Number.isFinite(data.scale) || data.scale < 0.5 || data.scale > 3) return null;
-            return { left: data.left, top: data.top, scale: data.scale,
-                minimized: typeof data.minimized === 'boolean' ? data.minimized : undefined };
+            return { left: data.left, top: data.top, scale: data.scale };
         } catch (error) { return null; }
     }
 
@@ -2908,7 +2907,7 @@ const ViewerTracker = (function() {
         var container = document.getElementById('tracker-container');
         if (!container) return;
         var rect = container.getBoundingClientRect();
-        panelGeometry = { left: rect.left, top: rect.top, scale: currentScale, minimized: isMinimized };
+        panelGeometry = { left: rect.left, top: rect.top, scale: currentScale };
         try { GM_setValue(PANEL_GEOMETRY_KEY, JSON.stringify(panelGeometry)); }
         catch (error) { log('Could not save panel position/scale: ' + error.message); }
     }
@@ -3499,7 +3498,6 @@ const ViewerTracker = (function() {
             constrainPanelPosition();
         }
         constrainPanelPosition();
-        savePanelGeometry();
         if (container) container.style.transition = previousTransition;
     }
 
@@ -3697,7 +3695,6 @@ const ViewerTracker = (function() {
             isMinimized = false;
             isAutoRefreshOn = !isPaused;
         }
-        if (panelGeometry && typeof panelGeometry.minimized === 'boolean') isMinimized = panelGeometry.minimized;
         try {
             createPanel();
         } catch (e) {

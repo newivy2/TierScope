@@ -4,10 +4,9 @@
 
 TierScope turns room viewer counts into a compact panel of live charts, trends, and session highs. Follow the different viewer tiers, spot changes in your audience, and replay the session to see how it unfolded.
 
-**Current release: 3.1.11**
+**Current release: 3.1.12**
 
 ![TierScope panel](Tracking%20example%206.jpg)
-![TierScope panel](Tracking%20example%207.jpg)
 
 ## Your room, at a glance
 
@@ -21,7 +20,7 @@ TierScope turns room viewer counts into a compact panel of live charts, trends, 
 - **Keep an eye on the room in compact mode.** A switchable chart, count changes, and sample age make the minimized panel useful at a glance.
 
 - **Make room for what matters.** Collapse tiers and totals to give the remaining charts more space.
-- **Keep your layout.** Position, size, compact/expanded view, and row visibility are remembered, with a one-click return to standard scale.
+- **Keep your layout.** Position, size, and row visibility are remembered, with a one-click return to standard scale.
 - **Set the background transparency.** Fade the panel backgrounds while keeping text and charts clear.
 - **Share and analyze.** Download animated GIFs, CSV history, and TXT session summaries.
 - **Explore Replay sample by sample.** Step backward or forward to inspect individual moments.
@@ -29,7 +28,7 @@ TierScope turns room viewer counts into a compact panel of live charts, trends, 
 
 ## Get started
 
-Install [Tampermonkey](https://www.tampermonkey.net/), follow Tampermonkey’s [userscript permission instructions](https://www.tampermonkey.net/faq.php?q=Q209) for your browser so installed scripts can run, open [tierscope.user.js](https://raw.githubusercontent.com/newivy2/TierScope/main/tierscope.user.js), and accept the installation. Refresh a Chaturbate room to start tracking.
+Install [Tampermonkey](https://www.tampermonkey.net/), open [tierscope.user.js](https://raw.githubusercontent.com/newivy2/TierScope/main/tierscope.user.js), and accept the installation. Refresh a Chaturbate room to start tracking.
 
 [Usage and development notes](DEVELOPMENT_NOTES.md) · [Report an issue](https://github.com/newivy2/TierScope/issues)
 

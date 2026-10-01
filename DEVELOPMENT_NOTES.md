@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **version 3.1.11**. For a quick introduction and installation link, see the [README](readme.md).
+Detailed reference for **version 3.1.12**. For a quick introduction and installation link, see the [README](readme.md).
 
 ## Contents
 
@@ -69,7 +69,7 @@ The footer shows sample source and age, or Paused and age. Hover for the source,
 
 ### Position and size
 
-Drag the header to move the panel, or drag the pink upper-left handle to resize it. Position and scale are saved when you release the mouse and restored after a refresh or room change. Compact/expanded view is saved when toggled, so refreshing a compact panel keeps it compact at the same scale. Older saved layout records without a view preference retain the previous default behavior until you toggle the view.
+Drag the header to move the panel, or drag the pink upper-left handle to resize it. Position and scale are saved when you release the mouse and restored after a refresh or room change. The panel starts expanded in broadcast rooms and minimized on other pages, such as Followed, Featured, and cam directories. Compact/expanded state is not remembered; the view preference saved by 3.1.11 is ignored. Position and scale still restore normally.
 
 Click **100%** in the header to return to standard scale. Use it in different tabs to give their panels the same scale. It keeps your collapsed-row choices and session data; it does not reset tracking or return the panel to its original position.
 
@@ -264,7 +264,7 @@ Look for their boxed markers below the header and click to restore them. Moderat
 
 **The panel shrank after collapsing rows**
 
-This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only version 3.1.11 is enabled, refresh the tab, and report the browser and steps that reproduce it.
+This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only version 3.1.12 is enabled, refresh the tab, and report the browser and steps that reproduce it.
 
 **The panel is too large or near a screen edge**
 
@@ -302,7 +302,8 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
-| **3.1.11** | Add a close button and document-level Escape handling for scan settings; remember compact/expanded view with panel geometry. |
+| **3.1.12** | Restore page-based startup: expanded in broadcast rooms, minimized elsewhere; retain position/scale persistence and scan-settings close fixes. |
+| 3.1.11 | Add a close button and document-level Escape handling for scan settings; remember compact/expanded view with panel geometry. |
 | 3.1.10 | Compact dashboard with a remembered switchable chart, count changes, sample freshness, and scan settings overlay. |
 | 3.1.9 | Isolate corrupt or unsupported saved records; restore healthy siblings; expire valid old-epoch orphan records. |
 | 3.1.8 | Separate session start from active time; preserve session highs beyond history rollover; isolate same-room tab saves; add repeatable regression tests and CI. |
