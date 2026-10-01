@@ -4,7 +4,7 @@
 
 TierScope turns room viewer counts into a compact panel of live charts, trends, and session highs. Follow the different viewer tiers, spot changes in your audience, and replay the session to see how it unfolded.
 
-**Current release: 3.1.12**
+**Current release: 3.1.13**
 
 ![TierScope panel](Tracking%20example%206.jpg)
 ![TierScope panel](Tracking%20example%207.jpg)
@@ -18,8 +18,7 @@ TierScope turns room viewer counts into a compact panel of live charts, trends, 
 
 ## What’s new since 3.1.1.0
 
-- **Keep an eye on the room in compact mode.** A switchable chart, count changes, and sample age make the minimized panel useful at a glance.
-
+- **Keep an eye on the room in compact mode.** Switch between Room total, 💎 With Tokens, and 📊 Registered charts, with count changes and sample age at a glance.
 - **Make room for what matters.** Collapse tiers and totals to give the remaining charts more space.
 - **Keep your layout.** Position, size, and row visibility are remembered, with a one-click return to standard scale.
 - **Set the background transparency.** Fade the panel backgrounds while keeping text and charts clear.
