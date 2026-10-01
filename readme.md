@@ -1,6 +1,5 @@
 # TierScope
 
-**A clearer view of the room.**
 
 Every broadcast has a rhythm. TierScope helps bring it into focus with a compact view of how a Chaturbate audience changes over time. Live charts, tier-by-tier trends, and session highs give creators a little more perspective on the rooms they build.
 
