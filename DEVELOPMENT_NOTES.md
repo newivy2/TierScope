@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **version 3.1.19**. For a quick introduction and installation link, see the [README](readme.md).
+Detailed reference for **version 3.2.0**. For a quick introduction and installation link, see the [README](readme.md).
 
 ## Contents
 
@@ -91,7 +91,7 @@ The absence window is saved with the session. Manually paused sessions do not ru
 
 The minimized panel retains its 140-pixel content width. Click the chart label to cycle **Room total → 💎 (With Tokens) → 📊 (Registered)**. This preference is saved across rooms and refreshes, independently of collapsed rows.
 
-The chart shows the last **15 recorded minutes**, ending at the latest retained sample. Horizontal positions follow sample timestamps; vertical scale fits the visible values. A single sample is a dot, and a constant series is a horizontal line. Hover over the chart for its value range, sample count, and end time. The adjacent H value is the session high, not merely the high within the visible window.
+The chart shows the last **15 recorded minutes**, ending at the latest retained sample. Horizontal positions follow sample timestamps; vertical scale fits the plotted values. When a missing interval crosses the window’s left edge, the preceding recorded endpoint is included in the scale so its orange connector can continue into view; it is not counted as a sample inside the window. A single sample is a dot, and a constant series is a horizontal line. Hover over the chart for its value range, sample count, and end time. The adjacent H value is the session high, not merely the high within the visible window.
 
 The header shows room total and its change; the two rows below the chart show With Tokens and Registered counts and changes. Changes use the main panel's selected comparison window. Restored snapshots leave changes blank until a fresh sample is accepted; a comparison also needs sufficient history. Hover over counts for exact values and percentages, changes for their comparison window, and the header for room name and room high.
 
@@ -127,9 +127,9 @@ Collapsing a row changes presentation only. All rows continue to be tracked and 
 
 Expanded charts show the full retained history, up to 10,000 samples. Horizontal positions follow sample timestamps; the whole retained span continues to fit as history grows. Replay shows only the samples through its selected position. Each row scales independently to its visible minimum and maximum. A single sample appears as a dot; a constant series is centered vertically.
 
-Known pauses, failed acquisition attempts, refresh boundaries, and unusually long acquisition intervals create breaks in the line. The space remains on the time axis; missing samples are not filled with zeroes or interpolated values. Breaks are saved with new history. For older sessions without break metadata, gaps are inferred conservatively from unusually long timestamp intervals; the original pause boundaries cannot always be recovered. If the system clock moves backward, horizontal positions are clamped to preserve sample order; inspection still shows the original recorded timestamp.
+Known pauses, failed acquisition attempts, refresh boundaries, and unusually long acquisition intervals interrupt the measured line. Thin, dashed orange connectors join the recorded endpoints across those intervals in expanded charts, the compact chart, Replay, and GIFs. The actual duration remains on the time axis. These connectors are visual annotations: they add no samples and do not alter counts, highs, trend comparisons, TXT reports, or CSV history. Until the next accepted sample exists, the line ends at the last observation; nothing is projected forward. Breaks are saved with new history. For older sessions without break metadata, gaps are inferred conservatively from unusually long timestamp intervals; the original pause boundaries cannot always be recovered. If the system clock moves backward, horizontal positions are clamped to preserve sample order; inspection still shows the original recorded timestamp.
 
-Hover over an expanded chart to see the nearest sample’s count and local time, its sample number, and the visible minimum and maximum. Hovering inside a gap explicitly identifies the nearest sample rather than presenting it as a measurement within the gap. Keyboard users can Tab to a chart, use Left/Right to move between samples, Home/End to jump to either end, and Escape to close the tooltip. Inspection adds no panel height.
+Hover over an expanded or compact chart to see the nearest recorded sample’s count and local time, its sample number, and the plotted minimum and maximum. Hovering inside a marked gap shows “No samples recorded during this interval,” the two endpoint times, and an explanation of the orange dashes. It does not display an estimated count for the missing interval. Keyboard users can Tab to a chart, use Left/Right to move between samples, Home/End to jump to either end, and Escape to close the tooltip. Inspection adds no panel height.
 
 Dense charts preserve the first, last, minimum, and maximum samples in each pixel column. This reduces drawing work without discarding stored samples or changing CSV counts. Replay reuses its frozen history and repaints when the selected sample or layout changes.
 
@@ -159,7 +159,7 @@ It preserves green high-value highlights, borders, text, charts, and the fills o
 
 The moon checkbox at the bottom right of Controls starts checked for **dark mode** when no preference has been saved. Uncheck it for **bright mode**. The choice is remembered across rooms and refreshes, independently of session data; Reset keeps it. Other already-open tabs keep their current theme until reloaded.
 
-The theme applies to expanded and compact views, Replay controls, scan settings, and chart tooltips. Bright mode uses light surfaces and darker neutral/status text. The registered-total chart switches from white to dark so it stays visible; tier colors, including dark purple and dark blue, stay unchanged. High-value backgrounds and pulses retain their green treatment, and the opacity slider keeps the same scope. Switching themes does not resize the panel, change tracking, or move the Replay position. GIF exports keep their existing fixed palette.
+The theme applies to expanded and compact views, Replay controls, scan settings, and chart tooltips. Bright mode uses light surfaces and darker neutral/status text. The registered-total chart switches from white to dark so it stays visible; tier colors, including dark purple and dark blue, stay unchanged. High-value backgrounds and pulses retain their green treatment, and the opacity slider keeps the same scope. Switching themes does not resize the panel, change tracking, or move the Replay position. GIF exports use a fixed dark background and palette, including orange for missing intervals.
 
 ## Request failures and retries
 
@@ -206,10 +206,10 @@ Open **Replay**, then click **GIF**. Progress and **Cancel** appear within the e
 | Tier rows | Seven color tiers plus the female/trans overlay |
 | Summary rows | Total, With Tokens, Registered, Anonymous |
 | Content | Historical lines, counts, and recorded elapsed time |
-| Rendering | Fixed palette, bitmap lettering, two-pixel chart strokes |
+| Rendering | Fixed palette, bitmap lettering, two-pixel measured lines, thinner orange dashed gap connectors |
 | Encoder | `omggif` 1.0.10, loaded by the userscript manager |
 
-Export uses the **entire frozen Replay range**, regardless of cursor position or playback speed. With more than 60 samples, it selects moments across the recorded time range and includes the first and last samples. Each chart shows history only through its selected sample, uses timestamp spacing and recorded gaps, and scales independently to its visible minimum and maximum. Flat series are centered.
+Export uses the **entire frozen Replay range**, regardless of cursor position or playback speed. With more than 60 samples, it selects moments across the recorded time range and includes the first and last samples. Each chart shows history only through its selected sample, uses timestamp spacing and recorded gaps, and scales independently to its visible minimum and maximum. Flat series are centered. Orange dashed connectors appear only once both recorded endpoints are included in the frame; a small legend identifies them as intervals with no samples.
 
 The GIF always includes every tier and all four summary lines, including rows collapsed in the panel. It has a fixed dark background; the panel’s opacity slider and row heights do not affect its layout. Generation happens locally and does not require watching or recording ten seconds of playback. File size and generation time depend on the history and device; there is no fixed file-size guarantee.
 
@@ -341,7 +341,7 @@ Look for their boxed markers below the header and click to restore them. Moderat
 
 **The panel shrank after collapsing rows**
 
-This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only version 3.1.18 is enabled, refresh the tab, and report the browser and steps that reproduce it.
+This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only version 3.2.0 is enabled, refresh the tab, and report the browser and steps that reproduce it.
 
 **The panel is too large or near a screen edge**
 
@@ -376,6 +376,11 @@ Check the browser’s downloads list and any blocked-download notification. Allo
 A room-level storage access failure can still make saving read-only. Individual corrupt or unsupported records are skipped instead: healthy history can restore and new records can save. See the TXT report and browser console for details. Skipped records remain untouched unless you explicitly Reset the room.
 
 ## Version history
+
+### 3.2.0
+
+- Orange dashed connectors mark missing intervals in expanded and compact charts, Replay, and GIFs, preserving elapsed-time spacing without adding samples.
+- Gap inspection explains the missing interval; GIFs include a small matching legend. Existing session records remain compatible.
 
 ### 3.1.19
 

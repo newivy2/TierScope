@@ -1,81 +1,82 @@
-TierScope 3.1.19 — targeted confirmation regression check
+TierScope 3.2.0 release validation
 
 Userscript syntax: PASS (node --check)
-Chromium: PASS manual Stop confirmation/Cancel, Stop layout, frozen time/chart, disabled scanning, retained Replay/CSV, reload, separate Start and automatic absence Stop without a prompt
-Firefox: PASS manual Stop confirmation/Cancel, Stop layout, frozen time/chart, disabled scanning, retained Replay/CSV, reload, separate Start and automatic absence Stop without a prompt
+48 unit tests: PASS
+Chromium browser suites: PASS
+Firefox browser suites: PASS
+Visual inspection: expanded chart, compact chart, and decoded GIF frame.
 
-The full suite was not rerun for this confirmation-only change.
-
---- Previous 3.1.18 full-suite baseline (unchanged test results) ---
-
+--- Unit tests ---
 npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
 
-> tierscope-regression-tests@3.1.18 test:unit
+> tierscope-regression-tests@3.2.0 test:unit
 > node --test tests/*.test.cjs
 
-✔ API parser rejects invalid totals, malformed records, duplicate usernames and unsafe numbers (7.757144ms)
-✔ CSV contains retained history in tier order, safe text, UTC times and correct totals (4.841046ms)
-✔ timestamps control chart spacing, breaks preserve gaps, duplicate times remain finite (13.660389ms)
-✔ dense plotting preserves per-column extrema and bounds drawing work (19.62126ms)
-✔ pause/reload gaps persist, with conservative legacy interval inference (10.510409ms)
-✔ old names are ignored on restore and omitted from new saves without rewriting source records (32.684451ms)
-✔ 429 honors Retry-After across manual attempts, Reset, reload and other tabs without DOM fallback (26.242556ms)
-✔ 401/403 pause acquisition until explicit Resume, including in sibling tabs (35.237513ms)
-✔ temporary failures back off to 15 minutes; server waits suppress fallback; successful API resumes normal cadence (13.352085ms)
-✔ older successful requests cannot clear a restriction written by another tab (9.424954ms)
-✔ local retry gate survives an unavailable GM write (5.591525ms)
-✔ Resume after access denial still honors an explicit server wait (4.363657ms)
-✔ an older stored policy cannot erase a newer unsaved restriction (8.21942ms)
+✔ API parser rejects invalid totals, malformed records, duplicate usernames and unsafe numbers (9.300727ms)
+✔ CSV contains retained history in tier order, safe text, UTC times and correct totals (5.202359ms)
+✔ timestamps control chart spacing, breaks preserve gaps, duplicate times remain finite (9.96085ms)
+✔ dense plotting preserves per-column extrema and bounds drawing work (15.411878ms)
+✔ pause/reload gaps persist, with conservative legacy interval inference (8.295474ms)
+✔ old names are ignored on restore and omitted from new saves without rewriting source records (31.247059ms)
+✔ 429 honors Retry-After across manual attempts, Reset, reload and other tabs without DOM fallback (20.615965ms)
+✔ 401/403 pause acquisition until explicit Resume, including in sibling tabs (31.754909ms)
+✔ temporary failures back off to 15 minutes; server waits suppress fallback; successful API resumes normal cadence (10.259961ms)
+✔ older successful requests cannot clear a restriction written by another tab (7.829503ms)
+✔ local retry gate survives an unavailable GM write (4.315855ms)
+✔ Resume after access denial still honors an explicit server wait (6.637379ms)
+✔ an older stored policy cannot erase a newer unsaved restriction (7.075246ms)
 PASS age boundaries, future timestamps, saved/API/DOM labels and timestamp explanation
 PASS all 12 chart rows, full 36px vertical range, long labels, zero/flat data and large counts fit
-PASS real omggif exports decode to matching pixels, at most 60 frames and exactly 10 seconds [{"name":"sample","samples":60,"frames":60,"bytes":464850,"encodeMs":1087},{"name":"single","samples":1,"frames":1,"bytes":5502,"encodeMs":16},{"name":"dense","samples":10000,"frames":60,"bytes":735346,"encodeMs":9648},{"name":"flat","samples":60,"frames":60,"bytes":336795,"encodeMs":921},{"name":"zero","samples":1,"frames":1,"bytes":5141,"encodeMs":14}]
+PASS real omggif exports decode to matching pixels, at most 60 frames and exactly 10 seconds [{"name":"sample","samples":60,"frames":60,"bytes":464850,"encodeMs":990},{"name":"single","samples":1,"frames":1,"bytes":5502,"encodeMs":16},{"name":"dense","samples":10000,"frames":60,"bytes":735346,"encodeMs":9159},{"name":"flat","samples":60,"frames":60,"bytes":336795,"encodeMs":959},{"name":"zero","samples":1,"frames":1,"bytes":5141,"encodeMs":17},{"name":"gaps","samples":60,"frames":60,"bytes":467840,"encodeMs":1190}]
 PASS cancellation releases export state and allows retry
-✔ GIF export decodes with exact pixels, bounded drawing, fixed duration, and cancellation (14155.502327ms)
-✔ pause/resume preserves session start and wall-time high offsets while timer excludes pauses (44.682258ms)
-✔ tier and total highs survive history eviction, ties, lower samples, and reload (331.123833ms)
-✔ legacy high timestamps are rebuilt from the matching sample; start is explicitly estimated (3.602842ms)
-✔ stale same-room tabs keep independent records and cannot replace the newest accepted sample (9.962293ms)
-✔ tabs opened before any save also write separate records (5.174597ms)
-✔ Reset invalidates old tabs and immediately persists a paused, empty session (14.873054ms)
-✔ newer schema and malformed records remain untouched while independent saves continue (10.854491ms)
-✔ expired tab data is not restored and returning writers rotate record IDs (7.091383ms)
-✔ saved display remains non-live; failed scan and render rollback retain data and highs (12.029735ms)
-✔ a late network response cannot commit after room navigation (11.478786ms)
-✔ sample ages use seconds, minutes, hours, days and clamp future timestamps (1.336391ms)
-✔ restored highlights compare with persistent session highs; Replay still uses historical highs (242.636769ms)
-✔ explicit Reset recovers from corrupt per-tab storage without retaining the damaged branch (4.442346ms)
-✔ late scan results cannot resurrect pre-Reset data (5.094478ms)
-✔ fresh room scans during init and starts its next interval only after completion (42.155674ms)
-✔ restored active and paused sessions keep their existing startup behavior (20.872153ms)
-✔ pausing during the first scan never lets its completion restart automatic scans (9.063991ms)
-✔ Reset or navigation invalidate the first scan and its scheduling continuation (12.128573ms)
-✔ startup respects existing retry gates and denial, including failures of the first request (35.678095ms)
-✔ directory pages do not gain an immediate room scan (7.52802ms)
-✔ Stop freezes elapsed time and history, rejects pending samples, and survives refresh (56.438335ms)
-✔ Start begins separate history and preserves the stopped source record until cleanup (8.894797ms)
-✔ absence slows to 2m then 5m, respects selected intervals, and a return restores cadence without chart gaps (24.169225ms)
-✔ three-hour deadline seals history and invalidates a request even if its response contains a returning owner (12.040221ms)
-✔ absence persists across refresh; delayed browser wake freezes at the three-hour deadline (21.843295ms)
-✔ errors and DOM-only samples cannot establish absence; valid empty API responses can without adding zero counts (8.975048ms)
-✔ Stop during a restored startup delay cannot be overwritten by its queued callbacks (13.520949ms)
-✔ corrupt siblings, invalid shapes, missing epochs and future schemas cannot block good history (20.089575ms)
-✔ invalid legacy record does not block a current tab record (8.056295ms)
-✔ a corrected record becomes eligible without Reset or deleting healthy data (3.650544ms)
-✔ late old-epoch records never restore and are removed after the three-hour grace period (9.749513ms)
-✔ old-epoch corrupt and unsupported records are never automatically deleted (4.804661ms)
-✔ failure to delete an expired record does not block a healthy sibling (6.113541ms)
-ℹ tests 47
+✔ GIF export decodes with exact pixels, bounded drawing, fixed duration, and cancellation (15258.992881ms)
+✔ GIF gap connectors are dashed, use a dedicated color, and preserve recorded endpoints (4.519631ms)
+✔ pause/resume preserves session start and wall-time high offsets while timer excludes pauses (45.280864ms)
+✔ tier and total highs survive history eviction, ties, lower samples, and reload (283.816019ms)
+✔ legacy high timestamps are rebuilt from the matching sample; start is explicitly estimated (4.493713ms)
+✔ stale same-room tabs keep independent records and cannot replace the newest accepted sample (6.920415ms)
+✔ tabs opened before any save also write separate records (3.970655ms)
+✔ Reset invalidates old tabs and immediately persists a paused, empty session (16.204852ms)
+✔ newer schema and malformed records remain untouched while independent saves continue (12.918696ms)
+✔ expired tab data is not restored and returning writers rotate record IDs (6.498149ms)
+✔ saved display remains non-live; failed scan and render rollback retain data and highs (19.825336ms)
+✔ a late network response cannot commit after room navigation (3.745337ms)
+✔ sample ages use seconds, minutes, hours, days and clamp future timestamps (0.979284ms)
+✔ restored highlights compare with persistent session highs; Replay still uses historical highs (237.155899ms)
+✔ explicit Reset recovers from corrupt per-tab storage without retaining the damaged branch (4.16649ms)
+✔ late scan results cannot resurrect pre-Reset data (3.843815ms)
+✔ fresh room scans during init and starts its next interval only after completion (52.994583ms)
+✔ restored active and paused sessions keep their existing startup behavior (15.664915ms)
+✔ pausing during the first scan never lets its completion restart automatic scans (16.297846ms)
+✔ Reset or navigation invalidate the first scan and its scheduling continuation (8.464188ms)
+✔ startup respects existing retry gates and denial, including failures of the first request (18.380181ms)
+✔ directory pages do not gain an immediate room scan (5.451433ms)
+✔ Stop freezes elapsed time and history, rejects pending samples, and survives refresh (63.894206ms)
+✔ Start begins separate history and preserves the stopped source record until cleanup (12.193301ms)
+✔ absence slows to 2m then 5m, respects selected intervals, and a return restores cadence without chart gaps (22.641914ms)
+✔ three-hour deadline seals history and invalidates a request even if its response contains a returning owner (6.972073ms)
+✔ absence persists across refresh; delayed browser wake freezes at the three-hour deadline (16.454683ms)
+✔ errors and DOM-only samples cannot establish absence; valid empty API responses can without adding zero counts (5.271663ms)
+✔ Stop during a restored startup delay cannot be overwritten by its queued callbacks (22.722686ms)
+✔ corrupt siblings, invalid shapes, missing epochs and future schemas cannot block good history (17.36333ms)
+✔ invalid legacy record does not block a current tab record (6.122284ms)
+✔ a corrected record becomes eligible without Reset or deleting healthy data (3.042649ms)
+✔ late old-epoch records never restore and are removed after the three-hour grace period (9.52834ms)
+✔ old-epoch corrupt and unsupported records are never automatically deleted (3.645716ms)
+✔ failure to delete an expired record does not block a healthy sibling (6.043455ms)
+ℹ tests 48
 ℹ suites 0
-ℹ pass 47
+ℹ pass 48
 ℹ fail 0
 ℹ cancelled 0
 ℹ skipped 0
 ℹ todo 0
-ℹ duration_ms 14300.495488
+ℹ duration_ms 15378.895864
 
+--- Chromium ---
 npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
 
-> tierscope-regression-tests@3.1.18 test:browser
+> tierscope-regression-tests@3.2.0 test:browser
 > node tests/run-browser.cjs chromium
 
 
@@ -114,7 +115,7 @@ PASS reduced-motion preference including mid-pulse changes, Replay isolation, an
 PASS failed acquisition and rendering rollback suppress pulses; Reset cancels active animations
 
 Browser: chromium — charts-browser.cjs
-PASS timestamp spacing, gaps, hover/keyboard inspection, Replay bounds, flat/single samples, original tier colors and unchanged panel geometry
+PASS orange dashed gaps in expanded/compact/Replay, dark/bright contrast, clipped compact boundary, no future connectors or synthetic values, hover/keyboard inspection, timestamp spacing, flat/single samples, original tier colors and unchanged geometry
 PASS rate-limit UI, reload persistence, access-denied pause and explicit recovery
 
 Browser: chromium — theme-browser.cjs
@@ -124,11 +125,12 @@ Browser: chromium — startup-browser.cjs
 PASS fresh initialization request, scanning status, completion-based countdown, visible first data point and compact time-control tooltip
 
 Browser: chromium — stop-browser.cjs
-PASS Stop layout, frozen time/chart, disabled scanning, retained Replay/CSV, reload, separate Start and automatic absence Stop
+PASS manual Stop confirmation/Cancel, Stop layout, frozen time/chart, disabled scanning, retained Replay/CSV, reload, separate Start and automatic absence Stop without a prompt
 
+--- Firefox ---
 npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
 
-> tierscope-regression-tests@3.1.18 test:firefox
+> tierscope-regression-tests@3.2.0 test:firefox
 > node tests/run-browser.cjs firefox
 
 
@@ -167,7 +169,7 @@ PASS reduced-motion preference including mid-pulse changes, Replay isolation, an
 PASS failed acquisition and rendering rollback suppress pulses; Reset cancels active animations
 
 Browser: firefox — charts-browser.cjs
-PASS timestamp spacing, gaps, hover/keyboard inspection, Replay bounds, flat/single samples, original tier colors and unchanged panel geometry
+PASS orange dashed gaps in expanded/compact/Replay, dark/bright contrast, clipped compact boundary, no future connectors or synthetic values, hover/keyboard inspection, timestamp spacing, flat/single samples, original tier colors and unchanged geometry
 PASS rate-limit UI, reload persistence, access-denied pause and explicit recovery
 
 Browser: firefox — theme-browser.cjs
@@ -177,4 +179,5 @@ Browser: firefox — startup-browser.cjs
 PASS fresh initialization request, scanning status, completion-based countdown, visible first data point and compact time-control tooltip
 
 Browser: firefox — stop-browser.cjs
-PASS Stop layout, frozen time/chart, disabled scanning, retained Replay/CSV, reload, separate Start and automatic absence Stop
+PASS manual Stop confirmation/Cancel, Stop layout, frozen time/chart, disabled scanning, retained Replay/CSV, reload, separate Start and automatic absence Stop without a prompt
+

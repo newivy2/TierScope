@@ -41,14 +41,14 @@ npm run test:performance
 | Layout | All 2,048 collapse combinations are checked at normal and 1.5 inherited line heights, including row overflow and restoration from all-collapsed. |
 | Compact dashboard | Chart pixels and 15-minute range, metric persistence across reload, blank saved deltas, live deltas, source/age, settings controls without height growth, control bounds, a visible close button, Escape after focus leaves the panel, broadcast-room refresh at a non-default scale, and page-based startup across room and directory URLs with obsolete view preferences ignored. |
 | High-value pulses | Two background/outline pulses on accepted live highs and returns after a dip, expanded and collapsed targets, no repeat at a plateau, no layout retrigger, steady final highlight, reduced motion, Replay isolation, minimized view, failed scans, and Reset cleanup. |
-| Charts and inspection | Timestamp spacing and gaps; bounded peak-preserving drawing; exact sample hover and keyboard inspection; no future data in Replay; centered flat/single samples; original dark-purple and dark-blue colors; no tooltip layout growth. |
+| Charts and inspection | Timestamp spacing and orange dashed gaps in expanded, compact, and Replay charts; dark/bright contrast; compact-window clipping; no future connectors or synthetic counts; bounded peak-preserving drawing; exact sample hover and keyboard inspection; no future data in Replay; centered flat/single samples; original dark-purple and dark-blue colors; no tooltip layout growth. |
 | Request policy | HTTP 429 and Retry-After, 401/403 pause with explicit recovery, capped exponential retries, no fallback around restrictions, Reset/reload/multi-tab gates, stale-response races, and storage-write failure. |
 | Data minimization | Legacy username fields are ignored on restore without rewriting source records or losing aggregates; new records omit both collections; TXT no longer includes unique female/trans totals; future-schema records remain untouched. |
 | Theme | Dark default; checkbox placement and keyboard activation; no layout or tracking changes; original tier colors and green highlights; background opacity; readable registered chart and tooltips; compact/settings/Replay rendering; persistence across refresh and rooms; Reset and storage-failure behavior. |
 | Controls | Drag/resize/reload, 100% size reset, edge clamping on expansion, centered buttons, and CSV download. |
 | Replay | Previous/next endpoints, pause-on-step, duplicate timestamps, and the selected frame surviving collapse and live scans. |
 | CSV | Column order, every retained sample, UTC timestamps, computed totals, and formula-safe text. |
-| GIF | Actual omggif output is decoded and compared pixel-for-pixel with the renderer. Checks all 12 rows, drawing bounds, 480×640 size, 60-frame cap, ten-second duration, flat/zero/large data, 10,000 samples, cancellation and retry. |
+| GIF | Actual omggif output is decoded and compared pixel-for-pixel with the renderer. Checks all 12 rows, drawing bounds, 480×640 size, 60-frame cap, ten-second duration, flat/zero/large data, 10,000 samples, cancellation and retry; dashed orange pixels, endpoint colors, gap legend, and no connectors before both samples are available. |
 
 ## GitHub automation
 

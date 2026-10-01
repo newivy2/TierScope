@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.1.19
+// @version      3.2.0
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -18,7 +18,7 @@
 const ViewerTracker = (function() {
     'use strict';
 
-    const TIERSCOPE_VERSION = '3.1.19';
+    const TIERSCOPE_VERSION = '3.2.0';
     const API_TIMEOUT_MS = 10000;
     const DEFAULT_API_INTERVAL_SECONDS = 60;
     const DOM_FALLBACK_INTERVAL_SECONDS = 60;
@@ -345,6 +345,7 @@ const ViewerTracker = (function() {
         tooltip: ['#171722', '#ffffff'],
         positive: ['#32CD32', '#23751f'],
         warning: ['#ffd43b', '#825d00'],
+        gap: ['#e89b45', '#ad5f10'],
         negative: ['#ff4444', '#b52332'],
         paused: ['#ff9999', '#b52332'],
         'delta-up': ['#69BE45', '#357b21'],
@@ -456,28 +457,40 @@ const ViewerTracker = (function() {
         canvas.width = Math.ceil(width * scale); canvas.height = Math.ceil(height * scale);
         ctx.scale(scale, scale); ctx.clearRect(0, 0, width, height);
         var times = frame.history.timestamps;
-        canvas.title = names[miniMetric] + ' — last 15 recorded minutes; vertical scale fits the visible values';
-        if (!times.length) return;
+        canvas.title = names[miniMetric] + ' — last 15 recorded minutes; vertical scale fits the plotted values';
+        if (!times.length) {
+            bindChartInspection(canvas, { values: [], times: [], breaks: [], plot: { end: -1 }, width: width, label: names[miniMetric] });
+            return;
+        }
         var end = times[times.length - 1], start = end - 15 * 60000;
         var breaks = getHistoryBreaks(frame.history);
-        var points = [];
+        var points = [], firstVisible = times.findIndex(function(time) { return time >= start; });
+        var firstDrawn = firstVisible > 0 && breaks[firstVisible] ? firstVisible - 1 : firstVisible;
         times.forEach(function(time, i) {
-            if (time >= start && time <= end) points.push({ time: time, gap: breaks[i], value: miniMetric === 'room' ?
+            // Keep one preceding endpoint so a gap crossing the window's left
+            // edge can be connected and clipped, without inventing a sample.
+            if (i >= firstDrawn && time <= end) points.push({ time: time, move: breaks[i], value: miniMetric === 'room' ?
                 frame.history.total[i] + frame.history.anonymous[i] : frame.history[miniMetric][i] });
         });
         var values = points.map(function(p) { return p.value; });
+        var firstIndex = points[0].time < start ? 1 : 0;
+        var visibleValues = values.slice(firstIndex);
         var min = Math.min.apply(null, values), max = Math.max.apply(null, values);
-        canvas.title += '; range ' + min + '–' + max + '; ' + points.length + ' samples through ' + new Date(end).toISOString();
-        ctx.strokeStyle = miniMetric === 'withTokens' ? '#ff69b4' : miniMetric === 'total' ? themeColor('text') : '#69BE45';
-        ctx.fillStyle = ctx.strokeStyle; ctx.lineWidth = 2; ctx.lineJoin = 'round';
-        ctx.beginPath();
+        canvas.title += '; range ' + min + '–' + max + '; ' + visibleValues.length + ' samples through ' + new Date(end).toISOString() +
+            '. Orange dashes: no samples recorded during the interval.';
+        bindChartInspection(canvas, { values: values, times: points.map(function(p) { return p.time; }),
+            breaks: points.map(function(p) { return p.move; }), firstIndex: firstIndex,
+            plot: { min: min, max: max, end: points.length - 1, startTime: start, endTime: end }, width: width, label: names[miniMetric] });
         points.forEach(function(point, i) {
-            var x = 2 + (point.time - start) / (15 * 60000) * (width - 4);
-            var y = max === min ? height / 2 : height - 3 - (point.value - min) / (max - min) * (height - 6);
-            if (i === 0 || point.gap) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-            if ((i === 0 || point.gap) && (i === points.length - 1 || points[i + 1].gap)) ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
+            point.x = 2 + (point.time - start) / (15 * 60000) * (width - 4);
+            point.y = max === min ? height / 2 : height - 3 - (point.value - min) / (max - min) * (height - 6);
+            point.move = i === 0 || point.move;
         });
-        ctx.stroke();
+        var color = miniMetric === 'withTokens' ? '#ff69b4' : miniMetric === 'total' ? themeColor('text') : '#69BE45';
+        ctx.strokeStyle = color;
+        ctx.save(); ctx.beginPath(); ctx.rect(2, 0, width - 2, height); ctx.clip();
+        drawCanvasChart(ctx, points, color);
+        ctx.restore();
         updateMiniFreshness();
     }
 
@@ -2046,6 +2059,7 @@ const ViewerTracker = (function() {
     const GIF_HEIGHT = 640;
     const GIF_MAX_FRAMES = 60;
     const GIF_DURATION_CS = 1000; // GIF delay units are hundredths of a second.
+    const GIF_GAP_COLOR_INDEX = 12;
     const GIF_FONT = {
         ' ': [0,0,0,0,0,0,0],
         A:[14,17,17,31,17,17,17], B:[30,17,17,30,17,17,30],
@@ -2144,24 +2158,32 @@ const ViewerTracker = (function() {
         }
         var range = maximum - minimum || 1;
         function y(value) { return maximum === minimum ? top + Math.round(plotHeight / 2) : top + plotHeight - Math.round((value - minimum) / range * plotHeight); }
-        function line(x0, y0, x1, y1) {
+        function line(x0, y0, x1, y1, strokeColor, dashed) {
             // Integer rasterization keeps every pixel in the fixed GIF palette.
             var dx = Math.abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
             var dy = -Math.abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
-            var error = dx + dy;
+            var error = dx + dy, step = 0;
+            var distancePerStep = Math.hypot(dx, dy) / Math.max(dx, -dy, 1);
             while (true) {
-                surface.rect(x0, y0, 2, 2, color);
+                if (!dashed || (step * distancePerStep) % 10 < 6) surface.rect(x0, y0, dashed ? 1 : 2, dashed ? 1 : 2, strokeColor);
                 if (x0 === x1 && y0 === y1) break;
                 var twiceError = 2 * error;
                 if (twiceError >= dy) { error += dy; x0 += sx; }
                 if (twiceError <= dx) { error += dx; y0 += sy; }
+                step++;
             }
         }
         var plot = buildChartPlot(values, times || values.map(function(_, i) { return i; }), breaks || [], plotWidth, lastIndex);
+        // Paint connectors first, so real observations keep their tier color.
+        for (var p = 1; p < plot.points.length; p++) {
+            if (!plot.points[p].move) continue;
+            var before = plot.points[p - 1], after = plot.points[p];
+            line(left + Math.round(before.x), y(before.value), left + Math.round(after.x), y(after.value), GIF_GAP_COLOR_INDEX, true);
+        }
         var previous = null;
         plot.points.forEach(function(point) {
             var x = left + Math.round(point.x), nextY = y(point.value);
-            if (previous && !point.move) line(previous.x, previous.y, x, nextY);
+            if (previous && !point.move) line(previous.x, previous.y, x, nextY, color, false);
             else surface.rect(x, nextY, 2, 2, color);
             previous = { x: x, y: nextY };
         });
@@ -2169,6 +2191,7 @@ const ViewerTracker = (function() {
 
     function drawGifSummary(surface, snapshot, index, tiers) {
         var data = snapshot.history;
+        var breaks = getHistoryBreaks(data);
         var margin = 16, rowStart = 90, rowStep = 44, groupGap = 12;
         var chartLeft = 176, countWidth = 70, columnGap = 10;
         var chartWidth = GIF_WIDTH - chartLeft - margin - countWidth - columnGap;
@@ -2177,12 +2200,15 @@ const ViewerTracker = (function() {
         surface.text(formatElapsedTime(snapshot.timeline[index]) + ' / ' +
             formatElapsedTime(snapshot.durationMs), margin, 46, 1, 2);
         surface.text('LINES SCALED PER SERIES', margin, 67, 1, 1);
+        if (breaks.some(function(gap, i) { return gap && i > 0 && i <= index; })) {
+            surface.text('ORANGE DASHES: NO SAMPLES', GIF_WIDTH - margin, 67, GIF_GAP_COLOR_INDEX, 1, true);
+        }
         surface.rect(margin, 80, GIF_WIDTH - margin * 2, 2, 1);
         function drawRow(label, values, top, color) {
             surface.rect(margin, top + 14, 6, 14, color);
             surface.text(label, 30, top + 14, 1, 2);
             drawGifSparkline(surface, values, index, color,
-                { left: chartLeft, top: top + 2, width: chartWidth, height: 36 }, data.timestamps, getHistoryBreaks(data));
+                { left: chartLeft, top: top + 2, width: chartWidth, height: 36 }, data.timestamps, breaks);
             var count = gifCount(values[index]);
             // Keep unusually large counts inside their column without truncation.
             var countScale = (count.length * 6 - 1) * 2 <= countWidth ? 2 : 1;
@@ -2242,6 +2268,7 @@ const ViewerTracker = (function() {
                 return parseInt(TIERS[tier].color.slice(1), 16);
             }));
             palette.push(0xff69b4, 0x888888); // With Tokens and Anonymous summary lines.
+            palette.push(0xe89b45); // Dashed missing-interval connectors (index 12).
             // GIF color-table lengths must be powers of two. Unused slots stay dark.
             while ((palette.length & (palette.length - 1)) !== 0) palette.push(palette[0]);
             var surface = createGifSurface(palette);
@@ -3071,10 +3098,11 @@ const ViewerTracker = (function() {
         return target - times[low - 1] <= times[low] - target ? low - 1 : low;
     }
 
-    function showChartTooltip(canvas, index, clientX, clientY, inGap) {
+    function showChartTooltip(canvas, index, clientX, clientY, gapIndex) {
         var model = canvas._tierScopeChart;
         if (!model || model.plot.end < 0) return;
-        index = Math.max(0, Math.min(model.plot.end, index));
+        var firstIndex = model.firstIndex || 0;
+        index = Math.max(firstIndex, Math.min(model.plot.end, index));
         canvas._tierScopeIndex = index;
         var tooltip = document.getElementById('tierscope-chart-tooltip');
         if (!tooltip) {
@@ -3084,11 +3112,13 @@ const ViewerTracker = (function() {
             document.body.appendChild(tooltip);
         }
         setThemeVariables(tooltip);
-        tooltip.textContent = model.label + ' · ' + model.values[index].toLocaleString() + '\n' +
+        tooltip.textContent = gapIndex > 0 ? model.label + '\nNo samples recorded during this interval.\n' +
+            new Date(model.times[gapIndex - 1]).toLocaleString() + ' – ' + new Date(model.times[gapIndex]).toLocaleString() +
+            '\nOrange dashes connect recorded endpoints only.' :
+            model.label + ' · ' + model.values[index].toLocaleString() + '\n' +
             new Date(model.times[index]).toLocaleString() + '\n' +
             'Range: ' + model.plot.min.toLocaleString() + '–' + model.plot.max.toLocaleString() +
-            ' · Sample ' + (index + 1) + '/' + (model.plot.end + 1) +
-            (inGap ? '\nNo samples in this gap; showing nearest sample.' : '');
+            ' · Sample ' + (index - firstIndex + 1) + '/' + (model.plot.end - firstIndex + 1);
         tooltip.style.display = 'block';
         var rect = tooltip.getBoundingClientRect();
         tooltip.style.left = Math.max(4, Math.min(clientX + 12, window.innerWidth - rect.width - 4)) + 'px';
@@ -3100,7 +3130,7 @@ const ViewerTracker = (function() {
         canvas.setAttribute('tabindex', '0'); canvas.setAttribute('role', 'img');
         canvas.setAttribute('aria-describedby', 'tierscope-chart-tooltip');
         canvas.setAttribute('aria-label', model.label + ' history. ' + (model.plot.end < 0 ? 'No samples.' :
-            'Range ' + model.plot.min + ' to ' + model.plot.max + '. ' + (model.plot.end + 1) + ' samples. Use Left and Right arrows to inspect samples; Home and End to jump; Escape to close.'));
+            'Range ' + model.plot.min + ' to ' + model.plot.max + '. ' + (model.plot.end - (model.firstIndex || 0) + 1) + ' samples. Orange dashes mark intervals with no recorded samples. Use Left and Right arrows to inspect samples; Home and End to jump; Escape to close.'));
         if (canvas._tierScopeBound) return;
         canvas._tierScopeBound = true;
         canvas.addEventListener('pointermove', function(event) {
@@ -3112,7 +3142,7 @@ const ViewerTracker = (function() {
             var axis = getChartTimes(m.times), index = nearestChartSample(axis, m.plot.end, time);
             var next = axis[index] > time ? index : index + 1;
             var gap = next > 0 && next <= m.plot.end && m.breaks[next] && time > axis[next - 1] && time < axis[next];
-            showChartTooltip(canvas, index, event.clientX, event.clientY, gap);
+            showChartTooltip(canvas, index, event.clientX, event.clientY, gap ? next : 0);
         });
         canvas.addEventListener('pointerleave', hideChartTooltip);
         canvas.addEventListener('blur', hideChartTooltip);
@@ -3131,6 +3161,28 @@ const ViewerTracker = (function() {
         });
     }
 
+    function drawCanvasChart(ctx, points, color) {
+        // A connector is only an annotation between recorded endpoints. Keep
+        // it separate from solid paths and never append interpolated samples.
+        ctx.save();
+        ctx.strokeStyle = themeColor('gap'); ctx.lineWidth = 1.5; ctx.lineCap = 'butt'; ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        points.forEach(function(point, i) {
+            if (i && point.move) {
+                ctx.moveTo(points[i - 1].x, points[i - 1].y);
+                ctx.lineTo(point.x, point.y);
+            }
+        });
+        ctx.stroke(); ctx.restore();
+        ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.setLineDash([]);
+        ctx.beginPath();
+        points.forEach(function(point, i) {
+            if (point.move) ctx.moveTo(point.x, point.y); else ctx.lineTo(point.x, point.y);
+            if (point.move && (i === points.length - 1 || points[i + 1].move)) ctx.fillRect(point.x - 1.5, point.y - 1.5, 3, 3);
+        });
+        ctx.stroke();
+    }
+
     function drawSparkline(canvasId, data, color, customHeight, times, breaks, lastIndex, label) {
         var canvas = document.getElementById(canvasId);
         if (!canvas) return;
@@ -3144,15 +3196,11 @@ const ViewerTracker = (function() {
         ctx.scale(scale, scale); ctx.clearRect(0, 0, width, height);
         var plot = buildChartPlot(data, times, breaks, Math.max(1, width - 4), lastIndex);
         bindChartInspection(canvas, { values: data, times: times, breaks: breaks, plot: plot, width: width, label: label });
-        ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-        ctx.beginPath();
-        plot.points.forEach(function(point, i) {
-            var x = 2 + point.x;
-            var y = plot.max === plot.min ? height / 2 : height - 2 - (point.value - plot.min) / (plot.max - plot.min) * (height - 4);
-            if (point.move) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-            if (point.move && (i === plot.points.length - 1 || plot.points[i + 1].move)) ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
-        });
-        ctx.stroke();
+        drawCanvasChart(ctx, plot.points.map(function(point) {
+            return { x: 2 + point.x,
+                y: plot.max === plot.min ? height / 2 : height - 2 - (point.value - plot.min) / (plot.max - plot.min) * (height - 4),
+                move: point.move };
+        }), color);
     }
 
     function drawAllSparklines() {
