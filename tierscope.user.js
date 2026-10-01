@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.1.14
+// @version      3.1.15
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -18,7 +18,7 @@
 const ViewerTracker = (function() {
     'use strict';
 
-    const TIERSCOPE_VERSION = '3.1.14';
+    const TIERSCOPE_VERSION = '3.1.15';
     const API_TIMEOUT_MS = 10000;
     const DEFAULT_API_INTERVAL_SECONDS = 60;
     const DOM_FALLBACK_INTERVAL_SECONDS = 60;
@@ -90,7 +90,6 @@ const ViewerTracker = (function() {
     var initGuard = 0;
     var urlCheckInterval = null;
     var scanEpoch = 0;
-    var sessionUniqueUsers = {};
     var lastAcceptedAcquisition = null;
     // Aggregate saved counts are presentation-only until a fresh scan succeeds.
     var restoredDisplayFrame = null;
@@ -265,7 +264,9 @@ const ViewerTracker = (function() {
         el.textContent = sessionStorageNotice ? 'Local only' : (isAutoRefreshOn ? source : 'Paused') +
             (sample ? ' · ' + formatSampleAge(sample.timestamp) : '');
         el.style.color = sessionStorageNotice ? '#ffd43b' : isAutoRefreshOn ? '#aaa' : '#ff9999';
-        el.title = sessionStorageNotice || source + (sample ? ': ' + new Date(sample.timestamp).toISOString() : '') +
+        var policyMessage = requestPolicyMessage(readRequestPolicy());
+        if (policyMessage && !sessionStorageNotice) { el.textContent = policyMessage; el.style.color = '#ffd43b'; }
+        el.title = sessionStorageNotice || (policyMessage ? policyMessage + '. ' : '') + source + (sample ? ': ' + new Date(sample.timestamp).toISOString() : '') +
             '. Age of the last accepted sample. ' + (isAutoRefreshOn ? 'Next attempt: ' + countdownSeconds + 's.' : 'Automatic scans paused.');
     }
 
@@ -314,9 +315,10 @@ const ViewerTracker = (function() {
         canvas.title = names[miniMetric] + ' — last 15 recorded minutes; vertical scale fits the visible values';
         if (!times.length) return;
         var end = times[times.length - 1], start = end - 15 * 60000;
+        var breaks = getHistoryBreaks(frame.history);
         var points = [];
         times.forEach(function(time, i) {
-            if (time >= start && time <= end) points.push({ time: time, value: miniMetric === 'room' ?
+            if (time >= start && time <= end) points.push({ time: time, gap: breaks[i], value: miniMetric === 'room' ?
                 frame.history.total[i] + frame.history.anonymous[i] : frame.history[miniMetric][i] });
         });
         var values = points.map(function(p) { return p.value; });
@@ -328,8 +330,8 @@ const ViewerTracker = (function() {
         points.forEach(function(point, i) {
             var x = 2 + (point.time - start) / (15 * 60000) * (width - 4);
             var y = max === min ? height / 2 : height - 3 - (point.value - min) / (max - min) * (height - 6);
-            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-            if (points.length === 1) ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
+            if (i === 0 || point.gap) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            if ((i === 0 || point.gap) && (i === points.length - 1 || points[i + 1].gap)) ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
         });
         ctx.stroke();
         updateMiniFreshness();
@@ -342,11 +344,10 @@ const ViewerTracker = (function() {
     var withTokensHighTime = null;
     var totalHighTime = null;
     var anonHighTime = null;
-    var sessionFemaleTransUsers = {};
-    var femaleTransUsernames = [];
     var femaleTransHighTime = null;
+    var pendingHistoryGap = false;
     var history = {
-        timestamps: [],
+        timestamps: [], breaks: [],
         'red': [], 'green': [], 'purple': [], 'pink': [], 'dark-blue': [], 'light-blue': [], 'gray': [], 'female-trans': [],
         'withTokens': [], 'total': [], 'anonymous': []
     };
@@ -423,7 +424,9 @@ const ViewerTracker = (function() {
             }).join('') + '</div>';
     }
 
+    var chartLayoutRevision = 0;
     function applyRowLayout() {
+        chartLayoutRevision++;
         var region = document.getElementById('tier-chart-region');
         var tray = document.getElementById('collapsed-tier-tray');
         var group = document.getElementById('summary-tier-rows');
@@ -525,6 +528,7 @@ const ViewerTracker = (function() {
 
     function redrawPanelCharts() {
         if (isMinimized) return;
+        chartLayoutRevision++;
         if (presentationMode === 'PLAYBACK') paintPlayback(playback);
         else drawAllSparklines();
     }
@@ -565,7 +569,7 @@ const ViewerTracker = (function() {
     var playback = null;
 
     function createPlaybackSnapshot(sourceHistory) {
-        var copiedHistory = { timestamps: sourceHistory.timestamps.slice() };
+        var copiedHistory = { timestamps: sourceHistory.timestamps.slice(), breaks: getHistoryBreaks(sourceHistory).slice() };
         var timeline = [];
         var highs = { roomTotal: [] };
         var firstTimestamp = copiedHistory.timestamps.length ? copiedHistory.timestamps[0] : 0;
@@ -603,12 +607,11 @@ const ViewerTracker = (function() {
     function getPlaybackFrame(snapshot, positionMs, exactIndex) {
         var index = getPlaybackSampleIndex(snapshot, positionMs, exactIndex);
         if (index < 0) return null;
-        var frameHistory = { timestamps: snapshot.history.timestamps.slice(0, index + 1) };
+        var frameHistory = snapshot.history;
         var frameHighs = {};
         var counts = {};
         var playbackNewHighTiers = {};
         STORAGE_HISTORY_SERIES.forEach(function(key) {
-            frameHistory[key] = snapshot.history[key].slice(0, index + 1);
             frameHighs[key] = snapshot.highs[key][index];
             var count = snapshot.history[key][index];
             if (hasStorageField(TIERS, key)) counts[key] = count;
@@ -621,8 +624,8 @@ const ViewerTracker = (function() {
         var anonymousCount = snapshot.history.anonymous[index];
         return { counts: counts, total: total, withTokens: snapshot.history.withTokens[index],
             anonymousCount: anonymousCount, fullRoomTotal: total + anonymousCount,
-            roomTotalHigh: frameHighs.roomTotal, history: frameHistory, highs: frameHighs,
-            uniqueCount: null, index: index, timestamp: snapshot.history.timestamps[index],
+            roomTotalHigh: frameHighs.roomTotal, history: frameHistory, historyEndIndex: index, highs: frameHighs,
+            index: index, timestamp: snapshot.history.timestamps[index],
             playbackNewHighTiers: playbackNewHighTiers };
     }
 
@@ -649,7 +652,12 @@ const ViewerTracker = (function() {
     function paintPlayback(state) {
         if (!isPlaybackCurrent(state)) return false;
         try {
-            renderPlaybackFrame(getPlaybackFrame(state.snapshot, state.positionMs, state.stepIndex));
+            var index = getPlaybackSampleIndex(state.snapshot, state.positionMs, state.stepIndex);
+            if (state.paintedIndex !== index || state.paintLayout !== chartLayoutRevision) {
+                renderPlaybackFrame(getPlaybackFrame(state.snapshot, state.positionMs, state.stepIndex));
+                state.paintedIndex = index;
+                state.paintLayout = chartLayoutRevision;
+            }
             updatePlaybackControls();
             return true;
         } catch (error) {
@@ -691,6 +699,7 @@ const ViewerTracker = (function() {
     }
 
     function leavePlayback(renderLive) {
+        hideChartTooltip();
         cancelHighPulses();
         cancelGifExport();
         if (typeof renderLive === 'undefined') renderLive = true;
@@ -871,7 +880,7 @@ const ViewerTracker = (function() {
 
     function renderPlaybackFrame(frame) {
         renderDisplayFrame(Object.assign({}, frame, { isPlayback: true }));
-        drawHistorySparklines(frame.history);
+        drawHistorySparklines(frame.history, frame.historyEndIndex);
     }
 
     function clearPlaybackPresentation() {
@@ -879,7 +888,7 @@ const ViewerTracker = (function() {
         var counts = {};
         STORAGE_HISTORY_SERIES.forEach(function(key) { emptyHistory[key] = []; counts[key] = 0; });
         renderDisplayFrame({ counts: counts, total: 0, withTokens: 0, anonymousCount: 0,
-            fullRoomTotal: 0, roomTotalHigh: 0, history: emptyHistory, uniqueCount: 0, isPlayback: false });
+            fullRoomTotal: 0, roomTotalHigh: 0, history: emptyHistory, isPlayback: false });
         drawHistorySparklines(emptyHistory);
     }
 
@@ -966,6 +975,13 @@ const ViewerTracker = (function() {
                 var data = migrateStoredSession(parsed, determineStorageSchema(parsed));
                 validateStoredSession(data);
                 if (candidate !== key && typeof data.roomEpoch !== 'string') throw new Error('Missing tab record epoch');
+                // Ignore obsolete names on restore without rewriting another tab's record.
+                // New saves contain only aggregate session data. Existing source records
+                // keep their normal expiration/Reset lifecycle.
+                if (hasStorageField(parsed, 'sessionUniqueUsers') || hasStorageField(parsed, 'sessionFemaleTransUsers')) {
+                    delete parsed.sessionUniqueUsers; delete parsed.sessionFemaleTransUsers;
+                    raw = JSON.stringify(parsed);
+                }
                 // Validate before any deletion. Unsupported or corrupt records remain
                 // untouched, and cannot prevent a compatible sibling from restoring.
                 // Expiration also applies to old epochs, including late post-Reset writes.
@@ -1033,21 +1049,16 @@ const ViewerTracker = (function() {
             requireField(Array.isArray(series) && series.length === data.history.timestamps.length &&
                 series.every(isStorageNumber), 'history.' + field);
         });
+        if (hasStorageField(data.history, 'breaks')) {
+            requireField(Array.isArray(data.history.breaks) && data.history.breaks.length === data.history.timestamps.length &&
+                data.history.breaks.every(function(value) { return typeof value === 'boolean'; }), 'history.breaks');
+        }
         if (hasStorageField(data, 'previousCounts')) {
             requireField(isStorageObject(data.previousCounts), 'previousCounts');
             STORAGE_HISTORY_SERIES.forEach(function(field) {
                 requireField(isStorageNumber(data.previousCounts[field]), 'previousCounts.' + field);
             });
         }
-        ['sessionUniqueUsers', 'sessionFemaleTransUsers'].forEach(function(field) {
-            if (!hasStorageField(data, field)) return;
-            var entries = data[field];
-            requireField(isStorageObject(entries), field);
-            Object.keys(entries).forEach(function(username) {
-                requireField(username.length > 0 && (field === 'sessionUniqueUsers' ? entries[username] === true :
-                    entries[username] === 'female' || entries[username] === 'trans'), field + ' entry');
-            });
-        });
         if (hasStorageField(data, 'tierHighTimes')) {
             requireField(isStorageObject(data.tierHighTimes), 'tierHighTimes');
             Object.keys(data.tierHighTimes).forEach(function(tier) {
@@ -1102,12 +1113,13 @@ const ViewerTracker = (function() {
             roomTotalHigh: hasStorageField(data, 'roomTotalHigh') ? data.roomTotalHigh : 0,
             pausedElapsedTime: hasStorageField(data, 'pausedElapsedTime') ? data.pausedElapsedTime : 0
         };
-        ['tierHighTimes', 'sessionUniqueUsers', 'sessionFemaleTransUsers'].forEach(function(field) {
+        ['tierHighTimes'].forEach(function(field) {
             normalized[field] = hasStorageField(data, field) ? Object.fromEntries(Object.entries(data[field])) : {};
         });
         STORAGE_NULLABLE_TIMES.forEach(function(field) {
             normalized[field] = hasStorageField(data, field) ? data[field] : null;
         });
+        normalized.history.breaks = getHistoryBreaks(data.history).slice();
         normalized.sessionHighs = {};
         STORAGE_HISTORY_SERIES.forEach(function(key) {
             if (data.sessionHighs && data.sessionHighs[key]) {
@@ -1174,9 +1186,9 @@ const ViewerTracker = (function() {
         previousUserCount = 0;
         previousRoomTotal = 0;
         lastAcceptedAcquisition = null;
-        femaleTransUsernames = [];
         newHighTiers = {};
         history = data.history;
+        pendingHistoryGap = true;
         tierHighTimes = data.tierHighTimes;
         withTokensHighTime = data.withTokensHighTime;
         totalHighTime = data.totalHighTime;
@@ -1191,8 +1203,6 @@ const ViewerTracker = (function() {
         syncHighTimes();
         isPaused = data.isPaused;
         pausedElapsedTime = data.pausedElapsedTime;
-        sessionFemaleTransUsers = data.sessionFemaleTransUsers;
-        sessionUniqueUsers = data.sessionUniqueUsers;
         previousCounts = data.previousCounts;
         hasTrendBaseline = data.hasTrendBaseline;
         trendComparisonMode = data.trendComparisonMode;
@@ -1254,8 +1264,6 @@ const ViewerTracker = (function() {
             roomEpoch: activeRoomEpoch,
             isPaused: isPaused,
             pausedElapsedTime: pausedElapsedTime,
-            sessionFemaleTransUsers: sessionFemaleTransUsers,
-            sessionUniqueUsers: sessionUniqueUsers,
             previousCounts: previousCounts,
             hasTrendBaseline: hasTrendBaseline,
             trendComparisonMode: trendComparisonMode,
@@ -1423,6 +1431,7 @@ const ViewerTracker = (function() {
 
     function pauseTrackingTimer() {
         if (isPaused) return;
+        pendingHistoryGap = true;
         isPaused = true;
         pausedElapsedTime = trackingStartTime ? Math.max(0, Date.now() - trackingStartTime) : 0;
         if (trackingTimerInterval) {
@@ -1490,7 +1499,7 @@ const ViewerTracker = (function() {
     }
 
     function resetAllTracking() {
-        if (!confirm('Reset all tracking data?\n\nThis will clear:\n- All session history\n- Trend tracking\n- Elapsed timer\n- Female/Trans user list\n- Unique user count\n\nA new scan will start immediately.')) {
+        if (!confirm('Reset all tracking data?\n\nThis will clear:\n- All session history\n- Trend tracking\n- Elapsed timer\n\nA new scan will start immediately.')) {
             return;
         }
         var modelName = getModelName();
@@ -1515,7 +1524,6 @@ const ViewerTracker = (function() {
         previousRoomTotal = 0;
         roomTotal = 0;
         roomTotalHigh = 0;
-        sessionUniqueUsers = {};
         previousCounts = {
             'red': 0, 'green': 0, 'purple': 0, 'pink': 0,
             'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0,
@@ -1530,8 +1538,6 @@ const ViewerTracker = (function() {
             'red': [], 'green': [], 'purple': [], 'pink': [], 'dark-blue': [], 'light-blue': [], 'gray': [], 'female-trans': [],
             'withTokens': [], 'total': [], 'anonymous': []
         };
-        sessionFemaleTransUsers = {};
-        femaleTransUsernames = [];
         roomTotalHighTime = null;
         tierHighTimes = {};
         withTokensHighTime = null;
@@ -1795,18 +1801,6 @@ const ViewerTracker = (function() {
             report.push(TIERS[tier].name + ': ' + current.toLocaleString() + ' (High: ' + high.toLocaleString() + ')');
         });
         report.push('');
-        report.push('--- ♀⚧ OVERLAY (SESSION) ---');
-        report.push('');
-        var sessionFemaleCount = 0;
-        var sessionTransCount = 0;
-        Object.keys(sessionFemaleTransUsers).forEach(function(username) {
-            var gender = sessionFemaleTransUsers[username];
-            if (gender === 'female') sessionFemaleCount++;
-            else if (gender === 'trans') sessionTransCount++;
-        });
-        var femaleTransTotal = sessionFemaleCount + sessionTransCount;
-        report.push('Total Unique ♀⚧ Viewers: ' + femaleTransTotal + ' (♀ Female: ' + sessionFemaleCount + ', ⚧ Trans: ' + sessionTransCount + ')');
-        report.push('');
         report.push('================================');
         report.push('End of Report');
         report.push('================================');
@@ -1954,9 +1948,9 @@ const ViewerTracker = (function() {
         return Math.max(0, low - 1);
     }
 
-    function drawGifSparkline(surface, values, lastIndex, color, bounds) {
+    function drawGifSparkline(surface, values, lastIndex, color, bounds, times, breaks) {
         // Match the panel: show only history through the selected sample, with
-        // each tier scaled to its own visible minimum/maximum and sample index.
+        // each tier scaled to its own visible minimum/maximum and elapsed time.
         // Reserve space for the two-pixel stroke at the right and bottom edges.
         var left = bounds.left, top = bounds.top;
         var plotWidth = bounds.width - 2, plotHeight = bounds.height - 2;
@@ -1966,7 +1960,7 @@ const ViewerTracker = (function() {
             maximum = Math.max(maximum, values[i]);
         }
         var range = maximum - minimum || 1;
-        function y(value) { return top + plotHeight - Math.round((value - minimum) / range * plotHeight); }
+        function y(value) { return maximum === minimum ? top + Math.round(plotHeight / 2) : top + plotHeight - Math.round((value - minimum) / range * plotHeight); }
         function line(x0, y0, x1, y1) {
             // Integer rasterization keeps every pixel in the fixed GIF palette.
             var dx = Math.abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
@@ -1980,34 +1974,14 @@ const ViewerTracker = (function() {
                 if (twiceError <= dx) { error += dx; y0 += sy; }
             }
         }
-        if (lastIndex === 0) {
-            surface.rect(left, y(values[0]), 2, 2, color);
-            return;
-        }
-        // Bucket dense history into pixel columns, preserving first/last points
-        // and extremes. Dense history needs no more columns than the chart width.
-        var column = -1, firstY = 0, lastY = 0, lowY = 0, highY = 0;
-        var previousX = null, previousY = null;
-        function flush() {
-            if (column < 0) return;
-            var x = left + column;
-            if (previousX !== null) line(previousX, previousY, x, firstY);
-            surface.rect(x, lowY, 2, highY - lowY + 2, color);
-            previousX = x; previousY = lastY;
-        }
-        for (var sample = 0; sample <= lastIndex; sample++) {
-            var nextColumn = Math.round(sample / lastIndex * plotWidth);
-            var nextY = y(values[sample]);
-            if (nextColumn !== column) {
-                flush();
-                column = nextColumn;
-                firstY = lowY = highY = nextY;
-            }
-            lastY = nextY;
-            lowY = Math.min(lowY, nextY);
-            highY = Math.max(highY, nextY);
-        }
-        flush();
+        var plot = buildChartPlot(values, times || values.map(function(_, i) { return i; }), breaks || [], plotWidth, lastIndex);
+        var previous = null;
+        plot.points.forEach(function(point) {
+            var x = left + Math.round(point.x), nextY = y(point.value);
+            if (previous && !point.move) line(previous.x, previous.y, x, nextY);
+            else surface.rect(x, nextY, 2, 2, color);
+            previous = { x: x, y: nextY };
+        });
     }
 
     function drawGifSummary(surface, snapshot, index, tiers) {
@@ -2025,7 +1999,7 @@ const ViewerTracker = (function() {
             surface.rect(margin, top + 14, 6, 14, color);
             surface.text(label, 30, top + 14, 1, 2);
             drawGifSparkline(surface, values, index, color,
-                { left: chartLeft, top: top + 2, width: chartWidth, height: 36 });
+                { left: chartLeft, top: top + 2, width: chartWidth, height: 36 }, data.timestamps, getHistoryBreaks(data));
             var count = gifCount(values[index]);
             // Keep unusually large counts inside their column without truncation.
             var countScale = (count.length * 6 - 1) * 2 <= countWidth ? 2 : 1;
@@ -2138,6 +2112,88 @@ const ViewerTracker = (function() {
         }
     }
 
+    const REQUEST_POLICY_KEY = 'tierscope:requests:v1:' + location.origin;
+    var requestPolicyUnsaved = false;
+    var requestPolicyCache = { until: 0, failures: 0, blocked: 0, status: 0, revision: '' };
+
+    function readRequestPolicy() {
+        try {
+            var raw = GM_getValue(REQUEST_POLICY_KEY, null);
+            if (raw === null && !requestPolicyUnsaved) requestPolicyCache = { until: 0, failures: 0, blocked: 0, status: 0, revision: '' };
+            else if (raw !== null) {
+                var value = JSON.parse(raw);
+                if (value && Number.isFinite(value.until) && value.until >= 0 && Number.isInteger(value.failures) &&
+                    value.failures >= 0 && (value.blocked === 0 || value.blocked === 401 || value.blocked === 403) &&
+                    Number.isInteger(value.status) && (!value.serverUntil || isStorageTimestamp(value.serverUntil)) && typeof value.revision === 'string') {
+                    if (requestPolicyUnsaved) {
+                        value = Object.assign({}, value, {
+                            until: Math.max(value.until, requestPolicyCache.until),
+                            serverUntil: Math.max(value.serverUntil || 0, requestPolicyCache.serverUntil || 0),
+                            failures: Math.max(value.failures, requestPolicyCache.failures),
+                            blocked: requestPolicyCache.blocked || value.blocked,
+                            status: requestPolicyCache.until >= value.until ? requestPolicyCache.status : value.status,
+                            revision: requestPolicyCache.revision
+                        });
+                    }
+                    requestPolicyCache = value;
+                }
+            }
+        } catch (error) { /* Retain the in-memory restriction if storage cannot be read. */ }
+        return requestPolicyCache;
+    }
+
+    function writeRequestPolicy(policy) {
+        policy.revision = makeStorageId(); requestPolicyCache = policy;
+        requestPolicyUnsaved = true;
+        try { GM_setValue(REQUEST_POLICY_KEY, JSON.stringify(policy)); requestPolicyUnsaved = false; }
+        catch (error) { log('Request restriction is local to this tab: ' + error.message); }
+    }
+
+    function retryAfterTime(value, now) {
+        if (typeof value !== 'string' || !value.trim()) return 0;
+        value = value.trim();
+        if (/^\d+$/.test(value)) {
+            var until = now + Number(value) * 1000;
+            return Number.isSafeInteger(until) && until <= 8640000000000000 ? until : 0;
+        }
+        var parsed = Date.parse(value);
+        return Number.isFinite(parsed) && parsed > now ? parsed : 0;
+    }
+
+    function recordRequestFailure(error) {
+        var old = readRequestPolicy();
+        var failures = Math.min(20, old.failures + 1);
+        var status = error.status || 0;
+        var delay = Math.min(900000, Math.max(60000, scanIntervalSeconds * 1000) * Math.pow(2, failures - 1));
+        var policy = { until: Math.max(old.until, Date.now() + delay, error.retryAt || 0), failures: failures,
+            blocked: status === 401 || status === 403 ? status : old.blocked, status: status,
+            serverUntil: Math.max(old.serverUntil || 0, error.retryAt || 0, status === 429 ? Date.now() + delay : 0), revision: '' };
+        writeRequestPolicy(policy);
+        return policy;
+    }
+
+    function clearRequestFailures(revision) {
+        var current = readRequestPolicy();
+        // An older in-flight request must not undo a newer restriction from another tab.
+        if (current.revision !== revision || current.blocked || !current.failures) return;
+        requestPolicyCache = { until: 0, failures: 0, blocked: 0, status: 0, revision: '' };
+        requestPolicyUnsaved = false;
+        try { GM_deleteValue(REQUEST_POLICY_KEY); } catch (error) { /* Retrying later is safe. */ }
+    }
+
+    function requestPolicyMessage(policy) {
+        if (policy.blocked) return 'Access denied (' + policy.blocked + ')';
+        var seconds = Math.max(0, Math.ceil((policy.until - Date.now()) / 1000));
+        if (!seconds) return '';
+        return (policy.status === 429 ? 'Rate limited · ' : 'Retry in ') +
+            (seconds >= 60 ? Math.ceil(seconds / 60) + 'm' : seconds + 's');
+    }
+
+    function pauseForAccessRestriction() {
+        if (isAutoRefreshOn) toggleAutoRefresh();
+        else pauseTrackingTimer();
+    }
+
     function parseGetChatUserListResponse(text) {
         if (typeof text !== 'string' || !text.trim()) throw new Error('Empty API response');
         var parts = text.trim().split(',');
@@ -2212,7 +2268,12 @@ const ViewerTracker = (function() {
                 (async function() {
                     var response = await fetch(url.href, { method: 'GET', credentials: 'same-origin',
                         mode: 'same-origin', cache: 'no-store', redirect: 'error', signal: controller.signal });
-                    if (!response.ok) throw new Error('API HTTP ' + response.status);
+                    if (!response.ok) {
+                        var error = new Error('API HTTP ' + response.status);
+                        error.status = response.status;
+                        error.retryAt = retryAfterTime(response.headers && response.headers.get('Retry-After'), Date.now());
+                        throw error;
+                    }
                     return response.text();
                 })(),
                 new Promise(function(resolve, reject) {
@@ -2263,10 +2324,15 @@ const ViewerTracker = (function() {
             if (!isAcquisitionCurrent(context)) return null;
             validateRoomSnapshot(snapshot);
             domHealthStatus.consecutiveFailures = 0;
+            clearRequestFailures(context.policyRevision);
             return snapshot;
         } catch (err) {
             if (!isAcquisitionCurrent(context)) return null;
             console.warn('[TierScope ' + TIERSCOPE_VERSION + '] API failed: ' + err.message);
+            var policy = recordRequestFailure(err);
+            if (policy.blocked) { pauseForAccessRestriction(); return null; }
+            // Do not switch acquisition routes around a rate limit or explicit server wait.
+            if (err.status === 429 || err.retryAt > Date.now()) return null;
         }
         lastAcquisitionAttemptSource = 'DOM';
         var fallbackWait = getDOMFallbackWaitSeconds(context.room);
@@ -2299,19 +2365,6 @@ const ViewerTracker = (function() {
         restoredDisplayFrame = null;
         users = new Map(snapshot.users.map(function(user) { return [user.username, user]; }));
         roomTotal = snapshot.roomTotal;
-        femaleTransUsernames = [];
-        var model = modelName.toLowerCase();
-        users.forEach(function(user) {
-            if (user.username.toLowerCase() !== model) {
-                Object.defineProperty(sessionUniqueUsers, user.username.toLowerCase(),
-                    { value: true, enumerable: true, configurable: true, writable: true });
-                if (user.gender === 'female' || user.gender === 'trans') {
-                    femaleTransUsernames.push(user.username);
-                    Object.defineProperty(sessionFemaleTransUsers, user.username,
-                        { value: user.gender, enumerable: true, configurable: true, writable: true });
-                }
-            }
-        });
         lastAcceptedAcquisition = { source: snapshot.source, timestamp: snapshot.timestamp, api: null };
         if (snapshot.source === 'API') {
             var owners = snapshot.users.filter(function(user) { return user.isOwner; });
@@ -2323,8 +2376,7 @@ const ViewerTracker = (function() {
             return {
                 room: modelName, anonymousCount: snapshot.anonymousCount,
                 registeredCount: snapshot.registeredCount, totalUsers: snapshot.totalUsers,
-                owner: owners.map(function(user) { return user.username; }).join(', ') || 'none',
-                ownerRecords: owners,
+                ownerCount: owners.length,
                 unknownClasses: Object.values(unknownClasses).reduce(function(a, b) { return a + b; }, 0),
                 unknownGenders: Object.values(unknownGenders).reduce(function(a, b) { return a + b; }, 0),
                 unknownClassCodes: unknownClasses, unknownGenderCodes: unknownGenders,
@@ -2343,6 +2395,13 @@ const ViewerTracker = (function() {
         if (sessionStorageNotice) {
             el.textContent = 'Local only • room reset';
             el.title = sessionStorageNotice;
+            return;
+        }
+        var policyMessage = requestPolicyMessage(readRequestPolicy());
+        if (policyMessage) {
+            var sample = lastAcceptedAcquisition || restoredDisplayFrame;
+            el.textContent = policyMessage;
+            el.title = policyMessage + (sample ? '. Last sample: ' + new Date(sample.timestamp).toISOString() : '. No accepted sample.');
             return;
         }
         if (!lastAcceptedAcquisition) {
@@ -2365,8 +2424,11 @@ const ViewerTracker = (function() {
     async function performScanThenReturn(returnToChat) {
         if (typeof returnToChat === 'undefined') returnToChat = true;
         if (isScanning) return;
+        var policy = readRequestPolicy();
+        if (policy.blocked) { pauseForAccessRestriction(); updateCountdownDisplay(); return; }
+        if (policy.until > Date.now()) { updateCountdownDisplay(); return; }
         isScanning = true;
-        var context = { epoch: ++scanEpoch, generation: initGuard, url: location.href, room: getModelName() };
+        var context = { epoch: ++scanEpoch, generation: initGuard, url: location.href, room: getModelName(), policyRevision: policy.revision };
         var priorState = null;
         var statusEl = document.getElementById('auto-status');
         updateCountdownDisplay();
@@ -2374,6 +2436,7 @@ const ViewerTracker = (function() {
             var snapshot = await acquireRoomSnapshot(context, returnToChat);
             if (!isAcquisitionCurrent(context)) return;
             if (!snapshot) {
+                pendingHistoryGap = true;
                 if (statusEl) {
                     statusEl.textContent = 'Scan skipped (unreliable)';
                     statusEl.style.color = '#ff4444';
@@ -2384,12 +2447,9 @@ const ViewerTracker = (function() {
                 users: users, roomTotal: roomTotal, previousUserCount: previousUserCount,
                 previousRoomTotal: previousRoomTotal, previousCounts: previousCounts,
                 hasTrendBaseline: hasTrendBaseline, lastAcceptedAcquisition: lastAcceptedAcquisition,
-                restoredDisplayFrame: restoredDisplayFrame,
-                femaleTransUsernames: femaleTransUsernames,
+                restoredDisplayFrame: restoredDisplayFrame, pendingHistoryGap: pendingHistoryGap,
                 trendHTML: (document.getElementById('trend-container') || {}).innerHTML,
                 trendHeaderText: (document.getElementById('trend-header-label') || {}).textContent,
-                sessionUniqueUsers: Object.fromEntries(Object.entries(sessionUniqueUsers)),
-                sessionFemaleTransUsers: Object.fromEntries(Object.entries(sessionFemaleTransUsers)),
                 history: Object.fromEntries(Object.keys(history).map(function(key) { return [key, history[key].slice()]; })),
                 roomTotalHigh: roomTotalHigh, roomTotalHighTime: roomTotalHighTime,
                 tierHighTimes: Object.fromEntries(Object.entries(tierHighTimes)),
@@ -2448,10 +2508,8 @@ const ViewerTracker = (function() {
                 hasTrendBaseline = priorState.hasTrendBaseline;
                 lastAcceptedAcquisition = priorState.lastAcceptedAcquisition;
                 restoredDisplayFrame = priorState.restoredDisplayFrame;
-                femaleTransUsernames = priorState.femaleTransUsernames;
-                sessionUniqueUsers = priorState.sessionUniqueUsers;
-                sessionFemaleTransUsers = priorState.sessionFemaleTransUsers;
                 history = priorState.history;
+                pendingHistoryGap = priorState.pendingHistoryGap;
                 roomTotalHigh = priorState.roomTotalHigh;
                 roomTotalHighTime = priorState.roomTotalHighTime;
                 tierHighTimes = priorState.tierHighTimes;
@@ -2473,11 +2531,13 @@ const ViewerTracker = (function() {
                 }
                 catch (displayError) { log('Could not repaint previous data: ' + displayError.message); }
             }
+            pendingHistoryGap = true;
             log('Error during scan; retaining previous valid data: ' + err.message);
         } finally {
             if (isAcquisitionCurrent(context)) {
                 isScanning = false;
                 resetCountdown();
+                updateAcquisitionStatus();
             }
         }
     }
@@ -2720,6 +2780,10 @@ const ViewerTracker = (function() {
         });
         syncHighTimes();
 
+        if (!history.breaks || history.breaks.length !== history.timestamps.length) history.breaks = getHistoryBreaks(history).slice();
+        var lastTime = history.timestamps.length ? history.timestamps[history.timestamps.length - 1] : null;
+        history.breaks.push(lastTime !== null && (pendingHistoryGap || now - lastTime > scanIntervalSeconds * 2000 + API_TIMEOUT_MS));
+        pendingHistoryGap = false;
         history.timestamps.push(now);
         Object.keys(counts).forEach(function(tier) {
             history[tier].push(counts[tier]);
@@ -2729,6 +2793,7 @@ const ViewerTracker = (function() {
         history['anonymous'].push(anonymousCount);
         if (history.timestamps.length > MAX_HISTORY_LENGTH) {
             history.timestamps.shift();
+            history.breaks.shift();
             Object.keys(counts).forEach(function(tier) { history[tier].shift(); });
             history['withTokens'].shift();
             history['total'].shift();
@@ -2739,39 +2804,160 @@ const ViewerTracker = (function() {
         }
     }
 
-    function drawSparkline(canvasId, data, color, customHeight) {
+    var chartTimeCache = new WeakMap();
+    function getChartTimes(times) {
+        var cached = chartTimeCache.get(times);
+        var last = times.length ? times[times.length - 1] : 0;
+        if (cached && cached.length === times.length && cached.last === last && cached.first === times[0]) return cached.axis;
+        var axis = [];
+        times.forEach(function(time, i) { axis.push(i ? Math.max(axis[i - 1], time) : time); });
+        chartTimeCache.set(times, { length: times.length, first: times[0], last: last, axis: axis });
+        return axis;
+    }
+
+    function getHistoryBreaks(data) {
+        if (data.breaks && data.breaks.length === data.timestamps.length) return data.breaks;
+        // Legacy records lack pause metadata. Infer only unusually long intervals.
+        var times = getChartTimes(data.timestamps), intervals = [];
+        for (var i = 1; i < times.length; i++) if (times[i] > times[i - 1]) intervals.push(times[i] - times[i - 1]);
+        intervals.sort(function(a, b) { return a - b; });
+        var typical = intervals.length ? intervals[Math.floor((intervals.length - 1) / 2)] : 60000;
+        var threshold = Math.max(120000, typical * 2 + API_TIMEOUT_MS);
+        return times.map(function(time, i) { return i > 0 && time - times[i - 1] > threshold; });
+    }
+
+    function chartColor(key, original) {
+        return key === 'purple' ? '#A36ACB' : key === 'dark-blue' ? '#7975CF' : original;
+    }
+
+    // Preserve first/last and extrema in each pixel column, in sample order.
+    // Only drawing is reduced; tooltips, histories and exports retain every sample.
+    function buildChartPlot(values, times, breaks, width, lastIndex) {
+        var end = Math.min(values.length, times.length) - 1;
+        if (Number.isInteger(lastIndex)) end = Math.min(end, lastIndex);
+        if (end < 0) return { points: [], min: 0, max: 0, end: -1 };
+        var axis = getChartTimes(times), startTime = axis[0], span = axis[end] - startTime;
+        var min = Infinity, max = -Infinity, points = [], bucket = null, breakNext = true;
+        function flush() {
+            if (!bucket) return;
+            var indices = [bucket.first, bucket.low, bucket.high, bucket.last].sort(function(a, b) { return a - b; });
+            indices.forEach(function(index, j) {
+                if (j && index === indices[j - 1]) return;
+                points.push({ index: index, x: span ? (axis[index] - startTime) / span * width : width / 2,
+                    value: values[index], move: breakNext });
+                breakNext = false;
+            });
+            bucket = null;
+        }
+        for (var i = 0; i <= end; i++) {
+            var value = values[i]; min = Math.min(min, value); max = Math.max(max, value);
+            var column = span ? Math.floor((axis[i] - startTime) / span * width) : 0;
+            if (breaks && breaks[i]) { flush(); breakNext = true; }
+            if (!bucket || bucket.column !== column) {
+                flush(); bucket = { column: column, first: i, last: i, low: i, high: i };
+            } else {
+                bucket.last = i;
+                if (value < values[bucket.low]) bucket.low = i;
+                if (value > values[bucket.high]) bucket.high = i;
+            }
+        }
+        flush();
+        return { points: points, min: min, max: max, end: end, startTime: startTime, endTime: axis[end] };
+    }
+
+    function hideChartTooltip() {
+        var tooltip = document.getElementById('tierscope-chart-tooltip');
+        if (tooltip) tooltip.style.display = 'none';
+    }
+
+    function nearestChartSample(times, end, target) {
+        var low = 0, high = end + 1;
+        while (low < high) { var middle = Math.floor((low + high) / 2); if (times[middle] <= target) low = middle + 1; else high = middle; }
+        if (low === 0) return 0;
+        if (low > end) return end;
+        return target - times[low - 1] <= times[low] - target ? low - 1 : low;
+    }
+
+    function showChartTooltip(canvas, index, clientX, clientY, inGap) {
+        var model = canvas._tierScopeChart;
+        if (!model || model.plot.end < 0) return;
+        index = Math.max(0, Math.min(model.plot.end, index));
+        canvas._tierScopeIndex = index;
+        var tooltip = document.getElementById('tierscope-chart-tooltip');
+        if (!tooltip) {
+            tooltip = document.createElement('div'); tooltip.id = 'tierscope-chart-tooltip';
+            tooltip.setAttribute('role', 'tooltip');
+            tooltip.style.cssText = 'position:fixed;z-index:2147483647;pointer-events:none;max-width:310px;padding:7px 9px;background:#171722;color:#fff;border:1px solid #a36acb;border-radius:5px;font:12px/1.5 Arial,sans-serif;white-space:pre-line;box-shadow:0 3px 12px #0008;';
+            document.body.appendChild(tooltip);
+        }
+        tooltip.textContent = model.label + ' · ' + model.values[index].toLocaleString() + '\n' +
+            new Date(model.times[index]).toLocaleString() + '\n' +
+            'Range: ' + model.plot.min.toLocaleString() + '–' + model.plot.max.toLocaleString() +
+            ' · Sample ' + (index + 1) + '/' + (model.plot.end + 1) +
+            (inGap ? '\nNo samples in this gap; showing nearest sample.' : '');
+        tooltip.style.display = 'block';
+        var rect = tooltip.getBoundingClientRect();
+        tooltip.style.left = Math.max(4, Math.min(clientX + 12, window.innerWidth - rect.width - 4)) + 'px';
+        tooltip.style.top = Math.max(4, Math.min(clientY + 12, window.innerHeight - rect.height - 4)) + 'px';
+    }
+
+    function bindChartInspection(canvas, model) {
+        canvas._tierScopeChart = model;
+        canvas.setAttribute('tabindex', '0'); canvas.setAttribute('role', 'img');
+        canvas.setAttribute('aria-describedby', 'tierscope-chart-tooltip');
+        canvas.setAttribute('aria-label', model.label + ' history. ' + (model.plot.end < 0 ? 'No samples.' :
+            'Range ' + model.plot.min + ' to ' + model.plot.max + '. ' + (model.plot.end + 1) + ' samples. Use Left and Right arrows to inspect samples; Home and End to jump; Escape to close.'));
+        if (canvas._tierScopeBound) return;
+        canvas._tierScopeBound = true;
+        canvas.addEventListener('pointermove', function(event) {
+            var m = canvas._tierScopeChart;
+            if (m.plot.end < 0) return;
+            var rect = canvas.getBoundingClientRect();
+            var fraction = Math.max(0, Math.min(1, ((event.clientX - rect.left) / rect.width * m.width - 2) / (m.width - 4)));
+            var time = m.plot.startTime + fraction * (m.plot.endTime - m.plot.startTime);
+            var axis = getChartTimes(m.times), index = nearestChartSample(axis, m.plot.end, time);
+            var next = axis[index] > time ? index : index + 1;
+            var gap = next > 0 && next <= m.plot.end && m.breaks[next] && time > axis[next - 1] && time < axis[next];
+            showChartTooltip(canvas, index, event.clientX, event.clientY, gap);
+        });
+        canvas.addEventListener('pointerleave', hideChartTooltip);
+        canvas.addEventListener('blur', hideChartTooltip);
+        canvas.addEventListener('focus', function() {
+            var rect = canvas.getBoundingClientRect();
+            showChartTooltip(canvas, canvas._tierScopeChart.plot.end, rect.left + rect.width / 2, rect.top + rect.height, false);
+        });
+        canvas.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') { hideChartTooltip(); event.stopPropagation(); return; }
+            var end = canvas._tierScopeChart.plot.end, index = canvas._tierScopeIndex === undefined ? end : canvas._tierScopeIndex;
+            if (event.key === 'ArrowLeft') index--; else if (event.key === 'ArrowRight') index++;
+            else if (event.key === 'Home') index = 0; else if (event.key === 'End') index = end; else return;
+            event.preventDefault(); event.stopPropagation();
+            var rect = canvas.getBoundingClientRect();
+            showChartTooltip(canvas, index, rect.left + rect.width / 2, rect.top + rect.height, false);
+        });
+    }
+
+    function drawSparkline(canvasId, data, color, customHeight, times, breaks, lastIndex, label) {
         var canvas = document.getElementById(canvasId);
         if (!canvas) return;
         var ctx = canvas.getContext('2d');
+        if (!ctx) return;
         var scale = Math.max(1, (currentScale || 1) * (window.devicePixelRatio || 1));
-        var displayHeight = customHeight || 28;
-        canvas.style.width = '105px'; // Stable flex basis; draw at its actual allocated width.
-        canvas.style.minWidth = '0';
-        canvas.style.height = displayHeight + 'px';
-        var displayWidth = canvas.clientWidth || 105;
-        canvas.width = Math.ceil(displayWidth * scale);
-        canvas.height = Math.ceil(displayHeight * scale);
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        if (data.length < 2) return;
-        ctx.scale(scale, scale);
-        var width = displayWidth;
-        var height = displayHeight;
-        var min = Math.min.apply(null, data);
-        var max = Math.max.apply(null, data);
-        var range = max - min || 1;
-        var padding = 2;
-        var drawHeight = height - (padding * 2);
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 2;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
+        var height = customHeight || 28;
+        canvas.style.width = '105px'; canvas.style.minWidth = '0'; canvas.style.height = height + 'px';
+        var width = canvas.clientWidth || 105;
+        canvas.width = Math.ceil(width * scale); canvas.height = Math.ceil(height * scale);
+        ctx.scale(scale, scale); ctx.clearRect(0, 0, width, height);
+        var plot = buildChartPlot(data, times, breaks, Math.max(1, width - 4), lastIndex);
+        bindChartInspection(canvas, { values: data, times: times, breaks: breaks, plot: plot, width: width, label: label });
+        ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
         ctx.beginPath();
-        for (var i = 0; i < data.length; i++) {
-            var x = (i / (data.length - 1)) * width;
-            var y = height - padding - ((data[i] - min) / range) * drawHeight;
-            if (i === 0) ctx.moveTo(x, y);
-            else ctx.lineTo(x, y);
-        }
+        plot.points.forEach(function(point, i) {
+            var x = 2 + point.x;
+            var y = plot.max === plot.min ? height / 2 : height - 2 - (point.value - plot.min) / (plot.max - plot.min) * (height - 4);
+            if (point.move) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            if (point.move && (i === plot.points.length - 1 || plot.points[i + 1].move)) ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
+        });
         ctx.stroke();
     }
 
@@ -2780,12 +2966,15 @@ const ViewerTracker = (function() {
         drawHistorySparklines(history);
     }
 
-    function drawHistorySparklines(displayHistory) {
+    function drawHistorySparklines(displayHistory, lastIndex) {
+        hideChartTooltip();
         if (rowLayoutNeedsMeasure) applyRowLayout();
+        var breaks = getHistoryBreaks(displayHistory);
         PANEL_ROWS.forEach(function(row) {
             if (collapsedRows.has(row.key)) return;
             var key = row.key === 'withtokens' ? 'withTokens' : row.key === 'anon' ? 'anonymous' : row.key;
-            drawSparkline('spark-' + row.key, displayHistory[key], row.color, panelChartHeights[row.key] || row.height);
+            drawSparkline('spark-' + row.key, displayHistory[key], chartColor(row.key, row.color),
+                panelChartHeights[row.key] || row.height, displayHistory.timestamps, breaks, lastIndex, row.label);
         });
     }
 
@@ -2808,7 +2997,7 @@ const ViewerTracker = (function() {
     }
 
     function getDisplayHigh(frame, key, current) {
-        return frame.isPlayback ? getHighValue(frame.history[key], current) : getSessionHigh(key, current);
+        return frame.isPlayback ? { value: Math.max(frame.highs[key] || 0, current || 0), isNew: false } : getSessionHigh(key, current);
     }
 
     function getHighValue(data, currentValue, timestamp) {
@@ -2822,11 +3011,15 @@ const ViewerTracker = (function() {
 
     function resetCountdown() {
         countdownSeconds = scanIntervalSeconds;
-        nextScanAt = Date.now() + scanIntervalSeconds * 1000;
+        nextScanAt = Math.max(Date.now() + scanIntervalSeconds * 1000, readRequestPolicy().until);
         updateCountdownDisplay();
     }
 
     function updateCountdownDisplay() {
+        var policy = readRequestPolicy();
+        if (policy.blocked && isAutoRefreshOn) pauseForAccessRestriction();
+        var policyMessage = requestPolicyMessage(policy);
+        if (isAutoRefreshOn && policy.until > nextScanAt) nextScanAt = policy.until;
         updateMiniFreshness();
         if (isAutoRefreshOn && !isScanning && nextScanAt) {
             countdownSeconds = Math.max(0, Math.ceil((nextScanAt - Date.now()) / 1000));
@@ -2869,6 +3062,15 @@ const ViewerTracker = (function() {
                 controlNextScan.textContent = 'Paused';
                 controlNextScan.style.color = '#ff4444';
             }
+        }
+        if (policyMessage) {
+            [statusEl, expandedCountdown, controlNextScan].forEach(function(el) {
+                if (!el) return;
+                el.textContent = policyMessage; el.style.color = '#ffd43b';
+                el.title = policyMessage + (policy.blocked ? '. Automatic scans stopped. After resolving access, use Resume to retry.' :
+                    '. No API or DOM acquisition before ' + new Date(policy.until).toLocaleString() + '.');
+            });
+            return;
         }
         if (!statusEl) return;
         if (isScanning) {
@@ -3088,6 +3290,7 @@ const ViewerTracker = (function() {
     }
 
     function createPanel() {
+        hideChartTooltip();
         cancelGifExport();
         leavePlayback(false);
         cleanupDragListeners();
@@ -3174,7 +3377,7 @@ const ViewerTracker = (function() {
                     '</div>' +
                     '<canvas id="spark-' + key + '" width="105" height="28" style="flex:1;margin:0 4px;"></canvas>' +
                     '<div style="text-align:right;width:48px;flex-shrink:0;">' +
-                        '<span id="count-' + key + '" style="font-weight:bold;color:' + t.color + ';font-size:14px;">0</span>' +
+                        '<span id="count-' + key + '" style="font-weight:bold;color:' + chartColor(key, t.color) + ';font-size:14px;">0</span>' +
                         '<div id="high-' + key + '" style="font-size:8px;color:#32CD32;margin-top:1px;">H:0</div>' +
                     '</div>' +
                 '</div>';
@@ -3437,6 +3640,13 @@ const ViewerTracker = (function() {
     }
 
     function toggleAutoRefresh() {
+        // Only an explicit Resume clears access denial. Reset/reload cannot bypass it.
+        if (!isAutoRefreshOn) {
+            var policy = readRequestPolicy();
+            if (policy.blocked) {
+                writeRequestPolicy({ until: policy.serverUntil || 0, serverUntil: policy.serverUntil || 0, failures: 0, blocked: 0, status: 0, revision: '' });
+            }
+        }
         isAutoRefreshOn = !isAutoRefreshOn;
         var btn = document.getElementById('btn-auto');
         var btnControl = document.getElementById('btn-control-auto');
@@ -3511,6 +3721,7 @@ const ViewerTracker = (function() {
     }
 
     function toggleView() {
+        hideChartTooltip();
         if (presentationMode === 'PLAYBACK') return;
         cancelHighPulses();
         isMinimized = !isMinimized;
@@ -3610,7 +3821,7 @@ const ViewerTracker = (function() {
         if (presentationMode === 'PLAYBACK') return;
         renderDisplayFrame({ counts: counts, total: total, withTokens: withTokens,
             anonymousCount: anonymousCount, fullRoomTotal: fullRoomTotal, roomTotalHigh: roomTotalHigh,
-            history: history, uniqueCount: null, isPlayback: false });
+            history: history, isPlayback: false });
     }
 
     function renderDisplayFrame(frame) {
@@ -3880,15 +4091,12 @@ const ViewerTracker = (function() {
             trendComparisonMode = 'last';
             autoTrendEscalation = true;
             roomTotalHigh = 0;
-            sessionUniqueUsers = {};
             roomTotalHighTime = null;
             tierHighTimes = {};
             withTokensHighTime = null;
             totalHighTime = null;
             anonHighTime = null;
             femaleTransHighTime = null;
-            femaleTransUsernames = [];
-            sessionFemaleTransUsers = {};
             initGuard++;
             scheduleInit(2002);
         }

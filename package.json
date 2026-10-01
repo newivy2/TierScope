@@ -1,0 +1,16 @@
+{
+  "name": "tierscope-regression-tests",
+  "version": "3.1.15",
+  "private": true,
+  "scripts": {
+    "test": "npm run test:unit && npm run test:browser && npm run test:firefox",
+    "test:unit": "node --test tests/*.test.cjs",
+    "test:browser": "node tests/run-browser.cjs chromium",
+    "test:firefox": "node tests/run-browser.cjs firefox",
+    "test:performance": "node tests/benchmark.cjs"
+  },
+  "devDependencies": {
+    "omggif": "1.0.10",
+    "playwright": "1.62.1"
+  }
+}

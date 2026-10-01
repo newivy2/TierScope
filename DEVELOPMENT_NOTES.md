@@ -1,11 +1,13 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **version 3.1.14**. For a quick introduction and installation link, see the [README](readme.md).
+Detailed reference for **version 3.1.15**. For a quick introduction and installation link, see the [README](readme.md).
 
 ## Contents
 
 - [Installation and updates](#installation-and-updates)
 - [Live controls and customization](#live-controls)
+- [Charts and sample inspection](#charts-and-sample-inspection)
+- [Request failures and retries](#request-failures-and-retries)
 - [Replay](#replay)
 - [GIF export](#download-a-gif)
 - [Understanding the counts](#understanding-the-counts)
@@ -93,6 +95,16 @@ Hover over a collapsed marker to see its count, high, and whether the displayed 
 
 Collapsing a row changes presentation only. All rows continue to be tracked and remain available in trend comparisons, TXT reports, CSV exports, and GIFs. In Replay, hiding or restoring rows preserves the selected position and Play/Pause state; it does not seek or restart playback.
 
+### Charts and sample inspection
+
+Expanded charts show the full retained history, up to 10,000 samples. Horizontal positions follow sample timestamps; the whole retained span continues to fit as history grows. Replay shows only the samples through its selected position. Each row scales independently to its visible minimum and maximum. A single sample appears as a dot; a constant series is centered vertically.
+
+Known pauses, failed acquisition attempts, refresh boundaries, and unusually long acquisition intervals create breaks in the line. The space remains on the time axis; missing samples are not filled with zeroes or interpolated values. Breaks are saved with new history. For older sessions without break metadata, gaps are inferred conservatively from unusually long timestamp intervals; the original pause boundaries cannot always be recovered. If the system clock moves backward, horizontal positions are clamped to preserve sample order; inspection still shows the original recorded timestamp.
+
+Hover over an expanded chart to see the nearest sample’s count and local time, its sample number, and the visible minimum and maximum. Hovering inside a gap explicitly identifies the nearest sample rather than presenting it as a measurement within the gap. Keyboard users can Tab to a chart, use Left/Right to move between samples, Home/End to jump to either end, and Escape to close the tooltip. Inspection adds no panel height.
+
+Dark-purple and dark-blue strokes and count text use slightly lighter shades for contrast; row markers and borders keep their tier colors. Dense charts preserve the first, last, minimum, and maximum samples in each pixel column. This reduces drawing work without discarding stored samples or changing CSV counts. Replay reuses its frozen history and repaints when the selected sample or layout changes.
+
 ### Trends and highlights
 
 The trend display uses green for increases, red for decreases, and yellow for unchanged counts. It shows the numeric change when nonzero.
@@ -114,6 +126,18 @@ Reduced-motion preferences disable the animation while preserving the steady hig
 The lamp slider ranges from **30% to 100%**, starting at **95%**. Moving left makes the main panel fill, normal tier-row fills, and normal collapsed-marker fills more transparent.
 
 It preserves green high-value highlights, borders, text, charts, and the fills of the summary rows, Controls, and other buttons. It does not apply opacity to the whole panel. The setting is retained during navigation in the current page session, but is not saved across a full reload.
+
+## Request failures and retries
+
+Acquisition distinguishes server restrictions from temporary failures:
+
+- **HTTP 429:** no DOM fallback is attempted. `Retry-After` is honored as either seconds or an HTTP date. Without a usable header, acquisition waits at least one minute and uses the backoff schedule below.
+- **HTTP 401 or 403:** automatic acquisition and its timer pause, and the panel shows **Access denied** with the status code. DOM fallback is not attempted. After resolving the access problem, use **Resume** to retry; Reset and reload do not clear the restriction. A server-provided wait still applies.
+- **Other failures:** retries start after the longer of one minute or the configured interval, then double after consecutive API failures, up to 15 minutes. A longer `Retry-After` takes precedence. The existing DOM fallback remains available for ordinary failures, with its own cooldown, but is skipped when the server specifies a future retry time.
+
+Successful, validated API acquisition clears the failure backoff unless another tab has since recorded a newer restriction. The last accepted sample stays visible throughout failures. The status and countdown show the retry or access state; the sample timestamp remains available in the status tooltip.
+
+Request restrictions are shared through userscript storage across TierScope tabs on the same origin and survive reloads. Changing the scan interval, resetting a room, or attempting another scan cannot shorten a server wait. This is a shared retry gate, not a single shared scanner: simultaneous tabs can still start requests before either receives a restriction.
 
 ## Replay
 
@@ -151,7 +175,7 @@ Open **Replay**, then click **GIF**. Progress and **Cancel** appear within the e
 | Rendering | Fixed palette, bitmap lettering, two-pixel chart strokes |
 | Encoder | `omggif` 1.0.10, loaded by the userscript manager |
 
-Export uses the **entire frozen Replay range**, regardless of cursor position or playback speed. With more than 60 samples, it selects moments across the recorded time range and includes the first and last samples. Each chart shows history only through its selected sample and scales independently to its visible minimum and maximum.
+Export uses the **entire frozen Replay range**, regardless of cursor position or playback speed. With more than 60 samples, it selects moments across the recorded time range and includes the first and last samples. Each chart shows history only through its selected sample, uses timestamp spacing and recorded gaps, and scales independently to its visible minimum and maximum. Flat series are centered.
 
 The GIF always includes every tier and all four summary lines, including rows collapsed in the panel. It has a fixed dark background; the panel’s opacity slider and row heights do not affect its layout. Generation happens locally and does not require watching or recording ten seconds of playback. File size and generation time depend on the history and device; there is no fixed file-size guarantee.
 
@@ -183,13 +207,13 @@ See Chaturbate’s [username-color documentation](https://support.chaturbate.com
 | 👻 / **Anonymous** | The API’s anonymous count; during DOM fallback, an estimate of room total minus registered records, with a minimum of zero. |
 | ♀⚧ / **Female/Trans** | An overlapping gender classification, not an eighth exclusive color tier. |
 
-With API samples, owner records are excluded from the seven color tiers but remain in Registered. The displayed female/trans count can include a matching-gender owner; the report’s unique female/trans viewer totals exclude the room owner.
+With API samples, owner records are excluded from the seven color tiers but remain in Registered. The displayed female/trans count can include a matching-gender owner. The female/trans row and its history remain aggregate sample counts; unique-viewer totals are no longer collected or reported.
 
 ## TXT and CSV exports
 
 ### TXT session summary
 
-**TXT** downloads a `.txt` file containing the latest displayed session counts, high values and their recorded times, tier breakdowns, unique female/trans viewer totals, acquisition details, and storage/version information. Before the first fresh scan after restoration, it explicitly labels its counts as a saved snapshot. Collapsed rows are included. It is a summary, not a raw time-series export.
+**TXT** downloads a `.txt` file containing the latest displayed session counts, high values and their recorded times, tier breakdowns, acquisition details, and storage/version information. Before the first fresh scan after restoration, it explicitly labels its counts as a saved snapshot. Collapsed rows are included. It is a summary, not a raw time-series export.
 
 ### CSV history
 
@@ -207,11 +231,15 @@ The CSV columns are:
 
 The file uses comma-separated fields, a header row, and UTF-8 with a byte-order mark for spreadsheet compatibility. Text fields are escaped, and potentially formula-like text is prefixed to prevent spreadsheet formula interpretation. If a spreadsheet opens it in one column, import it as UTF-8 and select a comma delimiter.
 
-CSV contains recorded aggregate counts, not usernames, high-value timestamps, or inferred per-sample acquisition sources. Saved history can be exported before a fresh scan. At least one recorded sample is required.
+CSV contains recorded aggregate counts, not usernames, high-value timestamps, or inferred per-sample acquisition sources. Gap metadata is used for drawing and is not an additional CSV column; the timestamp column retains the actual sample times. Saved history can be exported before a fresh scan. At least one recorded sample is required.
 
 ## Saved sessions
 
-Sessions are stored per room through Tampermonkey’s storage API, with a separate record for each tab. A compatible record is eligible for restoration if its last save was no more than **three hours ago**. This is a restore window, not a three-hour limit on an active session. Valid expired tab records are cleaned up when that room's storage is inspected, including records left behind by late writes from an old Reset generation. Old-generation records never participate in restoration. Corrupt or unsupported records are preserved rather than automatically deleted.
+Sessions are stored per room through Tampermonkey’s storage API, with a separate record for each tab.
+
+New saves contain aggregate history and session state, without per-viewer username collections. When restoring supported older records, the obsolete `sessionUniqueUsers` and `sessionFemaleTransUsers` fields are ignored. The source records are not rewritten during migration, preserving concurrent tab saves; their existing name fields remain on disk until normal record cleanup or an explicit room Reset. New saves omit these fields. Unsupported or corrupt records remain untouched, and older script versions still running in other tabs can continue writing names.
+
+A compatible record is eligible for restoration if its last save was no more than **three hours ago**. This is a restore window, not a three-hour limit on an active session. Valid expired tab records are cleaned up when that room's storage is inspected, including records left behind by late writes from an old Reset generation. Old-generation records never participate in restoration. Corrupt or unsupported records are preserved rather than automatically deleted.
 
 When several tabs have saved the same room, TierScope restores the record with the newest accepted sample. Ties prefer more retained samples, then the latest save. Histories are not merged. Closing an older tab cannot overwrite another tab's record, and open tabs keep their own in-memory histories.
 
@@ -237,11 +265,11 @@ On upgrade from older versions, tier/summary highs and their timestamps are rebu
 
 ## Development and testing
 
-The repository includes a repeatable test suite and a GitHub Actions workflow. See [TESTING.md](TESTING.md) for setup, coverage, and release checks. Tests run during development and add no overhead to the installed userscript.
+The repository includes a repeatable test suite and a GitHub Actions workflow. See [TESTING.md](TESTING.md) for setup, coverage, and release checks. Tests run during development and add no overhead to the installed userscript. Browser fixtures run in Chromium and Firefox; they do not replace checks of the installed userscript on the live site.
 
 ```sh
 npm ci
-npx playwright install chromium
+npx playwright install chromium firefox
 npm test
 ```
 
@@ -253,10 +281,11 @@ TierScope depends on Chaturbate’s room data and page structure; changes to eit
 - **Validation:** malformed or duplicate records reject the sample. Additional count-change checks can reject suspicious changes. Rejected samples add no history point.
 - **Fallback:** reads the Users tab if the API is unavailable or rejected, then attempts to return to Chat. Fallback attempts are spaced by at least 60 seconds, or the configured scan interval when longer.
 - **Freshness:** the last accepted data stays visible through failed attempts. The site’s Users tab and TierScope can refresh at different times.
-- **Storage format:** session schema version 2, with tab records under `tierscope:tab:v2:<room>:<record-id>` and a Reset generation under `tierscope:epoch:v2:<room>`. Compatible legacy records under `tierscope:v1:<room>` are validated and migrated in memory; new saves use version 2. Older releases cannot read these new records. Row visibility preferences are stored separately under `tierscope:ui:collapsedRows:v1`, and position/scale under `tierscope:ui:geometry:v1`.
+- **Storage format:** session schema version 2, with an optional `history.breaks` boolean array aligned to sample timestamps. Tab records are under `tierscope:tab:v2:<room>:<record-id>` and a Reset generation under `tierscope:epoch:v2:<room>`. Compatible legacy records under `tierscope:v1:<room>` are validated and migrated in memory; new saves use version 2. Releases before 3.1.8 do not read this per-tab format. Builds 3.1.8–3.1.14 can restore aggregate history but ignore the optional gap metadata. Row visibility preferences are stored separately under `tierscope:ui:collapsedRows:v1`, and position/scale under `tierscope:ui:geometry:v1`.
+- **Retry state:** `tierscope:requests:v1:<origin>` stores shared retry timing and access-denial status. It contains no viewer usernames and is separate from room Reset.
 - **GIF dependency:** [omggif](https://github.com/deanm/omggif), version 1.0.10, MIT licensed.
 
-The script does not upload TXT reports, CSV files, GIFs, or tracking history to a TierScope server. It makes room-data requests to Chaturbate; the userscript manager loads the encoder from jsDelivr. Saved session data includes observed usernames used for session bookkeeping.
+The script does not upload TXT reports, CSV files, GIFs, or tracking history to a TierScope server. It makes room-data requests to Chaturbate; the userscript manager loads the encoder from jsDelivr. Usernames returned by acquisition are used transiently in memory to validate and count the current sample. They are no longer collected into session name lists or written in new saved-session records. The room name remains part of storage keys and exported filenames/CSV rows.
 
 ## Troubleshooting
 
@@ -278,7 +307,7 @@ Look for their boxed markers below the header and click to restore them. Moderat
 
 **The panel shrank after collapsing rows**
 
-This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only version 3.1.14 is enabled, refresh the tab, and report the browser and steps that reproduce it.
+This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only version 3.1.15 is enabled, refresh the tab, and report the browser and steps that reproduce it.
 
 **The panel is too large or near a screen edge**
 
@@ -316,7 +345,8 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
-| **3.1.14** | Two gentle live high-value pulses on expanded rows and collapsed markers, with reduced-motion support. |
+| **3.1.15** | Timestamp-based charts and sampling gaps; hover and keyboard inspection; brighter dark-tier strokes/text; reduced dense-history drawing and Replay allocation; shared HTTP retry/access handling; remove session username lists and unique female/trans report totals; Chromium and Firefox regression coverage. |
+| 3.1.14 | Two gentle live high-value pulses on expanded rows and collapsed markers, with reduced-motion support. |
 | 3.1.13 | Compact metric icons; slightly brighter green highlights; larger third-row trend boxes; diamond trend background follows change direction while retaining its pink border. |
 | 3.1.12 | Restored page-based startup: expanded in broadcast rooms, minimized elsewhere; retain position/scale persistence and scan-settings close fixes. |
 | 3.1.11 | Added a close button and document-level Escape handling for scan settings; remember compact/expanded view with panel geometry. |
