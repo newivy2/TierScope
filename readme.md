@@ -2,7 +2,7 @@
 
 A Tampermonkey userscript that tracks viewer tiers in a Chaturbate room and shows how the audience changes over time.
 
-**Current release: 3.1.7 — October 1, 2026**
+**Current release: 3.1.9 — October 1, 2026**
 
 [Report an issue](https://github.com/newivy2/TierScope/issues)
 
@@ -41,6 +41,8 @@ When updating, install the complete userscript, including its metadata header. T
 ```javascript
 // @require      https://cdn.jsdelivr.net/npm/omggif@1.0.10/omggif.js
 ```
+
+The script also requests `GM_listValues` to find the separate saved records for each room.
 
 Keep only one enabled copy of TierScope. After an update, refresh existing room tabs.
 
@@ -100,7 +102,7 @@ The trend display uses green for increases, red for decreases, and yellow for un
 
 Choose **Last**, **5m**, **15m**, **30m**, **1h**, or **Start**. A manual selection turns automatic escalation off. **AUTO** toggles escalation through Last → 5m → 15m → 30m → 1h as tracking time grows. If a requested window extends before available history, the earliest retained sample is used.
 
-A row’s green high-value highlight is separate from its trend indicator: it appears whenever a positive count equals the highest value in its retained history, including a return to that value after a dip.
+A row’s green high-value highlight is separate from its trend indicator: it appears whenever a positive count equals the session high, including a return to that value after a dip. In Replay, it compares against the retained history through the selected sample.
 
 ### Background opacity
 
@@ -200,21 +202,39 @@ CSV contains recorded aggregate counts, not usernames, high-value timestamps, or
 
 ## Saved sessions
 
-Sessions are stored per room through Tampermonkey’s storage API. A compatible record is restored if its last save was no more than **three hours ago**. This is a restore window, not a three-hour limit on an active session.
+Sessions are stored per room through Tampermonkey’s storage API, with a separate record for each tab. A compatible record is eligible for restoration if its last save was no more than **three hours ago**. This is a restore window, not a three-hour limit on an active session. Valid expired tab records are cleaned up when that room's storage is inspected, including records left behind by late writes from an old Reset generation. Old-generation records never participate in restoration. Corrupt or unsupported records are preserved rather than automatically deleted.
+
+When several tabs have saved the same room, TierScope restores the record with the newest accepted sample. Ties prefer more retained samples, then the latest save. Histories are not merged. Closing an older tab cannot overwrite another tab's record, and open tabs keep their own in-memory histories.
+
+Reset starts a new storage generation for the room and clears its saved records. Other already-open tabs can continue displaying and collecting local data, but cannot save it back into the reset session. Their footer shows **Local only • room reset** after a save attempt; export TXT/CSV if needed, then refresh to join the new session.
 
 When restored history contains a sample, TierScope displays that sample until a new scan is accepted:
 
 - The header reads **SAVED:** and the footer reads **Saved** with the sample’s age.
-- Counts, highs, and charts come from saved history. They are not treated as a fresh acquisition.
+- Counts and charts come from saved history; highs come from the saved session-high records. They are not treated as a fresh acquisition.
 - Trends wait for a fresh sample, avoiding false drops caused by an empty live user list after reload.
 - The report labels the figures as **last saved stats**, includes the sample timestamp, and distinguishes them from live acquisition details.
 - A failed scan leaves the saved display intact. The first accepted scan replaces it with fresh data and resumes normal trend comparisons.
 
 Paused sessions remain paused after restoration. Resume acquisition with **▶** when ready.
 
-History is capped at **10,000 accepted samples**. Older points are discarded when that limit is reached. Replay, GIF, and CSV exports use the retained history. Tier/summary highs are derived from that history; the room-total high is also tracked separately.
+History is capped at **10,000 accepted samples**. Older points are discarded when that limit is reached. Replay, GIF, and CSV exports use the retained history. Session-high values and their matching timestamps are stored separately, so tier and total highs survive the removal of older chart samples. Replay highs remain limited to retained samples through the selected frame.
 
-Corrupt or unsupported newer-schema records are preserved and protected from automatic overwrite. **Reset** explicitly clears the current room’s stored record. Deleting the script or its manager data can remove saved sessions.
+Each saved record is checked independently. Corrupt or unsupported newer-schema records are skipped and preserved without blocking valid records from the same room. If none are usable, tracking starts fresh in a separate record. The TXT report shows the number of skipped records, and the console identifies them and the reason. **Reset** explicitly clears the current room’s saved records, including skipped records; it is not required to restore healthy sibling records. Deleting the script or its manager data can remove saved sessions.
+
+The session's original start is separate from the active tracking timer. Pauses do not move the session start. The TXT report's high offsets use wall time since session start, including pauses; the tracking timer excludes paused time.
+
+On upgrade from older versions, tier/summary highs and their timestamps are rebuilt from matching retained samples. Already-discarded peaks and an exact original start altered by earlier pauses cannot be recovered. The report labels a legacy start as estimated.
+
+## Development and testing
+
+The repository includes a repeatable test suite and a GitHub Actions workflow. See [TESTING.md](TESTING.md) for setup, coverage, and release checks. Tests run during development and add no overhead to the installed userscript.
+
+```sh
+npm ci
+npx playwright install chromium
+npm test
+```
 
 ## Acquisition and dependencies
 
@@ -222,7 +242,7 @@ Corrupt or unsupported newer-schema records are preserved and protected from aut
 - **Validation:** malformed or duplicate records reject the sample. Additional count-change checks can reject suspicious changes. Rejected samples add no history point.
 - **Fallback:** reads the Users tab if the API is unavailable or rejected, then attempts to return to Chat. Fallback attempts are spaced by at least 60 seconds, or the configured scan interval when longer.
 - **Freshness:** the last accepted data stays visible through failed attempts. The site’s Users tab and TierScope can refresh at different times.
-- **Storage format:** session schema version 1 under `tierscope:v1:<room>`. Compatible legacy records are validated before restoration. Row visibility preferences are stored separately under `tierscope:ui:collapsedRows:v1`, and position/scale under `tierscope:ui:geometry:v1`.
+- **Storage format:** session schema version 2, with tab records under `tierscope:tab:v2:<room>:<record-id>` and a Reset generation under `tierscope:epoch:v2:<room>`. Compatible legacy records under `tierscope:v1:<room>` are validated and migrated in memory; new saves use version 2. Older releases cannot read these new records. Row visibility preferences are stored separately under `tierscope:ui:collapsedRows:v1`, and position/scale under `tierscope:ui:geometry:v1`.
 - **GIF dependency:** [omggif](https://github.com/deanm/omggif), version 1.0.10, MIT licensed.
 
 The script does not upload TXT reports, CSV files, GIFs, or tracking history to a TierScope server. It makes room-data requests to Chaturbate; the userscript manager loads the encoder from jsDelivr. Saved session data includes observed usernames used for session bookkeeping.
@@ -247,7 +267,7 @@ Look for their boxed markers below the header and click to restore them. Moderat
 
 **The panel shrank after collapsing rows**
 
-This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only version 3.1.7 is enabled, refresh the tab, and report the browser and steps that reproduce it.
+This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only version 3.1.9 is enabled, refresh the tab, and report the browser and steps that reproduce it.
 
 **The panel is too large or near a screen edge**
 
@@ -279,13 +299,15 @@ Check the browser’s downloads list and any blocked-download notification. Allo
 
 **Storage is “Protected / read-only”**
 
-The saved record failed validation or uses an unsupported schema. It has not been overwritten. Use Reset only if you want to discard that room’s saved record.
+A room-level storage access failure can still make saving read-only. Individual corrupt or unsupported records are skipped instead: healthy history can restore and new records can save. See the TXT report and browser console for details. Skipped records remain untouched unless you explicitly Reset the room.
 
 ## Version history
 
 | Version | Notes |
 | --- | --- |
-| **3.1.7** | Reposition the panel immediately on expansion; center the live-control buttons. |
+| **3.1.9** | Isolate corrupt or unsupported saved records; restore healthy siblings; expire valid old-epoch orphan records. |
+| 3.1.8 | Separate session start from active time; preserve session highs beyond history rollover; isolate same-room tab saves; add repeatable regression tests and CI. |
+| 3.1.7 | Reposition the panel immediately on expansion; center the live-control buttons. |
 | 3.1.6 | Remember panel position and scale; add the 100% size reset, Replay sample stepping, and CSV history export alongside TXT reports. |
 | 3.1.5 | Fixed panel-height redistribution when collapsing rows, including inherited line-spacing cases. Shrink only when all 11 rows are collapsed. |
 | 3.1.4 | Added collapsible tier and summary rows, a restore strip, remembered visibility preferences, and taller remaining charts. Moderators and Fan Club start collapsed. |
