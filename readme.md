@@ -82,7 +82,7 @@ Restoration, window resizing, and expansion from compact view adjust the positio
 
 ### Collapsible rows
 
-All **11 panel rows** can be collapsed independently: the seven color tiers, the female/trans overlay, With Tokens, Registered, and Anonymous. The overall room total remains in the header.
+All **11 panel rows** can be collapsed independently. The overall room total remains in the header.
 
 1. Click a row’s circle or icon to hide its full row.
 2. Its marker appears as a small bordered button in the strip below the header.
