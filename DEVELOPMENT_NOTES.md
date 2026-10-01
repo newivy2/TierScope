@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **version 3.1.17**. For a quick introduction and installation link, see the [README](readme.md).
+Detailed reference for **version 3.1.19**. For a quick introduction and installation link, see the [README](readme.md).
 
 ## Contents
 
@@ -43,7 +43,9 @@ Keep only one enabled copy of TierScope. After an update, refresh existing room 
 | Pink upper-left resize handle | Scale the panel; save its size when you release it. |
 | **100%** in the header | Restore standard scale while keeping row visibility and session data. |
 | **−**, **+**, or **Expand** | Switch between expanded and compact views. |
-| **⏸ / ▶** in Controls or compact view | Pause or resume automatic acquisition and the tracking timer. An already-running scan may finish. |
+| **⏸ / ▶** in Controls or compact view | Pause or resume the current session. An already-running scan may finish. |
+| **■ Stop** in Controls | Confirm closing the session, freeze elapsed time and history, and discard pending scan results. |
+| **Start** after Stop | Confirm starting a separate session with an empty chart and a fresh timer. |
 | Compact-view timer controls | Adjust the interval from 30 to 300 seconds; presets are 30s, 60s, 2m, and 5m. |
 | Row circle or icon | Collapse that row into the strip below the header. |
 | Boxed icon in the collapsed-row strip | Restore its row to its original position. |
@@ -59,6 +61,31 @@ The default scan interval is **60 seconds**, counted after a scan finishes. A ne
 The footer shows the sample source and age, for example `API • 12s`, `DOM • 4m`, or `Saved • 2h 5m`. Ages use seconds, minutes, hours, or days as appropriate. They are measured from the **sample’s timestamp**, not the session’s last save time or the countdown to the next scan. Hover over the status to see the recorded timestamp.
 
 Reset requests a one-off scan even when automatic acquisition is paused. It does not turn automatic acquisition back on, and reloading afterward preserves that paused state.
+
+### Pause, Stop, and new sessions
+
+**Pause** suspends automatic acquisition and freezes the elapsed timer. An in-flight request may still finish. Resume continues the same history; the time away can appear as a sampling gap.
+
+**Stop** asks for confirmation before closing the current tab’s session. Cancel leaves the session running with its existing settings. It freezes elapsed time, retains the final counts and chart, cancels live high pulses, and invalidates any in-flight acquisition so that its result cannot append another sample. The header and status show **STOPPED / Stopped**. The chart’s time range and stopped trend comparisons do not advance with the clock. Replay, TXT, CSV, and GIF export remain available. Stop does not erase data or backdate/remove previously accepted samples.
+
+After Stop, Pause/Resume becomes **Start**. Starting again requires confirmation and begins separate history and elapsed time. Export the stopped session first if you want a lasting copy. Its existing tab record is left intact until normal storage cleanup, but there is no archive picker; ordinary restore still selects the room record with the newest sample. Other tabs retain their independent sessions. Reset retains its existing room-wide clearing behavior.
+
+Stopped state survives restoration of that saved record and never resumes automatically. The normal three-hour saved-record restore window still applies. Older builds can read the aggregate history and paused flag, but do not implement the new Stop behavior.
+
+### Broadcaster absence and reduced scanning
+
+TierScope uses the owner flag already present in well-formed user-list API responses; it makes no additional broadcast-status requests.
+
+- The first response without an owner starts an absence window. A second such response enables a **minimum two-minute** interval.
+- After **ten minutes** in that absence window, the minimum interval becomes **five minutes**.
+- An owner returning before the cutoff clears the absence window and restores the selected interval.
+- After **three hours** of absence, an active session automatically **Stops** without a confirmation prompt. This is a session-ending rule based on observed owner absence, not a claim that the site confirmed an offline broadcast. It also applies to a private or away period that lasts that long.
+
+Automatic intervals never shorten the user’s selected interval or a server retry wait. The selected interval remains visible in scan settings, while Controls shows **Reduced** and the actual countdown. Intentionally slower samples remain connected on the chart; genuine pauses and failed scans still produce gaps.
+
+Network errors, malformed responses, and DOM-only fallback samples cannot establish absence. A well-formed API response can establish owner absence even when the chart’s count sanity filter rejects its totals, such as an empty room after a populated sample. Rejected totals are not added to history. Errors do not count as additional absence observations; an established absence window continues in wall time until an owner is observed or a new session starts.
+
+The absence window is saved with the session. Manually paused sessions do not run the automatic cutoff; attempting Resume after an established three-hour absence closes the old session instead. If a sleeping/background tab processes the cutoff late, elapsed time freezes at the three-hour deadline. Pending or later responses cannot reopen the stopped session or add a returning broadcaster to its history.
 
 ### Compact dashboard
 
@@ -288,7 +315,7 @@ TierScope depends on Chaturbate’s room data and page structure; changes to eit
 - **Validation:** malformed or duplicate records reject the sample. Additional count-change checks can reject suspicious changes. Rejected samples add no history point.
 - **Fallback:** reads the Users tab if the API is unavailable or rejected, then attempts to return to Chat. Fallback attempts are spaced by at least 60 seconds, or the configured scan interval when longer.
 - **Freshness:** the last accepted data stays visible through failed attempts. The site’s Users tab and TierScope can refresh at different times.
-- **Storage format:** session schema version 2, with an optional `history.breaks` boolean array aligned to sample timestamps. Tab records are under `tierscope:tab:v2:<room>:<record-id>` and a Reset generation under `tierscope:epoch:v2:<room>`. Compatible legacy records under `tierscope:v1:<room>` are validated and migrated in memory; new saves use version 2. Releases before 3.1.8 do not read this per-tab format. Builds 3.1.8–3.1.14 can restore aggregate history but ignore the optional gap metadata. Row visibility preferences are stored separately under `tierscope:ui:collapsedRows:v1`, position/scale under `tierscope:ui:geometry:v1`, and the theme under `tierscope:ui:theme:v1`.
+- **Storage format:** session schema version 2, with an optional `history.breaks` boolean array aligned to sample timestamps. Optional `isStopped`, `stoppedAt`, `stopReason`, and `broadcasterAbsence` fields retain session closure and absence timing. Tab records are under `tierscope:tab:v2:<room>:<record-id>` and a Reset generation under `tierscope:epoch:v2:<room>`. Compatible legacy records under `tierscope:v1:<room>` are validated and migrated in memory; new saves use version 2. Releases before 3.1.8 do not read this per-tab format. Builds 3.1.8–3.1.14 can restore aggregate history but ignore the optional gap metadata. Row visibility preferences are stored separately under `tierscope:ui:collapsedRows:v1`, position/scale under `tierscope:ui:geometry:v1`, and the theme under `tierscope:ui:theme:v1`.
 - **Retry state:** `tierscope:requests:v1:<origin>` stores shared retry timing and access-denial status. It contains no viewer usernames and is separate from room Reset.
 - **GIF dependency:** [omggif](https://github.com/deanm/omggif), version 1.0.10, MIT licensed.
 
@@ -314,7 +341,7 @@ Look for their boxed markers below the header and click to restore them. Moderat
 
 **The panel shrank after collapsing rows**
 
-This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only version 3.1.17 is enabled, refresh the tab, and report the browser and steps that reproduce it.
+This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only version 3.1.18 is enabled, refresh the tab, and report the browser and steps that reproduce it.
 
 **The panel is too large or near a screen edge**
 
@@ -350,9 +377,14 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 ## Version history
 
+### 3.1.19
+
+- Manual Stop now asks for confirmation. Cancel preserves the current session; the automatic three-hour Stop remains unattended.
+
 | Version | Notes |
 | --- | --- |
-| **3.1.17** | Immediate first scan for new, unpaused room sessions, followed by the normal completion-based countdown; compact scan-settings tooltip. |
+| **3.1.18** | Definitive Stop and separate-session Start; persisted broadcaster-absence tracking with 2m/5m slowdown and a three-hour Stop; frozen stopped charts, timer, and report state. |
+| 3.1.17 | Immediate first scan for new, unpaused room sessions, followed by the normal completion-based countdown; compact scan-settings tooltip. |
 | 3.1.16 | Remembered dark/bright mode, with a moon checkbox in the existing Controls row and theme-aware panel surfaces, text, and registered-total chart. |
 | 3.1.15 | Timestamp-based charts and sampling gaps; hover and keyboard inspection; reduced dense-history drawing and Replay allocation; shared HTTP retry/access handling; remove session username lists and unique female/trans report totals; Chromium and Firefox regression coverage. |
 | 3.1.14 | Two gentle live high-value pulses on expanded rows and collapsed markers, with reduced-motion support. |

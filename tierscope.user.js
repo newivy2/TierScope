@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.1.17
+// @version      3.1.19
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -18,7 +18,7 @@
 const ViewerTracker = (function() {
     'use strict';
 
-    const TIERSCOPE_VERSION = '3.1.17';
+    const TIERSCOPE_VERSION = '3.1.19';
     const API_TIMEOUT_MS = 10000;
     const DEFAULT_API_INTERVAL_SECONDS = 60;
     const DOM_FALLBACK_INTERVAL_SECONDS = 60;
@@ -233,6 +233,87 @@ const ViewerTracker = (function() {
     var trackingStartTime = null;
     var trackingTimerInterval = null;
     var isPaused = false;
+    var isStopped = false;
+    var stoppedAt = null;
+    var stopReason = null;
+    var broadcasterAbsence = { since: null, missing: 0 };
+    var lastScheduledIntervalSeconds = DEFAULT_API_INTERVAL_SECONDS;
+    const ABSENCE_STOP_MS = 3 * 60 * 60 * 1000;
+
+    function getEffectiveScanIntervalSeconds() {
+        if (broadcasterAbsence.missing < 2 || broadcasterAbsence.since === null) return scanIntervalSeconds;
+        return Math.max(scanIntervalSeconds, Date.now() - broadcasterAbsence.since >= 10 * 60000 ? 300 : 120);
+    }
+
+    function nextBroadcasterAbsence(snapshot) {
+        if (snapshot.source !== 'API') return broadcasterAbsence;
+        if (snapshot.users.some(function(user) { return user.isOwner === true; })) return { since: null, missing: 0 };
+        if (!isAutoRefreshOn || isPaused || isStopped) return broadcasterAbsence;
+        return { since: broadcasterAbsence.since === null ? Date.now() : broadcasterAbsence.since,
+            missing: Math.min(1000000, broadcasterAbsence.missing + 1) };
+    }
+
+    function stopDescription() {
+        return stopReason === 'absence' ? 'Stopped after 3 hours of broadcaster absence' : 'Session stopped';
+    }
+
+    function checkAbsenceStop() {
+        if (!isStopped && isAutoRefreshOn && !isPaused && broadcasterAbsence.missing >= 2 &&
+            broadcasterAbsence.since !== null && Date.now() - broadcasterAbsence.since >= ABSENCE_STOP_MS) {
+            stopTracking('absence');
+            return true;
+        }
+        return false;
+    }
+
+    function updateStopControls() {
+        var stop = document.getElementById('btn-control-stop');
+        if (stop) { stop.disabled = isStopped; stop.style.opacity = isStopped ? '0.5' : '1'; }
+        ['btn-auto', 'btn-control-auto'].forEach(function(id) {
+            var button = document.getElementById(id);
+            if (!button) return;
+            button.innerHTML = isStopped ? 'Start' : isAutoRefreshOn ? '⏸' : '▶';
+            button.title = isStopped ? 'Start a new session (keeps this stopped record until normal cleanup)' :
+                isAutoRefreshOn ? 'Pause scans and elapsed time' : 'Resume this session';
+            button.setAttribute('aria-label', isStopped ? 'Start a new session' : isAutoRefreshOn ? 'Pause scans' : 'Resume scans');
+            button.style.background = isStopped ? '#4169E1' : isAutoRefreshOn ? '#32CD32' : '#ff4444';
+        });
+    }
+
+    function stopTracking(reason) {
+        if (isStopped) return;
+        stopReason = reason === 'absence' ? 'absence' : 'manual';
+        stoppedAt = stopReason === 'absence' && broadcasterAbsence.since !== null ?
+            Math.min(Date.now(), broadcasterAbsence.since + ABSENCE_STOP_MS) : Date.now();
+        isStopped = true;
+        // Invalidate pending API/DOM work before freezing this session.
+        scanEpoch++;
+        isScanning = false;
+        isAutoRefreshOn = false;
+        stopCountdown();
+        nextScanAt = 0;
+        if (!isPaused) pausedElapsedTime = trackingStartTime ? Math.max(0, stoppedAt - trackingStartTime) : 0;
+        isPaused = true;
+        if (trackingTimerInterval) clearInterval(trackingTimerInterval);
+        trackingTimerInterval = null;
+        pendingHistoryGap = false;
+        cancelHighPulses();
+        updateTrackingTimer();
+        updateStopControls();
+        updateDisplay();
+        updateCountdownDisplay();
+        updateAcquisitionStatus();
+        saveSession(getModelName());
+    }
+
+    function startNewSession() {
+        if (!isStopped) return;
+        if (!confirm('Start a new session?\n\nThe chart and elapsed time will start from zero. Export this stopped session first if you want to keep a report, CSV or GIF. Its saved record is retained until normal storage cleanup.')) return;
+        saveSession(getModelName());
+        tabRecords.delete(getStorageKey(getModelName()));
+        isAutoRefreshOn = true;
+        resetTrackingData(false);
+    }
     var pausedElapsedTime = 0;
     var dragListeners = [];
     var isResizing = false;
@@ -315,6 +396,10 @@ const ViewerTracker = (function() {
     function updateMiniFreshness() {
         var el = document.getElementById('mini-freshness');
         if (!el) return;
+        if (isStopped) {
+            el.textContent = 'Stopped'; el.title = stopDescription() + '. Start begins a new session.';
+            el.style.color = 'var(--panel-muted)'; return;
+        }
         var sample = lastAcceptedAcquisition || restoredDisplayFrame;
         var source = lastAcceptedAcquisition ? lastAcceptedAcquisition.source : sample ? 'Saved' : 'No sample';
         el.textContent = sessionStorageNotice ? 'Local only' : (isAutoRefreshOn ? source : 'Paused') +
@@ -322,6 +407,9 @@ const ViewerTracker = (function() {
         el.style.color = sessionStorageNotice ? 'var(--panel-warning)' : isAutoRefreshOn ? 'var(--panel-muted)' : 'var(--panel-paused)';
         var policyMessage = requestPolicyMessage(readRequestPolicy());
         if (policyMessage && !sessionStorageNotice) { el.textContent = policyMessage; el.style.color = 'var(--panel-warning)'; }
+        if (!policyMessage && isAutoRefreshOn && getEffectiveScanIntervalSeconds() > scanIntervalSeconds) {
+            el.textContent = 'Reduced · ' + getEffectiveScanIntervalSeconds() / 60 + 'm';
+        }
         el.title = sessionStorageNotice || (policyMessage ? policyMessage + '. ' : '') + source + (sample ? ': ' + new Date(sample.timestamp).toISOString() : '') +
             '. Age of the last accepted sample. ' + (isAutoRefreshOn ? 'Next attempt: ' + countdownSeconds + 's.' : 'Automatic scans paused.');
     }
@@ -345,7 +433,7 @@ const ViewerTracker = (function() {
         var roomChange = delta('mini-room-change', frame.fullRoomTotal, comparison && comparison.total + comparison.anonymous);
         var header = document.getElementById('header-text');
         if (header) {
-            header.textContent = (frame.isRestored ? 'SAVED: ' : '') + compactNumber(frame.fullRoomTotal);
+            header.textContent = (isStopped ? 'STOPPED: ' : frame.isRestored ? 'SAVED: ' : '') + compactNumber(frame.fullRoomTotal);
             header.title = getModelName() + ' — Room total: ' + frame.fullRoomTotal.toLocaleString() +
                 '; session high: ' + frame.roomTotalHigh.toLocaleString() + (roomChange ? '; change: ' + roomChange + ' versus ' + mode : '');
         }
@@ -1148,9 +1236,19 @@ const ViewerTracker = (function() {
             requireField(typeof data.trendComparisonMode === 'string' &&
                 hasStorageField(TREND_PRESETS, data.trendComparisonMode), 'trendComparisonMode');
         }
-        ['isPaused', 'hasTrendBaseline', 'autoTrendEscalation'].forEach(function(field) {
+        ['isPaused', 'isStopped', 'hasTrendBaseline', 'autoTrendEscalation'].forEach(function(field) {
             if (hasStorageField(data, field)) requireField(typeof data[field] === 'boolean', field);
         });
+        if (data.isStopped) {
+            requireField(data.isPaused === true && isStorageTimestamp(data.stoppedAt), 'stopped state');
+            requireField(data.stopReason === 'manual' || data.stopReason === 'absence', 'stopReason');
+        }
+        if (hasStorageField(data, 'broadcasterAbsence')) {
+            var absence = data.broadcasterAbsence;
+            requireField(isStorageObject(absence) && Number.isSafeInteger(absence.missing) && absence.missing >= 0 &&
+                absence.missing <= 1000000 && (absence.missing === 0 ? absence.since === null :
+                isStorageTimestamp(absence.since) && absence.since <= data.timestamp), 'broadcasterAbsence');
+        }
     }
 
     function normalizeStoredSession(data) {
@@ -1164,6 +1262,10 @@ const ViewerTracker = (function() {
             })),
             hasTrendBaseline: hasStorageField(data, 'previousCounts') && data.hasTrendBaseline === true,
             isPaused: data.isPaused === true,
+            isStopped: data.isStopped === true,
+            stoppedAt: data.isStopped ? data.stoppedAt : null,
+            stopReason: data.isStopped ? data.stopReason : null,
+            broadcasterAbsence: data.broadcasterAbsence ? Object.assign({}, data.broadcasterAbsence) : { since: null, missing: 0 },
             trendComparisonMode: hasStorageField(data, 'trendComparisonMode') ? data.trendComparisonMode : 'last',
             autoTrendEscalation: !hasStorageField(data, 'autoTrendEscalation') || data.autoTrendEscalation,
             roomTotalHigh: hasStorageField(data, 'roomTotalHigh') ? data.roomTotalHigh : 0,
@@ -1258,6 +1360,11 @@ const ViewerTracker = (function() {
         sessionHighs = data.sessionHighs;
         syncHighTimes();
         isPaused = data.isPaused;
+        isStopped = data.isStopped;
+        stoppedAt = data.stoppedAt;
+        stopReason = data.stopReason;
+        broadcasterAbsence = data.broadcasterAbsence;
+        lastScheduledIntervalSeconds = getEffectiveScanIntervalSeconds();
         pausedElapsedTime = data.pausedElapsedTime;
         previousCounts = data.previousCounts;
         hasTrendBaseline = data.hasTrendBaseline;
@@ -1319,6 +1426,10 @@ const ViewerTracker = (function() {
             sessionHighs: sessionHighs,
             roomEpoch: activeRoomEpoch,
             isPaused: isPaused,
+            isStopped: isStopped,
+            stoppedAt: stoppedAt,
+            stopReason: stopReason,
+            broadcasterAbsence: broadcasterAbsence,
             pausedElapsedTime: pausedElapsedTime,
             previousCounts: previousCounts,
             hasTrendBaseline: hasTrendBaseline,
@@ -1469,6 +1580,7 @@ const ViewerTracker = (function() {
     }
 
     function startTrackingTimer() {
+        if (isStopped) return;
         if (sessionStartedAt === null) sessionStartedAt = Date.now();
         if (isPaused) {
             isPaused = false;
@@ -1558,11 +1670,19 @@ const ViewerTracker = (function() {
         if (!confirm('Reset all tracking data?\n\nThis will clear:\n- All session history\n- Trend tracking\n- Elapsed timer\n\nA new scan will start immediately.')) {
             return;
         }
+        resetTrackingData(true);
+    }
+
+    function resetTrackingData(deleteSaved) {
         var modelName = getModelName();
         leavePlayback(false);
         cancelGifExport();
         log('Performing main reset...');
-        deleteSession(modelName);
+        if (deleteSaved) deleteSession(modelName);
+        isStopped = false;
+        stoppedAt = null;
+        stopReason = null;
+        broadcasterAbsence = { since: null, missing: 0 };
         activeSessionStorageKey = getStorageKey(modelName);
         scanEpoch++;
         isScanning = false;
@@ -1618,6 +1738,7 @@ const ViewerTracker = (function() {
         }, 500);
         updateTrendPresetButtons();
         updateAutoTrendButton();
+        updateStopControls();
         log('Reset complete - starting fresh scan (epoch: ' + scanEpoch + ')');
     }
 
@@ -1761,6 +1882,12 @@ const ViewerTracker = (function() {
             'Total Tracking Time: ' + totalTime,
             ''
         ];
+        if (isStopped) {
+            report.push('Session State: STOPPED — ' + stopDescription());
+            report.push('Stopped At: ' + new Date(stoppedAt).toISOString());
+            report.push('Displayed Data: Final retained sample; this session is closed.');
+            report.push('');
+        }
         if (restored) {
             report.push('Displayed Data: Last saved snapshot; no fresh sample accepted since restore.');
             report.push('Saved Snapshot Time: ' + new Date(restored.timestamp).toISOString());
@@ -1819,7 +1946,7 @@ const ViewerTracker = (function() {
             report.push('  Recorded at: ' + formatDateTime(anonHighTime) + ' (' + elapsed + ' into session)');
             report.push('');
         }
-        report.push(restored ? '--- LAST SAVED STATS (NOT A LIVE SAMPLE) ---' : '--- CURRENT STATS ---');
+        report.push(isStopped ? '--- STOPPED SESSION STATS (NOT A LIVE SAMPLE) ---' : restored ? '--- LAST SAVED STATS (NOT A LIVE SAMPLE) ---' : '--- CURRENT STATS ---');
         report.push('');
         var counts = { 'red': 0, 'green': 0, 'purple': 0, 'pink': 0, 'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0 };
         users.forEach(function(data) {
@@ -1842,7 +1969,7 @@ const ViewerTracker = (function() {
         var totalHighCurrent = getSessionHigh('total', total).value;
         var withTokensHighCurrent = getSessionHigh('withTokens', withTokens).value;
         var anonHighCurrent = getSessionHigh('anonymous', anonymousCount).value;
-        var statsLabel = restored ? 'Saved ' : 'Current ';
+        var statsLabel = isStopped ? 'Final ' : restored ? 'Saved ' : 'Current ';
         var reportedRoomHigh = restored ? restored.roomTotalHigh : roomTotalHigh;
         report.push(statsLabel + 'Room Total: ' + fullRoomTotal.toLocaleString() + ' (High: ' + reportedRoomHigh.toLocaleString() + ')');
         report.push(statsLabel + 'Registered: ' + total.toLocaleString() + ' (High: ' + totalHighCurrent.toLocaleString() + ')');
@@ -2378,6 +2505,10 @@ const ViewerTracker = (function() {
         try {
             var snapshot = await acquireAPISnapshot(context);
             if (!isAcquisitionCurrent(context)) return null;
+            // Presence comes from a well-formed API response, independently of
+            // whether its counts pass the chart's sudden-drop sanity checks.
+            broadcasterAbsence = nextBroadcasterAbsence(snapshot);
+            if (checkAbsenceStop()) return null;
             validateRoomSnapshot(snapshot);
             domHealthStatus.consecutiveFailures = 0;
             clearRequestFailures(context.policyRevision);
@@ -2448,6 +2579,11 @@ const ViewerTracker = (function() {
         updateMiniFreshness();
         var el = document.getElementById('acquisition-status');
         if (!el) return;
+        if (isStopped) {
+            el.textContent = 'Stopped';
+            el.title = stopDescription() + ' at ' + new Date(stoppedAt).toLocaleString() + '. History and elapsed time are frozen.';
+            return;
+        }
         if (sessionStorageNotice) {
             el.textContent = 'Local only • room reset';
             el.title = sessionStorageNotice;
@@ -2479,18 +2615,21 @@ const ViewerTracker = (function() {
 
     async function performScanThenReturn(returnToChat) {
         if (typeof returnToChat === 'undefined') returnToChat = true;
-        if (isScanning) return;
+        if (checkAbsenceStop()) return;
+        if (isScanning || isStopped) return;
         var policy = readRequestPolicy();
         if (policy.blocked) { pauseForAccessRestriction(); updateCountdownDisplay(); return; }
         if (policy.until > Date.now()) { updateCountdownDisplay(); return; }
         isScanning = true;
         var context = { epoch: ++scanEpoch, generation: initGuard, url: location.href, room: getModelName(), policyRevision: policy.revision };
         var priorState = null;
+        var priorAbsence = broadcasterAbsence;
         var statusEl = document.getElementById('auto-status');
         updateCountdownDisplay();
         try {
             var snapshot = await acquireRoomSnapshot(context, returnToChat);
             if (!isAcquisitionCurrent(context)) return;
+            if (checkAbsenceStop()) return;
             if (!snapshot) {
                 pendingHistoryGap = true;
                 if (statusEl) {
@@ -2594,17 +2733,19 @@ const ViewerTracker = (function() {
                 isScanning = false;
                 resetCountdown();
                 updateAcquisitionStatus();
+                if (!priorState && priorAbsence !== broadcasterAbsence) saveSession(context.room);
             }
         }
     }
 
     function getComparisonCounts() {
+        var comparisonNow = isStopped ? (history.timestamps[history.timestamps.length - 1] || stoppedAt) : Date.now();
         if (trendComparisonMode === 'last') {
             if (history.timestamps.length < 2) {
                 return { counts: null, short: false, actualMinutes: 0 };
             }
             var lastIdx = history.timestamps.length - 2;
-            var actualMinutes = Math.round((Date.now() - history.timestamps[lastIdx]) / 60000);
+            var actualMinutes = Math.round((comparisonNow - history.timestamps[lastIdx]) / 60000);
             return {
                 counts: {
                     'red': history['red'][lastIdx] || 0,
@@ -2635,7 +2776,7 @@ const ViewerTracker = (function() {
                     actualMinutes: 0
                 };
             }
-            var startMinutes = Math.round((Date.now() - history.timestamps[0]) / 60000);
+            var startMinutes = Math.round((comparisonNow - history.timestamps[0]) / 60000);
             return {
                 counts: {
                     'red': history['red'][0] || 0,
@@ -2656,7 +2797,7 @@ const ViewerTracker = (function() {
         }
         var preset = TREND_PRESETS[trendComparisonMode];
         if (!preset || preset.ms <= 0) return { counts: previousCounts, short: false, actualMinutes: 0 };
-        var targetTime = Date.now() - preset.ms;
+        var targetTime = comparisonNow - preset.ms;
         var idx = -1;
         for (var i = 0; i < history.timestamps.length; i++) {
             if (history.timestamps[i] <= targetTime) {
@@ -2670,7 +2811,7 @@ const ViewerTracker = (function() {
         if (idx === -1 || history.timestamps.length === 0) {
             return { counts: previousCounts, short: false, actualMinutes: 0 };
         }
-        var actualMs = Date.now() - history.timestamps[idx];
+        var actualMs = comparisonNow - history.timestamps[idx];
         var actualMinutes = Math.round(actualMs / 60000);
         return {
             counts: {
@@ -2721,7 +2862,7 @@ const ViewerTracker = (function() {
         var trendHeaderLabel = document.getElementById('trend-header-label');
         if (!trendContainer) return;
         if (restoredDisplayFrame) {
-            trendContainer.innerHTML = '<div style="font-size:8px;color:var(--panel-muted);text-align:center;padding:8px;">Saved snapshot — trends resume after a new sample.</div>';
+            trendContainer.innerHTML = '<div style="font-size:8px;color:var(--panel-muted);text-align:center;padding:8px;">' + (isStopped ? 'Session stopped — history remains available in Replay.' : 'Saved snapshot — trends resume after a new sample.') + '</div>';
             if (trendHeaderLabel) trendHeaderLabel.textContent = '📈 TREND';
             return;
         }
@@ -2838,7 +2979,7 @@ const ViewerTracker = (function() {
 
         if (!history.breaks || history.breaks.length !== history.timestamps.length) history.breaks = getHistoryBreaks(history).slice();
         var lastTime = history.timestamps.length ? history.timestamps[history.timestamps.length - 1] : null;
-        history.breaks.push(lastTime !== null && (pendingHistoryGap || now - lastTime > scanIntervalSeconds * 2000 + API_TIMEOUT_MS));
+        history.breaks.push(lastTime !== null && (pendingHistoryGap || now - lastTime > Math.max(scanIntervalSeconds, lastScheduledIntervalSeconds) * 2000 + API_TIMEOUT_MS));
         pendingHistoryGap = false;
         history.timestamps.push(now);
         Object.keys(counts).forEach(function(tier) {
@@ -3063,12 +3204,14 @@ const ViewerTracker = (function() {
     }
 
     function resetCountdown() {
-        countdownSeconds = scanIntervalSeconds;
-        nextScanAt = Math.max(Date.now() + scanIntervalSeconds * 1000, readRequestPolicy().until);
+        lastScheduledIntervalSeconds = getEffectiveScanIntervalSeconds();
+        countdownSeconds = lastScheduledIntervalSeconds;
+        nextScanAt = isStopped ? 0 : Math.max(Date.now() + lastScheduledIntervalSeconds * 1000, readRequestPolicy().until);
         updateCountdownDisplay();
     }
 
     function updateCountdownDisplay() {
+        if (checkAbsenceStop()) return;
         var policy = readRequestPolicy();
         if (policy.blocked && isAutoRefreshOn) pauseForAccessRestriction();
         var policyMessage = requestPolicyMessage(policy);
@@ -3085,6 +3228,17 @@ const ViewerTracker = (function() {
         var timerDisplay = document.getElementById('timer-display');
         var expandedCountdown = document.getElementById('expanded-countdown');
         var controlNextScan = document.getElementById('control-next-scan');
+        if (isStopped) {
+            [statusEl, expandedCountdown, controlNextScan].forEach(function(el) {
+                if (el) { el.textContent = 'Stopped'; el.title = stopDescription(); el.style.color = 'var(--panel-muted)'; }
+            });
+            updateStopControls();
+            return;
+        }
+        var effectiveInterval = getEffectiveScanIntervalSeconds();
+        var reduced = effectiveInterval > scanIntervalSeconds;
+        timingTitle += ' Selected interval: ' + scanIntervalSeconds + 's. Effective interval: ' + effectiveInterval + 's.' +
+            (reduced ? ' Reduced scanning while the broadcaster is absent; Stop after 3 hours.' : '');
         [statusEl, expandedCountdown, controlNextScan].forEach(function(el) {
             if (el) el.title = isAutoRefreshOn ? timingTitle :
                 'Automatic scans paused. An in-flight scan may finish. ' + timingTitle;
@@ -3109,7 +3263,7 @@ const ViewerTracker = (function() {
                 controlNextScan.textContent = 'Scanning...';
                 controlNextScan.style.color = 'var(--panel-warning)';
             } else if (isAutoRefreshOn) {
-                controlNextScan.textContent = 'Next: ' + countdownSeconds + 's';
+                controlNextScan.textContent = (reduced ? 'Reduced: ' : 'Next: ') + countdownSeconds + 's';
                 controlNextScan.style.color = 'var(--panel-positive)';
             } else {
                 controlNextScan.textContent = 'Paused';
@@ -3158,12 +3312,14 @@ const ViewerTracker = (function() {
     }
 
     function startCountdown() {
+        if (isStopped) return;
         if (countdownInterval) {
             clearInterval(countdownInterval);
             countdownInterval = null;
         }
         if (!nextScanAt) resetCountdown();
         updateCountdownDisplay();
+        if (isStopped) return;
         countdownInterval = setInterval(function() {
             if (!isAutoRefreshOn || isScanning) return;
             updateCountdownDisplay();
@@ -3517,6 +3673,7 @@ const ViewerTracker = (function() {
                     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">' +
                         '<span style="font-size:9px;font-weight:bold;color:#4169E1;">🎛️ CONTROLS</span>' +
                         '<button id="btn-replay" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-warning);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;" title="Replay recorded history">Replay</button>' +
+                        '<button type="button" id="btn-control-stop" aria-label="Stop this session" title="Stop this session and freeze its history and elapsed time" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:#ff4444;color:white;border:1px solid #ff4444;border-radius:2px;cursor:pointer;">■ Stop</button>' +
                         '<span style="font-size:11px;color:var(--panel-positive);font-weight:bold;" id="control-next-scan">Next: 60s</span>' +
                     '</div>' +
                     '<div id="control-action-row" style="display:grid;grid-template-columns:minmax(max-content,1fr) auto minmax(0,1fr);align-items:center;gap:3px;">' +
@@ -3598,6 +3755,11 @@ const ViewerTracker = (function() {
         if (btnDownload) btnDownload.addEventListener('click', downloadTrackingReport);
         if (btnMainReset) btnMainReset.addEventListener('click', resetAllTracking);
         if (btnControlAuto) btnControlAuto.addEventListener('click', toggleAutoRefresh);
+        document.getElementById('btn-control-stop').onclick = function() {
+            if (isStopped) return;
+            if (!confirm('Stop this session?\n\nHistory will remain available for Replay and downloads, but this session cannot be resumed. Starting again begins a new session.')) return;
+            stopTracking('manual');
+        };
         if (btnExportGif) btnExportGif.addEventListener('click', generateGifFromHistory);
         document.getElementById('btn-cancel-gif').onclick = cancelGifExport;
         updateContainerOpacity(panelBackgroundPercent);
@@ -3701,9 +3863,13 @@ const ViewerTracker = (function() {
         
         updateTrendPresetButtons();
         updateAutoTrendButton();
+        updateStopControls();
     }
 
     function toggleAutoRefresh() {
+        if (isStopped) { startNewSession(); return; }
+        if (!isAutoRefreshOn && broadcasterAbsence.missing >= 2 && broadcasterAbsence.since !== null &&
+            Date.now() - broadcasterAbsence.since >= ABSENCE_STOP_MS) { stopTracking('absence'); return; }
         // Only an explicit Resume clears access denial. Reset/reload cannot bypass it.
         if (!isAutoRefreshOn) {
             var policy = readRequestPolicy();
@@ -3743,6 +3909,7 @@ const ViewerTracker = (function() {
             pauseTrackingTimer();
             updateCountdownDisplay();
         }
+        updateStopControls();
     }
 
     function setupDraggable() {
@@ -3902,7 +4069,9 @@ const ViewerTracker = (function() {
         var registeredPct = fullRoomTotal > 0 ? Math.round((total / fullRoomTotal) * 100) + '%' : '0%';
         var headerText = document.getElementById('header-text');
         if (headerText) {
-            if (isMinimized) {
+            if (isStopped && !frame.isPlayback) {
+                headerText.textContent = 'STOPPED: ' + fullRoomTotal.toLocaleString() + ' (H:' + roomTotalHigh.toLocaleString() + ')';
+            } else if (isMinimized) {
                 headerText.textContent = (frame.isPlayback ? 'PLAYBACK: ' : (frame.isRestored ? 'SAVED: ' : '')) + fullRoomTotal.toLocaleString() + ' (H:' + roomTotalHigh.toLocaleString() + ')';
             } else {
                 headerText.textContent = (frame.isPlayback ? 'PLAYBACK: ' : (frame.isRestored ? 'SAVED: ' : 'USERS: ')) + fullRoomTotal.toLocaleString() + ' (H:' + roomTotalHigh.toLocaleString() + ')';
@@ -4052,6 +4221,7 @@ const ViewerTracker = (function() {
         updateTrendDisplay();
         updateAcquisitionStatus();
         restorePanelGeometry();
+        if (isStopped) { updateStopControls(); updateCountdownDisplay(); updateTrackingTimer(); return; }
         if (isRoom && modelName !== 'unknown' && !loaded && isAutoRefreshOn && !isPaused) {
             // A fresh room gets its first point now. Start the recurring countdown
             // only after this attempt settles; normal retry restrictions still apply.
@@ -4089,6 +4259,7 @@ const ViewerTracker = (function() {
                     }
                     setTimeout(function() {
                         if (myGeneration !== initGuard) return;
+                        if (isStopped) { updateStopControls(); updateCountdownDisplay(); return; }
                         if (isAutoRefreshOn && !isPaused) {
                             startTrackingTimer();
                             startCountdown();
@@ -4117,7 +4288,7 @@ const ViewerTracker = (function() {
             }, 1000);
         }
         healthCheckInterval = setInterval(function() {
-            if (myGeneration === initGuard && lastAcquisitionAttemptSource === 'DOM' && !isScanning) {
+            if (myGeneration === initGuard && !isStopped && lastAcquisitionAttemptSource === 'DOM' && !isScanning) {
                 validateDOMHealth();
             }
         }, 30000);
@@ -4138,6 +4309,10 @@ const ViewerTracker = (function() {
             nextScanAt = 0;
             countdownSeconds = scanIntervalSeconds;
             stopTrackingTimer();
+            isStopped = false;
+            stoppedAt = null;
+            stopReason = null;
+            broadcasterAbsence = { since: null, missing: 0 };
             cleanupDragListeners();
             if (miniSettingsKeyHandler) {
                 document.removeEventListener('keydown', miniSettingsKeyHandler, true);
