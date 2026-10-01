@@ -6,7 +6,7 @@ A Tampermonkey userscript that tracks viewer tiers in a Chaturbate room and show
 
 · [Report an issue](https://github.com/newivy2/TierScope/issues)
 
-![TierScope panel](Tracking%20example%205.jpg)
+![TierScope panel](Tracking%20example%206.jpg)
 
 ## What’s new in 3.1.5
 
