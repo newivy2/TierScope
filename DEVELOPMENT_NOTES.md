@@ -380,7 +380,7 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
-| ** 3.1.19** | Manual Stop now asks for confirmation. Cancel preserves the current session; the automatic three-hour Stop remains unattended. 
+| **3.1.19** | Manual Stop now asks for confirmation. Cancel preserves the current session; the automatic three-hour Stop remains unattended. 
 | 3.1.18 | Definitive Stop and separate-session Start; persisted broadcaster-absence tracking with 2m/5m slowdown and a three-hour Stop; frozen stopped charts, timer, and report state. |
 | 3.1.17 | Immediate first scan for new, unpaused room sessions, followed by the normal completion-based countdown; compact scan-settings tooltip. |
 | 3.1.16 | Remembered dark/bright mode, with a moon checkbox in the existing Controls row and theme-aware panel surfaces, text, and registered-total chart. |
