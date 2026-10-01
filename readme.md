@@ -1,8 +1,8 @@
 # TierScope
 
-**See how your Chaturbate audience changes over time.**
+**See how a Chaturbate audience changes over time.**
 
-TierScope turns room viewer counts into a compact panel of live charts, trends, and session highs. Follow the different viewer tiers, spot changes in your audience, and replay the session to see how it unfolded.
+TierScope turns room viewer counts into a compact panel of live charts, trends, and session highs. Follow the different viewer tiers, spot changes in the audience, and replay the session to see how it unfolded.
 
 **Current release: 3.1.14**
 
@@ -11,7 +11,7 @@ TierScope turns room viewer counts into a compact panel of live charts, trends, 
 
 ## Your room, at a glance
 
-- **Track your audience:** viewer tiers, registered and anonymous totals, token classifications, and a female/trans overlay.
+- **Track the audience:** viewer tiers, registered and anonymous totals, token classifications, and a female/trans overlay.
 - **See the changes:** line charts, trend comparisons, and highlights when counts reach a session high.
 - **Revisit a session:** Replay lets you pause, scrub, and explore recorded history while live tracking continues.
 - **Pick up where you left off:** saved sessions keep your last sample available after a refresh.
@@ -26,7 +26,7 @@ TierScope turns room viewer counts into a compact panel of live charts, trends, 
 - **Explore Replay sample by sample.** Step backward or forward to inspect individual moments.
 - **Read changes at a glance.** Color-coded trends and gentle high-value pulses draw attention to audience changes, even in collapsed rows.
 
-## Get started - Installation Instructions
+## Get started - HOW TO INSTALL
 
 Install [Tampermonkey](https://www.tampermonkey.net/), follow Tampermonkey’s [userscript permission instructions](https://www.tampermonkey.net/faq.php?q=Q209) for your browser so installed scripts can run, open [tierscope.user.js](https://raw.githubusercontent.com/newivy2/TierScope/main/tierscope.user.js), and accept the installation. Refresh a Chaturbate room to start tracking.
 
