@@ -4,6 +4,8 @@
 
 There’s more to a room than its viewer count. TierScope brings a Chaturbate audience into focus with live charts, tier-by-tier trends, and session highs—all in one compact panel. Notice the small shifts, follow the bigger picture, and replay the moments worth a closer look.
 
+**FREE and OPEN SOURCE**
+
 **Current release: 3.1.14**
 
 ![TierScope panel](Tracking%20example%206.jpg)
