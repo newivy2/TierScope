@@ -2,18 +2,19 @@
 
 A Tampermonkey userscript that tracks viewer tiers in a Chaturbate room and shows how the audience changes over time.
 
-**Current release: 3.1.2 — September 30, 2026**
+**Current release: 3.1.3 — September 30, 2026**
 
 · [Report an issue](https://github.com/newivy2/TierScope/issues)
 
 ![TierScope panel](Tracking%20example%205.jpg)
 
-## What’s new in 3.1.2
+## What’s new in 3.1.3
 
 - **Background opacity control:** a lamp icon and slider added to the footer.
 - **GIF export:** the GIF button lives in the Replay toolbar.
 - **640 × 400 animated summaries:** history lines, counts and elapsed time.
-- **Compact encoding:** up to 60 frames over a 10-second loop, using a fixed palette and crisp bitmap text. Export draws directly from recorded history and uses `omggif`; 
+- **Compact encoding:** up to 60 frames over a 10-second loop, using a fixed palette and crisp bitmap text. Export draws directly from recorded history and uses `omggif`;
+- Minor bug fixes
 
 ## Features
 
@@ -91,7 +92,7 @@ Open **Replay**, then click **GIF**. Progress and **Cancel** appear within the e
 | Property | Output |
 | --- | --- |
 | Format | Animated `.gif`, looping indefinitely |
-| Dimensions | **640 × 400** |
+| Dimensions | **480 × 640** |
 | Duration | **10 seconds per loop** |
 | Frames | Up to **60**; one recorded sample produces a single-frame GIF |
 | Tier rows | Seven color tiers plus the female/trans overlay |
@@ -192,7 +193,8 @@ The saved record failed validation or uses an unsupported schema. It has not bee
 
 | Version | Notes |
 | --- | --- |
-| **3.1.2** | Background-only opacity slider and compact footer; Replay-only 640 × 400 GIF export with tier and totals line charts. |
+| **3.1.3** | Fixed minor bug with counts in pause and reset states. Changed GIF size to 480x640 |
+| 3.1.2 | Background-only opacity slider and compact footer; Replay-only 640 × 400 GIF export with tier and totals line charts. |
 | 3.1.1.3 | Trend display uses green, red, and yellow backgrounds instead of arrows. |
 | 3.1.1.2 | High-value highlights also appear in Replay. |
 | 3.1.1.1 | Green row highlights at positive highs, including returns to a previous high. |
