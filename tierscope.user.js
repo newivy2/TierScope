@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.1.9
+// @version      3.1.11
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -18,7 +18,7 @@
 const ViewerTracker = (function() {
     'use strict';
 
-    const TIERSCOPE_VERSION = '3.1.9';
+    const TIERSCOPE_VERSION = '3.1.11';
     const API_TIMEOUT_MS = 10000;
     const DEFAULT_API_INTERVAL_SECONDS = 60;
     const DOM_FALLBACK_INTERVAL_SECONDS = 60;
@@ -99,6 +99,7 @@ const ViewerTracker = (function() {
     var freshnessInterval = null;
     var nextScanAt = 0;
     var windowResizeHandler = null;
+    var miniSettingsKeyHandler = null;
 
     var previousCounts = {
         'red': 0, 'green': 0, 'purple': 0, 'pink': 0,
@@ -191,6 +192,97 @@ const ViewerTracker = (function() {
     var currentScale = 1.0;
     const PANEL_GEOMETRY_KEY = 'tierscope:ui:geometry:v1';
     var panelGeometry = loadPanelGeometry();
+    const MINI_METRIC_KEY = 'tierscope:ui:miniMetric:v1';
+    const MINI_METRICS = ['room', 'withTokens', 'total'];
+    var miniMetric = 'room';
+    try {
+        var savedMiniMetric = GM_getValue(MINI_METRIC_KEY, 'room');
+        if (MINI_METRICS.indexOf(savedMiniMetric) !== -1) miniMetric = savedMiniMetric;
+    } catch (error) { /* Use the default metric if preferences are unavailable. */ }
+
+    function compactNumber(value) {
+        return value >= 1000000 ? (value / 1000000).toFixed(1).replace(/\.0$/, '') + 'm' :
+            value >= 10000 ? (value / 1000).toFixed(1).replace(/\.0$/, '') + 'k' : String(value);
+    }
+
+    function updateMiniFreshness() {
+        var el = document.getElementById('mini-freshness');
+        if (!el) return;
+        var sample = lastAcceptedAcquisition || restoredDisplayFrame;
+        var source = lastAcceptedAcquisition ? lastAcceptedAcquisition.source : sample ? 'Saved' : 'No sample';
+        el.textContent = sessionStorageNotice ? 'Local only' : (isAutoRefreshOn ? source : 'Paused') +
+            (sample ? ' · ' + formatSampleAge(sample.timestamp) : '');
+        el.style.color = sessionStorageNotice ? '#ffd43b' : isAutoRefreshOn ? '#aaa' : '#ff9999';
+        el.title = sessionStorageNotice || source + (sample ? ': ' + new Date(sample.timestamp).toISOString() : '') +
+            '. Age of the last accepted sample. ' + (isAutoRefreshOn ? 'Next attempt: ' + countdownSeconds + 's.' : 'Automatic scans paused.');
+    }
+
+    function updateCompactDashboard(frame) {
+        if (!isMinimized) return;
+        var comparison = !frame.isRestored && hasTrendBaseline ? getComparisonCounts().counts : null;
+        var mode = trendComparisonMode === 'last' ? 'previous sample' : trendComparisonMode === 'start' ? 'first retained sample' : trendComparisonMode;
+        function delta(id, value, old) {
+            var el = document.getElementById(id);
+            if (!el) return '';
+            var change = comparison ? value - old : null;
+            var text = change === null ? '' : change > 0 ? '+' + compactNumber(change) : change < 0 ? '−' + compactNumber(-change) : '0';
+            el.textContent = text;
+            el.style.color = change > 0 ? '#69BE45' : change < 0 ? '#ff7777' : '#ffd43b';
+            el.title = change === null ? 'Waiting for a fresh sample and comparison history' : 'Change versus ' + mode + ': ' + change;
+            return text;
+        }
+        delta('mini-withtokens-change', frame.withTokens, comparison && comparison.withTokens);
+        delta('mini-total-change', frame.total, comparison && comparison.total);
+        var roomChange = delta('mini-room-change', frame.fullRoomTotal, comparison && comparison.total + comparison.anonymous);
+        var header = document.getElementById('header-text');
+        if (header) {
+            header.textContent = (frame.isRestored ? 'SAVED: ' : '') + compactNumber(frame.fullRoomTotal);
+            header.title = getModelName() + ' — Room total: ' + frame.fullRoomTotal.toLocaleString() +
+                '; session high: ' + frame.roomTotalHigh.toLocaleString() + (roomChange ? '; change: ' + roomChange + ' versus ' + mode : '');
+        }
+        ['withtokens', 'total'].forEach(function(key) {
+            var el = document.getElementById('mini-' + key);
+            var value = key === 'total' ? frame.total : frame.withTokens;
+            if (el) { el.textContent = compactNumber(value); el.title = value.toLocaleString() + (key === 'total' ? ' registered users' : ' users in token-classified tiers'); }
+        });
+        var label = document.getElementById('mini-metric');
+        var names = { room: 'Room total', withTokens: 'With Tokens', total: 'Registered' };
+        if (label) { label.textContent = names[miniMetric] + ' ▾'; label.title = 'Click to cycle Room total, With Tokens, and Registered. Showing the last 15 recorded minutes.'; }
+        var high = document.getElementById('mini-high');
+        var peak = miniMetric === 'room' ? frame.roomTotalHigh : getSessionHigh(miniMetric, 0).value;
+        if (high) { high.textContent = 'H:' + compactNumber(peak); high.title = 'Session high: ' + peak.toLocaleString(); }
+        var canvas = document.getElementById('mini-chart');
+        if (!canvas) return;
+        var ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        var width = 140, height = 36, scale = window.devicePixelRatio || 1;
+        canvas.width = Math.ceil(width * scale); canvas.height = Math.ceil(height * scale);
+        ctx.scale(scale, scale); ctx.clearRect(0, 0, width, height);
+        var times = frame.history.timestamps;
+        canvas.title = names[miniMetric] + ' — last 15 recorded minutes; vertical scale fits the visible values';
+        if (!times.length) return;
+        var end = times[times.length - 1], start = end - 15 * 60000;
+        var points = [];
+        times.forEach(function(time, i) {
+            if (time >= start && time <= end) points.push({ time: time, value: miniMetric === 'room' ?
+                frame.history.total[i] + frame.history.anonymous[i] : frame.history[miniMetric][i] });
+        });
+        var values = points.map(function(p) { return p.value; });
+        var min = Math.min.apply(null, values), max = Math.max.apply(null, values);
+        canvas.title += '; range ' + min + '–' + max + '; ' + points.length + ' samples through ' + new Date(end).toISOString();
+        ctx.strokeStyle = miniMetric === 'withTokens' ? '#ff69b4' : miniMetric === 'total' ? '#ffffff' : '#69BE45';
+        ctx.fillStyle = ctx.strokeStyle; ctx.lineWidth = 2; ctx.lineJoin = 'round';
+        ctx.beginPath();
+        points.forEach(function(point, i) {
+            var x = 2 + (point.time - start) / (15 * 60000) * (width - 4);
+            var y = max === min ? height / 2 : height - 3 - (point.value - min) / (max - min) * (height - 6);
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            if (points.length === 1) ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
+        });
+        ctx.stroke();
+        updateMiniFreshness();
+    }
+
     var BASE_WIDTH_MINI = 140;
     var BASE_WIDTH_FULL = 280;
     var roomTotalHighTime = null;
@@ -2190,6 +2282,7 @@ const ViewerTracker = (function() {
     }
 
     function updateAcquisitionStatus() {
+        updateMiniFreshness();
         var el = document.getElementById('acquisition-status');
         if (!el) return;
         if (sessionStorageNotice) {
@@ -2679,6 +2772,7 @@ const ViewerTracker = (function() {
     }
 
     function updateCountdownDisplay() {
+        updateMiniFreshness();
         if (isAutoRefreshOn && !isScanning && nextScanAt) {
             countdownSeconds = Math.max(0, Math.ceil((nextScanAt - Date.now()) / 1000));
         }
@@ -2796,7 +2890,8 @@ const ViewerTracker = (function() {
             var data = JSON.parse(raw);
             if (!data || !Number.isFinite(data.left) || !Number.isFinite(data.top) ||
                 !Number.isFinite(data.scale) || data.scale < 0.5 || data.scale > 3) return null;
-            return { left: data.left, top: data.top, scale: data.scale };
+            return { left: data.left, top: data.top, scale: data.scale,
+                minimized: typeof data.minimized === 'boolean' ? data.minimized : undefined };
         } catch (error) { return null; }
     }
 
@@ -2813,7 +2908,7 @@ const ViewerTracker = (function() {
         var container = document.getElementById('tracker-container');
         if (!container) return;
         var rect = container.getBoundingClientRect();
-        panelGeometry = { left: rect.left, top: rect.top, scale: currentScale };
+        panelGeometry = { left: rect.left, top: rect.top, scale: currentScale, minimized: isMinimized };
         try { GM_setValue(PANEL_GEOMETRY_KEY, JSON.stringify(panelGeometry)); }
         catch (error) { log('Could not save panel position/scale: ' + error.message); }
     }
@@ -2942,6 +3037,10 @@ const ViewerTracker = (function() {
         cancelGifExport();
         leavePlayback(false);
         cleanupDragListeners();
+        if (miniSettingsKeyHandler) {
+            document.removeEventListener('keydown', miniSettingsKeyHandler, true);
+            miniSettingsKeyHandler = null;
+        }
         if (windowResizeHandler) {
             window.removeEventListener('resize', windowResizeHandler);
             windowResizeHandler = null;
@@ -2967,29 +3066,35 @@ const ViewerTracker = (function() {
                     'border-bottom:1px solid #ff69b4;padding-bottom:3px;cursor:move;' +
                 '">' +
                     '<span id="header-text" style="font-weight:bold;color:#ff69b4;font-size:10px;">USERS: 0 (H:0)</span>' +
+                    '<span id="mini-room-change" style="font-size:8px;margin:0 3px;display:none;"></span>' +
                     '<div style="display:flex;align-items:center;gap:5px;">' +
                         '<button type="button" id="btn-standard-size" title="Restore standard panel size (100%)" aria-label="Restore standard panel size" style="background:#333;border:1px solid #555;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;">100%</button>' +
                         '<button id="btn-toggle" style="background:#333;border:1px solid #555;color:#fff;border-radius:3px;cursor:pointer;font-size:9px;padding:1px 4px;flex-shrink:0;">+</button>' +
                     '</div>' +
                 '</div>' +
 
-                '<div id="minimized-view" style="display:block;text-align:center;">' +
-                    '<div style="font-size:9px;margin-bottom:3px;">' +
-                        '<div>💎 <span id="mini-withtokens" style="color:#ff69b4;font-weight:bold;">0</span>' +
-                        '(<span id="mini-withtokens-pct" style="color:#ff69b4;">0%</span>)</div>' +
-                        '<div style="margin-top:2px;">📊 <span id="mini-total" style="color:#fff;font-weight:bold;">0</span>' +
-                        '(<span id="mini-total-pct" style="color:#fff;">0%</span>)</div>' +
+                '<div id="minimized-view" style="display:block;position:relative;">' +
+                    '<div style="display:flex;align-items:center;justify-content:space-between;gap:3px;">' +
+                        '<button type="button" id="mini-metric" style="background:transparent;border:0;color:#ddd;font:inherit;cursor:pointer;padding:2px 0;" aria-label="Cycle chart metric">Room total ▾</button>' +
+                        '<span id="mini-high" style="color:#888;font-size:8px;"></span>' +
                     '</div>' +
-
+                    '<canvas id="mini-chart" width="140" height="36" style="display:block;width:100%;height:36px;" role="img" aria-label="Recent audience history"></canvas>' +
+                    '<div style="display:flex;justify-content:space-between;gap:4px;margin:3px 0;">' +
+                        '<span title="With Tokens">💎 <span id="mini-withtokens">0</span> <span id="mini-withtokens-change"></span></span>' +
+                        '<span title="Registered">📊 <span id="mini-total">0</span> <span id="mini-total-change"></span></span>' +
+                    '</div>' +
+                    '<div style="display:flex;align-items:center;gap:3px;">' +
+                        '<span id="mini-freshness" style="flex:1;min-width:0;font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">No sample</span>' +
+                        '<button type="button" id="btn-auto" style="background:#333;border:0;color:#fff;border-radius:3px;cursor:pointer;" title="Pause or resume scans">⏸</button>' +
+                        '<button type="button" id="mini-settings-toggle" style="background:#333;border:0;color:#fff;border-radius:3px;cursor:pointer;" aria-label="Scan interval settings" aria-expanded="false" aria-controls="mini-settings">◷</button>' +
+                        '<button type="button" id="btn-expand" style="background:#333;border:0;color:#fff;border-radius:3px;font-size:9px;cursor:pointer;" title="Expand panel" aria-label="Expand panel">↗</button>' +
+                    '</div>' +
+                    '<div id="mini-settings" style="display:none;position:absolute;left:0;right:0;top:17px;background:#20202b;border:1px solid #ff69b4;border-radius:4px;padding:5px;z-index:2;" role="group" aria-label="Scan interval">' +
+                        '<div style="display:flex;justify-content:space-between;align-items:center;font-size:9px;color:#ddd;">Scan interval <button type="button" id="mini-settings-close" aria-label="Close scan interval settings" title="Close (Escape)" style="background:#333;color:white;border:0;border-radius:3px;cursor:pointer;padding:1px 5px;font-size:13px;">×</button></div>' +
                     '<div style="display:flex;align-items:center;justify-content:center;gap:3px;margin:3px 0;padding:2px;background:rgba(255,255,255,0.05);border-radius:3px;">' +
                         '<button id="btn-timer-down" style="background:#444;border:none;color:#fff;border-radius:2px;cursor:pointer;font-size:9px;padding:1px 4px;font-weight:bold;">−</button>' +
                         '<span id="timer-display" style="font-size:11px;color:#ffd43b;font-weight:bold;min-width:28px;">60s</span>' +
                         '<button id="btn-timer-up" style="background:#444;border:none;color:#fff;border-radius:2px;cursor:pointer;font-size:9px;padding:1px 4px;font-weight:bold;">+</button>' +
-                    '</div>' +
-
-                    '<div style="display:flex;gap:2px;justify-content:center;flex-wrap:wrap;">' +
-                        '<button id="btn-expand" style="background:#444;border:none;color:white;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 5px;">Expand</button>' +
-                        '<button id="btn-auto" style="background:#32CD32;border:none;color:white;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 4px;" title="Auto-Refresh ON">⏸</button>' +
                     '</div>' +
 
                     '<div style="display:flex;gap:2px;justify-content:center;margin-top:3px;">' +
@@ -2999,7 +3104,8 @@ const ViewerTracker = (function() {
                         '<button class="timer-preset" data-time="300" style="background:#333;border:1px solid #555;color:#aaa;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">5m</button>' +
                     '</div>' +
 
-                    '<div id="auto-status" style="margin-top:2px;font-size:7px;color:#32CD32;">Starting...</div>' +
+                        '<div id="auto-status" style="margin-top:3px;font-size:8px;color:#aaa;">Starting...</div>' +
+                    '</div>' +
                 '</div>' +
 
                 '<div id="full-view" style="display:none;">' +
@@ -3193,6 +3299,39 @@ const ViewerTracker = (function() {
         var btnTimerDown = document.getElementById('btn-timer-down');
         var btnTimerUp = document.getElementById('btn-timer-up');
 
+        var miniMetricButton = document.getElementById('mini-metric');
+        if (miniMetricButton) miniMetricButton.onclick = function() {
+            miniMetric = MINI_METRICS[(MINI_METRICS.indexOf(miniMetric) + 1) % MINI_METRICS.length];
+            try { GM_setValue(MINI_METRIC_KEY, miniMetric); } catch (error) { log('Could not save compact chart preference'); }
+            updateDisplay();
+        };
+        var miniSettingsButton = document.getElementById('mini-settings-toggle');
+        var miniSettings = document.getElementById('mini-settings');
+        if (miniSettingsButton && miniSettings) {
+            var miniSettingsClose = document.getElementById('mini-settings-close');
+            function closeMiniSettings() {
+                miniSettings.style.display = 'none';
+                miniSettingsButton.setAttribute('aria-expanded', 'false');
+                miniSettingsButton.focus();
+            }
+            if (miniSettingsClose) miniSettingsClose.onclick = closeMiniSettings;
+            miniSettingsButton.onclick = function() {
+                if (miniSettings.style.display !== 'none') { closeMiniSettings(); return; }
+                miniSettings.style.display = 'block';
+                miniSettingsButton.setAttribute('aria-expanded', 'true');
+                if (miniSettingsClose) miniSettingsClose.focus();
+            };
+            // Capture Escape even after focus moves to the page. The listener is
+            // replaced on rebuild, independently of transient drag listeners.
+            miniSettingsKeyHandler = function(event) {
+                if (event.key === 'Escape' && miniSettings.style.display !== 'none') {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    closeMiniSettings();
+                }
+            };
+            document.addEventListener('keydown', miniSettingsKeyHandler, true);
+        }
         if (btnToggle) btnToggle.onclick = toggleView;
         if (btnExpand) btnExpand.onclick = toggleView;
         if (btnAuto) btnAuto.onclick = toggleAutoRefresh;
@@ -3283,7 +3422,7 @@ const ViewerTracker = (function() {
         var dragHandle = document.getElementById('drag-handle');
         if (!container || !dragHandle) return;
         var startDrag = function(e) {
-            if (isResizing) return;
+            if (isResizing || (e.target.closest && e.target.closest('button, input, select, a'))) return;
             isDragging = true;
             var rect = container.getBoundingClientRect();
             var scale = currentScale || 1;
@@ -3330,7 +3469,7 @@ const ViewerTracker = (function() {
         var previousTransition = container ? container.style.transition : '';
         // Measure the final expanded size immediately, not an intermediate
         // animated width. Clamping must also work without transition events.
-        if (!isMinimized && container) container.style.transition = 'none';
+        if (container) container.style.transition = 'none';
         if (isMinimized) {
             if (fullView) fullView.style.display = 'none';
             if (miniView) miniView.style.display = 'block';
@@ -3350,12 +3489,18 @@ const ViewerTracker = (function() {
             if (headerText) headerText.textContent = 'USERS: ' + currentTotal.toLocaleString() + ' (H:' + roomTotalHigh.toLocaleString() + ')';
 
         }
+        var settings = document.getElementById('mini-settings');
+        if (settings) settings.style.display = 'none';
+        var settingsButton = document.getElementById('mini-settings-toggle');
+        if (settingsButton) settingsButton.setAttribute('aria-expanded', 'false');
         updateDisplay();
         if (!isMinimized) {
             drawAllSparklines();
             constrainPanelPosition();
-            if (container) container.style.transition = previousTransition;
         }
+        constrainPanelPosition();
+        savePanelGeometry();
+        if (container) container.style.transition = previousTransition;
     }
 
     function scanUsers() {
@@ -3442,6 +3587,11 @@ const ViewerTracker = (function() {
         if (miniWithTokensPct) miniWithTokensPct.textContent = withTokensPct;
         if (miniTotal) miniTotal.textContent = total;
         if (miniTotalPct) miniTotalPct.textContent = registeredPct;
+        var miniChange = document.getElementById('mini-room-change');
+        if (miniChange) miniChange.style.display = isMinimized ? 'inline' : 'none';
+        if (miniWithTokens) miniWithTokens.parentElement && (miniWithTokens.parentElement.title = 'With Tokens: ' + withTokens.toLocaleString() + ' (' + withTokensPct + ' of registered users)');
+        if (miniTotal) miniTotal.parentElement && (miniTotal.parentElement.title = 'Registered: ' + total.toLocaleString() + ' (' + registeredPct + ' of room total)');
+        updateCompactDashboard(frame);
         if (!isMinimized) {
             Object.keys(TIERS).forEach(function(tier) {
                 var countEl = document.getElementById('count-' + tier);
@@ -3547,6 +3697,7 @@ const ViewerTracker = (function() {
             isMinimized = false;
             isAutoRefreshOn = !isPaused;
         }
+        if (panelGeometry && typeof panelGeometry.minimized === 'boolean') isMinimized = panelGeometry.minimized;
         try {
             createPanel();
         } catch (e) {
@@ -3569,6 +3720,7 @@ const ViewerTracker = (function() {
             drawAllSparklines();
             updateDisplay();
         }
+        updateDisplay();
         updateTrendDisplay();
         updateAcquisitionStatus();
         restorePanelGeometry();
@@ -3646,6 +3798,10 @@ const ViewerTracker = (function() {
             countdownSeconds = scanIntervalSeconds;
             stopTrackingTimer();
             cleanupDragListeners();
+            if (miniSettingsKeyHandler) {
+                document.removeEventListener('keydown', miniSettingsKeyHandler, true);
+                miniSettingsKeyHandler = null;
+            }
             isScanning = false;
             if (healthCheckInterval) {
                 clearInterval(healthCheckInterval);

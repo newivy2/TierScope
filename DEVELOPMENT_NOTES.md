@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **version 3.1.9**. For a quick introduction and installation link, see the [README](readme.md).
+Detailed reference for **version 3.1.11**. For a quick introduction and installation link, see the [README](readme.md).
 
 ## Contents
 
@@ -57,9 +57,19 @@ The footer shows the sample source and age, for example `API • 12s`, `DOM • 
 
 Reset requests a one-off scan even when automatic acquisition is paused. It does not turn automatic acquisition back on, and reloading afterward preserves that paused state.
 
+### Compact dashboard
+
+The minimized panel retains its 140-pixel content width. Click the chart label to cycle **Room total → With Tokens → Registered**. This preference is saved across rooms and refreshes, independently of collapsed rows.
+
+The chart shows the last **15 recorded minutes**, ending at the latest retained sample. Horizontal positions follow sample timestamps; vertical scale fits the visible values. A single sample is a dot, and a constant series is a horizontal line. Hover over the chart for its value range, sample count, and end time. The adjacent H value is the session high, not merely the high within the visible window.
+
+The header shows room total and its change; the two rows below the chart show With Tokens and Registered counts and changes. Changes use the main panel's selected comparison window. Restored snapshots leave changes blank until a fresh sample is accepted; a comparison also needs sufficient history. Hover over counts for exact values and percentages, changes for their comparison window, and the header for room name and room high.
+
+The footer shows sample source and age, or Paused and age. Hover for the source, timestamp, and scan timing. The clock button opens scan-interval controls over the chart without increasing panel height. Click the × close button, click the clock again, or press Escape to close them. Escape works even after focus moves outside the panel. Pause/Resume and Expand remain directly accessible.
+
 ### Position and size
 
-Drag the header to move the panel, or drag the pink upper-left handle to resize it. Position and scale are saved when you release the mouse and restored after a refresh or room change.
+Drag the header to move the panel, or drag the pink upper-left handle to resize it. Position and scale are saved when you release the mouse and restored after a refresh or room change. Compact/expanded view is saved when toggled, so refreshing a compact panel keeps it compact at the same scale. Older saved layout records without a view preference retain the previous default behavior until you toggle the view.
 
 Click **100%** in the header to return to standard scale. Use it in different tabs to give their panels the same scale. It keeps your collapsed-row choices and session data; it does not reset tracking or return the panel to its original position.
 
@@ -254,7 +264,7 @@ Look for their boxed markers below the header and click to restore them. Moderat
 
 **The panel shrank after collapsing rows**
 
-This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only version 3.1.9 is enabled, refresh the tab, and report the browser and steps that reproduce it.
+This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only version 3.1.11 is enabled, refresh the tab, and report the browser and steps that reproduce it.
 
 **The panel is too large or near a screen edge**
 
@@ -292,9 +302,11 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
-| **3.1.9** | Isolate corrupt or unsupported saved records; restore healthy siblings; expire valid old-epoch orphan records. |
+| **3.1.11** | Add a close button and document-level Escape handling for scan settings; remember compact/expanded view with panel geometry. |
+| 3.1.10 | Compact dashboard with a remembered switchable chart, count changes, sample freshness, and scan settings overlay. |
+| 3.1.9 | Isolate corrupt or unsupported saved records; restore healthy siblings; expire valid old-epoch orphan records. |
 | 3.1.8 | Separate session start from active time; preserve session highs beyond history rollover; isolate same-room tab saves; add repeatable regression tests and CI. |
-| 3.1.7 | Reposition the panel immediately on expansion. |
+| 3.1.7 | Reposition the panel immediately on expansion; center the live-control buttons. |
 | 3.1.6 | Remember panel position and scale; add the 100% size reset, Replay sample stepping, and CSV history export alongside TXT reports. |
 | 3.1.5 | Fixed panel-height redistribution when collapsing rows, including inherited line-spacing cases. Shrink only when all 11 rows are collapsed. |
 | 3.1.4 | Added collapsible tier and summary rows, a restore strip, remembered visibility preferences, and taller remaining charts. Moderators and Fan Club start collapsed. |
