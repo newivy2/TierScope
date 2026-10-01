@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **version 3.3.0**. For a quick introduction and installation link, see the [README](readme.md).
+Detailed reference for **version 3.3.1**. For a quick introduction and installation link, see the [README](readme.md).
 
 ## Contents
 
@@ -43,7 +43,7 @@ Keep only one enabled copy of TierScope. After an update, refresh existing room 
 | Header / drag area | Move the panel; save its position when you release it. |
 | Pink upper-left resize handle | Scale the panel; save its size when you release it. |
 | **100%** in the header | Restore standard scale while keeping row visibility and session data. |
-| **Full ▾ / 1h ▾ / 15m ▾** in the expanded header | Open chart-window and session-file options. |
+| **Full ▾ / 4h ▾ / 2h ▾ / 1h ▾ / 30m ▾ / 15m ▾** in the expanded header | Open chart-window and session-file options. |
 | **−**, **+**, or **Expand** | Switch between expanded and compact views. |
 | **⏸ / ▶** in Controls or compact view | Pause or resume the current session. An already-running scan may finish. |
 | **■ Stop** in Controls | Confirm closing the session, freeze elapsed time and history, and discard pending scan results. |
@@ -127,7 +127,7 @@ Collapsing a row changes presentation only. All rows continue to be tracked and 
 
 ### Charts and sample inspection
 
-Expanded charts default to **Full history**, up to 10,000 retained samples. The header menu also offers **Last hour** and **Last 15 minutes**. The selected window ends at the latest recorded sample, or the selected Replay sample, and stays still while no new sample arrives. Short sessions use the available span. Horizontal positions follow sample timestamps; Full history continues to fit the whole retained span as history grows. Replay never draws samples beyond its selected frame. Each row scales independently to the values drawn in that window; a preceding endpoint may be included to connect and clip a segment crossing its left boundary. A single sample appears as a dot; a constant series is centered vertically.
+Expanded charts default to **Full history**, up to 10,000 retained samples. The header menu offers **Full history**, **Last 4 hours**, **Last 2 hours**, **Last hour**, **Last 30 minutes**, and **Last 15 minutes**, in that order. The selected window ends at the latest recorded sample, or the selected Replay sample, and stays still while no new sample arrives. Short sessions use the available span. Horizontal positions follow sample timestamps; Full history continues to fit the whole retained span as history grows. Replay never draws samples beyond its selected frame. Each row scales independently to the values drawn in that window; a preceding endpoint may be included to connect and clip a segment crossing its left boundary. A single sample appears as a dot; a constant series is centered vertically.
 
 The window choice is remembered across rooms and refreshes. It changes chart presentation only: counts, session highs, comparisons, stored samples, CSV, GIFs, and session-file exports keep their existing full retained range. Reset keeps the preference. The compact chart keeps its independent 15-minute window. Changing windows during Replay preserves the selected sample and Play/Pause state. The menu overlays the panel, adds no height, and closes with ×, Escape, or an outside click.
 
@@ -197,7 +197,7 @@ Replay freezes the available history when opened. New scans continue updating th
 
 ## Session files
 
-Open the **Full ▾ / 1h ▾ / 15m ▾** header menu and choose **Save session file**. The download ends in `.tierscope.json` and contains the room name, capture time, full retained sample history, gap markers, session highs and their recorded times, session start information, active elapsed time, and paused/stopped state. It contains aggregate counts, without viewer username collections. A running session can be saved without pausing or stopping it.
+Open the **Full ▾ / 4h ▾ / 2h ▾ / 1h ▾ / 30m ▾ / 15m ▾** header menu and choose **Save session file**. The download ends in `.tierscope.json` and contains the room name, capture time, full retained sample history, gap markers, session highs and their recorded times, session start information, active elapsed time, and paused/stopped state. It contains aggregate counts, without viewer username collections. A running session can be saved without pausing or stopping it.
 
 Choose **Open session file…** from the same menu to reopen a download. It opens paused in a separate **FILE REPLAY** view, with the same stepping, playback speed, row controls, chart windows, and GIF export as ordinary Replay. Hover over the header for the file’s room name; the options menu shows its room, capture time, sample count, and whole-session room high. The Replay time tooltip includes captured active time and session state. Replay highs still use retained samples through the selected frame; the file also preserves whole-session highs that may predate those samples.
 
@@ -357,7 +357,7 @@ Look for their boxed markers below the header and click to restore them. Moderat
 
 **The panel shrank after collapsing rows**
 
-This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only version 3.3.0 is enabled, refresh the tab, and report the browser and steps that reproduce it.
+This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only version 3.3.1 is enabled, refresh the tab, and report the browser and steps that reproduce it.
 
 **The panel is too large or near a screen edge**
 
@@ -397,7 +397,8 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
-| **3.3.0** | Download and reopen session files in isolated, read-only Replay; remembered Full / 1h / 15m expanded chart windows; expanded file, rendering, and lifecycle regression tests. |
+| **3.3.1** | Add 4h, 2h, and 30min chart windows; keep the order Full / 4h / 2h / 1h / 30min / 15min. |
+| 3.3.0 | Download and reopen session files in isolated, read-only Replay; remembered Full / 1h / 15m expanded chart windows; expanded file, rendering, and lifecycle regression tests. |
 | 3.2.0 | Orange dashed connectors mark missing intervals in expanded and compact charts, Replay, and GIFs, preserving elapsed-time spacing without adding samples. Gap inspection explains the missing interval; GIFs include a small matching legend. Existing session records remain compatible. |
 | 3.1.19 | Manual Stop now asks for confirmation. Cancel preserves the current session; the automatic three-hour Stop remains unattended. |
 | 3.1.18 | Definitive Stop and separate-session Start; persisted broadcaster-absence tracking with 2m/5m slowdown and a three-hour Stop; frozen stopped charts, timer, and report state. |

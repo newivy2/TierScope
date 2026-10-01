@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.3.0
+// @version      3.3.1
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -18,7 +18,7 @@
 const ViewerTracker = (function() {
     'use strict';
 
-    const TIERSCOPE_VERSION = '3.3.0';
+    const TIERSCOPE_VERSION = '3.3.1';
     const API_TIMEOUT_MS = 10000;
     const DEFAULT_API_INTERVAL_SECONDS = 60;
     const DOM_FALLBACK_INTERVAL_SECONDS = 60;
@@ -730,7 +730,7 @@ const ViewerTracker = (function() {
     const SESSION_FILE_VERSION = 1;
     const SESSION_FILE_MAX_BYTES = 8 * 1024 * 1024;
     const CHART_WINDOW_KEY = 'tierscope:ui:chartWindow:v1';
-    const CHART_WINDOWS = { full: 0, hour: 60 * 60000, quarter: 15 * 60000 };
+    const CHART_WINDOWS = { full: 0, fourHours: 240 * 60000, twoHours: 120 * 60000, hour: 60 * 60000, halfHour: 30 * 60000, quarter: 15 * 60000 };
     var chartWindowMode = 'full';
     try {
         var savedWindow = GM_getValue(CHART_WINDOW_KEY, 'full');
@@ -859,8 +859,8 @@ const ViewerTracker = (function() {
         var button = document.getElementById('btn-panel-options');
         if (button) {
             button.style.display = isMinimized ? 'none' : '';
-            button.textContent = ({ full: 'Full', hour: '1h', quarter: '15m' })[chartWindowMode] + ' ▾';
-            button.title = 'Chart window and session files. Showing ' + ({ full: 'full history', hour: 'the last hour', quarter: 'the last 15 minutes' })[chartWindowMode] + '.';
+            button.textContent = ({ full: 'Full', fourHours: '4h', twoHours: '2h', hour: '1h', halfHour: '30m', quarter: '15m' })[chartWindowMode] + ' ▾';
+            button.title = 'Chart window and session files. Showing ' + ({ full: 'full history', fourHours: 'the last 4 hours', twoHours: 'the last 2 hours', hour: 'the last hour', halfHour: 'the last 30 minutes', quarter: 'the last 15 minutes' })[chartWindowMode] + '.';
         }
         var select = document.getElementById('chart-window-select');
         if (select) select.value = chartWindowMode;
@@ -3784,7 +3784,7 @@ const ViewerTracker = (function() {
                 '<div id="panel-options" role="group" aria-label="Chart and session options" style="display:none;position:absolute;right:5px;top:29px;width:190px;max-width:calc(100% - 10px);box-sizing:border-box;z-index:5;padding:8px;background:var(--panel-solid);color:var(--panel-text);border:1px solid #ff69b4;border-radius:4px;font-size:11px;box-shadow:0 3px 12px #0008;">' +
                     '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;"><strong>Charts &amp; sessions</strong><button type="button" id="panel-options-close" aria-label="Close chart and session options" style="background:var(--panel-button);color:var(--panel-text);border:0;border-radius:3px;cursor:pointer;">×</button></div>' +
                     '<label for="chart-window-select">Chart window</label>' +
-                    '<select id="chart-window-select" style="display:block;width:100%;margin:4px 0 6px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);font-size:11px;"><option value="full">Full history</option><option value="hour">Last hour</option><option value="quarter">Last 15 minutes</option></select>' +
+                    '<select id="chart-window-select" style="display:block;width:100%;margin:4px 0 6px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);font-size:11px;"><option value="full">Full history</option><option value="fourHours">Last 4 hours</option><option value="twoHours">Last 2 hours</option><option value="hour">Last hour</option><option value="halfHour">Last 30 minutes</option><option value="quarter">Last 15 minutes</option></select>' +
                     '<div style="font-size:10px;color:var(--panel-muted);line-height:1.4;margin-bottom:8px;">Charts only. Downloads keep the full retained history.</div>' +
                     '<button type="button" id="btn-save-session" style="display:block;width:100%;margin:4px 0;padding:4px;background:#4169E1;color:#fff;border:0;border-radius:3px;cursor:pointer;">Save session file</button>' +
                     '<button type="button" id="btn-open-session" style="display:block;width:100%;margin:4px 0;padding:4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:3px;cursor:pointer;">Open session file…</button>' +
