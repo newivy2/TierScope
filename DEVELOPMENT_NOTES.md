@@ -303,8 +303,8 @@ A room-level storage access failure can still make saving read-only. Individual 
 | Version | Notes |
 | --- | --- |
 | **3.1.13** | Compact metric icons; slightly brighter green highlights; larger third-row trend boxes; diamond trend background follows change direction while retaining its pink border. |
-| 3.1.12 | Restore page-based startup: expanded in broadcast rooms, minimized elsewhere; retain position/scale persistence and scan-settings close fixes. |
-| 3.1.11 | Add a close button and document-level Escape handling for scan settings; remember compact/expanded view with panel geometry. |
+| 3.1.12 | Restored page-based startup: expanded in broadcast rooms, minimized elsewhere; retain position/scale persistence and scan-settings close fixes. |
+| 3.1.11 | Added a close button and document-level Escape handling for scan settings; remember compact/expanded view with panel geometry. |
 | 3.1.10 | Compact dashboard with a remembered switchable chart, count changes, sample freshness, and scan settings overlay. |
 | 3.1.9 | Isolate corrupt or unsupported saved records; restore healthy siblings; expire valid old-epoch orphan records. |
 | 3.1.8 | Separate session start from active time; preserve session highs beyond history rollover; isolate same-room tab saves; add repeatable regression tests and CI. |
