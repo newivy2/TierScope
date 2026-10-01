@@ -254,7 +254,7 @@ The saved record failed validation or uses an unsupported schema. It has not bee
 
 ## Thanks
 
-- **Andrew Weed** — API acquisition and Replay mode.
+- **baba_oriley** — API acquisition and Replay mode.
 - **checksnmale** — testing and feedback.
 - **Dean McNamee** — the omggif encoder.
 
