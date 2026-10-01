@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.1.16
+// @version      3.1.17
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -18,7 +18,7 @@
 const ViewerTracker = (function() {
     'use strict';
 
-    const TIERSCOPE_VERSION = '3.1.16';
+    const TIERSCOPE_VERSION = '3.1.17';
     const API_TIMEOUT_MS = 10000;
     const DEFAULT_API_INTERVAL_SECONDS = 60;
     const DOM_FALLBACK_INTERVAL_SECONDS = 60;
@@ -3396,7 +3396,7 @@ const ViewerTracker = (function() {
                     '<div style="display:flex;align-items:center;gap:3px;">' +
                         '<span id="mini-freshness" style="flex:1;min-width:0;font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">No sample</span>' +
                         '<button type="button" id="btn-auto" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;cursor:pointer;" title="Pause or resume scans">⏸</button>' +
-                        '<button type="button" id="mini-settings-toggle" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;cursor:pointer;" aria-label="Scan interval settings" aria-expanded="false" aria-controls="mini-settings">◷</button>' +
+                        '<button type="button" id="mini-settings-toggle" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;cursor:pointer;" aria-label="Scan interval settings" title="Scan interval settings — adjust how often TierScope scans" aria-expanded="false" aria-controls="mini-settings">◷</button>' +
                         '<button type="button" id="btn-expand" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;font-size:9px;cursor:pointer;" title="Expand panel" aria-label="Expand panel">↗</button>' +
                     '</div>' +
                     '<div id="mini-settings" style="display:none;position:absolute;left:0;right:0;top:17px;background:var(--panel-settings);border:1px solid #ff69b4;border-radius:4px;padding:5px;z-index:2;" role="group" aria-label="Scan interval">' +
@@ -4052,57 +4052,70 @@ const ViewerTracker = (function() {
         updateTrendDisplay();
         updateAcquisitionStatus();
         restorePanelGeometry();
-        var attempts = 0;
-        var maxAttempts = 30;
-        var checkInterval = setInterval(function() {
-            if (myGeneration !== initGuard) {
-                clearInterval(checkInterval);
-                log('Init ' + myGeneration + ' superseded by newer generation');
-                return;
-            }
-            attempts++;
-            if ((isRoom && modelName !== 'unknown') || document.querySelector(DOM_SELECTORS.userListTab) || attempts >= maxAttempts) {
-                clearInterval(checkInterval);
-                if (!isRoom && attempts >= maxAttempts && !document.querySelector(DOM_SELECTORS.userListTab)) {
-                    log('UserListTab not found after 30s, giving up');
-                    var statusEl = document.getElementById('auto-status');
-                    if (statusEl) {
-                        statusEl.textContent = 'No chat detected';
-                        statusEl.style.color = 'var(--panel-negative)';
-                    }
+        if (isRoom && modelName !== 'unknown' && !loaded && isAutoRefreshOn && !isPaused) {
+            // A fresh room gets its first point now. Start the recurring countdown
+            // only after this attempt settles; normal retry restrictions still apply.
+            var initialScan = performScanThenReturn(true);
+            var startupContext = { epoch: scanEpoch, generation: myGeneration, url: location.href };
+            initialScan.then(function() {
+                // A pause, Reset, navigation, or newer scan owns its own scheduling.
+                if (!isAcquisitionCurrent(startupContext) || !isAutoRefreshOn || isPaused) return;
+                startTrackingTimer();
+                startCountdown();
+            }).catch(function(error) { log('Could not finish initial scan setup: ' + error.message); });
+        } else {
+            var attempts = 0;
+            var maxAttempts = 30;
+            var checkInterval = setInterval(function() {
+                if (myGeneration !== initGuard) {
+                    clearInterval(checkInterval);
+                    log('Init ' + myGeneration + ' superseded by newer generation');
                     return;
                 }
-                if (!isPaused) {
-                    performScanThenReturn(true);
-                }
-                setTimeout(function() {
-                    if (myGeneration !== initGuard) return;
-                    if (isAutoRefreshOn && !isPaused) {
-                        startTrackingTimer();
-                        startCountdown();
-                    } else {
-                        var btnAuto = document.getElementById('btn-auto');
-                        var btnControlAuto = document.getElementById('btn-control-auto');
-                        if (btnAuto) {
-                            btnAuto.style.background = '#ff4444';
-                            btnAuto.innerHTML = '▶';
-                            btnAuto.title = 'Auto-Refresh OFF - Click to start';
-                        }
-                        if (btnControlAuto) {
-                            btnControlAuto.style.background = '#ff4444';
-                            btnControlAuto.innerHTML = '▶';
-                            btnControlAuto.title = 'Auto-Refresh OFF - Click to start';
-                        }
+                attempts++;
+                if ((isRoom && modelName !== 'unknown') || document.querySelector(DOM_SELECTORS.userListTab) || attempts >= maxAttempts) {
+                    clearInterval(checkInterval);
+                    if (!isRoom && attempts >= maxAttempts && !document.querySelector(DOM_SELECTORS.userListTab)) {
+                        log('UserListTab not found after 30s, giving up');
                         var statusEl = document.getElementById('auto-status');
                         if (statusEl) {
-                            statusEl.textContent = isPaused ? 'Paused (restored)' : 'Paused';
+                            statusEl.textContent = 'No chat detected';
                             statusEl.style.color = 'var(--panel-negative)';
                         }
-                        updateTrackingTimer();
+                        return;
                     }
-                }, 2002);
-            }
-        }, 1000);
+                    if (!isPaused) {
+                        performScanThenReturn(true);
+                    }
+                    setTimeout(function() {
+                        if (myGeneration !== initGuard) return;
+                        if (isAutoRefreshOn && !isPaused) {
+                            startTrackingTimer();
+                            startCountdown();
+                        } else {
+                            var btnAuto = document.getElementById('btn-auto');
+                            var btnControlAuto = document.getElementById('btn-control-auto');
+                            if (btnAuto) {
+                                btnAuto.style.background = '#ff4444';
+                                btnAuto.innerHTML = '▶';
+                                btnAuto.title = 'Auto-Refresh OFF - Click to start';
+                            }
+                            if (btnControlAuto) {
+                                btnControlAuto.style.background = '#ff4444';
+                                btnControlAuto.innerHTML = '▶';
+                                btnControlAuto.title = 'Auto-Refresh OFF - Click to start';
+                            }
+                            var statusEl = document.getElementById('auto-status');
+                            if (statusEl) {
+                                statusEl.textContent = isPaused ? 'Paused (restored)' : 'Paused';
+                                statusEl.style.color = 'var(--panel-negative)';
+                            }
+                            updateTrackingTimer();
+                        }
+                    }, 2002);
+                }
+            }, 1000);
+        }
         healthCheckInterval = setInterval(function() {
             if (myGeneration === initGuard && lastAcquisitionAttemptSource === 'DOM' && !isScanning) {
                 validateDOMHealth();

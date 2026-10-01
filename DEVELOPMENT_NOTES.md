@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **version 3.1.16**. For a quick introduction and installation link, see the [README](readme.md).
+Detailed reference for **version 3.1.17**. For a quick introduction and installation link, see the [README](readme.md).
 
 ## Contents
 
@@ -54,7 +54,7 @@ Keep only one enabled copy of TierScope. After an update, refresh existing room 
 | **Replay** | Open recorded history for the current room. |
 | **Reset** | Confirm clearing this room’s history, counters, and elapsed time, then request one fresh scan. Keep the automatic-scan pause state and layout preferences. |
 
-The default scan interval is **60 seconds**, counted after a scan finishes. Faster polling does not guarantee fresher data from the site.
+The default scan interval is **60 seconds**, counted after a scan finishes. A new, unpaused room session requests its first sample as soon as the panel is initialized, then starts the normal countdown when that attempt completes. Existing retry waits and access restrictions still apply. Restored sessions keep their existing startup behavior; paused sessions wait for Resume. Faster polling does not guarantee fresher data from the site.
 
 The footer shows the sample source and age, for example `API • 12s`, `DOM • 4m`, or `Saved • 2h 5m`. Ages use seconds, minutes, hours, or days as appropriate. They are measured from the **sample’s timestamp**, not the session’s last save time or the countdown to the next scan. Hover over the status to see the recorded timestamp.
 
@@ -68,7 +68,7 @@ The chart shows the last **15 recorded minutes**, ending at the latest retained 
 
 The header shows room total and its change; the two rows below the chart show With Tokens and Registered counts and changes. Changes use the main panel's selected comparison window. Restored snapshots leave changes blank until a fresh sample is accepted; a comparison also needs sufficient history. Hover over counts for exact values and percentages, changes for their comparison window, and the header for room name and room high.
 
-The footer shows sample source and age, or Paused and age. Hover for the source, timestamp, and scan timing. The clock button opens scan-interval controls over the chart without increasing panel height. Click the × close button, click the clock again, or press Escape to close them. Escape works even after focus moves outside the panel. Pause/Resume and Expand remain directly accessible.
+The footer shows sample source and age, or Paused and age. Hover for the source, timestamp, and scan timing. The clock button opens scan-interval controls over the chart without increasing panel height. Its tooltip explains that it adjusts how often TierScope scans. Click the × close button, click the clock again, or press Escape to close them. Escape works even after focus moves outside the panel. Pause/Resume and Expand remain directly accessible.
 
 ### Position and size
 
@@ -314,7 +314,7 @@ Look for their boxed markers below the header and click to restore them. Moderat
 
 **The panel shrank after collapsing rows**
 
-This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only version 3.1.16 is enabled, refresh the tab, and report the browser and steps that reproduce it.
+This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only version 3.1.17 is enabled, refresh the tab, and report the browser and steps that reproduce it.
 
 **The panel is too large or near a screen edge**
 
@@ -352,7 +352,8 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
-| **3.1.16** | Remembered dark/bright mode, with a moon checkbox in the existing Controls row and theme-aware panel surfaces, text, and registered-total chart. |
+| **3.1.17** | Immediate first scan for new, unpaused room sessions, followed by the normal completion-based countdown; compact scan-settings tooltip. |
+| 3.1.16 | Remembered dark/bright mode, with a moon checkbox in the existing Controls row and theme-aware panel surfaces, text, and registered-total chart. |
 | 3.1.15 | Timestamp-based charts and sampling gaps; hover and keyboard inspection; reduced dense-history drawing and Replay allocation; shared HTTP retry/access handling; remove session username lists and unique female/trans report totals; Chromium and Firefox regression coverage. |
 | 3.1.14 | Two gentle live high-value pulses on expanded rows and collapsed markers, with reduced-motion support. |
 | 3.1.13 | Compact metric icons; slightly brighter green highlights; larger third-row trend boxes; diamond trend background follows change direction while retaining its pink border. |
