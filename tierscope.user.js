@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.1.13
+// @version      3.1.14
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -18,7 +18,7 @@
 const ViewerTracker = (function() {
     'use strict';
 
-    const TIERSCOPE_VERSION = '3.1.13';
+    const TIERSCOPE_VERSION = '3.1.14';
     const API_TIMEOUT_MS = 10000;
     const DEFAULT_API_INTERVAL_SECONDS = 60;
     const DOM_FALLBACK_INTERVAL_SECONDS = 60;
@@ -111,6 +111,58 @@ const ViewerTracker = (function() {
     var trendComparisonMode = 'last';
     var autoTrendEscalation = true;
     var newHighTiers = {};
+    var highPulseAnimations = new Map();
+    var highPulseMotion = typeof window.matchMedia === 'function' ?
+        window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+    if (highPulseMotion) {
+        var motionChanged = function(event) { if (event.matches) cancelHighPulses(); };
+        if (highPulseMotion.addEventListener) highPulseMotion.addEventListener('change', motionChanged);
+        else if (highPulseMotion.addListener) highPulseMotion.addListener(motionChanged);
+    }
+
+    function cancelHighPulse(key) {
+        var animation = highPulseAnimations.get(key);
+        highPulseAnimations.delete(key);
+        if (animation) {
+            try { animation.cancel(); } catch (error) { /* A decoration must not affect tracking. */ }
+        }
+    }
+
+    function cancelHighPulses() {
+        Array.from(highPulseAnimations.keys()).forEach(cancelHighPulse);
+    }
+
+    // Called once, after a live sample commits successfully. Rendering, Replay,
+    // restoration and layout changes never generate notification events.
+    function pulseAcceptedHighs(priorState) {
+        try {
+            if (presentationMode !== 'LIVE' || isMinimized || restoredDisplayFrame ||
+                document.visibilityState === 'hidden' || (highPulseMotion && highPulseMotion.matches)) {
+                cancelHighPulses();
+                return;
+            }
+            PANEL_ROWS.forEach(function(row) {
+                var key = row.key === 'withtokens' ? 'withTokens' : row.key === 'anon' ? 'anonymous' : row.key;
+                if (!newHighTiers[key]) { cancelHighPulse(row.key); return; }
+                var previousHigh = priorState.sessionHighs[key];
+                var raisedHigh = sessionHighs[key].value > (previousHigh ? previousHigh.value : 0);
+                if (priorState.newHighTiers[key] && !raisedHigh) return;
+                var target = document.getElementById((collapsedRows.has(row.key) ? 'restore-row-' : 'tier-row-') + row.key);
+                if (!target || typeof target.animate !== 'function') return;
+                cancelHighPulse(row.key);
+                var animation = target.animate([
+                    { backgroundColor: 'rgba(50, 205, 50, 0.22)', boxShadow: 'inset 0 0 0 1px rgba(105, 190, 69, 0)', offset: 0 },
+                    { backgroundColor: 'rgba(50, 205, 50, 0.40)', boxShadow: 'inset 0 0 0 1px rgba(105, 190, 69, 0.75)', offset: 0.5 },
+                    { backgroundColor: 'rgba(50, 205, 50, 0.22)', boxShadow: 'inset 0 0 0 1px rgba(105, 190, 69, 0)', offset: 1 }
+                ], { duration: 850, iterations: 2, easing: 'ease-in-out', fill: 'none' });
+                highPulseAnimations.set(row.key, animation);
+                animation.onfinish = animation.oncancel = function() {
+                    if (highPulseAnimations.get(row.key) === animation) highPulseAnimations.delete(row.key);
+                };
+            });
+        } catch (error) { log('High pulse unavailable: ' + error.message); }
+    }
+
 
     function validateDOMHealth() {
         const now = Date.now();
@@ -434,6 +486,7 @@ const ViewerTracker = (function() {
     }
 
     function setRowCollapsed(key, collapsed) {
+        cancelHighPulse(key);
         if (!PANEL_ROWS.some(function(row) { return row.key === key; })) return;
         if (collapsed) collapsedRows.add(key);
         else collapsedRows.delete(key);
@@ -621,6 +674,7 @@ const ViewerTracker = (function() {
             playback = { url: location.href, key: activeSessionStorageKey, generation: initGuard,
                 snapshot: snapshot, positionMs: 0, speed: 1, lastTickAt: Date.now(),
                 playing: snapshot.durationMs > 0, timer: null };
+            cancelHighPulses();
             presentationMode = 'PLAYBACK';
             setPlaybackLayout(true);
             if (!paintPlayback(playback)) return false;
@@ -637,6 +691,7 @@ const ViewerTracker = (function() {
     }
 
     function leavePlayback(renderLive) {
+        cancelHighPulses();
         cancelGifExport();
         if (typeof renderLive === 'undefined') renderLive = true;
         if (!playback && presentationMode === 'LIVE') return false;
@@ -2381,6 +2436,7 @@ const ViewerTracker = (function() {
             };
             updateAcquisitionStatus();
             saveSession(context.room);
+            pulseAcceptedHighs(priorState);
             if (diagnostics) console.log('[TierScope ' + TIERSCOPE_VERSION + '] API scan accepted', diagnostics);
         } catch (err) {
             if (priorState) {
@@ -3456,6 +3512,7 @@ const ViewerTracker = (function() {
 
     function toggleView() {
         if (presentationMode === 'PLAYBACK') return;
+        cancelHighPulses();
         isMinimized = !isMinimized;
         var fullView = document.getElementById('full-view');
         var miniView = document.getElementById('minimized-view');

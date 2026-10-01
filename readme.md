@@ -4,7 +4,7 @@
 
 TierScope turns room viewer counts into a compact panel of live charts, trends, and session highs. Follow the different viewer tiers, spot changes in your audience, and replay the session to see how it unfolded.
 
-**Current release: 3.1.13**
+**Current release: 3.1.14**
 
 ![TierScope panel](Tracking%20example%206.jpg)
 ![TierScope panel](Tracking%20example%207.jpg)
@@ -24,7 +24,7 @@ TierScope turns room viewer counts into a compact panel of live charts, trends, 
 - **Set the background transparency.** Fade the panel backgrounds while keeping text and charts clear.
 - **Save and analyze.** Download animated GIFs, CSV history, and TXT session summaries.
 - **Explore Replay sample by sample.** Step backward or forward to inspect individual moments.
-- **Read changes at a glance.** Color-coded trends and high-value highlights make audience changes easier to follow.
+- **Read changes at a glance.** Color-coded trends and gentle high-value pulses draw attention to audience changes, even in collapsed rows.
 
 ## Get started
 

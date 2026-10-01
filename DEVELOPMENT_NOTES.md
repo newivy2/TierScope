@@ -101,6 +101,14 @@ Choose **Last**, **5m**, **15m**, **30m**, **1h**, or **Start**. A manual select
 
 A row’s green high-value highlight is separate from its trend indicator: it appears whenever a positive count equals the session high, including a return to that value after a dip. In Replay, it compares against the retained history through the selected sample.
 
+### High-value pulses
+
+An accepted live sample triggers two gentle pulses when a row sets a new positive session high or returns to its high after a dip. The visible expanded row or collapsed marker pulses for about 1.7 seconds, then retains its steady green highlight. Text, counts, chart lines, and icons do not fade.
+
+A count staying at its high does not restart the cue. Collapsing or restoring a row cancels its current pulse and never starts another. Entering Replay, minimizing the panel, resetting, or changing rooms cancels active pulses. Saved snapshots and Replay never pulse, and events while the compact panel or Replay is open are not queued for later. Zero counts do not trigger a pulse.
+
+Reduced-motion preferences disable the animation while preserving the steady highlight. Browsers without the animation API also retain the steady highlight. Highs concern observed tier counts, not individual viewers' activity or purchases.
+
 ### Background opacity
 
 The lamp slider ranges from **30% to 100%**, starting at **95%**. Moving left makes the main panel fill, normal tier-row fills, and normal collapsed-marker fills more transparent.
@@ -264,7 +272,7 @@ Look for their boxed markers below the header and click to restore them. Moderat
 
 **The panel shrank after collapsing rows**
 
-This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only version 3.1.13 is enabled, refresh the tab, and report the browser and steps that reproduce it.
+This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only version 3.1.14 is enabled, refresh the tab, and report the browser and steps that reproduce it.
 
 **The panel is too large or near a screen edge**
 
@@ -302,7 +310,8 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
-| **3.1.13** | Compact metric icons; slightly brighter green highlights; larger third-row trend boxes; diamond trend background follows change direction while retaining its pink border. |
+| **3.1.14** | Two gentle live high-value pulses on expanded rows and collapsed markers, with reduced-motion support. |
+| 3.1.13 | Compact metric icons; slightly brighter green highlights; larger third-row trend boxes; diamond trend background follows change direction while retaining its pink border. |
 | 3.1.12 | Restored page-based startup: expanded in broadcast rooms, minimized elsewhere; retain position/scale persistence and scan-settings close fixes. |
 | 3.1.11 | Added a close button and document-level Escape handling for scan settings; remember compact/expanded view with panel geometry. |
 | 3.1.10 | Compact dashboard with a remembered switchable chart, count changes, sample freshness, and scan settings overlay. |
