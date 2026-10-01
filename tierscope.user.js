@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.1.7
+// @version      3.1.9
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -9,6 +9,7 @@
 // @grant        unsafeWindow
 // @grant        GM_setValue
 // @grant        GM_getValue
+// @grant        GM_listValues
 // @grant        GM_deleteValue
 // @require      https://cdn.jsdelivr.net/npm/omggif@1.0.10/omggif.js
 // @run-at       document-end
@@ -17,19 +18,29 @@
 const ViewerTracker = (function() {
     'use strict';
 
-    const TIERSCOPE_VERSION = '3.1.7';
+    const TIERSCOPE_VERSION = '3.1.9';
     const API_TIMEOUT_MS = 10000;
     const DEFAULT_API_INTERVAL_SECONDS = 60;
     const DOM_FALLBACK_INTERVAL_SECONDS = 60;
-    const STORAGE_SCHEMA_VERSION = 1;
+    const STORAGE_SCHEMA_VERSION = 2;
     const STORAGE_KEY_PREFIX = 'tierscope:v1:';
     const STORAGE_MAX_AGE_MS = 3 * 60 * 60 * 1000;
     const STORAGE_HISTORY_SERIES = ['red', 'green', 'purple', 'pink', 'dark-blue', 'light-blue', 'gray',
         'female-trans', 'withTokens', 'total', 'anonymous'];
     const STORAGE_NULLABLE_TIMES = ['withTokensHighTime', 'totalHighTime', 'anonHighTime',
-        'femaleTransHighTime', 'roomTotalHighTime', 'trackingStartTime'];
+        'femaleTransHighTime', 'roomTotalHighTime', 'trackingStartTime', 'sessionStartedAt'];
     var sessionStorageStatus = new Map();
+    var sessionRecordWarnings = new Map();
     var activeSessionStorageKey = null;
+    // Tabs never overwrite each other's records. The shared epoch changes only on Reset.
+    const TAB_RECORD_PREFIX = 'tierscope:tab:v2:';
+    const ROOM_EPOCH_PREFIX = 'tierscope:epoch:v2:';
+    var activeRoomEpoch = null;
+    var tabRecords = new Map();
+    var sessionStorageNotice = '';
+    var sessionStartedAt = null;
+    var sessionStartEstimated = false;
+    var sessionHighs = {};
 
     // GIF Export State
     var gifExportJob = null;
@@ -380,7 +391,7 @@ const ViewerTracker = (function() {
             var value = row.key === 'withtokens' ? frame.withTokens : row.key === 'total' ? frame.total :
                 row.key === 'anon' ? frame.anonymousCount : frame.counts[row.key];
             var historyKey = row.key === 'withtokens' ? 'withTokens' : row.key === 'anon' ? 'anonymous' : row.key;
-            var high = getHighValue(frame.history[historyKey], value).value;
+            var high = getDisplayHigh(frame, historyKey, value).value;
             var context = frame.isPlayback ? 'Replay' : frame.isRestored ? 'Saved sample' : 'Latest sample';
             button.title = row.label + ': ' + value.toLocaleString() + ' (High: ' + high.toLocaleString() +
                 '). ' + context + '. Click to restore row.';
@@ -784,8 +795,54 @@ const ViewerTracker = (function() {
         return Number.isSafeInteger(value) && value >= 0 && value <= 8640000000000000;
     }
 
+    function makeStorageId() {
+        if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+        return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2) + '-' + Math.random().toString(36).slice(2);
+    }
+
+    function roomEpochKey(key) { return ROOM_EPOCH_PREFIX + key.slice(STORAGE_KEY_PREFIX.length); }
+    function roomTabPrefix(key) { return TAB_RECORD_PREFIX + key.slice(STORAGE_KEY_PREFIX.length) + ':'; }
+    function getRoomEpoch(key) { return GM_getValue(roomEpochKey(key), 'legacy'); }
+
     function readSavedSession(key) {
-        return GM_getValue(key, undefined);
+        var epoch = getRoomEpoch(key);
+        var keys = GM_listValues().filter(function(candidate) { return candidate.indexOf(roomTabPrefix(key)) === 0; });
+        if (epoch === 'legacy') keys.unshift(key);
+        var selected;
+        var warnings = [];
+        keys.forEach(function(candidate) {
+            try {
+                var raw = GM_getValue(candidate, undefined);
+                if (typeof raw === 'undefined') return;
+                if (typeof raw !== 'string') throw new Error('Saved session must be JSON text');
+                var parsed = JSON.parse(raw);
+                var data = migrateStoredSession(parsed, determineStorageSchema(parsed));
+                validateStoredSession(data);
+                if (candidate !== key && typeof data.roomEpoch !== 'string') throw new Error('Missing tab record epoch');
+                // Validate before any deletion. Unsupported or corrupt records remain
+                // untouched, and cannot prevent a compatible sibling from restoring.
+                // Expiration also applies to old epochs, including late post-Reset writes.
+                if (Date.now() - data.timestamp > STORAGE_MAX_AGE_MS) {
+                    if (candidate !== key) GM_deleteValue(candidate);
+                    return;
+                }
+                if (candidate !== key && data.roomEpoch !== epoch) return;
+                var times = data.history.timestamps;
+                var sampleTime = times.length ? Math.max.apply(null, times) : -1;
+                var rank = [sampleTime, times.length, data.timestamp, candidate === key ? 0 : 1, candidate];
+                if (!selected || rank.some(function(value, i) {
+                    return value > selected.rank[i] && rank.slice(0, i).every(function(v, j) { return v === selected.rank[j]; });
+                })) selected = { raw: raw, rank: rank };
+            } catch (error) {
+                warnings.push(candidate + ': ' + error.message);
+            }
+        });
+        var previous = sessionRecordWarnings.get(key) || [];
+        warnings.forEach(function(warning) {
+            if (previous.indexOf(warning) === -1) log('Saved record skipped and retained: ' + warning);
+        });
+        sessionRecordWarnings.set(key, warnings);
+        return selected ? selected.raw : undefined;
     }
 
     function determineStorageSchema(data) {
@@ -801,6 +858,7 @@ const ViewerTracker = (function() {
         if (schema.version > STORAGE_SCHEMA_VERSION) {
             throw new Error('Newer storage schema ' + schema.version + '; this build supports ' + STORAGE_SCHEMA_VERSION);
         }
+        if (schema.version === 1) return Object.assign({}, data, { schemaVersion: STORAGE_SCHEMA_VERSION });
         if (schema.version !== STORAGE_SCHEMA_VERSION) {
             throw new Error('Unsupported storage schema ' + schema.version + '; no migration path to ' + STORAGE_SCHEMA_VERSION);
         }
@@ -855,6 +913,18 @@ const ViewerTracker = (function() {
                 requireField(data[field] === null || isStorageTimestamp(data[field]), field);
             }
         });
+        if (hasStorageField(data, 'roomEpoch')) requireField(typeof data.roomEpoch === 'string', 'roomEpoch');
+        if (hasStorageField(data, 'sessionStartEstimated')) requireField(typeof data.sessionStartEstimated === 'boolean', 'sessionStartEstimated');
+        if (hasStorageField(data, 'sessionHighs')) {
+            requireField(isStorageObject(data.sessionHighs), 'sessionHighs');
+            STORAGE_HISTORY_SERIES.forEach(function(key) {
+                var high = data.sessionHighs[key];
+                requireField(isStorageObject(high) && isStorageNumber(high.value) &&
+                    (high.time === null || isStorageTimestamp(high.time)), 'sessionHighs.' + key);
+                requireField(high.value >= Math.max.apply(null, [0].concat(data.history[key])), 'sessionHighs.' + key + ' below retained history');
+                requireField(high.value === 0 || high.time !== null, 'sessionHighs.' + key + '.time');
+            });
+        }
         if (hasStorageField(data, 'roomTotalHigh')) requireField(isStorageNumber(data.roomTotalHigh), 'roomTotalHigh');
         if (hasStorageField(data, 'pausedElapsedTime')) {
             requireField(isStorageTimestamp(data.pausedElapsedTime) &&
@@ -891,6 +961,26 @@ const ViewerTracker = (function() {
         STORAGE_NULLABLE_TIMES.forEach(function(field) {
             normalized[field] = hasStorageField(data, field) ? data[field] : null;
         });
+        normalized.sessionHighs = {};
+        STORAGE_HISTORY_SERIES.forEach(function(key) {
+            if (data.sessionHighs && data.sessionHighs[key]) {
+                normalized.sessionHighs[key] = Object.assign({}, data.sessionHighs[key]);
+            } else {
+                // Legacy highs cannot be recovered beyond retained history. Rebuild
+                // both the value and its timestamp from the same actual sample.
+                var values = normalized.history[key];
+                var value = Math.max.apply(null, [0].concat(values));
+                normalized.sessionHighs[key] = { value: value,
+                    time: value > 0 ? normalized.history.timestamps[values.indexOf(value)] : null };
+            }
+        });
+        normalized.sessionStartEstimated = data.sessionStartEstimated === true;
+        if (!hasStorageField(data, 'sessionStartedAt')) {
+            var knownTimes = [data.trackingStartTime, data.roomTotalHighTime].concat(normalized.history.timestamps)
+                .filter(function(time) { return typeof time === 'number' && time > 0; });
+            normalized.sessionStartedAt = knownTimes.length ? Math.min.apply(null, knownTimes) : null;
+            normalized.sessionStartEstimated = knownTimes.length > 0;
+        }
         return normalized;
     }
 
@@ -948,6 +1038,10 @@ const ViewerTracker = (function() {
         roomTotalHigh = data.roomTotalHigh;
         roomTotalHighTime = data.roomTotalHighTime;
         trackingStartTime = data.trackingStartTime;
+        sessionStartedAt = data.sessionStartedAt;
+        sessionStartEstimated = data.sessionStartEstimated;
+        sessionHighs = data.sessionHighs;
+        syncHighTimes();
         isPaused = data.isPaused;
         pausedElapsedTime = data.pausedElapsedTime;
         sessionFemaleTransUsers = data.sessionFemaleTransUsers;
@@ -960,6 +1054,11 @@ const ViewerTracker = (function() {
         restoredDisplayFrame = getPlaybackFrame(snapshot, snapshot.durationMs);
         if (restoredDisplayFrame) {
             restoredDisplayFrame.isRestored = true;
+            restoredDisplayFrame.playbackNewHighTiers = {};
+            STORAGE_HISTORY_SERIES.forEach(function(key) {
+                var value = history[key][history[key].length - 1];
+                if (value > 0 && value >= getSessionHigh(key, 0).value) restoredDisplayFrame.playbackNewHighTiers[key] = true;
+            });
             restoredDisplayFrame.roomTotalHigh = Math.max(roomTotalHigh, restoredDisplayFrame.roomTotalHigh);
         }
     }
@@ -967,18 +1066,28 @@ const ViewerTracker = (function() {
     function getStorageReportStatus(model) {
         if (!model || model === 'unknown') return { producer: 'Unknown (no saved session)', access: 'No room' };
         var status = inspectStoredSession(model, false);
+        var warnings = sessionRecordWarnings.get(getStorageKey(model)) || [];
         return {
             producer: status.producerVersion === null ? (status.legacy ? 'Unknown (legacy session)' : 'Unknown') :
                 (status.producerVersion || '(empty string)'),
             access: status.protected ? 'Protected / read-only: ' + status.reason :
-                (activeSessionStorageKey === getStorageKey(model) ? 'Writable' : 'Not initialized')
+                (sessionStorageNotice || (activeSessionStorageKey === getStorageKey(model) ? 'Writable (separate tab record)' : 'Not initialized')) +
+                (warnings.length ? '; ' + warnings.length + ' skipped record(s) retained; see console' : '')
         };
     }
 
     function saveSession(model) {
         if (!model || model === 'unknown') return;
         var key = getStorageKey(model);
-        if (inspectStoredSession(model, false).protected || activeSessionStorageKey !== key) return;
+        if (activeSessionStorageKey !== key || inspectStoredSession(model, false).protected) return;
+        if (getRoomEpoch(key) !== activeRoomEpoch) {
+            sessionStorageNotice = 'Reset in another tab — local data only; export TXT/CSV before reloading';
+            updateAcquisitionStatus();
+            return;
+        }
+        STORAGE_HISTORY_SERIES.forEach(function(series) {
+            if (!sessionHighs[series]) sessionHighs[series] = getSessionHigh(series, 0);
+        });
         var saveData = {
             schemaVersion: STORAGE_SCHEMA_VERSION,
             producerVersion: TIERSCOPE_VERSION,
@@ -992,6 +1101,10 @@ const ViewerTracker = (function() {
             roomTotalHigh: roomTotalHigh,
             roomTotalHighTime: roomTotalHighTime,
             trackingStartTime: trackingStartTime,
+            sessionStartedAt: sessionStartedAt,
+            sessionStartEstimated: sessionStartEstimated,
+            sessionHighs: sessionHighs,
+            roomEpoch: activeRoomEpoch,
             isPaused: isPaused,
             pausedElapsedTime: pausedElapsedTime,
             sessionFemaleTransUsers: sessionFemaleTransUsers,
@@ -1004,7 +1117,15 @@ const ViewerTracker = (function() {
         try {
             validateStoredSession(saveData);
             var raw = JSON.stringify(saveData);
-            GM_setValue(key, raw);
+            // A tab returning after expiration gets a new record ID. No read/modify/
+            // write of a shared history key, even when two tabs save simultaneously.
+            var tabRecord = tabRecords.get(key);
+            if (!tabRecord || Date.now() - tabRecord.savedAt > STORAGE_MAX_AGE_MS) {
+                tabRecord = { id: makeStorageId(), savedAt: Date.now() };
+            }
+            GM_setValue(roomTabPrefix(key) + tabRecord.id, raw);
+            tabRecord.savedAt = Date.now();
+            tabRecords.set(key, tabRecord);
             sessionStorageStatus.set(key, { protected: false, raw: raw, producerVersion: TIERSCOPE_VERSION, legacy: false });
             log('Session saved for ' + model + ' (storage schema ' + STORAGE_SCHEMA_VERSION + ', producer ' + TIERSCOPE_VERSION + ')');
         } catch (e) {
@@ -1018,19 +1139,11 @@ const ViewerTracker = (function() {
         leavePlayback(false);
         var key = getStorageKey(model);
         activeSessionStorageKey = key;
+        activeRoomEpoch = getRoomEpoch(key);
+        sessionStorageNotice = '';
         var saved = inspectStoredSession(model, true);
         if (saved.protected || !saved.data) return false;
         var age = Date.now() - saved.data.timestamp;
-        if (age > STORAGE_MAX_AGE_MS) {
-            try {
-                GM_deleteValue(key);
-                sessionStorageStatus.delete(key);
-                log('Compatible saved session expired (' + Math.round(age/60000) + ' min old), deleting');
-            } catch (e) {
-                protectSessionStorage(key, 'Failed to delete expired session: ' + e.message, saved.producerVersion);
-            }
-            return false;
-        }
         restoreSessionState(saved.data);
         log('Session restored for ' + model + ' (' + Math.round(age/60000) + ' min old; ' +
             (saved.legacy ? 'validated legacy schema 1' : 'storage schema ' + STORAGE_SCHEMA_VERSION) +
@@ -1042,8 +1155,16 @@ const ViewerTracker = (function() {
         if (!model || model === 'unknown') return;
         var key = getStorageKey(model);
         try {
+            // Invalidate every old tab before clearing this tab's data. Late writes
+            // carry the old epoch and cannot become the restored session.
+            activeRoomEpoch = makeStorageId();
+            GM_setValue(roomEpochKey(key), activeRoomEpoch);
+            GM_listValues().filter(function(candidate) { return candidate.indexOf(roomTabPrefix(key)) === 0; })
+                .forEach(function(candidate) { GM_deleteValue(candidate); });
             GM_deleteValue(key);
             sessionStorageStatus.delete(key);
+            sessionRecordWarnings.delete(key);
+            sessionStorageNotice = '';
             log('Session deleted for ' + model);
         } catch (e) {
             protectSessionStorage(key, 'Explicit Reset could not delete saved session: ' + e.message,
@@ -1137,6 +1258,7 @@ const ViewerTracker = (function() {
     }
 
     function startTrackingTimer() {
+        if (sessionStartedAt === null) sessionStartedAt = Date.now();
         if (isPaused) {
             isPaused = false;
             trackingStartTime = Date.now() - pausedElapsedTime;
@@ -1170,6 +1292,9 @@ const ViewerTracker = (function() {
             trackingTimerInterval = null;
         }
         trackingStartTime = null;
+        sessionStartedAt = null;
+        sessionStartEstimated = false;
+        sessionHighs = {};
         pausedElapsedTime = 0;
         isPaused = false;
         roomTotalHighTime = null;
@@ -1406,7 +1531,7 @@ const ViewerTracker = (function() {
     function downloadTrackingReport() {
         var modelName = getModelName();
         var restored = restoredDisplayFrame;
-        var sessionStart = trackingStartTime ? formatDateTime(trackingStartTime) : 'Not started';
+        var sessionStart = sessionStartedAt !== null ? formatDateTime(sessionStartedAt) : 'Not started';
         var totalTime = trackingStartTime ? formatElapsedTime(isPaused ? pausedElapsedTime : (Date.now() - trackingStartTime)) : '00:00:00';
         var now = Date.now();
         var storageReport = getStorageReportStatus(modelName);
@@ -1416,7 +1541,7 @@ const ViewerTracker = (function() {
             '================================',
             '',
             'Model: ' + modelName,
-            'Session Start: ' + sessionStart,
+            'Session Start: ' + sessionStart + (sessionStartEstimated ? ' (estimated from legacy data)' : ''),
             'Report Generated: ' + formatDateTime(now),
             'TierScope Version: ' + TIERSCOPE_VERSION,
             'Storage Schema Version: ' + STORAGE_SCHEMA_VERSION,
@@ -1440,45 +1565,47 @@ const ViewerTracker = (function() {
             report.push('Registered includes broadcaster/owner and unclassified records outside the seven viewer tiers.');
             report.push('');
         }
-        report.push('--- ALL-TIME HIGHS ---');
+        report.push('--- SESSION HIGHS ---');
+        report.push('Offsets below are wall time since session start, including pauses.');
+        if (sessionStartEstimated) report.push('Legacy tier highs were recovered from retained samples; older discarded peaks are unavailable.');
         report.push('');
         if (roomTotalHigh > 0 && roomTotalHighTime) {
-            var elapsed = formatElapsedTime(roomTotalHighTime - trackingStartTime);
+            var elapsed = formatElapsedTime(roomTotalHighTime - sessionStartedAt);
             report.push('Room Total High: ' + roomTotalHigh.toLocaleString() + ' users');
             report.push('  Recorded at: ' + formatDateTime(roomTotalHighTime) + ' (' + elapsed + ' into session)');
             report.push('');
         }
         Object.keys(TIERS).forEach(function(tier) {
-            var highResult = getHighValue(history[tier], 0);
+            var highResult = getSessionHigh(tier, 0);
             var highVal = highResult.value;
             var highTime = tierHighTimes[tier];
             if (highVal > 0 && highTime) {
-                var elapsed = formatElapsedTime(highTime - trackingStartTime);
+                var elapsed = formatElapsedTime(highTime - sessionStartedAt);
                 report.push(TIERS[tier].name + ' High: ' + highVal.toLocaleString());
                 report.push('  Recorded at: ' + formatDateTime(highTime) + ' (' + elapsed + ' into session)');
                 report.push('');
             }
         });
-        var withTokensResult = getHighValue(history['withTokens'], 0);
+        var withTokensResult = getSessionHigh('withTokens', 0);
         var withTokensHigh = withTokensResult.value;
         if (withTokensHigh > 0 && withTokensHighTime) {
-            var elapsed = formatElapsedTime(withTokensHighTime - trackingStartTime);
+            var elapsed = formatElapsedTime(withTokensHighTime - sessionStartedAt);
             report.push('With Tokens High: ' + withTokensHigh.toLocaleString());
             report.push('  Recorded at: ' + formatDateTime(withTokensHighTime) + ' (' + elapsed + ' into session)');
             report.push('');
         }
-        var totalResult = getHighValue(history['total'], 0);
+        var totalResult = getSessionHigh('total', 0);
         var totalHigh = totalResult.value;
         if (totalHigh > 0 && totalHighTime) {
-            var elapsed = formatElapsedTime(totalHighTime - trackingStartTime);
+            var elapsed = formatElapsedTime(totalHighTime - sessionStartedAt);
             report.push('Registered Users High: ' + totalHigh.toLocaleString());
             report.push('  Recorded at: ' + formatDateTime(totalHighTime) + ' (' + elapsed + ' into session)');
             report.push('');
         }
-        var anonResult = getHighValue(history['anonymous'], 0);
+        var anonResult = getSessionHigh('anonymous', 0);
         var anonHigh = anonResult.value;
         if (anonHigh > 0 && anonHighTime) {
-            var elapsed = formatElapsedTime(anonHighTime - trackingStartTime);
+            var elapsed = formatElapsedTime(anonHighTime - sessionStartedAt);
             report.push('Anonymous High: ' + anonHigh.toLocaleString());
             report.push('  Recorded at: ' + formatDateTime(anonHighTime) + ' (' + elapsed + ' into session)');
             report.push('');
@@ -1503,9 +1630,9 @@ const ViewerTracker = (function() {
             anonymousCount = restored.anonymousCount;
             fullRoomTotal = restored.fullRoomTotal;
         }
-        var totalHighCurrent = getHighValue(history['total'], total).value;
-        var withTokensHighCurrent = getHighValue(history['withTokens'], withTokens).value;
-        var anonHighCurrent = getHighValue(history['anonymous'], anonymousCount).value;
+        var totalHighCurrent = getSessionHigh('total', total).value;
+        var withTokensHighCurrent = getSessionHigh('withTokens', withTokens).value;
+        var anonHighCurrent = getSessionHigh('anonymous', anonymousCount).value;
         var statsLabel = restored ? 'Saved ' : 'Current ';
         var reportedRoomHigh = restored ? restored.roomTotalHigh : roomTotalHigh;
         report.push(statsLabel + 'Room Total: ' + fullRoomTotal.toLocaleString() + ' (High: ' + reportedRoomHigh.toLocaleString() + ')');
@@ -1517,7 +1644,7 @@ const ViewerTracker = (function() {
         report.push('');
         Object.keys(TIERS).forEach(function(tier) {
             var current = counts[tier] || 0;
-            var high = getHighValue(history[tier], current).value;
+            var high = getSessionHigh(tier, current).value;
             report.push(TIERS[tier].name + ': ' + current.toLocaleString() + ' (High: ' + high.toLocaleString() + ')');
         });
         report.push('');
@@ -2065,6 +2192,11 @@ const ViewerTracker = (function() {
     function updateAcquisitionStatus() {
         var el = document.getElementById('acquisition-status');
         if (!el) return;
+        if (sessionStorageNotice) {
+            el.textContent = 'Local only • room reset';
+            el.title = sessionStorageNotice;
+            return;
+        }
         if (!lastAcceptedAcquisition) {
             if (restoredDisplayFrame) {
                 el.textContent = 'Saved • ' + formatSampleAge(restoredDisplayFrame.timestamp);
@@ -2115,6 +2247,8 @@ const ViewerTracker = (function() {
                 tierHighTimes: Object.fromEntries(Object.entries(tierHighTimes)),
                 withTokensHighTime: withTokensHighTime, totalHighTime: totalHighTime,
                 anonHighTime: anonHighTime, femaleTransHighTime: femaleTransHighTime,
+                sessionStartedAt: sessionStartedAt,
+                sessionHighs: Object.fromEntries(Object.entries(sessionHighs).map(function(entry) { return [entry[0], Object.assign({}, entry[1])]; })),
                 newHighTiers: Object.fromEntries(Object.entries(newHighTiers))
             };
             var diagnostics = acceptRoomSnapshot(snapshot, context.room);
@@ -2176,6 +2310,8 @@ const ViewerTracker = (function() {
                 totalHighTime = priorState.totalHighTime;
                 anonHighTime = priorState.anonHighTime;
                 femaleTransHighTime = priorState.femaleTransHighTime;
+                sessionStartedAt = priorState.sessionStartedAt;
+                sessionHighs = priorState.sessionHighs;
                 newHighTiers = priorState.newHighTiers || {};
                 try {
                     var trendEl = document.getElementById('trend-container');
@@ -2424,58 +2560,18 @@ const ViewerTracker = (function() {
         var anonymousCount = getAnonymousCount();
         var now = Date.now();
         
-        Object.keys(counts).forEach(function(tier) {
-            var highResult = getHighValue(history[tier], counts[tier], now);
-            if (counts[tier] > 0 && counts[tier] >= highResult.value) {
-                newHighTiers[tier] = true;
-            } else {
-                delete newHighTiers[tier];
-            }
-            if (highResult.isNew && highResult.time) {
-                tierHighTimes[tier] = highResult.time;
-            }
+        if (sessionStartedAt === null) sessionStartedAt = now;
+        var sample = Object.assign({}, counts, { withTokens: withTokens, total: total, anonymous: anonymousCount });
+        STORAGE_HISTORY_SERIES.forEach(function(key) {
+            var previous = getSessionHigh(key, 0);
+            var value = sample[key];
+            if (value > previous.value) sessionHighs[key] = { value: value, time: now };
+            else if (!sessionHighs[key]) sessionHighs[key] = previous;
+            if (value > 0 && value >= sessionHighs[key].value) newHighTiers[key] = true;
+            else delete newHighTiers[key];
         });
-        
-        var withTokensResult = getHighValue(history['withTokens'], withTokens, now);
-        if (withTokens > 0 && withTokens >= withTokensResult.value) {
-            newHighTiers['withTokens'] = true;
-        } else {
-            delete newHighTiers['withTokens'];
-        }
-        if (withTokensResult.isNew && withTokensResult.time) {
-            withTokensHighTime = withTokensResult.time;
-        }
-        
-        var totalResult = getHighValue(history['total'], total, now);
-        if (total > 0 && total >= totalResult.value) {
-            newHighTiers['total'] = true;
-        } else {
-            delete newHighTiers['total'];
-        }
-        if (totalResult.isNew && totalResult.time) {
-            totalHighTime = totalResult.time;
-        }
-        
-        var anonResult = getHighValue(history['anonymous'], anonymousCount, now);
-        if (anonymousCount > 0 && anonymousCount >= anonResult.value) {
-            newHighTiers['anonymous'] = true;
-        } else {
-            delete newHighTiers['anonymous'];
-        }
-        if (anonResult.isNew && anonResult.time) {
-            anonHighTime = anonResult.time;
-        }
-        
-        var ftResult = getHighValue(history['female-trans'], counts['female-trans'], now);
-        if (counts['female-trans'] > 0 && counts['female-trans'] >= ftResult.value) {
-            newHighTiers['female-trans'] = true;
-        } else {
-            delete newHighTiers['female-trans'];
-        }
-        if (ftResult.isNew && ftResult.time) {
-            femaleTransHighTime = ftResult.time;
-        }
-        
+        syncHighTimes();
+
         history.timestamps.push(now);
         Object.keys(counts).forEach(function(tier) {
             history[tier].push(counts[tier]);
@@ -2543,6 +2639,28 @@ const ViewerTracker = (function() {
             var key = row.key === 'withtokens' ? 'withTokens' : row.key === 'anon' ? 'anonymous' : row.key;
             drawSparkline('spark-' + row.key, displayHistory[key], row.color, panelChartHeights[row.key] || row.height);
         });
+    }
+
+    function getSessionHigh(key, current) {
+        var saved = sessionHighs[key];
+        if (!saved) {
+            var values = history[key] || [];
+            var value = Math.max.apply(null, [0].concat(values));
+            saved = { value: value, time: value > 0 ? history.timestamps[values.indexOf(value)] : null };
+        }
+        return { value: Math.max(saved.value, current || 0), time: saved.time };
+    }
+
+    function syncHighTimes() {
+        Object.keys(TIERS).forEach(function(key) { tierHighTimes[key] = getSessionHigh(key, 0).time; });
+        withTokensHighTime = getSessionHigh('withTokens', 0).time;
+        totalHighTime = getSessionHigh('total', 0).time;
+        anonHighTime = getSessionHigh('anonymous', 0).time;
+        femaleTransHighTime = getSessionHigh('female-trans', 0).time;
+    }
+
+    function getDisplayHigh(frame, key, current) {
+        return frame.isPlayback ? getHighValue(frame.history[key], current) : getSessionHigh(key, current);
     }
 
     function getHighValue(data, currentValue, timestamp) {
@@ -3330,7 +3448,7 @@ const ViewerTracker = (function() {
                 var highEl = document.getElementById('high-' + tier);
                 var rowEl = document.getElementById('tier-row-' + tier);
                 var currentVal = counts[tier];
-                var highResult = getHighValue(displayHistory[tier], currentVal);
+                var highResult = getDisplayHigh(frame, tier, currentVal);
                 var highVal = highResult.value;
                 if (countEl) countEl.textContent = currentVal;
                 if (highEl) highEl.textContent = 'H:' + highVal.toLocaleString();
@@ -3347,7 +3465,7 @@ const ViewerTracker = (function() {
             var withTokensPctEl = document.getElementById('pct-withtokens');
             var withTokensHighEl = document.getElementById('high-withtokens');
             var withTokensRowEl = document.getElementById('tier-row-withtokens');
-            var withTokensResult = getHighValue(displayHistory['withTokens'], withTokens);
+            var withTokensResult = getDisplayHigh(frame, 'withTokens', withTokens);
             if (withTokensCountEl) withTokensCountEl.textContent = withTokens;
             if (withTokensPctEl) withTokensPctEl.textContent = withTokensPct;
             if (withTokensHighEl) withTokensHighEl.textContent = 'H:' + withTokensResult.value.toLocaleString();
@@ -3362,7 +3480,7 @@ const ViewerTracker = (function() {
             var totalEl = document.getElementById('count-total');
             var totalHighEl = document.getElementById('high-total');
             var totalRowEl = document.getElementById('tier-row-total');
-            var totalResult = getHighValue(displayHistory['total'], total);
+            var totalResult = getDisplayHigh(frame, 'total', total);
             if (totalEl) totalEl.textContent = total;
             if (totalHighEl) totalHighEl.textContent = 'H:' + totalResult.value.toLocaleString();
             if (totalRowEl) {
@@ -3376,7 +3494,7 @@ const ViewerTracker = (function() {
             var fullAnonText = document.getElementById('anon-ratio-full');
             var anonHighEl = document.getElementById('high-anon');
             var anonRowEl = document.getElementById('tier-row-anon');
-            var anonResult = getHighValue(displayHistory['anonymous'], anonymousCount);
+            var anonResult = getDisplayHigh(frame, 'anonymous', anonymousCount);
             if (fullAnonText) {
                 var anonLabel = anonymousCount > 0 ? anonymousCount.toLocaleString() : '0';
                 var digits = String(Math.abs(anonymousCount)).length;
