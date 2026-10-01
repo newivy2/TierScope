@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.1.12
+// @version      3.1.13
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -18,7 +18,7 @@
 const ViewerTracker = (function() {
     'use strict';
 
-    const TIERSCOPE_VERSION = '3.1.12';
+    const TIERSCOPE_VERSION = '3.1.13';
     const API_TIMEOUT_MS = 10000;
     const DEFAULT_API_INTERVAL_SECONDS = 60;
     const DOM_FALLBACK_INTERVAL_SECONDS = 60;
@@ -247,7 +247,7 @@ const ViewerTracker = (function() {
         });
         var label = document.getElementById('mini-metric');
         var names = { room: 'Room total', withTokens: 'With Tokens', total: 'Registered' };
-        if (label) { label.textContent = names[miniMetric] + ' ▾'; label.title = 'Click to cycle Room total, With Tokens, and Registered. Showing the last 15 recorded minutes.'; }
+        if (label) { label.textContent = (miniMetric === 'room' ? 'Room total' : miniMetric === 'withTokens' ? '💎' : '📊') + ' ▾'; label.setAttribute('aria-label', names[miniMetric] + ' chart. Activate to change metric.'); label.title = 'Click to cycle Room total, With Tokens, and Registered. Showing the last 15 recorded minutes.'; }
         var high = document.getElementById('mini-high');
         var peak = miniMetric === 'room' ? frame.roomTotalHigh : getSessionHigh(miniMetric, 0).value;
         if (high) { high.textContent = 'H:' + compactNumber(peak); high.title = 'Session high: ' + peak.toLocaleString(); }
@@ -489,7 +489,7 @@ const ViewerTracker = (function() {
                 '). ' + context + '. Click to restore row.';
             button.setAttribute('aria-label', 'Restore ' + row.label + ' row. ' + context + ': ' + value.toLocaleString());
             button.style.background = highlights && highlights[historyKey] ?
-                'rgba(50, 205, 50, 0.15)' : 'rgba(255,255,255,calc(0.05 * var(--tier-background-scale, 1)))';
+                'rgba(50, 205, 50, 0.22)' : 'rgba(255,255,255,calc(0.05 * var(--tier-background-scale, 1)))';
         });
     }
 
@@ -2592,16 +2592,15 @@ const ViewerTracker = (function() {
             var deltaColor = diff > 0 ? '#32CD32' : '#ff4444';
             // Color-coded background based on delta direction
             var bgStyle;
-            if (isSpecial) {
-                bgStyle = 'background:rgba(255,105,180,0.15);border:1px solid #ff69b4;';
-            } else if (diff > 0) {
-                bgStyle = 'background:rgba(50, 205, 50, 0.15);';  // Green for positive
+            if (diff > 0) {
+                bgStyle = 'background:rgba(50, 205, 50, 0.22);';  // Green for positive
             } else if (diff < 0) {
                 bgStyle = 'background:rgba(255, 85, 85, 0.15);';   // Red for negative
             } else {
                 bgStyle = 'background:rgba(255, 215, 0, 0.15);';   // Yellow for stable
             }
-            var padding = isLarge ? '4px 10px' : '2px 6px';
+            if (isSpecial) bgStyle += 'border:1px solid #ff69b4;';
+            var padding = isLarge ? '6px 12px' : '2px 6px';
             var fontSize = isLarge ? '12px' : '10px';
             var deltaFont = fontSize;
             if (deltaText) {
@@ -2629,7 +2628,7 @@ const ViewerTracker = (function() {
         html += buildTrendItem(getTierMarker('gray'), counts['gray'] || 0, comparisonCounts['gray'] || 0, false, false);
         html += buildTrendItem(getTierMarker('female-trans'), counts['female-trans'] || 0, comparisonCounts['female-trans'] || 0, false, false);
         html += '</div>';
-        html += '<div style="display:flex;justify-content:center;gap:8px;padding:6px 0;">';
+        html += '<div style="display:flex;justify-content:center;gap:8px;padding:4px 0;">';
         html += buildTrendItem('💎', withTokens || 0, comparisonCounts.withTokens || 0, true, true);
         html += buildTrendItem('📊', total || 0, comparisonCounts.total || 0, false, true);
         html += buildTrendItem('👻', anonymousCount || 0, comparisonCounts.anonymous || 0, false, true);
@@ -3602,7 +3601,7 @@ const ViewerTracker = (function() {
                 if (highEl) highEl.textContent = 'H:' + highVal.toLocaleString();
                 if (rowEl) {
                     if (highlights && highlights[tier]) {
-                        rowEl.style.background = 'rgba(50, 205, 50, 0.15)';
+                        rowEl.style.background = 'rgba(50, 205, 50, 0.22)';
                     } else {
                         rowEl.style.background = 'rgba(255,255,255,calc(0.05 * var(--tier-background-scale, 1)))';
                     }
@@ -3619,7 +3618,7 @@ const ViewerTracker = (function() {
             if (withTokensHighEl) withTokensHighEl.textContent = 'H:' + withTokensResult.value.toLocaleString();
             if (withTokensRowEl) {
                 if (highlights && highlights['withTokens']) {
-                    withTokensRowEl.style.background = 'rgba(50, 205, 50, 0.15)';
+                    withTokensRowEl.style.background = 'rgba(50, 205, 50, 0.22)';
                 } else {
                     withTokensRowEl.style.background = 'rgba(255,105,180,0.15)';
                 }
@@ -3633,7 +3632,7 @@ const ViewerTracker = (function() {
             if (totalHighEl) totalHighEl.textContent = 'H:' + totalResult.value.toLocaleString();
             if (totalRowEl) {
                 if (highlights && highlights['total']) {
-                    totalRowEl.style.background = 'rgba(50, 205, 50, 0.15)';
+                    totalRowEl.style.background = 'rgba(50, 205, 50, 0.22)';
                 } else {
                     totalRowEl.style.background = 'rgba(255,255,255,0.1)';
                 }
@@ -3652,7 +3651,7 @@ const ViewerTracker = (function() {
             if (anonHighEl) anonHighEl.textContent = 'H:' + anonResult.value.toLocaleString();
             if (anonRowEl) {
                 if (highlights && highlights['anonymous']) {
-                    anonRowEl.style.background = 'rgba(50, 205, 50, 0.15)';
+                    anonRowEl.style.background = 'rgba(50, 205, 50, 0.22)';
                 } else {
                     anonRowEl.style.background = 'rgba(136,136,136,0.15)';
                 }

@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **version 3.1.12**. For a quick introduction and installation link, see the [README](readme.md).
+Detailed reference for **version 3.1.13. For a quick introduction and installation link, see the [README](readme.md).
 
 ## Contents
 
@@ -59,7 +59,7 @@ Reset requests a one-off scan even when automatic acquisition is paused. It does
 
 ### Compact dashboard
 
-The minimized panel retains its 140-pixel content width. Click the chart label to cycle **Room total → With Tokens → Registered**. This preference is saved across rooms and refreshes, independently of collapsed rows.
+The minimized panel retains its 140-pixel content width. Click the chart label to cycle **Room total → 💎 (With Tokens) → 📊 (Registered)**. This preference is saved across rooms and refreshes, independently of collapsed rows.
 
 The chart shows the last **15 recorded minutes**, ending at the latest retained sample. Horizontal positions follow sample timestamps; vertical scale fits the visible values. A single sample is a dot, and a constant series is a horizontal line. Hover over the chart for its value range, sample count, and end time. The adjacent H value is the session high, not merely the high within the visible window.
 
@@ -264,7 +264,7 @@ Look for their boxed markers below the header and click to restore them. Moderat
 
 **The panel shrank after collapsing rows**
 
-This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only version 3.1.12 is enabled, refresh the tab, and report the browser and steps that reproduce it.
+This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only version 3.1.13 is enabled, refresh the tab, and report the browser and steps that reproduce it.
 
 **The panel is too large or near a screen edge**
 
@@ -302,7 +302,8 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
-| **3.1.12** | Restore page-based startup: expanded in broadcast rooms, minimized elsewhere; retain position/scale persistence and scan-settings close fixes. |
+| **3.1.13** | Compact metric icons; slightly brighter green highlights; larger third-row trend boxes; diamond trend background follows change direction while retaining its pink border. |
+| 3.1.12 | Restore page-based startup: expanded in broadcast rooms, minimized elsewhere; retain position/scale persistence and scan-settings close fixes. |
 | 3.1.11 | Add a close button and document-level Escape handling for scan settings; remember compact/expanded view with panel geometry. |
 | 3.1.10 | Compact dashboard with a remembered switchable chart, count changes, sample freshness, and scan settings overlay. |
 | 3.1.9 | Isolate corrupt or unsupported saved records; restore healthy siblings; expire valid old-epoch orphan records. |
