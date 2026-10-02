@@ -1,35 +1,15 @@
-TierScope 3.3.1 — targeted interval regression checks
+TierScope 3.3.2 — targeted FILE REPLAY source-label checks
 
 Userscript syntax: PASS (node --check)
 11 session-file/window tests: PASS
-Session-file/window browser checks: PASS in Chromium and Firefox
+Session-file/window browser checks: PASS in Chromium 138 and Firefox 153
 
-The complete suite was not rerun for this interval-only update. The previous 3.3.0 full-suite baseline passed 59 unit tests and all browser suites.
+Verified visible archive room identity during background acquisition; changing
+files updates that identity; returning to live hides it and ordinary Replay
+clears it. A long valid room name is ellipsized with its full name in the tooltip.
+The room label, buttons, and timeline do not overlap; panel geometry is unchanged.
+File import on a directory page still shows the source without starting scans.
+Session/GIF exports, window selection, and existing file validation checks pass.
 
---- Unit tests ---
-✔ session download round-trips full history, gaps, timing, highs and room despite a narrow chart window (42.77303ms)
-✔ a session file survives more than three hours and retains highs outside the rolling history (11.013725ms)
-✔ unknown file fields and obsolete username collections are discarded without execution or re-export (5.788892ms)
-✔ invalid, empty, oversized and future-version files preserve the current Replay and live state (9.535901ms)
-✔ live scans continue behind imported Replay; closing returns to the latest room data (9.397292ms)
-✔ exporting a normal Replay preserves its entry snapshot after new scans (7.895332ms)
-✔ pause, reload, failed acquisition, Stop, file Replay and close preserve session closure and timing (13.005433ms)
-✔ Reset, navigation, closing Replay and a newer file cancel an older asynchronous file read (24.179678ms)
-✔ Stop during an in-flight scan cannot append into live history or an imported Replay (6.826734ms)
-✔ chart windows retain all stored samples and use only samples through the Replay frame (4.968808ms)
-✔ full history defaults, window preferences survive reload and Reset, invalid preferences fall back safely (30.281972ms)
-ℹ tests 11
-ℹ suites 0
-ℹ pass 11
-ℹ fail 0
-ℹ cancelled 0
-ℹ skipped 0
-ℹ todo 0
-ℹ duration_ms 272.481089
-
---- Chromium ---
-PASS session files and exports, all six chart windows in requested order, short sessions, header labels, frozen Replay position, keyboard inspection, unchanged geometry and no future Replay samples
-
---- Firefox ---
-PASS session files and exports, all six chart windows in requested order, short sessions, header labels, frozen Replay position, keyboard inspection, unchanged geometry and no future Replay samples
-
+The complete suite was not rerun for this presentation-only update.
+The previous full-suite baseline is recorded in the development notes.

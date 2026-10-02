@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **version 3.3.1**. For a quick introduction and installation link, see the [README](readme.md).
+Detailed reference for **version 3.3.2**. For a quick introduction and installation link, see the [README](readme.md).
 
 ## Contents
 
@@ -199,7 +199,7 @@ Replay freezes the available history when opened. New scans continue updating th
 
 Open the **Full ▾ / 4h ▾ / 2h ▾ / 1h ▾ / 30m ▾ / 15m ▾** header menu and choose **Save session file**. The download ends in `.tierscope.json` and contains the room name, capture time, full retained sample history, gap markers, session highs and their recorded times, session start information, active elapsed time, and paused/stopped state. It contains aggregate counts, without viewer username collections. A running session can be saved without pausing or stopping it.
 
-Choose **Open session file…** from the same menu to reopen a download. It opens paused in a separate **FILE REPLAY** view, with the same stepping, playback speed, row controls, chart windows, and GIF export as ordinary Replay. Hover over the header for the file’s room name; the options menu shows its room, capture time, sample count, and whole-session room high. The Replay time tooltip includes captured active time and session state. Replay highs still use retained samples through the selected frame; the file also preserves whole-session highs that may predate those samples.
+Choose **Open session file…** from the same menu to reopen a download. It opens paused in a separate **FILE REPLAY** view, with the same stepping, playback speed, row controls, chart windows, and GIF export as ordinary Replay. The file’s room name stays visible above the Replay controls, independently of the room currently open in the browser. Long names shorten with an ellipsis; hover over the name to read it in full. The options menu shows its room, capture time, sample count, and whole-session room high. The Replay time tooltip includes captured active time and session state. Replay highs still use retained samples through the selected frame; the file also preserves whole-session highs that may predate those samples.
 
 Opening a file does not replace, merge, save over, or resume the current room session. Current live acquisition continues with its existing pause/Stop state. **Close Replay** returns to that room’s latest data. It is also possible to expand TierScope on a directory page and open a file there; opening the file itself makes no acquisition requests. Imported Replay is not automatically restored after refresh or navigation: reopen the file when needed.
 
@@ -357,7 +357,7 @@ Look for their boxed markers below the header and click to restore them. Moderat
 
 **The panel shrank after collapsing rows**
 
-This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only version 3.3.1 is enabled, refresh the tab, and report the browser and steps that reproduce it.
+This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only version 3.3.2 is enabled, refresh the tab, and report the browser and steps that reproduce it.
 
 **The panel is too large or near a screen edge**
 
@@ -397,7 +397,8 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
-| **3.3.1** | Add 4h, 2h, and 30min chart windows; keep the order Full / 4h / 2h / 1h / 30min / 15min. |
+| **3.3.2** | Show the saved session’s room name in FILE REPLAY, with long-name truncation and unchanged panel dimensions. |
+| 3.3.1 | Add 4h, 2h, and 30min chart windows; keep the order Full / 4h / 2h / 1h / 30min / 15min. |
 | 3.3.0 | Download and reopen session files in isolated, read-only Replay; remembered Full / 1h / 15m expanded chart windows; expanded file, rendering, and lifecycle regression tests. |
 | 3.2.0 | Orange dashed connectors mark missing intervals in expanded and compact charts, Replay, and GIFs, preserving elapsed-time spacing without adding samples. Gap inspection explains the missing interval; GIFs include a small matching legend. Existing session records remain compatible. |
 | 3.1.19 | Manual Stop now asks for confirmation. Cancel preserves the current session; the automatic three-hour Stop remains unattended. |

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.3.1
+// @version      3.3.2
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -18,7 +18,7 @@
 const ViewerTracker = (function() {
     'use strict';
 
-    const TIERSCOPE_VERSION = '3.3.1';
+    const TIERSCOPE_VERSION = '3.3.2';
     const API_TIMEOUT_MS = 10000;
     const DEFAULT_API_INTERVAL_SECONDS = 60;
     const DOM_FALLBACK_INTERVAL_SECONDS = 60;
@@ -1192,6 +1192,18 @@ const ViewerTracker = (function() {
         updatePanelOptions();
         var label = document.getElementById('playback-label');
         if (label) { label.textContent = playback.imported ? 'FILE REPLAY' : 'PLAYBACK'; label.title = playback.archive ? playback.archive.room : ''; }
+        var room = document.getElementById('playback-room');
+        if (room) {
+            var sourceRoom = playback.imported && playback.archive ? playback.archive.room : '';
+            room.textContent = sourceRoom ? 'Room: ' + sourceRoom : '';
+            room.title = sourceRoom ? 'Saved session from ' + sourceRoom : '';
+            room.style.display = sourceRoom ? 'block' : 'none';
+        }
+        // A saved/empty trend is shorter than the live trend grid. The hidden
+        // Controls area below it provides room for the file label without
+        // changing the panel's dimensions.
+        var controls = document.getElementById('playback-controls');
+        if (controls) controls.style.minHeight = playback.imported ? '66px' : '';
         var back = document.getElementById('playback-return');
         if (back) { back.textContent = playback.imported ? 'Close Replay' : 'Return to Live'; back.title = playback.imported ? 'Close this file and return to the current room session' : 'Return to the current room session'; }
         var index = getPlaybackSampleIndex(playback.snapshot, playback.positionMs, playback.stepIndex);
@@ -3906,12 +3918,15 @@ const ViewerTracker = (function() {
                             '<span id="gif-export-status" role="status" style="font-size:8px;color:var(--panel-secondary);overflow-wrap:anywhere;"></span>' +
                             '<button id="btn-cancel-gif" hidden style="font-size:8px;cursor:pointer;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;">Cancel</button>' +
                         '</div>' +
+                        '<div style="display:flex;flex-direction:column;justify-content:center;gap:4px;min-width:0;">' +
+                            '<div id="playback-room" style="display:none;flex-shrink:0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center;font-size:10px;line-height:12px;font-weight:bold;color:var(--panel-text);"></div>' +
                         '<div style="display:flex;align-items:center;justify-content:space-between;gap:3px;">' +
                             '<strong id="playback-label" style="font-size:9px;color:var(--panel-warning);">PLAYBACK</strong>' +
                             '<button id="playback-play" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#4169E1;color:white;border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Pause</button>' +
                             '<select id="playback-speed" aria-label="Playback speed" style="font-size:8px;height:15px;margin:0;padding:0;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select>' +
                             '<button id="btn-export-gif" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#ff69b4;color:white;border:1px solid #ff69b4;border-radius:2px;cursor:pointer;" title="Download this Replay as a ' + GIF_WIDTH + ' × ' + GIF_HEIGHT + ' GIF">GIF</button>' +
                             '<button id="playback-return" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Return to Live</button>' +
+                        '</div>' +
                         '</div>' +
                         '<div style="display:flex;align-items:center;gap:4px;min-width:0;">' +
                         '<button type="button" id="playback-previous" title="Previous recorded sample (pauses Replay)" aria-label="Previous recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">|&#9664;</button>' +
