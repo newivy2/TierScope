@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.3.2
+// @version      3.3.3
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -18,7 +18,7 @@
 const ViewerTracker = (function() {
     'use strict';
 
-    const TIERSCOPE_VERSION = '3.3.2';
+    const TIERSCOPE_VERSION = '3.3.3';
     const API_TIMEOUT_MS = 10000;
     const DEFAULT_API_INTERVAL_SECONDS = 60;
     const DOM_FALLBACK_INTERVAL_SECONDS = 60;
@@ -237,10 +237,25 @@ const ViewerTracker = (function() {
     var stoppedAt = null;
     var stopReason = null;
     var broadcasterAbsence = { since: null, missing: 0 };
+    var absencePausedAt = null;
     var lastScheduledIntervalSeconds = DEFAULT_API_INTERVAL_SECONDS;
+    const ABSENCE_PAUSE_MS = 15 * 60 * 1000;
+    const ABSENCE_CHECK_SECONDS = 300;
     const ABSENCE_STOP_MS = 3 * 60 * 60 * 1000;
 
+    function isAbsencePaused() {
+        return absencePausedAt !== null && isPaused && isAutoRefreshOn && !isStopped;
+    }
+
+    function absencePauseDescription() {
+        return 'Recording and elapsed time paused after 15 minutes without the broadcaster. ' +
+            'API return checks every 5 minutes, subject to retry restrictions. A confirmed return resumes recording. ' +
+            'Automatic Stop at ' + new Date(absencePausedAt + ABSENCE_STOP_MS).toLocaleString() +
+            ' (3 hours after auto-pause).';
+    }
+
     function getEffectiveScanIntervalSeconds() {
+        if (isAbsencePaused()) return ABSENCE_CHECK_SECONDS;
         if (broadcasterAbsence.missing < 2 || broadcasterAbsence.since === null) return scanIntervalSeconds;
         return Math.max(scanIntervalSeconds, Date.now() - broadcasterAbsence.since >= 10 * 60000 ? 300 : 120);
     }
@@ -254,12 +269,32 @@ const ViewerTracker = (function() {
     }
 
     function stopDescription() {
-        return stopReason === 'absence' ? 'Stopped after 3 hours of broadcaster absence' : 'Session stopped';
+        return stopReason === 'absence' ? (absencePausedAt !== null ?
+            'Stopped after 3 hours auto-paused for broadcaster absence' : 'Stopped after 3 hours of broadcaster absence') : 'Session stopped';
     }
 
     function checkAbsenceStop() {
-        if (!isStopped && isAutoRefreshOn && !isPaused && broadcasterAbsence.missing >= 2 &&
-            broadcasterAbsence.since !== null && Date.now() - broadcasterAbsence.since >= ABSENCE_STOP_MS) {
+        if (isStopped || !isAutoRefreshOn) return false;
+        if (absencePausedAt === null && !isPaused && broadcasterAbsence.missing >= 2 &&
+            broadcasterAbsence.since !== null && Date.now() - broadcasterAbsence.since >= ABSENCE_PAUSE_MS) {
+            // Anchor deadlines to observed absence even if a background tab wakes late.
+            absencePausedAt = broadcasterAbsence.since + ABSENCE_PAUSE_MS;
+            scanEpoch++;
+            isScanning = false;
+            pausedElapsedTime = trackingStartTime ? Math.max(0, absencePausedAt - trackingStartTime) : 0;
+            isPaused = true;
+            if (trackingTimerInterval) clearInterval(trackingTimerInterval);
+            trackingTimerInterval = null;
+            pendingHistoryGap = true;
+            cancelHighPulses();
+            // The next attempt checks presence only; it cannot record absent-room counts.
+            nextScanAt = Math.max(Date.now(), readRequestPolicy().until);
+            updateTrackingTimer();
+            updateStopControls();
+            updateAcquisitionStatus();
+            saveSession(getModelName());
+        }
+        if (isAbsencePaused() && Date.now() - absencePausedAt >= ABSENCE_STOP_MS) {
             stopTracking('absence');
             return true;
         }
@@ -274,9 +309,10 @@ const ViewerTracker = (function() {
             if (!button) return;
             button.innerHTML = isStopped ? 'Start' : isAutoRefreshOn ? '⏸' : '▶';
             button.title = isStopped ? 'Start a new session (keeps this stopped record until normal cleanup)' :
+                isAbsencePaused() ? 'Pause return checks; manual Resume will be required' :
                 isAutoRefreshOn ? 'Pause scans and elapsed time' : 'Resume this session';
-            button.setAttribute('aria-label', isStopped ? 'Start a new session' : isAutoRefreshOn ? 'Pause scans' : 'Resume scans');
-            button.style.background = isStopped ? '#4169E1' : isAutoRefreshOn ? '#32CD32' : '#ff4444';
+            button.setAttribute('aria-label', isStopped ? 'Start a new session' : isAbsencePaused() ? 'Pause return checks' : isAutoRefreshOn ? 'Pause scans' : 'Resume scans');
+            button.style.background = isStopped ? '#4169E1' : isAbsencePaused() ? '#b86b00' : isAutoRefreshOn ? '#32CD32' : '#ff4444';
         });
     }
 
@@ -284,7 +320,7 @@ const ViewerTracker = (function() {
         if (isStopped) return;
         stopReason = reason === 'absence' ? 'absence' : 'manual';
         stoppedAt = stopReason === 'absence' && broadcasterAbsence.since !== null ?
-            Math.min(Date.now(), broadcasterAbsence.since + ABSENCE_STOP_MS) : Date.now();
+            Math.min(Date.now(), (absencePausedAt !== null ? absencePausedAt : broadcasterAbsence.since) + ABSENCE_STOP_MS) : Date.now();
         isStopped = true;
         // Invalidate pending API/DOM work before freezing this session.
         scanEpoch++;
@@ -400,6 +436,13 @@ const ViewerTracker = (function() {
         if (isStopped) {
             el.textContent = 'Stopped'; el.title = stopDescription() + '. Start begins a new session.';
             el.style.color = 'var(--panel-muted)'; return;
+        }
+        if (isAbsencePaused() && !sessionStorageNotice) {
+            var waitingPolicy = requestPolicyMessage(readRequestPolicy());
+            el.textContent = waitingPolicy || 'Auto-paused';
+            el.title = absencePauseDescription() + (waitingPolicy ? ' ' + waitingPolicy + '.' : ' Next return check: ' + countdownSeconds + 's.');
+            el.style.color = 'var(--panel-warning)';
+            return;
         }
         var sample = lastAcceptedAcquisition || restoredDisplayFrame;
         var source = lastAcceptedAcquisition ? lastAcceptedAcquisition.source : sample ? 'Saved' : 'No sample';
@@ -1456,6 +1499,12 @@ const ViewerTracker = (function() {
             requireField(data.isPaused === true && isStorageTimestamp(data.stoppedAt), 'stopped state');
             requireField(data.stopReason === 'manual' || data.stopReason === 'absence', 'stopReason');
         }
+        if (hasStorageField(data, 'absencePausedAt') && data.absencePausedAt !== null) {
+            requireField(isStorageTimestamp(data.absencePausedAt) && data.absencePausedAt <= data.timestamp &&
+                data.isPaused === true && isStorageObject(data.broadcasterAbsence) &&
+                data.broadcasterAbsence.missing >= 2 && isStorageTimestamp(data.broadcasterAbsence.since) &&
+                data.absencePausedAt === data.broadcasterAbsence.since + ABSENCE_PAUSE_MS, 'absencePausedAt');
+        }
         if (hasStorageField(data, 'broadcasterAbsence')) {
             var absence = data.broadcasterAbsence;
             requireField(isStorageObject(absence) && Number.isSafeInteger(absence.missing) && absence.missing >= 0 &&
@@ -1478,6 +1527,7 @@ const ViewerTracker = (function() {
             isStopped: data.isStopped === true,
             stoppedAt: data.isStopped ? data.stoppedAt : null,
             stopReason: data.isStopped ? data.stopReason : null,
+            absencePausedAt: hasStorageField(data, 'absencePausedAt') ? data.absencePausedAt : null,
             broadcasterAbsence: data.broadcasterAbsence ? Object.assign({}, data.broadcasterAbsence) : { since: null, missing: 0 },
             trendComparisonMode: hasStorageField(data, 'trendComparisonMode') ? data.trendComparisonMode : 'last',
             autoTrendEscalation: !hasStorageField(data, 'autoTrendEscalation') || data.autoTrendEscalation,
@@ -1577,6 +1627,7 @@ const ViewerTracker = (function() {
         stoppedAt = data.stoppedAt;
         stopReason = data.stopReason;
         broadcasterAbsence = data.broadcasterAbsence;
+        absencePausedAt = data.absencePausedAt;
         lastScheduledIntervalSeconds = getEffectiveScanIntervalSeconds();
         pausedElapsedTime = data.pausedElapsedTime;
         previousCounts = data.previousCounts;
@@ -1643,6 +1694,7 @@ const ViewerTracker = (function() {
             stoppedAt: stoppedAt,
             stopReason: stopReason,
             broadcasterAbsence: broadcasterAbsence,
+            absencePausedAt: absencePausedAt,
             pausedElapsedTime: pausedElapsedTime,
             previousCounts: previousCounts,
             hasTrendBaseline: hasTrendBaseline,
@@ -1896,6 +1948,7 @@ const ViewerTracker = (function() {
         stoppedAt = null;
         stopReason = null;
         broadcasterAbsence = { since: null, missing: 0 };
+        absencePausedAt = null;
         activeSessionStorageKey = getStorageKey(modelName);
         scanEpoch++;
         isScanning = false;
@@ -2100,6 +2153,12 @@ const ViewerTracker = (function() {
             report.push('Stopped At: ' + new Date(stoppedAt).toISOString());
             report.push('Displayed Data: Final retained sample; this session is closed.');
             report.push('');
+        } else if (isAbsencePaused()) {
+            report.push('Session State: AUTO-PAUSED — broadcaster absent');
+            report.push('Auto-paused At: ' + new Date(absencePausedAt).toISOString());
+            report.push('Displayed Data: Last retained sample; presence checks do not record audience counts.');
+            report.push(absencePauseDescription());
+            report.push('');
         }
         if (restored) {
             report.push('Displayed Data: Last saved snapshot; no fresh sample accepted since restore.');
@@ -2159,7 +2218,7 @@ const ViewerTracker = (function() {
             report.push('  Recorded at: ' + formatDateTime(anonHighTime) + ' (' + elapsed + ' into session)');
             report.push('');
         }
-        report.push(isStopped ? '--- STOPPED SESSION STATS (NOT A LIVE SAMPLE) ---' : restored ? '--- LAST SAVED STATS (NOT A LIVE SAMPLE) ---' : '--- CURRENT STATS ---');
+        report.push(isStopped ? '--- STOPPED SESSION STATS (NOT A LIVE SAMPLE) ---' : isAbsencePaused() ? '--- AUTO-PAUSED STATS (NOT A LIVE SAMPLE) ---' : restored ? '--- LAST SAVED STATS (NOT A LIVE SAMPLE) ---' : '--- CURRENT STATS ---');
         report.push('');
         var counts = { 'red': 0, 'green': 0, 'purple': 0, 'pink': 0, 'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0 };
         users.forEach(function(data) {
@@ -2718,6 +2777,33 @@ const ViewerTracker = (function() {
         }
     }
 
+    async function checkBroadcasterReturn(context) {
+        lastAcquisitionAttemptSource = 'API';
+        try {
+            var snapshot = await acquireAPISnapshot(context);
+            if (!isAcquisitionCurrent(context) || checkAbsenceStop() || !isAbsencePaused()) return null;
+            if (readRequestPolicy().blocked) { pauseForAccessRestriction(); return null; }
+            clearRequestFailures(context.policyRevision);
+            if (!snapshot.users.some(function(user) { return user.isOwner === true; })) return null;
+            broadcasterAbsence = { since: null, missing: 0 };
+            absencePausedAt = null;
+            startTrackingTimer();
+            updateStopControls();
+            // A presence signal can resume scanning even if the counts fail the
+            // usual sample checks. Only a validated sample enters the history.
+            validateRoomSnapshot(snapshot);
+            return snapshot;
+        } catch (error) {
+            if (!isAcquisitionCurrent(context)) return null;
+            if (isAbsencePaused()) {
+                var policy = recordRequestFailure(error);
+                if (policy.blocked) pauseForAccessRestriction();
+            }
+            log('Return check did not record a sample: ' + error.message);
+            return null;
+        }
+    }
+
     function getDOMFallbackWaitSeconds(modelName) {
         var readyAt = domFallbackReadyAtByRoom.get(modelName.toLowerCase()) || 0;
         return Math.max(0, Math.ceil((readyAt - Date.now()) / 1000));
@@ -2728,10 +2814,11 @@ const ViewerTracker = (function() {
         try {
             var snapshot = await acquireAPISnapshot(context);
             if (!isAcquisitionCurrent(context)) return null;
+            if (checkAbsenceStop() || !isAcquisitionCurrent(context)) return null;
             // Presence comes from a well-formed API response, independently of
             // whether its counts pass the chart's sudden-drop sanity checks.
             broadcasterAbsence = nextBroadcasterAbsence(snapshot);
-            if (checkAbsenceStop()) return null;
+            if (checkAbsenceStop() || !isAcquisitionCurrent(context)) return null;
             validateRoomSnapshot(snapshot);
             domHealthStatus.consecutiveFailures = 0;
             clearRequestFailures(context.policyRevision);
@@ -2819,6 +2906,11 @@ const ViewerTracker = (function() {
             el.title = policyMessage + (sample ? '. Last sample: ' + new Date(sample.timestamp).toISOString() : '. No accepted sample.');
             return;
         }
+        if (isAbsencePaused()) {
+            el.textContent = 'Auto-paused • return checks';
+            el.title = absencePauseDescription();
+            return;
+        }
         if (!lastAcceptedAcquisition) {
             if (restoredDisplayFrame) {
                 el.textContent = 'Saved • ' + formatSampleAge(restoredDisplayFrame.timestamp);
@@ -2847,12 +2939,14 @@ const ViewerTracker = (function() {
         var context = { epoch: ++scanEpoch, generation: initGuard, url: location.href, room: getModelName(), policyRevision: policy.revision };
         var priorState = null;
         var priorAbsence = broadcasterAbsence;
+        var checkingReturn = isAbsencePaused();
         var statusEl = document.getElementById('auto-status');
         updateCountdownDisplay();
         try {
-            var snapshot = await acquireRoomSnapshot(context, returnToChat);
+            var snapshot = checkingReturn ? await checkBroadcasterReturn(context) : await acquireRoomSnapshot(context, returnToChat);
             if (!isAcquisitionCurrent(context)) return;
             if (checkAbsenceStop()) return;
+            if (checkingReturn && isAbsencePaused()) return;
             if (!snapshot) {
                 pendingHistoryGap = true;
                 if (statusEl) {
@@ -2956,7 +3050,7 @@ const ViewerTracker = (function() {
                 isScanning = false;
                 resetCountdown();
                 updateAcquisitionStatus();
-                if (!priorState && priorAbsence !== broadcasterAbsence) saveSession(context.room);
+                if (checkingReturn || (!priorState && priorAbsence !== broadcasterAbsence)) saveSession(context.room);
             }
         }
     }
@@ -3487,10 +3581,21 @@ const ViewerTracker = (function() {
             updateStopControls();
             return;
         }
+        if (isAbsencePaused()) {
+            if (timerDisplay) timerDisplay.textContent = scanIntervalSeconds + 's';
+            [statusEl, expandedCountdown, controlNextScan].forEach(function(el) {
+                if (!el) return;
+                el.textContent = policyMessage || (el === statusEl ? 'Auto-paused' : isScanning ? 'Checking...' : 'Check: ' + countdownSeconds + 's');
+                el.title = absencePauseDescription() + (policyMessage ? ' ' + policyMessage + '.' : ' Next return check: ' + countdownSeconds + 's.');
+                el.style.color = 'var(--panel-warning)';
+            });
+            updateStopControls();
+            return;
+        }
         var effectiveInterval = getEffectiveScanIntervalSeconds();
         var reduced = effectiveInterval > scanIntervalSeconds;
         timingTitle += ' Selected interval: ' + scanIntervalSeconds + 's. Effective interval: ' + effectiveInterval + 's.' +
-            (reduced ? ' Reduced scanning while the broadcaster is absent; Stop after 3 hours.' : '');
+            (reduced ? ' Reduced scanning while the broadcaster is absent; auto-pause at 15 minutes, then return checks for up to 3 hours.' : '');
         [statusEl, expandedCountdown, controlNextScan].forEach(function(el) {
             if (el) el.title = isAutoRefreshOn ? timingTitle :
                 'Automatic scans paused. An in-flight scan may finish. ' + timingTitle;
@@ -4136,8 +4241,7 @@ const ViewerTracker = (function() {
 
     function toggleAutoRefresh() {
         if (isStopped) { startNewSession(); return; }
-        if (!isAutoRefreshOn && broadcasterAbsence.missing >= 2 && broadcasterAbsence.since !== null &&
-            Date.now() - broadcasterAbsence.since >= ABSENCE_STOP_MS) { stopTracking('absence'); return; }
+        if (checkAbsenceStop()) return;
         // Only an explicit Resume clears access denial. Reset/reload cannot bypass it.
         if (!isAutoRefreshOn) {
             var policy = readRequestPolicy();
@@ -4145,6 +4249,9 @@ const ViewerTracker = (function() {
                 writeRequestPolicy({ until: policy.serverUntil || 0, serverUntil: policy.serverUntil || 0, failures: 0, blocked: 0, status: 0, revision: '' });
             }
         }
+        if (isAbsencePaused()) { scanEpoch++; isScanning = false; }
+        absencePausedAt = null;
+        broadcasterAbsence = { since: null, missing: 0 };
         isAutoRefreshOn = !isAutoRefreshOn;
         var btn = document.getElementById('btn-auto');
         var btnControl = document.getElementById('btn-control-auto');
@@ -4178,6 +4285,8 @@ const ViewerTracker = (function() {
             updateCountdownDisplay();
         }
         updateStopControls();
+        updateAcquisitionStatus();
+        saveSession(getModelName());
     }
 
     function setupDraggable() {
@@ -4463,7 +4572,7 @@ const ViewerTracker = (function() {
             isAutoRefreshOn = isRoom;
         } else {
             isMinimized = false;
-            isAutoRefreshOn = !isPaused;
+            isAutoRefreshOn = !isStopped && (!isPaused || absencePausedAt !== null);
         }
         try {
             createPanel();
@@ -4492,7 +4601,12 @@ const ViewerTracker = (function() {
         updateAcquisitionStatus();
         restorePanelGeometry();
         if (isStopped) { updateStopControls(); updateCountdownDisplay(); updateTrackingTimer(); return; }
-        if (isRoom && modelName !== 'unknown' && !loaded && isAutoRefreshOn && !isPaused) {
+        if (isRoom && isAbsencePaused()) {
+            nextScanAt = Math.max(Date.now(), readRequestPolicy().until);
+            startCountdown();
+            performScanThenReturn(true);
+            updateTrackingTimer();
+        } else if (isRoom && modelName !== 'unknown' && !loaded && isAutoRefreshOn && !isPaused) {
             // A fresh room gets its first point now. Start the recurring countdown
             // only after this attempt settles; normal retry restrictions still apply.
             var initialScan = performScanThenReturn(true);
@@ -4530,7 +4644,11 @@ const ViewerTracker = (function() {
                     setTimeout(function() {
                         if (myGeneration !== initGuard) return;
                         if (isStopped) { updateStopControls(); updateCountdownDisplay(); return; }
-                        if (isAutoRefreshOn && !isPaused) {
+                        if (isAbsencePaused()) {
+                            startCountdown();
+                            updateStopControls();
+                            updateTrackingTimer();
+                        } else if (isAutoRefreshOn && !isPaused) {
                             startTrackingTimer();
                             startCountdown();
                         } else {
@@ -4558,7 +4676,7 @@ const ViewerTracker = (function() {
             }, 1000);
         }
         healthCheckInterval = setInterval(function() {
-            if (myGeneration === initGuard && !isStopped && lastAcquisitionAttemptSource === 'DOM' && !isScanning) {
+            if (myGeneration === initGuard && !isStopped && !isAbsencePaused() && lastAcquisitionAttemptSource === 'DOM' && !isScanning) {
                 validateDOMHealth();
             }
         }, 30000);
@@ -4584,6 +4702,7 @@ const ViewerTracker = (function() {
             stoppedAt = null;
             stopReason = null;
             broadcasterAbsence = { since: null, missing: 0 };
+            absencePausedAt = null;
             cleanupDragListeners();
             if (miniSettingsKeyHandler) {
                 document.removeEventListener('keydown', miniSettingsKeyHandler, true);

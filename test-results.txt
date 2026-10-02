@@ -1,15 +1,197 @@
-TierScope 3.3.2 — targeted FILE REPLAY source-label checks
+TierScope 3.3.3 — regression results
 
-Userscript syntax: PASS (node --check)
-11 session-file/window tests: PASS
-Session-file/window browser checks: PASS in Chromium 138 and Firefox 153
+Userscript syntax: PASS
+67 unit tests: PASS
+All seven browser suites: PASS in Chromium 138 and Firefox 153
 
-Verified visible archive room identity during background acquisition; changing
-files updates that identity; returning to live hides it and ordinary Replay
-clears it. A long valid room name is ellipsized with its full name in the tooltip.
-The room label, buttons, and timeline do not overlap; panel geometry is unchanged.
-File import on a directory page still shows the source without starting scans.
-Session/GIF exports, window selection, and existing file validation checks pass.
+Browser checks use mocked rooms, not the live site.
+The new Stop/absence browser test was rerun after correcting its layout comparison
+to use the immediately preceding live panel as its baseline. Other passing browser
+suites were not repeated.
 
-The complete suite was not rerun for this presentation-only update.
-The previous full-suite baseline is recorded in the development notes.
+--- Unit tests ---
+PASS age boundaries, future timestamps, saved/API/DOM labels and timestamp explanation
+PASS all 12 chart rows, full 36px vertical range, long labels, zero/flat data and large counts fit
+PASS real omggif exports decode to matching pixels, at most 60 frames and exactly 10 seconds [{"name":"sample","samples":60,"frames":60,"bytes":464850,"encodeMs":1009},{"name":"single","samples":1,"frames":1,"bytes":5502,"encodeMs":19},{"name":"dense","samples":10000,"frames":60,"bytes":735346,"encodeMs":9604},{"name":"flat","samples":60,"frames":60,"bytes":336795,"encodeMs":1628},{"name":"zero","samples":1,"frames":1,"bytes":5141,"encodeMs":29},{"name":"gaps","samples":60,"frames":60,"bytes":467840,"encodeMs":1929}]
+PASS cancellation releases export state and allows retry
+✔ API parser rejects invalid totals, malformed records, duplicate usernames and unsafe numbers (11.879928ms)
+✔ CSV contains retained history in tier order, safe text, UTC times and correct totals (4.982439ms)
+✔ timestamps control chart spacing, breaks preserve gaps, duplicate times remain finite (2.349213ms)
+✔ dense plotting preserves per-column extrema and bounds drawing work (12.276132ms)
+✔ pause/reload gaps persist, with conservative legacy interval inference (8.326801ms)
+✔ old names are ignored on restore and omitted from new saves without rewriting source records (22.662942ms)
+✔ 429 honors Retry-After across manual attempts, Reset, reload and other tabs without DOM fallback (15.481414ms)
+✔ 401/403 pause acquisition until explicit Resume, including in sibling tabs (22.10635ms)
+✔ temporary failures back off to 15 minutes; server waits suppress fallback; successful API resumes normal cadence (12.161072ms)
+✔ older successful requests cannot clear a restriction written by another tab (7.329111ms)
+✔ local retry gate survives an unavailable GM write (3.7556ms)
+✔ Resume after access denial still honors an explicit server wait (7.033604ms)
+✔ an older stored policy cannot erase a newer unsaved restriction (4.141668ms)
+✔ GIF export decodes with exact pixels, bounded drawing, fixed duration, and cancellation (18289.926134ms)
+✔ GIF gap connectors are dashed, use a dedicated color, and preserve recorded endpoints (3.918291ms)
+✔ session download round-trips full history, gaps, timing, highs and room despite a narrow chart window (14.69204ms)
+✔ a session file survives more than three hours and retains highs outside the rolling history (7.119204ms)
+✔ unknown file fields and obsolete username collections are discarded without execution or re-export (4.993066ms)
+✔ invalid, empty, oversized and future-version files preserve the current Replay and live state (8.213618ms)
+✔ live scans continue behind imported Replay; closing returns to the latest room data (10.49042ms)
+✔ exporting a normal Replay preserves its entry snapshot after new scans (6.00462ms)
+✔ pause, reload, failed acquisition, Stop, file Replay and close preserve session closure and timing (12.095515ms)
+✔ Reset, navigation, closing Replay and a newer file cancel an older asynchronous file read (22.822787ms)
+✔ Stop during an in-flight scan cannot append into live history or an imported Replay (7.137349ms)
+✔ chart windows retain all stored samples and use only samples through the Replay frame (5.599156ms)
+✔ full history defaults, window preferences survive reload and Reset, invalid preferences fall back safely (27.031587ms)
+✔ pause/resume preserves session start and wall-time high offsets while timer excludes pauses (5.231554ms)
+✔ tier and total highs survive history eviction, ties, lower samples, and reload (208.07157ms)
+✔ legacy high timestamps are rebuilt from the matching sample; start is explicitly estimated (4.688383ms)
+✔ stale same-room tabs keep independent records and cannot replace the newest accepted sample (10.070048ms)
+✔ tabs opened before any save also write separate records (7.356367ms)
+✔ Reset invalidates old tabs and immediately persists a paused, empty session (17.398828ms)
+✔ newer schema and malformed records remain untouched while independent saves continue (13.461251ms)
+✔ expired tab data is not restored and returning writers rotate record IDs (3.421068ms)
+✔ saved display remains non-live; failed scan and render rollback retain data and highs (11.263094ms)
+✔ a late network response cannot commit after room navigation (5.681632ms)
+✔ sample ages use seconds, minutes, hours, days and clamp future timestamps (2.022127ms)
+✔ restored highlights compare with persistent session highs; Replay still uses historical highs (397.809693ms)
+✔ explicit Reset recovers from corrupt per-tab storage without retaining the damaged branch (5.381073ms)
+✔ late scan results cannot resurrect pre-Reset data (7.201959ms)
+✔ fresh room scans during init and starts its next interval only after completion (12.534687ms)
+✔ restored active and paused sessions keep their existing startup behavior (21.059778ms)
+✔ pausing during the first scan never lets its completion restart automatic scans (8.875571ms)
+✔ Reset or navigation invalidate the first scan and its scheduling continuation (14.049328ms)
+✔ startup respects existing retry gates and denial, including failures of the first request (24.033136ms)
+✔ directory pages do not gain an immediate room scan (8.006123ms)
+✔ Stop freezes elapsed time and history, rejects pending samples, and survives refresh (18.894418ms)
+✔ Start begins separate history and preserves the stopped source record until cleanup (14.201144ms)
+✔ absence slows to 2m then 5m; returns before 15m restore the selected interval without gaps (21.905056ms)
+✔ 15m auto-pause freezes time and samples, checks every 5m, and resumes with one real sample plus a gap (16.540186ms)
+✔ three hours AFTER auto-pause seals history and rejects a pending returning-owner response (21.973997ms)
+✔ auto-pause restores its deadline and frozen time, then detects a return after refresh (23.479748ms)
+✔ delayed browser wake freezes active time at 15m and Stops at the later three-hour paused deadline (16.703739ms)
+✔ manual Pause cancels return checks and automatic resume, including a pending returning-owner response (23.872329ms)
+✔ Reset and navigation invalidate in-flight return checks (27.924734ms)
+✔ return checks never fall back to DOM; malformed responses and retry restrictions cannot resume recording (18.652068ms)
+✔ restored running startup still starts return checks when its delayed callback meets the absence threshold (23.804374ms)
+✔ errors and DOM-only samples cannot establish absence; valid empty API responses can without adding zero counts (10.598865ms)
+✔ Stop during a restored startup delay cannot be overwritten by its queued callbacks (16.982935ms)
+✔ a confirmed return resumes timing even when its audience counts fail validation (15.201873ms)
+✔ optional auto-pause persistence rejects inconsistent state and preserves legacy records (13.301275ms)
+✔ corrupt siblings, invalid shapes, missing epochs and future schemas cannot block good history (9.642155ms)
+✔ invalid legacy record does not block a current tab record (8.825708ms)
+✔ a corrected record becomes eligible without Reset or deleting healthy data (4.226385ms)
+✔ late old-epoch records never restore and are removed after the three-hour grace period (5.395736ms)
+✔ old-epoch corrupt and unsupported records are never automatically deleted (5.040376ms)
+✔ failure to delete an expired record does not block a healthy sibling (4.204875ms)
+ℹ tests 67
+ℹ suites 0
+ℹ pass 67
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 19718.953462
+
+
+--- chromium ---
+
+Browser: chromium — browser.cjs
+PASS TXT/CSV fit beside timer; downloaded CSV has all 60 samples and correct totals/timestamps
+PASS compact chart pixels, 15-minute window, saved deltas, metric preference, and timer overlay
+PASS broadcast room reopens expanded at the saved non-default scale
+PASS drag/scale survive reload; 100% restores exact standard width and persists
+PASS Replay stepping pauses, respects endpoints, preserves collapsed-row frames, and handles duplicate timestamps
+PASS viewport clamping and no browser errors
+PASS expansion clamping and centered Controls
+PASS all 2,048 collapse combinations; inherited line-height normal {
+  baseline: 547,
+  min: 547,
+  max: 547,
+  overflow: 0,
+  compact: 180,
+  restored: 547
+}
+PASS all 2,048 collapse combinations; inherited line-height 1.5 {
+  baseline: 617,
+  min: 617,
+  max: 617,
+  overflow: 0,
+  compact: 190,
+  restored: 617
+}
+PASS real DOM fallback, Chat return, cooldown, and independent frozen Replay
+PASS compact live deltas, source freshness, and controls fit
+PASS page-based startup across room routes and directory pages; obsolete view preferences ignored; scale retained
+PASS metric icons, accessible labels, larger third-row boxes, and diamond increase/stable/decrease backgrounds
+
+Browser: chromium — pulse-browser.cjs
+PASS two pulses for live highs and returns, expanded/collapsed targets, steady final highlight, no plateau or layout retrigger
+PASS reduced-motion preference including mid-pulse changes, Replay isolation, and no deferred pulses after expanding
+PASS failed acquisition and rendering rollback suppress pulses; Reset cancels active animations
+
+Browser: chromium — charts-browser.cjs
+PASS orange dashed gaps in expanded/compact/Replay, dark/bright contrast, clipped compact boundary, no future connectors or synthetic values, hover/keyboard inspection, timestamp spacing, flat/single samples, original tier colors and unchanged geometry
+PASS rate-limit UI, reload persistence, access-denied pause and explicit recovery
+
+Browser: chromium — theme-browser.cjs
+PASS dark/bright toggle placement, default/persistence, keyboard, opacity, original tier colors, highlights, tooltips, compact/Replay rendering, state preservation and storage failure
+
+Browser: chromium — startup-browser.cjs
+PASS fresh initialization request, scanning status, completion-based countdown, visible first data point and compact time-control tooltip
+
+Browser: chromium — stop-browser.cjs
+PASS manual Stop confirmation/Cancel, Stop layout, frozen time/chart, disabled scanning, retained Replay/CSV, reload, separate Start, 15m absence pause, frozen samples/time, background return checks behind FILE REPLAY, auto-resume, paused reload and automatic Stop without a prompt
+
+Browser: chromium — session-files-browser.cjs
+PASS session files and exports, visible file room identity across background scans and replacement files, long-name layout, source clearing on exit, all six chart windows, frozen Replay position and unchanged panel geometry
+
+
+--- firefox ---
+
+Browser: firefox — browser.cjs
+PASS TXT/CSV fit beside timer; downloaded CSV has all 60 samples and correct totals/timestamps
+PASS compact chart pixels, 15-minute window, saved deltas, metric preference, and timer overlay
+PASS broadcast room reopens expanded at the saved non-default scale
+PASS drag/scale survive reload; 100% restores exact standard width and persists
+PASS Replay stepping pauses, respects endpoints, preserves collapsed-row frames, and handles duplicate timestamps
+PASS viewport clamping and no browser errors
+PASS expansion clamping and centered Controls
+PASS all 2,048 collapse combinations; inherited line-height normal {
+  baseline: 552,
+  min: 552,
+  max: 552,
+  overflow: 0.050018310546875,
+  compact: 185,
+  restored: 552
+}
+PASS all 2,048 collapse combinations; inherited line-height 1.5 {
+  baseline: 618,
+  min: 618,
+  max: 618,
+  overflow: 0.050018310546875,
+  compact: 191,
+  restored: 618
+}
+PASS real DOM fallback, Chat return, cooldown, and independent frozen Replay
+PASS compact live deltas, source freshness, and controls fit
+PASS page-based startup across room routes and directory pages; obsolete view preferences ignored; scale retained
+PASS metric icons, accessible labels, larger third-row boxes, and diamond increase/stable/decrease backgrounds
+
+Browser: firefox — pulse-browser.cjs
+PASS two pulses for live highs and returns, expanded/collapsed targets, steady final highlight, no plateau or layout retrigger
+PASS reduced-motion preference including mid-pulse changes, Replay isolation, and no deferred pulses after expanding
+PASS failed acquisition and rendering rollback suppress pulses; Reset cancels active animations
+
+Browser: firefox — charts-browser.cjs
+PASS orange dashed gaps in expanded/compact/Replay, dark/bright contrast, clipped compact boundary, no future connectors or synthetic values, hover/keyboard inspection, timestamp spacing, flat/single samples, original tier colors and unchanged geometry
+PASS rate-limit UI, reload persistence, access-denied pause and explicit recovery
+
+Browser: firefox — theme-browser.cjs
+PASS dark/bright toggle placement, default/persistence, keyboard, opacity, original tier colors, highlights, tooltips, compact/Replay rendering, state preservation and storage failure
+
+Browser: firefox — startup-browser.cjs
+PASS fresh initialization request, scanning status, completion-based countdown, visible first data point and compact time-control tooltip
+
+Browser: firefox — stop-browser.cjs
+PASS manual Stop confirmation/Cancel, Stop layout, frozen time/chart, disabled scanning, retained Replay/CSV, reload, separate Start, 15m absence pause, frozen samples/time, background return checks behind FILE REPLAY, auto-resume, paused reload and automatic Stop without a prompt
+
+Browser: firefox — session-files-browser.cjs
+PASS session files and exports, visible file room identity across background scans and replacement files, long-name layout, source clearing on exit, all six chart windows, frozen Replay position and unchanged panel geometry
