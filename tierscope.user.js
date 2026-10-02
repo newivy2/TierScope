@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.3.3
+// @version      3.3.4
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -18,7 +18,7 @@
 const ViewerTracker = (function() {
     'use strict';
 
-    const TIERSCOPE_VERSION = '3.3.3';
+    const TIERSCOPE_VERSION = '3.3.4';
     const API_TIMEOUT_MS = 10000;
     const DEFAULT_API_INTERVAL_SECONDS = 60;
     const DOM_FALLBACK_INTERVAL_SECONDS = 60;
@@ -240,7 +240,7 @@ const ViewerTracker = (function() {
     var absencePausedAt = null;
     var lastScheduledIntervalSeconds = DEFAULT_API_INTERVAL_SECONDS;
     const ABSENCE_PAUSE_MS = 15 * 60 * 1000;
-    const ABSENCE_CHECK_SECONDS = 300;
+    const ABSENCE_CHECK_SECONDS = 60;
     const ABSENCE_STOP_MS = 3 * 60 * 60 * 1000;
 
     function isAbsencePaused() {
@@ -249,7 +249,7 @@ const ViewerTracker = (function() {
 
     function absencePauseDescription() {
         return 'Recording and elapsed time paused after 15 minutes without the broadcaster. ' +
-            'API return checks every 5 minutes, subject to retry restrictions. A confirmed return resumes recording. ' +
+            'API return checks every minute, subject to retry restrictions. A confirmed return resumes recording. ' +
             'Automatic Stop at ' + new Date(absencePausedAt + ABSENCE_STOP_MS).toLocaleString() +
             ' (3 hours after auto-pause).';
     }

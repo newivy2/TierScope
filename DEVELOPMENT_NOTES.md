@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **version 3.3.3**. For a quick introduction and installation link, see the [README](readme.md).
+Detailed reference for **version 3.3.4**. For a quick introduction and installation link, see the [README](readme.md).
 
 ## Contents
 
@@ -81,7 +81,7 @@ TierScope uses the owner flag in well-formed user-list API responses. This ident
 - The first response without an owner starts an absence window. A second such response enables a **minimum two-minute** interval.
 - After **ten minutes**, the minimum interval becomes **five minutes**.
 - After **15 minutes** of established absence, recording and active elapsed time **automatically pause**. The last accepted sample remains visible.
-- While auto-paused, TierScope checks the same user-list API **every five minutes** for the owner. These checks do not add absent-room counts to history, update highs, or use the DOM fallback.
+- While auto-paused, TierScope checks the same user-list API **every minute** for the owner. This return-check interval is independent of the selected recording interval. These checks do not add absent-room counts to history, update highs, or use the DOM fallback.
 - A well-formed response containing the owner resumes the selected scan interval and active timer. Its audience counts are recorded only if they pass the usual sample validation. The first accepted sample after the pause has an orange dashed gap connector.
 - After **three continuous hours auto-paused**, the session **Stops** without a confirmation prompt. This means **three hours and 15 minutes from the first absence observation**, provided absence has been confirmed. A later return needs a new session.
 
@@ -89,7 +89,7 @@ Controls shows **Reduced** during slowdown, then a **Check** countdown while aut
 
 The Pause button becomes **Pause return checks** while auto-paused. Clicking it switches to an ordinary manual pause: no return checks, automatic resume, or automatic Stop. Manual Resume starts checking the room again with a fresh absence window. Manual Stop still ends the session immediately after confirmation, and Reset starts fresh history.
 
-Errors, malformed responses, and DOM-only samples cannot establish absence or confirm a return. Once absence is established, its deadlines use wall time; a failed check does not prove a return or extend the deadline. Checks respect rate limits, server waits, and retry backoff, so detecting a return can take longer than five minutes. Access denial (401/403) switches to manual pause and requires explicit Resume. Selected scan intervals never become shorter during slowdown.
+Errors, malformed responses, and DOM-only samples cannot establish absence or confirm a return. Once absence is established, its deadlines use wall time; a failed check does not prove a return or extend the deadline. Checks respect rate limits, server waits, and retry backoff, so detecting a return can take longer than one minute. Access denial (401/403) switches to manual pause and requires explicit Resume. Selected scan intervals never become shorter during slowdown.
 
 Absence and the automatic-pause time are saved with the session. Restoring an eligible auto-paused record resumes return checks without restarting elapsed time. The normal three-hour saved-record restore window still applies; completed return checks refresh that record without adding samples. If a suspended tab wakes late, active time freezes at the 15-minute pause deadline and an overdue Stop uses the original deadline. Pending responses cannot reopen a stopped session or survive Reset, navigation, or cancellation of return checks.
 
@@ -361,7 +361,7 @@ Look for their boxed markers below the header and click to restore them. Moderat
 
 **The panel shrank after collapsing rows**
 
-This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only version 3.3.3 is enabled, refresh the tab, and report the browser and steps that reproduce it.
+This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only version 3.3.4 is enabled, refresh the tab, and report the browser and steps that reproduce it.
 
 **The panel is too large or near a screen edge**
 
@@ -401,7 +401,8 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
-| **3.3.3** | Auto-pause recording after 15 minutes of broadcaster absence, check for returns every five minutes, resume automatically on return, and Stop after three hours auto-paused. |
+| **3.3.4** | Check for the broadcaster every minute while auto-paused; retain the three-hour auto-pause Stop deadline. |
+| 3.3.3 | Auto-pause recording after 15 minutes of broadcaster absence, check for returns every five minutes, resume automatically on return, and Stop after three hours auto-paused. |
 | 3.3.2 | Show the saved session’s room name in FILE REPLAY, with long-name truncation and unchanged panel dimensions. |
 | 3.3.1 | Add 4h, 2h, and 30min chart windows; keep the order Full / 4h / 2h / 1h / 30min / 15min. |
 | 3.3.0 | Download and reopen session files in isolated, read-only Replay; remembered Full / 1h / 15m expanded chart windows; expanded file, rendering, and lifecycle regression tests. |
