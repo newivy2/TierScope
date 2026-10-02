@@ -403,7 +403,7 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
-| **3.3.5** | One-click Resume overrides automatic absence pause and Stop until a confirmed broadcaster return; preserve the override across refresh and manual Pause/Resume. |
+| **3.3.5** | One-click Resume overrides automatic absence pause and Stop until a confirmed broadcaster return; override is preserved across refresh and manual Pause/Resume. |
 | 3.3.4 | Check for the broadcaster every minute while auto-paused; retain the three-hour auto-pause Stop deadline. |
 | 3.3.3 | Auto-pause recording after 15 minutes of broadcaster absence, check for returns every five minutes, resume automatically on return, and Stop after three hours auto-paused. |
 | 3.3.2 | Show the saved session’s room name in FILE REPLAY, with long-name truncation and unchanged panel dimensions. |
