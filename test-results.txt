@@ -1,89 +1,90 @@
-TierScope 3.3.5 verification
+TierScope 3.3.6 verification
 
 Syntax check: node --check tierscope.user.js — passed.
 Unit tests: 71 passed, 0 failed, 0 skipped.
-Browsers: Chromium 138 and Firefox 153, using Playwright 1.62.1.
-Affected browser suites: stop-browser.cjs, startup-browser.cjs, charts-browser.cjs — passed in both browsers.
+Browsers: Chromium 138 and Firefox 153, with Playwright 1.62.1.
+Affected browser suites: stop-browser.cjs, theme-browser.cjs, session-files-browser.cjs — passed in both browsers.
+Additional Chromium geometry checks: existing browser.cjs checks through expansion clamping and Controls alignment passed, including drag/scale restoration, standard-size reset, Replay stepping, and CSV download. The unrelated collapse-combination loop and later sections were omitted from that focused run.
 
-Verified one-click automatic-pause override; saved override on refresh; ordinary manual Pause/Resume; selected intervals; cancellation of the old automatic Stop deadline; stale presence-response rejection; re-arming only on a current, valid API owner observation; Reset/navigation; request restrictions; return checks behind FILE REPLAY; ordinary startup and chart behavior.
+Verified direct Save/Open beside Replay, actual download and file selection, empty-session Save disabled/Open enabled, retained file actions during Replay, Stop between Pause and Reset with confirmation preserved, automatic-pause override, countdown bounds, and dark/bright layout without panel growth.
 
-The full browser suite was not rerun for this change. Browser fixtures use controlled local responses, not the live site or an installed userscript manager. Firefox used container-specific sandbox settings for the test environment.
+The full browser suite was not rerun for this layout change. Browser fixtures use controlled local responses, not the live site or an installed userscript manager. Firefox used container-specific sandbox settings for the test environment.
 
 PASS age boundaries, future timestamps, saved/API/DOM labels and timestamp explanation
 PASS all 12 chart rows, full 36px vertical range, long labels, zero/flat data and large counts fit
-PASS real omggif exports decode to matching pixels, at most 60 frames and exactly 10 seconds [{"name":"sample","samples":60,"frames":60,"bytes":464850,"encodeMs":1009},{"name":"single","samples":1,"frames":1,"bytes":5502,"encodeMs":15},{"name":"dense","samples":10000,"frames":60,"bytes":735346,"encodeMs":8402},{"name":"flat","samples":60,"frames":60,"bytes":336795,"encodeMs":959},{"name":"zero","samples":1,"frames":1,"bytes":5141,"encodeMs":21},{"name":"gaps","samples":60,"frames":60,"bytes":467840,"encodeMs":1088}]
+PASS real omggif exports decode to matching pixels, at most 60 frames and exactly 10 seconds [{"name":"sample","samples":60,"frames":60,"bytes":464850,"encodeMs":1025},{"name":"single","samples":1,"frames":1,"bytes":5502,"encodeMs":17},{"name":"dense","samples":10000,"frames":60,"bytes":735346,"encodeMs":8546},{"name":"flat","samples":60,"frames":60,"bytes":336795,"encodeMs":1007},{"name":"zero","samples":1,"frames":1,"bytes":5141,"encodeMs":17},{"name":"gaps","samples":60,"frames":60,"bytes":467840,"encodeMs":1098}]
 PASS cancellation releases export state and allows retry
-✔ API parser rejects invalid totals, malformed records, duplicate usernames and unsafe numbers (11.931041ms)
-✔ CSV contains retained history in tier order, safe text, UTC times and correct totals (4.987024ms)
-✔ timestamps control chart spacing, breaks preserve gaps, duplicate times remain finite (2.079405ms)
-✔ dense plotting preserves per-column extrema and bounds drawing work (13.91198ms)
-✔ pause/reload gaps persist, with conservative legacy interval inference (8.469767ms)
-✔ old names are ignored on restore and omitted from new saves without rewriting source records (26.829506ms)
-✔ 429 honors Retry-After across manual attempts, Reset, reload and other tabs without DOM fallback (15.731409ms)
-✔ 401/403 pause acquisition until explicit Resume, including in sibling tabs (22.143197ms)
-✔ temporary failures back off to 15 minutes; server waits suppress fallback; successful API resumes normal cadence (11.101322ms)
-✔ older successful requests cannot clear a restriction written by another tab (7.249392ms)
-✔ local retry gate survives an unavailable GM write (3.31131ms)
-✔ Resume after access denial still honors an explicit server wait (5.457154ms)
-✔ an older stored policy cannot erase a newer unsaved restriction (4.301966ms)
-✔ GIF export decodes with exact pixels, bounded drawing, fixed duration, and cancellation (14410.03567ms)
-✔ GIF gap connectors are dashed, use a dedicated color, and preserve recorded endpoints (4.090509ms)
-✔ session download round-trips full history, gaps, timing, highs and room despite a narrow chart window (15.644327ms)
-✔ a session file survives more than three hours and retains highs outside the rolling history (6.9768ms)
-✔ unknown file fields and obsolete username collections are discarded without execution or re-export (5.659318ms)
-✔ invalid, empty, oversized and future-version files preserve the current Replay and live state (10.082974ms)
-✔ live scans continue behind imported Replay; closing returns to the latest room data (14.055487ms)
-✔ exporting a normal Replay preserves its entry snapshot after new scans (8.21149ms)
-✔ pause, reload, failed acquisition, Stop, file Replay and close preserve session closure and timing (15.653279ms)
-✔ Reset, navigation, closing Replay and a newer file cancel an older asynchronous file read (30.149488ms)
-✔ Stop during an in-flight scan cannot append into live history or an imported Replay (8.44486ms)
-✔ chart windows retain all stored samples and use only samples through the Replay frame (6.012454ms)
-✔ full history defaults, window preferences survive reload and Reset, invalid preferences fall back safely (31.579475ms)
-✔ pause/resume preserves session start and wall-time high offsets while timer excludes pauses (11.179036ms)
-✔ tier and total highs survive history eviction, ties, lower samples, and reload (200.663141ms)
-✔ legacy high timestamps are rebuilt from the matching sample; start is explicitly estimated (3.300306ms)
-✔ stale same-room tabs keep independent records and cannot replace the newest accepted sample (6.640911ms)
-✔ tabs opened before any save also write separate records (4.991067ms)
-✔ Reset invalidates old tabs and immediately persists a paused, empty session (11.579069ms)
-✔ newer schema and malformed records remain untouched while independent saves continue (11.298618ms)
-✔ expired tab data is not restored and returning writers rotate record IDs (3.145037ms)
-✔ saved display remains non-live; failed scan and render rollback retain data and highs (8.151758ms)
-✔ a late network response cannot commit after room navigation (4.413871ms)
-✔ sample ages use seconds, minutes, hours, days and clamp future timestamps (2.374894ms)
-✔ restored highlights compare with persistent session highs; Replay still uses historical highs (208.184949ms)
-✔ explicit Reset recovers from corrupt per-tab storage without retaining the damaged branch (2.876231ms)
-✔ late scan results cannot resurrect pre-Reset data (4.614942ms)
-✔ fresh room scans during init and starts its next interval only after completion (7.593385ms)
-✔ restored active and paused sessions keep their existing startup behavior (15.464801ms)
-✔ pausing during the first scan never lets its completion restart automatic scans (6.840952ms)
-✔ Reset or navigation invalidate the first scan and its scheduling continuation (13.518836ms)
-✔ startup respects existing retry gates and denial, including failures of the first request (25.769874ms)
-✔ directory pages do not gain an immediate room scan (9.048815ms)
-✔ Stop freezes elapsed time and history, rejects pending samples, and survives refresh (17.058136ms)
-✔ Start begins separate history and preserves the stopped source record until cleanup (15.942976ms)
-✔ absence slows to 2m then 5m; returns before 15m restore the selected interval without gaps (19.605338ms)
-✔ 15m auto-pause freezes time and samples, checks every minute, and resumes with one real sample plus a gap (15.879252ms)
-✔ three hours AFTER auto-pause seals history and rejects a pending returning-owner response (16.873827ms)
-✔ auto-pause restores its deadline and frozen time, then detects a return after refresh (22.342847ms)
-✔ delayed browser wake freezes active time at 15m and Stops at the later three-hour paused deadline (13.886487ms)
-✔ one-click Resume cancels auto-pause and its Stop deadline for the continuous absence (14.942669ms)
-✔ a stale returning-owner check cannot clear a newer manual override or append its sample (14.620851ms)
-✔ override persists through refresh and an ordinary manual Pause/Resume (37.051446ms)
-✔ only a current well-formed API owner re-arms automation for a later absence (18.176721ms)
-✔ override honors existing rate limits and is cleared by Reset or room navigation (23.469081ms)
-✔ Reset and navigation invalidate in-flight return checks (65.981747ms)
-✔ return checks never fall back to DOM; malformed responses and retry restrictions cannot resume recording (9.407271ms)
-✔ restored running startup still starts return checks when its delayed callback meets the absence threshold (14.177004ms)
-✔ errors and DOM-only samples cannot establish absence; valid empty API responses can without adding zero counts (6.510231ms)
-✔ Stop during a restored startup delay cannot be overwritten by its queued callbacks (9.22364ms)
-✔ a confirmed return resumes timing even when its audience counts fail validation (9.683358ms)
-✔ optional auto-pause persistence rejects inconsistent state and preserves legacy records (8.570828ms)
-✔ corrupt siblings, invalid shapes, missing epochs and future schemas cannot block good history (6.284083ms)
-✔ invalid legacy record does not block a current tab record (4.019506ms)
-✔ a corrected record becomes eligible without Reset or deleting healthy data (3.511106ms)
-✔ late old-epoch records never restore and are removed after the three-hour grace period (3.457214ms)
-✔ old-epoch corrupt and unsupported records are never automatically deleted (2.856243ms)
-✔ failure to delete an expired record does not block a healthy sibling (3.4518ms)
+✔ API parser rejects invalid totals, malformed records, duplicate usernames and unsafe numbers (12.513367ms)
+✔ CSV contains retained history in tier order, safe text, UTC times and correct totals (4.823466ms)
+✔ timestamps control chart spacing, breaks preserve gaps, duplicate times remain finite (2.038866ms)
+✔ dense plotting preserves per-column extrema and bounds drawing work (10.814716ms)
+✔ pause/reload gaps persist, with conservative legacy interval inference (7.586884ms)
+✔ old names are ignored on restore and omitted from new saves without rewriting source records (23.5914ms)
+✔ 429 honors Retry-After across manual attempts, Reset, reload and other tabs without DOM fallback (13.913223ms)
+✔ 401/403 pause acquisition until explicit Resume, including in sibling tabs (20.43676ms)
+✔ temporary failures back off to 15 minutes; server waits suppress fallback; successful API resumes normal cadence (10.098533ms)
+✔ older successful requests cannot clear a restriction written by another tab (7.18077ms)
+✔ local retry gate survives an unavailable GM write (3.169581ms)
+✔ Resume after access denial still honors an explicit server wait (5.094456ms)
+✔ an older stored policy cannot erase a newer unsaved restriction (4.537039ms)
+✔ GIF export decodes with exact pixels, bounded drawing, fixed duration, and cancellation (14758.82249ms)
+✔ GIF gap connectors are dashed, use a dedicated color, and preserve recorded endpoints (3.915414ms)
+✔ session download round-trips full history, gaps, timing, highs and room despite a narrow chart window (14.367772ms)
+✔ a session file survives more than three hours and retains highs outside the rolling history (6.673773ms)
+✔ unknown file fields and obsolete username collections are discarded without execution or re-export (4.865169ms)
+✔ invalid, empty, oversized and future-version files preserve the current Replay and live state (8.009326ms)
+✔ live scans continue behind imported Replay; closing returns to the latest room data (12.111408ms)
+✔ exporting a normal Replay preserves its entry snapshot after new scans (6.375256ms)
+✔ pause, reload, failed acquisition, Stop, file Replay and close preserve session closure and timing (12.97573ms)
+✔ Reset, navigation, closing Replay and a newer file cancel an older asynchronous file read (23.616849ms)
+✔ Stop during an in-flight scan cannot append into live history or an imported Replay (7.011001ms)
+✔ chart windows retain all stored samples and use only samples through the Replay frame (6.430953ms)
+✔ full history defaults, window preferences survive reload and Reset, invalid preferences fall back safely (26.134235ms)
+✔ pause/resume preserves session start and wall-time high offsets while timer excludes pauses (5.77976ms)
+✔ tier and total highs survive history eviction, ties, lower samples, and reload (205.13796ms)
+✔ legacy high timestamps are rebuilt from the matching sample; start is explicitly estimated (3.806987ms)
+✔ stale same-room tabs keep independent records and cannot replace the newest accepted sample (6.448315ms)
+✔ tabs opened before any save also write separate records (4.135739ms)
+✔ Reset invalidates old tabs and immediately persists a paused, empty session (11.499035ms)
+✔ newer schema and malformed records remain untouched while independent saves continue (8.731951ms)
+✔ expired tab data is not restored and returning writers rotate record IDs (2.776095ms)
+✔ saved display remains non-live; failed scan and render rollback retain data and highs (7.682908ms)
+✔ a late network response cannot commit after room navigation (4.477052ms)
+✔ sample ages use seconds, minutes, hours, days and clamp future timestamps (1.580191ms)
+✔ restored highlights compare with persistent session highs; Replay still uses historical highs (201.605024ms)
+✔ explicit Reset recovers from corrupt per-tab storage without retaining the damaged branch (2.851625ms)
+✔ late scan results cannot resurrect pre-Reset data (5.510234ms)
+✔ fresh room scans during init and starts its next interval only after completion (6.994755ms)
+✔ restored active and paused sessions keep their existing startup behavior (14.812985ms)
+✔ pausing during the first scan never lets its completion restart automatic scans (5.739137ms)
+✔ Reset or navigation invalidate the first scan and its scheduling continuation (10.978136ms)
+✔ startup respects existing retry gates and denial, including failures of the first request (19.977432ms)
+✔ directory pages do not gain an immediate room scan (5.999423ms)
+✔ Stop freezes elapsed time and history, rejects pending samples, and survives refresh (12.165753ms)
+✔ Start begins separate history and preserves the stopped source record until cleanup (8.52353ms)
+✔ absence slows to 2m then 5m; returns before 15m restore the selected interval without gaps (13.393322ms)
+✔ 15m auto-pause freezes time and samples, checks every minute, and resumes with one real sample plus a gap (12.186869ms)
+✔ three hours AFTER auto-pause seals history and rejects a pending returning-owner response (14.377222ms)
+✔ auto-pause restores its deadline and frozen time, then detects a return after refresh (17.218903ms)
+✔ delayed browser wake freezes active time at 15m and Stops at the later three-hour paused deadline (13.269219ms)
+✔ one-click Resume cancels auto-pause and its Stop deadline for the continuous absence (13.702495ms)
+✔ a stale returning-owner check cannot clear a newer manual override or append its sample (8.936761ms)
+✔ override persists through refresh and an ordinary manual Pause/Resume (28.416021ms)
+✔ only a current well-formed API owner re-arms automation for a later absence (12.028333ms)
+✔ override honors existing rate limits and is cleared by Reset or room navigation (29.197723ms)
+✔ Reset and navigation invalidate in-flight return checks (14.719178ms)
+✔ return checks never fall back to DOM; malformed responses and retry restrictions cannot resume recording (9.040231ms)
+✔ restored running startup still starts return checks when its delayed callback meets the absence threshold (12.605074ms)
+✔ errors and DOM-only samples cannot establish absence; valid empty API responses can without adding zero counts (6.163006ms)
+✔ Stop during a restored startup delay cannot be overwritten by its queued callbacks (10.302894ms)
+✔ a confirmed return resumes timing even when its audience counts fail validation (7.717627ms)
+✔ optional auto-pause persistence rejects inconsistent state and preserves legacy records (9.384165ms)
+✔ corrupt siblings, invalid shapes, missing epochs and future schemas cannot block good history (5.9675ms)
+✔ invalid legacy record does not block a current tab record (22.552606ms)
+✔ a corrected record becomes eligible without Reset or deleting healthy data (2.6084ms)
+✔ late old-epoch records never restore and are removed after the three-hour grace period (3.335238ms)
+✔ old-epoch corrupt and unsupported records are never automatically deleted (3.58236ms)
+✔ failure to delete an expired record does not block a healthy sibling (4.078022ms)
 ℹ tests 71
 ℹ suites 0
 ℹ pass 71
@@ -91,28 +92,26 @@ PASS cancellation releases export state and allows retry
 ℹ cancelled 0
 ℹ skipped 0
 ℹ todo 0
-ℹ duration_ms 15680.313644
+ℹ duration_ms 15887.816881
 
 
 
 Browser: chromium — stop-browser.cjs
 PASS manual Stop confirmation/Cancel, Stop layout, frozen time/chart, disabled scanning, retained Replay/CSV, reload, separate Start, 15m absence pause, frozen samples/time, background return checks behind FILE REPLAY, auto-resume, paused reload, one-click Resume override and restored override, re-arming on owner return and automatic Stop without a prompt
 
-Browser: chromium — startup-browser.cjs
-PASS fresh initialization request, scanning status, completion-based countdown, visible first data point and compact time-control tooltip
+Browser: chromium — theme-browser.cjs
+PASS dark/bright toggle placement, default/persistence, keyboard, opacity, original tier colors, highlights, tooltips, compact/Replay rendering, state preservation and storage failure
 
-Browser: chromium — charts-browser.cjs
-PASS orange dashed gaps in expanded/compact/Replay, dark/bright contrast, clipped compact boundary, no future connectors or synthetic values, hover/keyboard inspection, timestamp spacing, flat/single samples, original tier colors and unchanged geometry
-PASS rate-limit UI, reload persistence, access-denied pause and explicit recovery
+Browser: chromium — session-files-browser.cjs
+PASS direct Save/Open controls, empty-session availability, Replay menu Save/Open, session files and exports, visible file room identity across background scans and replacement files, long-name layout, source clearing on exit, all six chart windows, frozen Replay position and unchanged panel geometry
 
 
 
 Browser: firefox — stop-browser.cjs
 PASS manual Stop confirmation/Cancel, Stop layout, frozen time/chart, disabled scanning, retained Replay/CSV, reload, separate Start, 15m absence pause, frozen samples/time, background return checks behind FILE REPLAY, auto-resume, paused reload, one-click Resume override and restored override, re-arming on owner return and automatic Stop without a prompt
 
-Browser: firefox — startup-browser.cjs
-PASS fresh initialization request, scanning status, completion-based countdown, visible first data point and compact time-control tooltip
+Browser: firefox — theme-browser.cjs
+PASS dark/bright toggle placement, default/persistence, keyboard, opacity, original tier colors, highlights, tooltips, compact/Replay rendering, state preservation and storage failure
 
-Browser: firefox — charts-browser.cjs
-PASS orange dashed gaps in expanded/compact/Replay, dark/bright contrast, clipped compact boundary, no future connectors or synthetic values, hover/keyboard inspection, timestamp spacing, flat/single samples, original tier colors and unchanged geometry
-PASS rate-limit UI, reload persistence, access-denied pause and explicit recovery
+Browser: firefox — session-files-browser.cjs
+PASS direct Save/Open controls, empty-session availability, Replay menu Save/Open, session files and exports, visible file room identity across background scans and replacement files, long-name layout, source clearing on exit, all six chart windows, frozen Replay position and unchanged panel geometry

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.3.5
+// @version      3.3.6
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -18,7 +18,7 @@
 const ViewerTracker = (function() {
     'use strict';
 
-    const TIERSCOPE_VERSION = '3.3.5';
+    const TIERSCOPE_VERSION = '3.3.6';
     const API_TIMEOUT_MS = 10000;
     const DEFAULT_API_INTERVAL_SECONDS = 60;
     const DOM_FALLBACK_INTERVAL_SECONDS = 60;
@@ -912,8 +912,10 @@ const ViewerTracker = (function() {
         }
         var select = document.getElementById('chart-window-select');
         if (select) select.value = chartWindowMode;
-        var save = document.getElementById('btn-save-session');
-        if (save) save.disabled = !((isPlaybackCurrent(playback) && playback.archive) || history.timestamps.length);
+        ['btn-save-session', 'btn-control-save-session'].forEach(function(id) {
+            var save = document.getElementById(id);
+            if (save) save.disabled = !((isPlaybackCurrent(playback) && playback.archive) || history.timestamps.length);
+        });
         var info = document.getElementById('session-file-info');
         if (info) {
             var archive = isPlaybackCurrent(playback) && playback.imported ? playback.archive : null;
@@ -937,7 +939,10 @@ const ViewerTracker = (function() {
         document.getElementById('panel-options-close').onclick = function() { close(true); };
         document.getElementById('chart-window-select').onchange = function() { setChartWindow(this.value); };
         document.getElementById('btn-save-session').onclick = function() { downloadSessionFile(); close(true); };
-        document.getElementById('btn-open-session').onclick = function() { input.value = ''; input.click(); };
+        document.getElementById('btn-control-save-session').onclick = downloadSessionFile;
+        function chooseSessionFile() { input.value = ''; input.click(); }
+        document.getElementById('btn-open-session').onclick = chooseSessionFile;
+        document.getElementById('btn-control-open-session').onclick = chooseSessionFile;
         input.onchange = function() { var file = input.files && input.files[0]; if (file) { close(false); readSessionFile(file); } };
         function outside(event) { if (!menu.contains(event.target) && !button.contains(event.target)) close(false); }
         function escape(event) {
@@ -4053,16 +4058,19 @@ const ViewerTracker = (function() {
                 '</div>' +
 
                 '<div id="control-field" style="margin-top:5px;padding:4px;background:rgba(65,105,225,0.15);border-radius:3px;border:1px solid #4169E1;">' +
-                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">' +
+                    '<div id="control-session-row" style="display:flex;justify-content:space-between;align-items:center;gap:3px;margin-bottom:4px;white-space:nowrap;">' +
                         '<span style="font-size:9px;font-weight:bold;color:#4169E1;">🎛️ CONTROLS</span>' +
+                        '<div id="control-session-buttons" style="display:flex;gap:2px;align-items:center;">' +
                         '<button id="btn-replay" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-warning);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;" title="Replay recorded history">Replay</button>' +
-                        '<button type="button" id="btn-control-stop" aria-label="Stop this session" title="Stop this session and freeze its history and elapsed time" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:#ff4444;color:white;border:1px solid #ff4444;border-radius:2px;cursor:pointer;">■ Stop</button>' +
+                        '<button type="button" id="btn-control-save-session" aria-label="Save session file" title="Save this session as a file to replay later" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:#4169E1;color:white;border:1px solid #4169E1;border-radius:2px;cursor:pointer;">Save</button>' +
+                        '<button type="button" id="btn-control-open-session" aria-label="Open session file" title="Open a saved session in FILE REPLAY" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Open</button>' +
+                        '</div>' +
                         '<span style="font-size:11px;color:var(--panel-positive);font-weight:bold;" id="control-next-scan">Next: 60s</span>' +
                     '</div>' +
                     '<div id="control-action-row" style="display:grid;grid-template-columns:minmax(max-content,1fr) auto minmax(0,1fr);align-items:center;gap:3px;">' +
                         '<span style="font-size:12px;color:var(--panel-warning);font-family:monospace;font-weight:bold;flex-shrink:0;" id="control-tracking-timer">00:00:00</span>' +
-                        '<div id="control-action-buttons" style="display:flex;gap:3px;align-items:center;">' +
-                            '<button id="btn-download-report" style="background:#4169E1;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 4px;display:flex;align-items:center;gap:2px;" title="Download tracking report">' +
+                        '<div id="control-action-buttons" style="display:flex;gap:2px;align-items:center;">' +
+                            '<button id="btn-download-report" style="background:#4169E1;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Download tracking report">' +
                                 '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
                                     '<line x1="12" y1="4" x2="12" y2="16"/>' +
                                     '<polyline points="6 10 12 16 18 10"/>' +
@@ -4070,7 +4078,7 @@ const ViewerTracker = (function() {
                                 '</svg>' +
                                 'TXT' +
                             '</button>' +
-                            '<button id="btn-download-csv" style="background:#4169E1;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 4px;display:flex;align-items:center;gap:2px;" title="Download all retained history as CSV">' +
+                            '<button id="btn-download-csv" style="background:#4169E1;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Download all retained history as CSV">' +
                                 '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
                                     '<line x1="12" y1="4" x2="12" y2="16"/>' +
                                     '<polyline points="6 10 12 16 18 10"/>' +
@@ -4079,7 +4087,8 @@ const ViewerTracker = (function() {
                                 'CSV' +
                             '</button>' +
                             '<button id="btn-control-auto" style="background:#32CD32;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 4px;min-width:24px;" title="Auto-Refresh ON">⏸</button>' +
-                            '<button id="btn-main-reset" style="background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 4px;display:flex;align-items:center;gap:2px;" title="Reset all tracking data">' +
+                            '<button type="button" id="btn-control-stop" aria-label="Stop this session" title="Stop this session and freeze its history and elapsed time" style="background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;white-space:nowrap;">■ Stop</button>' +
+                            '<button id="btn-main-reset" style="background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Reset all tracking data">' +
                                 '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
                                     '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12"/>' +
                                     '<path d="M3 3v9h9"/>' +

@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **version 3.3.5**. For a quick introduction and installation link, see the [README](readme.md).
+Detailed reference for **version 3.3.6**. For a quick introduction and installation link, see the [README](readme.md).
 
 ## Contents
 
@@ -46,7 +46,7 @@ Keep only one enabled copy of TierScope. After an update, refresh existing room 
 | **Full ▾ / 4h ▾ / 2h ▾ / 1h ▾ / 30m ▾ / 15m ▾** in the expanded header | Open chart-window and session-file options. |
 | **−**, **+**, or **Expand** | Switch between expanded and compact views. |
 | **⏸ / ▶** in Controls or compact view | Pause or resume the current session. An already-running scan may finish. |
-| **■ Stop** in Controls | Confirm closing the session, freeze elapsed time and history, and discard pending scan results. |
+| **■ Stop** between Pause and Reset in Controls | Confirm closing the session, freeze elapsed time and history, and discard pending scan results. |
 | **Start** after Stop | Confirm starting a separate session with an empty chart and a fresh timer. |
 | Compact-view timer controls | Adjust the interval from 30 to 300 seconds; presets are 30s, 60s, 2m, and 5m. |
 | Row circle or icon | Collapse that row into the strip below the header. |
@@ -56,6 +56,8 @@ Keep only one enabled copy of TierScope. After an update, refresh existing room 
 | **TXT** | Download a text summary of the current session. |
 | **CSV** | Download every retained history sample, including collapsed tiers. |
 | **Replay** | Open recorded history for the current room. |
+| **Save** beside Replay | Download the current session as a file for later Replay. |
+| **Open** beside Save | Open a saved session file in FILE REPLAY. |
 | **Reset** | Confirm clearing this room’s history, counters, and elapsed time, then request one fresh scan. Keep the automatic-scan pause state and layout preferences. |
 
 The default scan interval is **60 seconds**, counted after a scan finishes. A new, unpaused room session requests its first sample as soon as the panel is initialized, then starts the normal countdown when that attempt completes. Existing retry waits and access restrictions still apply. Restored sessions keep their existing startup behavior; paused sessions wait for Resume. Faster polling does not guarantee fresher data from the site.
@@ -203,9 +205,11 @@ Replay freezes the available history when opened. New scans continue updating th
 
 ## Session files
 
-Open the **Full ▾ / 4h ▾ / 2h ▾ / 1h ▾ / 30m ▾ / 15m ▾** header menu and choose **Save session file**. The download ends in `.tierscope.json` and contains the room name, capture time, full retained sample history, gap markers, session highs and their recorded times, session start information, active elapsed time, and paused/stopped state. It contains aggregate counts, without viewer username collections. A running session can be saved without pausing or stopping it.
+Click **Save** beside Replay in Controls. The download ends in `.tierscope.json` and contains the room name, capture time, full retained sample history, gap markers, session highs and their recorded times, session start information, active elapsed time, and paused/stopped state. It contains aggregate counts, without viewer username collections. A running session can be saved without pausing or stopping it. Save becomes available after the first recorded sample.
 
-Choose **Open session file…** from the same menu to reopen a download. It opens paused in a separate **FILE REPLAY** view, with the same stepping, playback speed, row controls, chart windows, and GIF export as ordinary Replay. The file’s room name stays visible above the Replay controls, independently of the room currently open in the browser. Long names shorten with an ellipsis; hover over the name to read it in full. The options menu shows its room, capture time, sample count, and whole-session room high. The Replay time tooltip includes captured active time and session state. Replay highs still use retained samples through the selected frame; the file also preserves whole-session highs that may predate those samples.
+Click **Open** beside Save to reopen a download. It opens paused in a separate **FILE REPLAY** view, with the same stepping, playback speed, row controls, chart windows, and GIF export as ordinary Replay. The file’s room name stays visible above the Replay controls, independently of the room currently open in the browser. Long names shorten with an ellipsis; hover over the name to read it in full. The options menu shows its room, capture time, sample count, and whole-session room high. The Replay time tooltip includes captured active time and session state. Replay highs still use retained samples through the selected frame; the file also preserves whole-session highs that may predate those samples.
+
+The header menu retains **Save session file** and **Open session file…** so both actions remain available during Replay, when live Controls are hidden. Open is also available without a live session; on directory pages, expand the panel to reach Controls.
 
 Opening a file does not replace, merge, save over, or resume the current room session. Current live acquisition continues with its existing pause/Stop state. **Close Replay** returns to that room’s latest data. It is also possible to expand TierScope on a directory page and open a file there; opening the file itself makes no acquisition requests. Imported Replay is not automatically restored after refresh or navigation: reopen the file when needed.
 
@@ -363,7 +367,7 @@ Look for their boxed markers below the header and click to restore them. Moderat
 
 **The panel shrank after collapsing rows**
 
-This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only version 3.3.5 is enabled, refresh the tab, and report the browser and steps that reproduce it.
+This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only version 3.3.6 is enabled, refresh the tab, and report the browser and steps that reproduce it.
 
 **The panel is too large or near a screen edge**
 
@@ -403,7 +407,8 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
-| **3.3.5** | One-click Resume overrides automatic absence pause and Stop until a confirmed broadcaster return; override is preserved across refresh and manual Pause/Resume. |
+| **3.3.6** | Put Save and Open beside Replay in Controls; move Stop between Pause and Reset, keeping the existing panel size and Stop confirmation. |
+| 3.3.5 | One-click Resume overrides automatic absence pause and Stop until a confirmed broadcaster return; override is preserved across refresh and manual Pause/Resume. |
 | 3.3.4 | Check for the broadcaster every minute while auto-paused; retain the three-hour auto-pause Stop deadline. |
 | 3.3.3 | Auto-pause recording after 15 minutes of broadcaster absence, check for returns every five minutes, resume automatically on return, and Stop after three hours auto-paused. |
 | 3.3.2 | Show the saved session’s room name in FILE REPLAY, with long-name truncation and unchanged panel dimensions. |
