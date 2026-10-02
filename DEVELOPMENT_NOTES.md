@@ -407,7 +407,7 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
-| **3.3.6** | Put Save and Open beside Replay in Controls; move Stop between Pause and Reset, keeping the existing panel size and Stop confirmation. |
+| **3.3.6** | Added Save and Open beside Replay in Controls; moved Stop between Pause and Reset. |
 | 3.3.5 | One-click Resume overrides automatic absence pause and Stop until a confirmed broadcaster return; override is preserved across refresh and manual Pause/Resume. |
 | 3.3.4 | Check for the broadcaster every minute while auto-paused; retain the three-hour auto-pause Stop deadline. |
 | 3.3.3 | Auto-pause recording after 15 minutes of broadcaster absence, check for returns every five minutes, resume automatically on return, and Stop after three hours auto-paused. |
