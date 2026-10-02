@@ -46,7 +46,7 @@ Keep only one enabled copy of TierScope. After an update, refresh existing room 
 | **Full ▾ / 4h ▾ / 2h ▾ / 1h ▾ / 30m ▾ / 15m ▾** in the expanded header | Open chart-window and session-file options. |
 | **−**, **+**, or **Expand** | Switch between expanded and compact views. |
 | **⏸ / ▶** in Controls or compact view | Pause or resume the current session. An already-running scan may finish. |
-| **■ Stop** between Pause and Reset in Controls | Confirm closing the session, freeze elapsed time and history, and discard pending scan results. |
+| **■ Stop** | Confirm closing the session, freeze elapsed time and history, and discard pending scan results. |
 | **Start** after Stop | Confirm starting a separate session with an empty chart and a fresh timer. |
 | Compact-view timer controls | Adjust the interval from 30 to 300 seconds; presets are 30s, 60s, 2m, and 5m. |
 | Row circle or icon | Collapse that row into the strip below the header. |
@@ -56,8 +56,8 @@ Keep only one enabled copy of TierScope. After an update, refresh existing room 
 | **TXT** | Download a text summary of the current session. |
 | **CSV** | Download every retained history sample, including collapsed tiers. |
 | **Replay** | Open recorded history for the current room. |
-| **Save** beside Replay | Download the current session as a file for later Replay. |
-| **Open** beside Save | Open a saved session file in FILE REPLAY. |
+| **Save** | Download the current session as a file for later Replay. |
+| **Open** | Open a saved session file in FILE REPLAY. |
 | **Reset** | Confirm clearing this room’s history, counters, and elapsed time, then request one fresh scan. Keep the automatic-scan pause state and layout preferences. |
 
 The default scan interval is **60 seconds**, counted after a scan finishes. A new, unpaused room session requests its first sample as soon as the panel is initialized, then starts the normal countdown when that attempt completes. Existing retry waits and access restrictions still apply. Restored sessions keep their existing startup behavior; paused sessions wait for Resume. Faster polling does not guarantee fresher data from the site.
