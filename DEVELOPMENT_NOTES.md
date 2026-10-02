@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **version 3.3.4**. For a quick introduction and installation link, see the [README](readme.md).
+Detailed reference for **version 3.3.5**. For a quick introduction and installation link, see the [README](readme.md).
 
 ## Contents
 
@@ -87,9 +87,11 @@ TierScope uses the owner flag in well-formed user-list API responses. This ident
 
 Controls shows **Reduced** during slowdown, then a **Check** countdown while auto-paused. The status line and compact view show **Auto-paused**; tooltips explain the return checks and Stop deadline. Playback, FILE REPLAY, and exports remain available while return checks continue in the background.
 
-The Pause button becomes **Pause return checks** while auto-paused. Clicking it switches to an ordinary manual pause: no return checks, automatic resume, or automatic Stop. Manual Resume starts checking the room again with a fresh absence window. Manual Stop still ends the session immediately after confirmation, and Reset starts fresh history.
+While auto-paused, the button becomes **▶ Resume recording**. One click restarts recording and active elapsed time at the selected scan interval, cancels the pending automatic Stop, and replaces return-only checks with normal scans. Absence slowdown, automatic pause, and automatic Stop stay disabled for that continuous absence. Only a new, well-formed API response containing the owner re-enables absence automation for a later departure.
 
-Errors, malformed responses, and DOM-only samples cannot establish absence or confirm a return. Once absence is established, its deadlines use wall time; a failed check does not prove a return or extend the deadline. Checks respect rate limits, server waits, and retry backoff, so detecting a return can take longer than one minute. Access denial (401/403) switches to manual pause and requires explicit Resume. Selected scan intervals never become shorter during slowdown.
+This manual override is saved with the session and survives refresh and ordinary Pause/Resume. Reset or starting a new session clears it. Manual Stop still ends the session after confirmation. The countdown tooltip and TXT report identify an active override.
+
+Errors, malformed responses, and DOM-only samples cannot establish absence or confirm a return. Once absence is established, its deadlines use wall time; a failed check does not prove a return or extend the deadline. Checks respect rate limits, server waits, and retry backoff, so detecting a return can take longer than one minute. Manual override also respects these restrictions. Access denial (401/403) switches to manual pause and requires explicit Resume; an internal failure cannot activate the override. Selected scan intervals never become shorter during slowdown.
 
 Absence and the automatic-pause time are saved with the session. Restoring an eligible auto-paused record resumes return checks without restarting elapsed time. The normal three-hour saved-record restore window still applies; completed return checks refresh that record without adding samples. If a suspended tab wakes late, active time freezes at the 15-minute pause deadline and an overdue Stop uses the original deadline. Pending responses cannot reopen a stopped session or survive Reset, navigation, or cancellation of return checks.
 
@@ -307,7 +309,7 @@ When restored history contains a sample, TierScope displays that sample until a 
 - The report labels the figures as **last saved stats**, includes the sample timestamp, and distinguishes them from live acquisition details.
 - A failed scan leaves the saved display intact. The first accepted scan replaces it with fresh data and resumes normal trend comparisons.
 
-Manually paused sessions remain paused after restoration. Resume acquisition with **▶** when ready. Automatically paused sessions restore their return checks and resume recording only when the broadcaster is detected again.
+Manually paused sessions remain paused after restoration. Resume acquisition with **▶** when ready. Automatically paused sessions restore their return checks; recording resumes when the broadcaster is detected again or you select **▶ Resume recording** to override the pause.
 
 History is capped at **10,000 accepted samples**. Older points are discarded when that limit is reached. Replay, GIF, and CSV exports use the retained history. Session-high values and their matching timestamps are stored separately, so tier and total highs survive the removal of older chart samples. Replay highs remain limited to retained samples through the selected frame.
 
@@ -335,7 +337,7 @@ TierScope depends on Chaturbate’s room data and page structure; changes to eit
 - **Validation:** malformed or duplicate records reject the sample. Additional count-change checks can reject suspicious changes. Rejected samples add no history point.
 - **Fallback:** reads the Users tab if the API is unavailable or rejected, then attempts to return to Chat. Fallback attempts are spaced by at least 60 seconds, or the configured scan interval when longer.
 - **Freshness:** the last accepted data stays visible through failed attempts. The site’s Users tab and TierScope can refresh at different times.
-- **Storage format:** session schema version 2, with an optional `history.breaks` boolean array aligned to sample timestamps. Optional `isStopped`, `stoppedAt`, `stopReason`, `broadcasterAbsence`, and `absencePausedAt` fields retain session closure and absence timing. Older builds ignore `absencePausedAt` and restore an auto-paused session as an ordinary manual pause. Tab records are under `tierscope:tab:v2:<room>:<record-id>` and a Reset generation under `tierscope:epoch:v2:<room>`. Compatible legacy records under `tierscope:v1:<room>` are validated and migrated in memory; new saves use version 2. Releases before 3.1.8 do not read this per-tab format. Builds 3.1.8–3.1.14 can restore aggregate history but ignore the optional gap metadata. Row visibility preferences are stored separately under `tierscope:ui:collapsedRows:v1`, position/scale under `tierscope:ui:geometry:v1`, and the theme under `tierscope:ui:theme:v1`.
+- **Storage format:** session schema version 2, with an optional `history.breaks` boolean array aligned to sample timestamps. Optional `isStopped`, `stoppedAt`, `stopReason`, `broadcasterAbsence`, `absencePausedAt`, and boolean `absenceOverrideActive` fields retain session closure, absence timing, and manual override. Builds before 3.3.3 ignore `absencePausedAt` and restore an auto-paused session as an ordinary manual pause. Builds before 3.3.5 ignore the override flag and can restart absence automation. Missing optional fields retain their backward-compatible defaults. Tab records are under `tierscope:tab:v2:<room>:<record-id>` and a Reset generation under `tierscope:epoch:v2:<room>`. Compatible legacy records under `tierscope:v1:<room>` are validated and migrated in memory; new saves use version 2. Releases before 3.1.8 do not read this per-tab format. Builds 3.1.8–3.1.14 can restore aggregate history but ignore the optional gap metadata. Row visibility preferences are stored separately under `tierscope:ui:collapsedRows:v1`, position/scale under `tierscope:ui:geometry:v1`, and the theme under `tierscope:ui:theme:v1`.
 - **Retry state:** `tierscope:requests:v1:<origin>` stores shared retry timing and access-denial status. It contains no viewer usernames and is separate from room Reset.
 - **GIF dependency:** [omggif](https://github.com/deanm/omggif), version 1.0.10, MIT licensed.
 
@@ -361,7 +363,7 @@ Look for their boxed markers below the header and click to restore them. Moderat
 
 **The panel shrank after collapsing rows**
 
-This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only version 3.3.4 is enabled, refresh the tab, and report the browser and steps that reproduce it.
+This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only version 3.3.5 is enabled, refresh the tab, and report the browser and steps that reproduce it.
 
 **The panel is too large or near a screen edge**
 
@@ -401,7 +403,8 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
-| **3.3.4** | Check for the broadcaster every minute while auto-paused; retain the three-hour auto-pause Stop deadline. |
+| **3.3.5** | One-click Resume overrides automatic absence pause and Stop until a confirmed broadcaster return; preserve the override across refresh and manual Pause/Resume. |
+| 3.3.4 | Check for the broadcaster every minute while auto-paused; retain the three-hour auto-pause Stop deadline. |
 | 3.3.3 | Auto-pause recording after 15 minutes of broadcaster absence, check for returns every five minutes, resume automatically on return, and Stop after three hours auto-paused. |
 | 3.3.2 | Show the saved session’s room name in FILE REPLAY, with long-name truncation and unchanged panel dimensions. |
 | 3.3.1 | Add 4h, 2h, and 30min chart windows; keep the order Full / 4h / 2h / 1h / 30min / 15min. |

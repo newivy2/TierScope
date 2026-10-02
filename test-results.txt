@@ -1,36 +1,118 @@
-TierScope 3.3.4 — targeted return-check interval regression results
+TierScope 3.3.5 verification
 
-Userscript syntax: PASS
-15 absence lifecycle tests: PASS
+Syntax check: node --check tierscope.user.js — passed.
+Unit tests: 71 passed, 0 failed, 0 skipped.
+Browsers: Chromium 138 and Firefox 153, using Playwright 1.62.1.
+Affected browser suites: stop-browser.cjs, startup-browser.cjs, charts-browser.cjs — passed in both browsers.
 
-Verified no return check before 60 seconds, a check at 60 seconds, no samples
-while absent, automatic resume, reload, manual cancellation, retry restrictions,
-and the unchanged three-hour auto-pause Stop deadline.
+Verified one-click automatic-pause override; saved override on refresh; ordinary manual Pause/Resume; selected intervals; cancellation of the old automatic Stop deadline; stale presence-response rejection; re-arming only on a current, valid API owner observation; Reset/navigation; request restrictions; return checks behind FILE REPLAY; ordinary startup and chart behavior.
 
-Browser suites and unrelated unit tests were not rerun for this interval-only
-change. The 3.3.3 baseline passed all 67 unit tests and all seven browser suites
-in Chromium and Firefox.
+The full browser suite was not rerun for this change. Browser fixtures use controlled local responses, not the live site or an installed userscript manager. Firefox used container-specific sandbox settings for the test environment.
 
-✔ Stop freezes elapsed time and history, rejects pending samples, and survives refresh (57.768934ms)
-✔ Start begins separate history and preserves the stopped source record until cleanup (16.749074ms)
-✔ absence slows to 2m then 5m; returns before 15m restore the selected interval without gaps (14.885269ms)
-✔ 15m auto-pause freezes time and samples, checks every minute, and resumes with one real sample plus a gap (14.628905ms)
-✔ three hours AFTER auto-pause seals history and rejects a pending returning-owner response (13.185507ms)
-✔ auto-pause restores its deadline and frozen time, then detects a return after refresh (15.764273ms)
-✔ delayed browser wake freezes active time at 15m and Stops at the later three-hour paused deadline (13.064839ms)
-✔ manual Pause cancels return checks and automatic resume, including a pending returning-owner response (12.451896ms)
-✔ Reset and navigation invalidate in-flight return checks (19.730235ms)
-✔ return checks never fall back to DOM; malformed responses and retry restrictions cannot resume recording (10.782124ms)
-✔ restored running startup still starts return checks when its delayed callback meets the absence threshold (16.441519ms)
-✔ errors and DOM-only samples cannot establish absence; valid empty API responses can without adding zero counts (6.609168ms)
-✔ Stop during a restored startup delay cannot be overwritten by its queued callbacks (11.248454ms)
-✔ a confirmed return resumes timing even when its audience counts fail validation (7.855945ms)
-✔ optional auto-pause persistence rejects inconsistent state and preserves legacy records (11.762001ms)
-ℹ tests 15
+PASS age boundaries, future timestamps, saved/API/DOM labels and timestamp explanation
+PASS all 12 chart rows, full 36px vertical range, long labels, zero/flat data and large counts fit
+PASS real omggif exports decode to matching pixels, at most 60 frames and exactly 10 seconds [{"name":"sample","samples":60,"frames":60,"bytes":464850,"encodeMs":1009},{"name":"single","samples":1,"frames":1,"bytes":5502,"encodeMs":15},{"name":"dense","samples":10000,"frames":60,"bytes":735346,"encodeMs":8402},{"name":"flat","samples":60,"frames":60,"bytes":336795,"encodeMs":959},{"name":"zero","samples":1,"frames":1,"bytes":5141,"encodeMs":21},{"name":"gaps","samples":60,"frames":60,"bytes":467840,"encodeMs":1088}]
+PASS cancellation releases export state and allows retry
+✔ API parser rejects invalid totals, malformed records, duplicate usernames and unsafe numbers (11.931041ms)
+✔ CSV contains retained history in tier order, safe text, UTC times and correct totals (4.987024ms)
+✔ timestamps control chart spacing, breaks preserve gaps, duplicate times remain finite (2.079405ms)
+✔ dense plotting preserves per-column extrema and bounds drawing work (13.91198ms)
+✔ pause/reload gaps persist, with conservative legacy interval inference (8.469767ms)
+✔ old names are ignored on restore and omitted from new saves without rewriting source records (26.829506ms)
+✔ 429 honors Retry-After across manual attempts, Reset, reload and other tabs without DOM fallback (15.731409ms)
+✔ 401/403 pause acquisition until explicit Resume, including in sibling tabs (22.143197ms)
+✔ temporary failures back off to 15 minutes; server waits suppress fallback; successful API resumes normal cadence (11.101322ms)
+✔ older successful requests cannot clear a restriction written by another tab (7.249392ms)
+✔ local retry gate survives an unavailable GM write (3.31131ms)
+✔ Resume after access denial still honors an explicit server wait (5.457154ms)
+✔ an older stored policy cannot erase a newer unsaved restriction (4.301966ms)
+✔ GIF export decodes with exact pixels, bounded drawing, fixed duration, and cancellation (14410.03567ms)
+✔ GIF gap connectors are dashed, use a dedicated color, and preserve recorded endpoints (4.090509ms)
+✔ session download round-trips full history, gaps, timing, highs and room despite a narrow chart window (15.644327ms)
+✔ a session file survives more than three hours and retains highs outside the rolling history (6.9768ms)
+✔ unknown file fields and obsolete username collections are discarded without execution or re-export (5.659318ms)
+✔ invalid, empty, oversized and future-version files preserve the current Replay and live state (10.082974ms)
+✔ live scans continue behind imported Replay; closing returns to the latest room data (14.055487ms)
+✔ exporting a normal Replay preserves its entry snapshot after new scans (8.21149ms)
+✔ pause, reload, failed acquisition, Stop, file Replay and close preserve session closure and timing (15.653279ms)
+✔ Reset, navigation, closing Replay and a newer file cancel an older asynchronous file read (30.149488ms)
+✔ Stop during an in-flight scan cannot append into live history or an imported Replay (8.44486ms)
+✔ chart windows retain all stored samples and use only samples through the Replay frame (6.012454ms)
+✔ full history defaults, window preferences survive reload and Reset, invalid preferences fall back safely (31.579475ms)
+✔ pause/resume preserves session start and wall-time high offsets while timer excludes pauses (11.179036ms)
+✔ tier and total highs survive history eviction, ties, lower samples, and reload (200.663141ms)
+✔ legacy high timestamps are rebuilt from the matching sample; start is explicitly estimated (3.300306ms)
+✔ stale same-room tabs keep independent records and cannot replace the newest accepted sample (6.640911ms)
+✔ tabs opened before any save also write separate records (4.991067ms)
+✔ Reset invalidates old tabs and immediately persists a paused, empty session (11.579069ms)
+✔ newer schema and malformed records remain untouched while independent saves continue (11.298618ms)
+✔ expired tab data is not restored and returning writers rotate record IDs (3.145037ms)
+✔ saved display remains non-live; failed scan and render rollback retain data and highs (8.151758ms)
+✔ a late network response cannot commit after room navigation (4.413871ms)
+✔ sample ages use seconds, minutes, hours, days and clamp future timestamps (2.374894ms)
+✔ restored highlights compare with persistent session highs; Replay still uses historical highs (208.184949ms)
+✔ explicit Reset recovers from corrupt per-tab storage without retaining the damaged branch (2.876231ms)
+✔ late scan results cannot resurrect pre-Reset data (4.614942ms)
+✔ fresh room scans during init and starts its next interval only after completion (7.593385ms)
+✔ restored active and paused sessions keep their existing startup behavior (15.464801ms)
+✔ pausing during the first scan never lets its completion restart automatic scans (6.840952ms)
+✔ Reset or navigation invalidate the first scan and its scheduling continuation (13.518836ms)
+✔ startup respects existing retry gates and denial, including failures of the first request (25.769874ms)
+✔ directory pages do not gain an immediate room scan (9.048815ms)
+✔ Stop freezes elapsed time and history, rejects pending samples, and survives refresh (17.058136ms)
+✔ Start begins separate history and preserves the stopped source record until cleanup (15.942976ms)
+✔ absence slows to 2m then 5m; returns before 15m restore the selected interval without gaps (19.605338ms)
+✔ 15m auto-pause freezes time and samples, checks every minute, and resumes with one real sample plus a gap (15.879252ms)
+✔ three hours AFTER auto-pause seals history and rejects a pending returning-owner response (16.873827ms)
+✔ auto-pause restores its deadline and frozen time, then detects a return after refresh (22.342847ms)
+✔ delayed browser wake freezes active time at 15m and Stops at the later three-hour paused deadline (13.886487ms)
+✔ one-click Resume cancels auto-pause and its Stop deadline for the continuous absence (14.942669ms)
+✔ a stale returning-owner check cannot clear a newer manual override or append its sample (14.620851ms)
+✔ override persists through refresh and an ordinary manual Pause/Resume (37.051446ms)
+✔ only a current well-formed API owner re-arms automation for a later absence (18.176721ms)
+✔ override honors existing rate limits and is cleared by Reset or room navigation (23.469081ms)
+✔ Reset and navigation invalidate in-flight return checks (65.981747ms)
+✔ return checks never fall back to DOM; malformed responses and retry restrictions cannot resume recording (9.407271ms)
+✔ restored running startup still starts return checks when its delayed callback meets the absence threshold (14.177004ms)
+✔ errors and DOM-only samples cannot establish absence; valid empty API responses can without adding zero counts (6.510231ms)
+✔ Stop during a restored startup delay cannot be overwritten by its queued callbacks (9.22364ms)
+✔ a confirmed return resumes timing even when its audience counts fail validation (9.683358ms)
+✔ optional auto-pause persistence rejects inconsistent state and preserves legacy records (8.570828ms)
+✔ corrupt siblings, invalid shapes, missing epochs and future schemas cannot block good history (6.284083ms)
+✔ invalid legacy record does not block a current tab record (4.019506ms)
+✔ a corrected record becomes eligible without Reset or deleting healthy data (3.511106ms)
+✔ late old-epoch records never restore and are removed after the three-hour grace period (3.457214ms)
+✔ old-epoch corrupt and unsupported records are never automatically deleted (2.856243ms)
+✔ failure to delete an expired record does not block a healthy sibling (3.4518ms)
+ℹ tests 71
 ℹ suites 0
-ℹ pass 15
+ℹ pass 71
 ℹ fail 0
 ℹ cancelled 0
 ℹ skipped 0
 ℹ todo 0
-ℹ duration_ms 276.686977
+ℹ duration_ms 15680.313644
+
+
+
+Browser: chromium — stop-browser.cjs
+PASS manual Stop confirmation/Cancel, Stop layout, frozen time/chart, disabled scanning, retained Replay/CSV, reload, separate Start, 15m absence pause, frozen samples/time, background return checks behind FILE REPLAY, auto-resume, paused reload, one-click Resume override and restored override, re-arming on owner return and automatic Stop without a prompt
+
+Browser: chromium — startup-browser.cjs
+PASS fresh initialization request, scanning status, completion-based countdown, visible first data point and compact time-control tooltip
+
+Browser: chromium — charts-browser.cjs
+PASS orange dashed gaps in expanded/compact/Replay, dark/bright contrast, clipped compact boundary, no future connectors or synthetic values, hover/keyboard inspection, timestamp spacing, flat/single samples, original tier colors and unchanged geometry
+PASS rate-limit UI, reload persistence, access-denied pause and explicit recovery
+
+
+
+Browser: firefox — stop-browser.cjs
+PASS manual Stop confirmation/Cancel, Stop layout, frozen time/chart, disabled scanning, retained Replay/CSV, reload, separate Start, 15m absence pause, frozen samples/time, background return checks behind FILE REPLAY, auto-resume, paused reload, one-click Resume override and restored override, re-arming on owner return and automatic Stop without a prompt
+
+Browser: firefox — startup-browser.cjs
+PASS fresh initialization request, scanning status, completion-based countdown, visible first data point and compact time-control tooltip
+
+Browser: firefox — charts-browser.cjs
+PASS orange dashed gaps in expanded/compact/Replay, dark/bright contrast, clipped compact boundary, no future connectors or synthetic values, hover/keyboard inspection, timestamp spacing, flat/single samples, original tier colors and unchanged geometry
+PASS rate-limit UI, reload persistence, access-denied pause and explicit recovery
