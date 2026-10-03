@@ -1,8 +1,9 @@
+const {instrument, prepareSource} = require('./helpers/instrument.cjs');
 const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const engine = process.env.TIERSCOPE_BROWSER || 'chromium';
-const source = fs.readFileSync(path.join(__dirname, '../tierscope.user.js'), 'utf8')
+const source = prepareSource(fs.readFileSync(path.join(__dirname, '../tierscope.user.js'), 'utf8'))
   .replaceAll('scheduleInit(2000);', '')
   .replace('downloadTrackingReport: downloadTrackingReport,', `
     __ath: {init, scan: performScanThenReturn, pause: pauseAutoRefresh, archive: captureSessionFile,
@@ -41,7 +42,7 @@ const source = fs.readFileSync(path.join(__dirname, '../tierscope.user.js'), 'ut
     async function load(room = 'testroom') {
       owner = room;
       await page.goto('https://tierscope.test/' + room + '/');
-      await page.addScriptTag({content: source});
+      await page.addScriptTag({content:instrument(source)});
       await page.evaluate(() => ViewerTracker.__ath.init());
       await page.waitForFunction(() => ViewerTracker.__ath.state().history.timestamps.length > 0);
       await page.evaluate(() => ViewerTracker.__ath.pause());

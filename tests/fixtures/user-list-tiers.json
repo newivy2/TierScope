@@ -1,0 +1,10 @@
+{
+  "provenance": "Synthetic protocol regression fixture, not a captured or independently verified Chaturbate response. Counts intentionally differ by class to catch swapped mappings.",
+  "body": "8,testroom|o|f|0,mod_1|m|m|0,fan_1|f|m|0,fan_2|f|f|0,purple_1|l|m|0,purple_2|l|m|0,purple_3|l|s|0,pink_1|p|m|0,pink_2|p|m|0,pink_3|p|m|0,pink_4|p|f|0,blue_1|tr|m|0,blue_2|tr|m|0,blue_3|tr|m|0,blue_4|tr|m|0,blue_5|tr|s|0,light_1|t|m|0,light_2|t|m|0,light_3|t|m|0,light_4|t|m|0,light_5|t|m|0,light_6|t|c|0,gray_1|g|m|0,gray_2|g|m|0,gray_3|g|m|0,gray_4|g|m|0,gray_5|g|m|0,gray_6|g|m|0,gray_7|g|m|0",
+  "expected": {
+    "red": 1, "green": 2, "purple": 3, "pink": 4,
+    "dark-blue": 5, "light-blue": 6, "gray": 7,
+    "withTokens": 21, "total": 29, "anonymous": 8, "female-trans": 5,
+    "roomTotal": 37
+  }
+}

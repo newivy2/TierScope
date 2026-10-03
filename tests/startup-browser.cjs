@@ -1,6 +1,7 @@
+const {instrument, prepareSource} = require('./helpers/instrument.cjs');
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const engine=process.env.TIERSCOPE_BROWSER||'chromium';
-const source=fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8').replaceAll('scheduleInit(2000);','')
+const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8')).replaceAll('scheduleInit(2000);','')
  .replace('downloadTrackingReport: downloadTrackingReport,',`
  __startup:{init,state:()=>({count:history.timestamps.length,scanning:isScanning,countdown:countdownInterval,next:nextScanAt,now:Date.now()})},
  downloadTrackingReport: downloadTrackingReport,`);
@@ -21,7 +22,7 @@ const source=fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8')
    window.GM_listValues=()=>Object.keys(localStorage);window.GM_getValue=(k,d)=>localStorage.getItem(k)===null?d:JSON.parse(localStorage.getItem(k));
    window.GM_setValue=(k,v)=>localStorage.setItem(k,JSON.stringify(v));window.GM_deleteValue=k=>localStorage.removeItem(k);
   });
-  await page.goto('https://tierscope.test/testroom/');await page.addScriptTag({content:source});
+  await page.goto('https://tierscope.test/testroom/');await page.addScriptTag({content:instrument(source)});
   await page.evaluate(()=>ViewerTracker.__startup.init());await requested;
   const pending=await page.evaluate(()=>ViewerTracker.__startup.state());
   assert.equal(requests,1);assert(pending.scanning);assert.equal(pending.countdown,null);
@@ -40,5 +41,23 @@ const source=fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8')
   await page.keyboard.press('Escape');assert(!(await page.locator('#mini-settings').isVisible()));
   assert.deepEqual(errors,[]);
   console.log('PASS fresh initialization request, scanning status, completion-based countdown, visible first data point and compact time-control tooltip');
+  // Exercise normal startup and a real panel control without any injected API.
+  await page.route('https://tierscope.test/api/**',r=>r.fulfill({body:'5,testroom|o|f|0,viewer|t|m|0'}));
+  await page.goto('https://tierscope.test/freshroom/');
+  await page.addScriptTag({content:fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8')});
+  await page.waitForFunction(()=>document.getElementById('header-text')?.textContent.startsWith('USERS:'));
+  assert.deepEqual(await page.evaluate(()=>[typeof window.ViewerTracker,typeof window.GifWriter]),['undefined','undefined']);
+  await page.click('#btn-replay');
+  assert.match(await page.locator('#header-text').textContent(),/^PLAYBACK:/);
+  await page.click('#playback-return');
+  assert.match(await page.locator('#header-text').textContent(),/^USERS:/);
+  const epoch=()=>page.evaluate(()=>localStorage.getItem('tierscope:epoch:v2:freshroom'));
+  const beforeReset=await epoch();
+  page.once('dialog',dialog=>dialog.dismiss());await page.click('#btn-main-reset');
+  assert.equal(await epoch(),beforeReset,'Cancel preserves the session');
+  page.once('dialog',dialog=>dialog.accept());await page.click('#btn-main-reset');
+  assert.notEqual(await epoch(),beforeReset,'the panel can still Reset the session');
+  assert.deepEqual(errors,[]);
+  console.log('PASS unmodified userscript starts and panel Replay/confirmed Reset work without a page API or global GIF encoder');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1});

@@ -1,3 +1,4 @@
+const {instrument, prepareSource} = require('./helpers/instrument.cjs');
 const fs=require('fs');
 const assert=require('assert/strict');
 const chromium=require('playwright')[process.env.TIERSCOPE_BROWSER || 'chromium'];
@@ -5,7 +6,7 @@ const path=require('path');
 const tmp=fs.mkdtempSync(path.join(require('os').tmpdir(),'tierscope-tests-'));
 const executablePath=process.env.TIERSCOPE_CHROMIUM_PATH;
 const browserArgs=process.env.TIERSCOPE_CHROMIUM_ARGS ? JSON.parse(process.env.TIERSCOPE_CHROMIUM_ARGS) : [];
-const source=fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8');
+const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8'));
 const injected=source.replaceAll('scheduleInit(2000);','/* test controls initial setup */').replace('downloadTrackingReport: downloadTrackingReport,',`
  __test: {
    trendCase: function(diff) {
@@ -37,6 +38,8 @@ const injected=source.replaceAll('scheduleInit(2000);','/* test controls initial
    repaint: repaintLivePresentation,
    init: init,
    scan: performScanThenReturn,
+   fallback: function(){return acquireDOMSnapshot({epoch:scanEpoch,generation:initGuard,url:location.href,room:getModelName()},true);},
+   invalidateScan: function(){scanEpoch++;},
    pausePlayback: function(){if(playback&&playback.playing)togglePlayback();},
    savedPrefs: function(){return GM_getValue(COLLAPSED_ROWS_KEY,null);}
  },
@@ -56,8 +59,7 @@ const injected=source.replaceAll('scheduleInit(2000);','/* test controls initial
  page.on('pageerror',e=>errors.push(e.message));
  await page.route('https://tierscope.test/**',r=>r.fulfill({contentType:r.request().url().includes('/api/')?'text/plain':'text/html',body:r.request().url().includes('/api/')?'5,testroom|o|f|0,viewer|t|m|0':'<!doctype html><html><body style="margin:0;background:#303846;"></body></html>'}));
  await page.goto('https://tierscope.test/testroom/');
- await page.addScriptTag({path:require.resolve('omggif')});
- await page.addScriptTag({content:injected});
+ await page.addScriptTag({content:instrument(injected)});
  await page.evaluate(()=>ViewerTracker.__test.setup());
  if(process.env.TIERSCOPE_TRACE)console.log('TRACE setup complete');
  await page.waitForTimeout(150);
@@ -113,11 +115,11 @@ const injected=source.replaceAll('scheduleInit(2000);','/* test controls initial
  await page.mouse.move(resize.x+3,resize.y+3);await page.mouse.down();await page.mouse.move(resize.x-70,resize.y+3,{steps:5});await page.mouse.up();
  const scale=(await page.evaluate(()=>ViewerTracker.__test.extra())).scale;assert(scale>1.2);
  const saved=await page.evaluate(()=>JSON.parse(GM_getValue('tierscope:ui:geometry:v1')));
- await page.reload();await page.addScriptTag({content:injected});await page.evaluate(()=>ViewerTracker.__test.init());await page.waitForTimeout(400);
+ await page.reload();await page.addScriptTag({content:instrument(injected)});await page.evaluate(()=>ViewerTracker.__test.init());await page.waitForTimeout(400);
  assert.equal((await page.evaluate(()=>ViewerTracker.__test.extra())).scale,scale);
  const restored=await page.locator('#tracker-container').boundingBox();assert(Math.abs(restored.x-saved.left)<1);assert(Math.abs(restored.y-saved.top)<1);
  await page.click('#btn-toggle');
- await page.reload();await page.addScriptTag({content:injected});await page.evaluate(()=>ViewerTracker.__test.init());await page.waitForTimeout(400);
+ await page.reload();await page.addScriptTag({content:instrument(injected)});await page.evaluate(()=>ViewerTracker.__test.init());await page.waitForTimeout(400);
  assert.equal(await page.locator('#full-view').isVisible(),true);
  assert.equal((await page.evaluate(()=>ViewerTracker.__test.extra())).scale,scale);
  assert(Math.abs((await page.locator('#tracker-container').boundingBox()).width-restored.width)<1);
@@ -181,7 +183,7 @@ const injected=source.replaceAll('scheduleInit(2000);','/* test controls initial
    await page.setViewportSize({width:1100,height:1100});
    await page.reload();
    await page.evaluate(value=>{localStorage.removeItem('tierscope:ui:geometry:v1');document.body.style.lineHeight=value;},lineHeight);
-   await page.addScriptTag({content:injected});await page.evaluate(()=>ViewerTracker.__test.setup());
+   await page.addScriptTag({content:instrument(injected)});await page.evaluate(()=>ViewerTracker.__test.setup());
    await page.waitForTimeout(400);
    const result=await page.evaluate(keys=>{
      ViewerTracker.__test.layout([]);
@@ -201,13 +203,16 @@ const injected=source.replaceAll('scheduleInit(2000);','/* test controls initial
    assert.equal(result.restored,result.baseline);assert(result.compact<result.baseline-250);assert(result.overflow<=0.5);
    console.log('PASS all 2,048 collapse combinations; inherited line-height '+lineHeight, result);
  }
- // API failure uses real DOM fallback, returns to Chat, and respects cooldown.
+ // API failure uses real DOM fallback, restores the selected tab, and respects cooldown.
  await page.evaluate(()=>{
    const fixture=document.createElement('div');fixture.id='room-fixture';
-   fixture.innerHTML='<button data-testid="users-tab-default">USERS (6)</button><button data-testid="chat-tab-default">CHAT</button><div id="UserListTab"><span class="username mod">moduser</span><span class="username defaultUser">viewer</span></div>';
+   fixture.innerHTML='<div role="tablist"><button role="tab" aria-selected="false" data-testid="users-tab-default">USERS (6)</button><button role="tab" aria-selected="true" data-testid="chat-tab-default">CHAT</button><button role="tab" aria-selected="false" data-tab="private">PRIVATE</button></div><div id="UserListTab"><span class="username mod">moduser</span><span class="username defaultUser">viewer</span></div>';
    document.body.appendChild(fixture);window.tabClicks={users:0,chat:0};
-   fixture.querySelector('[data-testid="users-tab-default"]').onclick=()=>window.tabClicks.users++;
-   fixture.querySelector('[data-testid="chat-tab-default"]').onclick=()=>window.tabClicks.chat++;
+   for(const tab of fixture.querySelectorAll('[role="tab"]')) tab.onclick=()=>{
+     const name=tab.dataset.tab || (tab.dataset.testid.startsWith('users')?'users':'chat');
+     window.tabClicks[name]=(window.tabClicks[name]||0)+1;
+     for(const other of fixture.querySelectorAll('[role="tab"]')) other.setAttribute('aria-selected',String(other===tab));
+   };
  });
  await page.route('https://tierscope.test/api/**',r=>r.fulfill({contentType:'text/plain',body:'invalid response'}));
  await page.click('#btn-replay');await page.evaluate(()=>ViewerTracker.__test.pausePlayback());
@@ -224,6 +229,35 @@ const injected=source.replaceAll('scheduleInit(2000);','/* test controls initial
  assert.deepEqual(await page.evaluate(()=>window.tabClicks),{users:1,chat:1});
  await page.click('#playback-return');assert.match(await page.locator('#acquisition-status').textContent(),/^Retry in/);
  console.log('PASS real DOM fallback, Chat return, cooldown, and independent frozen Replay');
+ const fallbackCases=await page.evaluate(async()=>{
+   const fixture=document.getElementById('room-fixture');
+   const users=fixture.querySelector('[data-testid="users-tab-default"]');
+   const chat=fixture.querySelector('[data-testid="chat-tab-default"]');
+   const pm=fixture.querySelector('[data-tab="private"]');
+   const select=tab=>{for(const other of fixture.querySelectorAll('[role="tab"]'))other.setAttribute('aria-selected',String(other===tab));window.tabClicks={};};
+   const selected=()=>fixture.querySelector('[aria-selected="true"]')?.textContent;
+   const result={};
+   select(users);await ViewerTracker.__test.fallback();result.users={clicks:{...tabClicks},selected:selected()};
+   select(pm);await ViewerTracker.__test.fallback();result.private={clicks:{...tabClicks},selected:selected()};
+   select(null);try{await ViewerTracker.__test.fallback();}catch(e){result.unknownError=e.message;}
+   result.unknownClicks={...tabClicks};
+   select(chat);let pending=ViewerTracker.__test.fallback();pm.click();
+   result.interrupted={snapshot:await pending,clicks:{...tabClicks},selected:selected()};
+   select(chat);pending=ViewerTracker.__test.fallback();ViewerTracker.__test.invalidateScan();
+   result.stale={snapshot:await pending,clicks:{...tabClicks}};
+   select(pm);Object.defineProperty(users,'textContent',{configurable:true,get(){throw new Error('DOM parse failure');}});
+   try{await ViewerTracker.__test.fallback();}catch(e){result.parseError=e.message;}
+   delete users.textContent;result.failed={clicks:{...tabClicks},selected:selected()};
+   return result;
+ });
+ assert.deepEqual(fallbackCases.users,{clicks:{},selected:'USERS (6)'});
+ assert.deepEqual(fallbackCases.private,{clicks:{users:1,private:1},selected:'PRIVATE'});
+ assert.match(fallbackCases.unknownError,/selected tab/);assert.deepEqual(fallbackCases.unknownClicks,{});
+ assert.deepEqual(fallbackCases.interrupted,{snapshot:null,clicks:{users:1,private:1},selected:'PRIVATE'});
+ assert.deepEqual(fallbackCases.stale,{snapshot:null,clicks:{users:1}});
+ assert.match(fallbackCases.parseError,/DOM parse failure/);
+ assert.deepEqual(fallbackCases.failed,{clicks:{users:1,private:1},selected:'PRIVATE'});
+ console.log('PASS DOM fallback preserves Users/private tabs, skips unknown state, respects user navigation, and restores after parse failure');
  await page.click('#btn-toggle');
  assert.notEqual(await page.locator('#mini-total-change').textContent(),'');
  assert.match(await page.locator('#mini-freshness').getAttribute('title'),/DOM/);
@@ -242,7 +276,7 @@ const injected=source.replaceAll('scheduleInit(2000);','/* test controls initial
    for(const [urlPath,expanded] of [['testroom/',true],['b/testroom/',true],['testroom/cam/',true],['',false],['followed/',false],['featured/',false],['female-cams/',false],['trans-cams/',false],['male-cams/',false]]) {
      await page.goto('https://tierscope.test/'+urlPath);
      await page.evaluate(minimized=>GM_setValue('tierscope:ui:geometry:v1',JSON.stringify({left:40,top:40,scale:1.25,minimized})),legacyMinimized);
-     await page.addScriptTag({content:injected});await page.evaluate(()=>ViewerTracker.__test.init());await page.waitForTimeout(100);
+     await page.addScriptTag({content:instrument(injected)});await page.evaluate(()=>ViewerTracker.__test.init());await page.waitForTimeout(100);
      assert.equal(await page.locator('#full-view').isVisible(),expanded,urlPath);
      assert.equal(await page.locator('#minimized-view').isVisible(),!expanded,urlPath);
      assert.equal((await page.evaluate(()=>ViewerTracker.__test.extra())).scale,1.25);

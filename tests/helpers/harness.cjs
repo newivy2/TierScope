@@ -1,8 +1,9 @@
 const fs = require('fs');
+const {instrument, prepareSource} = require('./instrument.cjs');
 const vm = require('vm');
 const assert = require('assert/strict');
 const path = require('path');
-const source = fs.readFileSync(path.join(__dirname, '../../tierscope.user.js'), 'utf8');
+const source = prepareSource(fs.readFileSync(path.join(__dirname, '../../tierscope.user.js'), 'utf8'));
 const key = 'tierscope:v1:testroom';
 function harness(storage = new Map(), sourceText = source) {
   const elements = new Map(), timers = new Map(), logs = [], downloads = [];
@@ -34,7 +35,7 @@ function harness(storage = new Map(), sourceText = source) {
   class FakeDate extends Date {constructor(...a){super(...(a.length?a:[now]));}static now(){return now;}}
   const blobs=new Map(); let blobId=0;
   class FakeURL extends URL {static createObjectURL(b){const id='blob:test-'+(++blobId);blobs.set(id,b);return id;}static revokeObjectURL(){}}
-  const context = { GifWriter: require("omggif").GifWriter,
+  const context = {
     crypto:require("crypto").webcrypto, document, location:new URL('https://chaturbate.com/testroom/'), Date:FakeDate,
     console:{log:(...a)=>logs.push(a.join(' ')),warn:(...a)=>logs.push(a.join(' ')),error:(...a)=>logs.push(a.join(' '))},
     URL:FakeURL,Blob,AbortController, confirm:()=>true,alert:(x)=>logs.push('ALERT: '+x),
@@ -76,7 +77,7 @@ function harness(storage = new Map(), sourceText = source) {
         lastAcceptedAcquisition,restoredDisplayFrame:typeof restoredDisplayFrame === 'undefined' ? null : restoredDisplayFrame,
         isScanning,presentationMode,roomTotalHigh,tierHighTimes};}},
     downloadTrackingReport: downloadTrackingReport,`);
-  vm.createContext(context); vm.runInContext(instrumented,context);
+  vm.createContext(context); vm.runInContext(instrument(instrumented),context);
   const api=context.ViewerTracker, t=api.__test;
   function runWhere(pred){for(const[id,tm]of [...timers])if(pred(tm)){if(!tm.repeat)timers.delete(id);tm.fn();}}
   return {t,api,storage,context,blobs,downloads,e:id=>elements.get(id),logs,timers,

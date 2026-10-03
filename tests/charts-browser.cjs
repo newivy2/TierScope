@@ -1,6 +1,7 @@
+const {instrument, prepareSource} = require('./helpers/instrument.cjs');
 const fs=require('fs'),path=require('path'),assert=require('node:assert/strict');
 const engine=process.env.TIERSCOPE_BROWSER||'chromium';const browserType=require('playwright')[engine];
-const source=fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8').replaceAll('scheduleInit(2000);','').replace('downloadTrackingReport: downloadTrackingReport,',`
+const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8')).replaceAll('scheduleInit(2000);','').replace('downloadTrackingReport: downloadTrackingReport,',`
 __charts:{
  setup:function(kind){
   loadSession(getModelName());var now=Date.now(),times=kind==='single'?[now]:[now-1380000,now-1320000,now-1260000,now-60000,now];
@@ -40,7 +41,7 @@ async function assertConnector(canvas,rgb){
   return r.fulfill({contentType:'text/html',body:'<html><body style="background:#303846"></body></html>'});
  });
  await page.addInitScript(()=>{window.GM_getValue=(k,d)=>{let v=localStorage.getItem(k);return v===null?d:JSON.parse(v)};window.GM_setValue=(k,v)=>localStorage.setItem(k,JSON.stringify(v));window.GM_deleteValue=k=>localStorage.removeItem(k);window.GM_listValues=()=>Object.keys(localStorage);window.confirm=()=>true;});
- await page.goto('https://tierscope.test/testroom/');await page.addScriptTag({content:source});
+ await page.goto('https://tierscope.test/testroom/');await page.addScriptTag({content:instrument(source)});
  await page.evaluate(()=>ViewerTracker.__charts.setup());
  const savedState=await page.evaluate(()=>ViewerTracker.__charts.snapshot());
  const bounds=await page.locator('#tracker-container').boundingBox();
@@ -85,7 +86,7 @@ async function assertConnector(canvas,rgb){
  }
  console.log('PASS orange dashed gaps in expanded/compact/Replay, dark/bright contrast, clipped compact boundary, no future connectors or synthetic values, hover/keyboard inspection, timestamp spacing, flat/single samples, original tier colors and unchanged geometry');
  status=429;await page.evaluate(()=>ViewerTracker.__charts.scan());const after429=requests;await page.evaluate(()=>ViewerTracker.__charts.scan());assert.equal(requests,after429);assert.match(await page.locator('#control-next-scan').textContent(),/Rate limited/);
- await page.reload();await page.addScriptTag({content:source});await page.evaluate(()=>ViewerTracker.__charts.setup());await page.evaluate(()=>ViewerTracker.__charts.scan());assert.equal(requests,after429);
+ await page.reload();await page.addScriptTag({content:instrument(source)});await page.evaluate(()=>ViewerTracker.__charts.setup());await page.evaluate(()=>ViewerTracker.__charts.scan());assert.equal(requests,after429);
  await page.evaluate(()=>GM_deleteValue('tierscope:requests:v1:'+location.origin));status=403;await page.evaluate(()=>ViewerTracker.__charts.scan());assert.match(await page.locator('#acquisition-status').textContent(),/Access denied/);status=200;await page.click('#btn-control-auto');await page.waitForFunction(()=>ViewerTracker.__charts.policy().blocked===0&&document.getElementById('header-text').textContent.startsWith('USERS:'));
  assert.deepEqual(errors,[]);console.log('PASS rate-limit UI, reload persistence, access-denied pause and explicit recovery');
  if(process.env.TIERSCOPE_SCREENSHOT){await page.evaluate(()=>ViewerTracker.__charts.setup());await page.locator('#tracker-container').screenshot({path:process.env.TIERSCOPE_SCREENSHOT});}

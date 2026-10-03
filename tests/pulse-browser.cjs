@@ -1,6 +1,7 @@
+const {instrument, prepareSource} = require('./helpers/instrument.cjs');
 const fs=require('fs'),path=require('path'),assert=require('assert/strict');
 const chromium=require('playwright')[process.env.TIERSCOPE_BROWSER || 'chromium'];
-const source=fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8');
+const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8'));
 const injected=source.replaceAll('scheduleInit(2000);','/* fixture startup */').replace('downloadTrackingReport: downloadTrackingReport,',`
  __pulse:{
   setup(){
@@ -32,7 +33,7 @@ const injected=source.replaceAll('scheduleInit(2000);','/* fixture startup */').
   let count=1,invalid=false;
   await page.route('https://tierscope.test/**',r=>r.fulfill({contentType:r.request().url().includes('/api/')?'text/plain':'text/html',body:r.request().url().includes('/api/')?
    (invalid?'invalid':'0,'+Array.from({length:count},(_,i)=>'mod'+i+'|m|m|0').concat(['purpuser|l|m|0']).join(',')):'<!doctype html><html><body></body></html>'}));
-  await page.goto('https://tierscope.test/testroom/');await page.addScriptTag({content:injected});await page.evaluate(()=>ViewerTracker.__pulse.setup());
+  await page.goto('https://tierscope.test/testroom/');await page.addScriptTag({content:instrument(injected)});await page.evaluate(()=>ViewerTracker.__pulse.setup());
   const calls=()=>page.evaluate(()=>window.pulseCalls);
   const clear=()=>page.evaluate(()=>{window.pulseCalls=[];});
   const scan=async n=>{count=n;await clear();await page.evaluate(()=>ViewerTracker.__pulse.scan());return calls();};

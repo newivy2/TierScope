@@ -1,7 +1,8 @@
+const {instrument, prepareSource} = require('./helpers/instrument.cjs');
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const {GifReader}=require('omggif');
 const engine=process.env.TIERSCOPE_BROWSER||'chromium';
-const source=fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8').replaceAll('scheduleInit(2000);','')
+const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8')).replaceAll('scheduleInit(2000);','')
  .replace('downloadTrackingReport: downloadTrackingReport,',`
  __files:{setup:function(){
   loadSession(getModelName());var now=Date.now(),h={timestamps:Array.from({length:121},(_,i)=>now-(120-i)*60000),breaks:Array(121).fill(false)};
@@ -26,8 +27,8 @@ async function downloaded(page,action){const [download]=await Promise.all([page.
   window.GM_listValues=()=>Object.keys(localStorage);window.GM_getValue=(k,d)=>localStorage.getItem(k)===null?d:JSON.parse(localStorage.getItem(k));
   window.GM_setValue=(k,v)=>localStorage.setItem(k,JSON.stringify(v));window.GM_deleteValue=k=>localStorage.removeItem(k);
  });
- await page.goto('https://tierscope.test/testroom/');await page.addScriptTag({content:source});await page.evaluate(()=>ViewerTracker.__files.setup());await page.waitForTimeout(350);
- await page.addScriptTag({content:fs.readFileSync(require.resolve('omggif'),'utf8')});
+ await page.goto('https://tierscope.test/testroom/');await page.addScriptTag({content:instrument(source)});await page.evaluate(()=>ViewerTracker.__files.setup());await page.waitForTimeout(350);
+ assert.equal(await page.evaluate(()=>typeof window.GifWriter),'undefined','GIF export needs no page/global encoder');
  const panel=page.locator('#tracker-container'),bounds=await panel.boundingBox(),canvas=page.locator('#spark-red');
  const before=await page.evaluate(()=>ViewerTracker.__files.state());
  const options=page.getByRole('button',{name:'Chart window and session files'}),menu=page.locator('#panel-options');
@@ -122,10 +123,10 @@ async function downloaded(page,action){const [download]=await Promise.all([page.
  assert.equal(await roomLabel.textContent(),'Room: archived_room','ordinary Replay can open a file directly');
  assert.deepEqual((await page.evaluate(()=>ViewerTracker.__files.state())).history,fileBeforeSave.history,'Open leaves the background live session intact');
  await page.click('#playback-return');
- await page.reload();await page.addScriptTag({content:source});await page.evaluate(()=>ViewerTracker.__files.init());
+ await page.reload();await page.addScriptTag({content:instrument(source)});await page.evaluate(()=>ViewerTracker.__files.init());
  assert.equal(await page.locator('#btn-panel-options').textContent(),'15m ▾');assert.equal((await page.evaluate(()=>ViewerTracker.__files.state())).imported,false,'reload restores only the room session');
  const priorRequests=requests;
- await page.goto('https://tierscope.test/followed-cams/');await page.addScriptTag({content:source});await page.evaluate(()=>ViewerTracker.__files.init());
+ await page.goto('https://tierscope.test/followed-cams/');await page.addScriptTag({content:instrument(source)});await page.evaluate(()=>ViewerTracker.__files.init());
  await page.click('#btn-expand');assert(await save.isDisabled(),'empty directory view has nothing to save');assert(await open.isEnabled());
  const directoryPicker=page.waitForEvent('filechooser');await open.click();await(await directoryPicker).setFiles(file);await page.waitForFunction(()=>ViewerTracker.__files.state().imported);
  assert(await roomLabel.isVisible());assert.equal(await roomLabel.textContent(),'Room: archived_room');
