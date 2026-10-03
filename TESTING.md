@@ -4,10 +4,11 @@ The tests execute the userscript in controlled fixtures. They do not connect to 
 
 ## Run locally
 
-Use Node.js 22 and npm. From this directory:
+Use Node.js 22 and npm. From this directory, build the installable script from `src/` before testing:
 
 ```sh
 npm ci
+npm run build
 npx playwright install chromium firefox
 npm test
 ```
@@ -17,6 +18,7 @@ On a Linux machine missing browser libraries, use `npx playwright install --with
 Individual commands:
 
 ```sh
+npm run build:check
 npm run test:unit
 npm run test:browser
 npm run test:firefox
@@ -29,6 +31,7 @@ npm run test:performance
 
 | Test | What it verifies |
 | --- | --- |
+| Modular build | The generated userscript matches source and version metadata; all 196 extracted functions and startup initialization match 3.4.0 after state-access normalization; explicit imports, unchanged markup/styles/text and userscript permissions, no runtime module imports or shipped test hooks. |
 | Session clock | Session start survives repeated pause/resume and reload; active time excludes pauses; reported high offsets use wall time. |
 | Session highs | Values and matching timestamps survive the 10,000-sample rollover, equal highs, lower samples, and reload. Saved highlights use session highs; Replay uses highs through the selected frame. |
 | All-time highs | Accepted live peaks and timestamps; SH/ATH labels, header placement, keyboard and compact controls, mode-specific highlights and pulses; session Reset, Stop/Start and expiry; room isolation and persisted preference; explicit file Add including retained session peaks, idempotence and Replay isolation; concurrent writes/compaction, late writes after Clear, confirmation, corrupt records, failed acquisition/rendering/storage and retry. |
@@ -55,7 +58,7 @@ npm run test:performance
 
 ## GitHub automation
 
-Copy this package's contents into the repository root, including `.github/workflows/tests.yml`. The workflow runs `npm test` on pushes and pull requests. It has read-only repository permissions. Adding these files does not publish or change the live userscript by itself.
+The workflow in `.github/workflows/tests.yml` runs `npm test` on pushes and pull requests. This first checks the committed userscript against a fresh in-memory build, then runs the unit, Chromium, and Firefox suites. It has read-only repository permissions. See [BUILDING.md](BUILDING.md) for source ownership and the build workflow.
 
 ## Before a release
 

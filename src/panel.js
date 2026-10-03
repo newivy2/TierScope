@@ -1,0 +1,562 @@
+import { hideChartTooltip } from './charts.js';
+import { updateCompactDashboard } from './compact.js';
+import { getAnonymousCount } from './dom.js';
+import { bindPanelOptions, updatePanelOptions } from './files.js';
+import { cancelGifExport, generateGifFromHistory } from './gif.js';
+import { getDisplayHigh, highDescription, highLabel } from './highs.js';
+import { bindRowControls, cleanupDragListeners, collapseMarkerHtml, collapsedTrayHtml, restoreStandardSize, setupDraggable, setupResizable, setupResizeHandler, toggleView, updateCollapsedRowStatus } from './layout.js';
+import { adjustTimer, resetAllTracking, resetCountdown, startCountdown, stopCountdown, stopTracking, toggleAutoRefresh, updateCountdownDisplay, updateStopControls } from './lifecycle.js';
+import { bindPlaybackControls, leavePlayback, updateReplayAvailability } from './replay.js';
+import { downloadTrackingCSV, downloadTrackingReport } from './reports.js';
+import { runtime } from './runtime.js';
+import { applyPanelTheme, updateContainerOpacity } from './theme.js';
+import { setTrendComparisonMode, toggleAutoTrendEscalation, updateAutoTrendButton, updateTrendPresetButtons } from './trends.js';
+import { log } from './utils.js';
+
+export function createPanel() {
+    if (runtime.panelOptionsCleanup) { runtime.panelOptionsCleanup(); runtime.panelOptionsCleanup = null; }
+    hideChartTooltip();
+    cancelGifExport();
+    leavePlayback(false);
+    cleanupDragListeners();
+    if (runtime.miniSettingsKeyHandler) {
+        document.removeEventListener('keydown', runtime.miniSettingsKeyHandler, true);
+        runtime.miniSettingsKeyHandler = null;
+    }
+    if (runtime.windowResizeHandler) {
+        window.removeEventListener('resize', runtime.windowResizeHandler);
+        runtime.windowResizeHandler = null;
+    }
+    if (window._trackerResizeCleanup) {
+        window._trackerResizeCleanup();
+        window._trackerResizeCleanup = null;
+    }
+    var existing = document.getElementById('cb-tier-tracker');
+    if (existing) existing.remove();
+
+    var div = document.createElement('div');
+    div.id = 'cb-tier-tracker';
+
+    var html =
+        '<div id="tracker-container" style="' +
+            'position:fixed;top:80px;right:20px;background:rgba(20,20,30,0.95);color:var(--panel-text);padding:5px;' +
+            'border-radius:6px;font-family:Arial,sans-serif;font-size:9px;z-index:999999;width:' + runtime.BASE_WIDTH_MINI + 'px;' +
+            'border:1px solid #ff69b4;transition:width 0.3s ease;cursor:default;user-select:none;' +
+        '">' +
+            '<div id="drag-handle" style="' +
+                'display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;' +
+                'border-bottom:1px solid #ff69b4;padding-bottom:3px;cursor:move;' +
+            '">' +
+                '<span id="header-text" style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:bold;color:var(--panel-accent);font-size:10px;">USERS: 0 (SH:0)</span>' +
+                '<span id="mini-room-change" style="font-size:8px;margin:0 3px;display:none;"></span>' +
+                '<div style="display:flex;align-items:center;gap:3px;flex-shrink:0;">' +
+                    '<button type="button" id="btn-high-mode" aria-pressed="false" aria-label="Session highs. Switch to all-time highs" style="display:none;min-width:29px;background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;">SH</button>' +
+                    '<button type="button" id="btn-panel-options" aria-label="Chart window and session files" aria-expanded="false" aria-controls="panel-options" style="display:none;background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;white-space:nowrap;">Full ▾</button>' +
+                    '<button type="button" id="btn-standard-size" title="Restore standard panel size (100%)" aria-label="Restore standard panel size" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;">100%</button>' +
+                    '<button id="btn-toggle" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:9px;padding:1px 4px;flex-shrink:0;">+</button>' +
+                '</div>' +
+            '</div>' +
+
+            '<div id="panel-options" role="group" aria-label="Chart and session options" style="display:none;position:absolute;right:5px;top:29px;width:190px;max-width:calc(100% - 10px);box-sizing:border-box;z-index:5;padding:8px;background:var(--panel-solid);color:var(--panel-text);border:1px solid #ff69b4;border-radius:4px;font-size:11px;box-shadow:0 3px 12px #0008;">' +
+                '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;"><strong>Charts &amp; sessions</strong><button type="button" id="panel-options-close" aria-label="Close chart and session options" style="background:var(--panel-button);color:var(--panel-text);border:0;border-radius:3px;cursor:pointer;">×</button></div>' +
+                '<label for="chart-window-select">Chart window</label>' +
+                '<select id="chart-window-select" style="display:block;width:100%;margin:4px 0 6px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);font-size:11px;"><option value="full">Full history</option><option value="fourHours">Last 4 hours</option><option value="twoHours">Last 2 hours</option><option value="hour">Last hour</option><option value="halfHour">Last 30 minutes</option><option value="quarter">Last 15 minutes</option></select>' +
+                '<div style="font-size:10px;color:var(--panel-muted);line-height:1.4;margin-bottom:8px;">Charts only. Downloads keep the full retained history.</div>' +
+                '<button type="button" id="btn-save-session" style="display:block;width:100%;margin:4px 0;padding:4px;background:#4169E1;color:#fff;border:0;border-radius:3px;cursor:pointer;">Save session file</button>' +
+                '<button type="button" id="btn-open-session" style="display:block;width:100%;margin:4px 0;padding:4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:3px;cursor:pointer;">Open session file…</button>' +
+                '<input type="file" id="session-file-input" accept=".json,application/json" style="display:none;">' +
+                '<div id="session-file-info" style="display:none;margin-top:7px;font-size:10px;line-height:1.4;white-space:pre-line;overflow-wrap:anywhere;color:var(--panel-secondary);"></div>' +
+                '<div style="border-top:1px solid var(--panel-divider);margin-top:8px;padding-top:6px;"><strong>All-time highs</strong>' +
+                    '<div id="all-time-info" style="font-size:10px;line-height:1.4;margin:4px 0;color:var(--panel-secondary);"></div>' +
+                    '<button type="button" id="btn-add-all-time" style="display:none;width:100%;margin:4px 0;padding:4px;background:#4169E1;color:#fff;border:0;border-radius:3px;cursor:pointer;">Add to all-time highs</button>' +
+                    '<button type="button" id="btn-clear-all-time" style="display:block;width:100%;margin:4px 0;padding:4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:3px;cursor:pointer;">Clear all-time highs…</button>' +
+                    '<div id="all-time-action-status" role="status" style="font-size:10px;line-height:1.4;overflow-wrap:anywhere;color:var(--panel-secondary);"></div>' +
+                '</div>' +
+            '</div>' +
+            '<div id="minimized-view" style="display:block;position:relative;">' +
+                '<div style="display:flex;align-items:center;justify-content:space-between;gap:3px;">' +
+                    '<button type="button" id="mini-metric" style="background:transparent;border:0;color:var(--panel-secondary);font:inherit;cursor:pointer;padding:2px 0;" aria-label="Cycle chart metric">Room total ▾</button>' +
+                    '<button type="button" id="mini-high" style="background:transparent;border:0;padding:0;color:var(--panel-subtle);font-size:8px;cursor:pointer;"></button>' +
+                '</div>' +
+                '<canvas id="mini-chart" width="140" height="36" style="display:block;width:100%;height:36px;" role="img" aria-label="Recent audience history"></canvas>' +
+                '<div style="display:flex;justify-content:space-between;gap:4px;margin:3px 0;">' +
+                    '<span title="With Tokens">💎 <span id="mini-withtokens">0</span> <span id="mini-withtokens-change"></span></span>' +
+                    '<span title="Registered">📊 <span id="mini-total">0</span> <span id="mini-total-change"></span></span>' +
+                '</div>' +
+                '<div style="display:flex;align-items:center;gap:3px;">' +
+                    '<span id="mini-freshness" style="flex:1;min-width:0;font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">No sample</span>' +
+                    '<button type="button" id="btn-auto" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;cursor:pointer;" title="Pause or resume scans">⏸</button>' +
+                    '<button type="button" id="mini-settings-toggle" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;cursor:pointer;" aria-label="Scan interval settings" title="Scan interval settings — adjust how often TierScope scans" aria-expanded="false" aria-controls="mini-settings">◷</button>' +
+                    '<button type="button" id="btn-expand" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;font-size:9px;cursor:pointer;" title="Expand panel" aria-label="Expand panel">↗</button>' +
+                '</div>' +
+                '<div id="mini-settings" style="display:none;position:absolute;left:0;right:0;top:17px;background:var(--panel-settings);border:1px solid #ff69b4;border-radius:4px;padding:5px;z-index:2;" role="group" aria-label="Scan interval">' +
+                    '<div style="display:flex;justify-content:space-between;align-items:center;font-size:9px;color:var(--panel-secondary);">Scan interval <button type="button" id="mini-settings-close" aria-label="Close scan interval settings" title="Close (Escape)" style="background:var(--panel-button);color:var(--panel-text);border:0;border-radius:3px;cursor:pointer;padding:1px 5px;font-size:13px;">×</button></div>' +
+                '<div style="display:flex;align-items:center;justify-content:center;gap:3px;margin:3px 0;padding:2px;background:rgba(var(--panel-row-rgb),0.05);border-radius:3px;">' +
+                    '<button id="btn-timer-down" style="background:var(--panel-button-strong);border:none;color:var(--panel-text);border-radius:2px;cursor:pointer;font-size:9px;padding:1px 4px;font-weight:bold;">−</button>' +
+                    '<span id="timer-display" style="font-size:11px;color:var(--panel-warning);font-weight:bold;min-width:28px;">60s</span>' +
+                    '<button id="btn-timer-up" style="background:var(--panel-button-strong);border:none;color:var(--panel-text);border-radius:2px;cursor:pointer;font-size:9px;padding:1px 4px;font-weight:bold;">+</button>' +
+                '</div>' +
+
+                '<div style="display:flex;gap:2px;justify-content:center;margin-top:3px;">' +
+                    '<button class="timer-preset" data-time="30" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">30s</button>' +
+                    '<button class="timer-preset" data-time="60" style="background:#ff69b4;border:1px solid #ff69b4;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">60s</button>' +
+                    '<button class="timer-preset" data-time="120" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">2m</button>' +
+                    '<button class="timer-preset" data-time="300" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">5m</button>' +
+                '</div>' +
+
+                    '<div id="auto-status" style="margin-top:3px;font-size:8px;color:var(--panel-muted);">Starting...</div>' +
+                '</div>' +
+            '</div>' +
+
+            '<div id="full-view" style="display:none;">' +
+            '<div id="tier-chart-region" style="display:flow-root;">' + collapsedTrayHtml();
+
+    Object.keys(runtime.TIERS).forEach(function(key) {
+        var t = runtime.TIERS[key];
+        html +=
+            '<div id="tier-row-' + key + '" data-tier="' + key + '" style="display:flex;align-items:center;padding:1px 3px;margin:1px 0;background:rgba(var(--panel-row-rgb),calc(0.05 * var(--tier-background-scale, 1)));border-radius:3px;border-left:3px solid ' + t.color + ';">' +
+                '<div style="width:30px;flex-shrink:0;text-align:center;">' +
+                    collapseMarkerHtml(key) +
+                '</div>' +
+                '<canvas id="spark-' + key + '" width="105" height="28" style="flex:1;margin:0 4px;"></canvas>' +
+                '<div style="text-align:right;width:48px;flex-shrink:0;">' +
+                    '<span id="count-' + key + '" style="font-weight:bold;color:' + t.color + ';font-size:14px;">0</span>' +
+                    '<div id="high-' + key + '" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div>' +
+                '</div>' +
+            '</div>';
+    });
+
+    html +=
+            '<div id="summary-tier-rows" style="border-top:1px solid var(--panel-divider);margin-top:4px;padding-top:4px;">' +
+                '<div id="tier-row-withtokens" data-tier="withtokens" style="display:flex;align-items:center;padding:2px 3px;background:rgba(255,105,180,0.15);border-radius:3px;border:1px solid #ff69b4;margin-bottom:3px;">' +
+                    '<div style="width:30px;flex-shrink:0;text-align:center;">' +
+                        collapseMarkerHtml('withtokens') +
+                    '</div>' +
+                    '<canvas id="spark-withtokens" width="105" height="28" style="flex:1;margin:0 4px;"></canvas>' +
+                    '<div style="text-align:right;width:48px;flex-shrink:0;">' +
+                        '<span id="count-withtokens" style="font-weight:bold;color:#ff69b4;font-size:14px;">0</span>' +
+                        '<span id="pct-withtokens" style="font-size:8px;color:#ff69b4;margin-left:2px;">0%</span>' +
+                        '<div id="high-withtokens" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div>' +
+                    '</div>' +
+                '</div>' +
+                '<div id="tier-row-total" data-tier="total" style="display:flex;align-items:center;padding:2px 3px;background:rgba(var(--panel-row-rgb),0.1);border-radius:3px;">' +
+                    '<div style="width:30px;flex-shrink:0;text-align:center;">' +
+                        collapseMarkerHtml('total') +
+                    '</div>' +
+                    '<canvas id="spark-total" width="105" height="28" style="flex:1;margin:0 4px;"></canvas>' +
+                    '<div style="text-align:right;width:48px;flex-shrink:0;">' +
+                        '<span id="count-total" style="font-weight:bold;color:var(--panel-text);font-size:14px;">0</span>' +
+                        '<div id="high-total" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div>' +
+                    '</div>' +
+                '</div>' +
+            '</div>' +
+
+            '<div id="tier-row-anon" data-tier="anonymous" style="margin-top:5px;padding:5px;background:rgba(136,136,136,0.15);border-radius:3px;border:1px solid #888;">' +
+                '<div style="display:flex;align-items:center;">' +
+                    '<div style="width:30px;flex-shrink:0;text-align:center;">' +
+                        collapseMarkerHtml('anon') +
+                    '</div>' +
+                    '<canvas id="spark-anon" width="105" height="50" style="flex:1;margin:0 4px;"></canvas>' +
+                    '<div style="text-align:right;width:48px;flex-shrink:0;">' +
+                        '<span id="anon-ratio-full" style="font-size:13px;font-weight:bold;color:#ff69b4;">--</span>' +
+                        '<div id="high-anon" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div>' +
+                    '</div>' +
+                '</div>' +
+            '</div>' +
+
+            '</div>' +
+            '<div id="trend-section" style="position:relative;border-top:1px solid #4169E1;margin-top:5px;padding-top:5px;">' +
+                '<div id="live-trend">' +
+                '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;flex-wrap:wrap;gap:2px;">' +
+                    '<span id="trend-header-label" style="font-size:9px;font-weight:bold;color:#4169E1;">📈 TREND</span>' +
+                    '<div style="display:flex;gap:2px;flex-wrap:wrap;">' +
+                        '<button class="trend-preset-btn" data-mode="last" style="background:#4169E1;border:1px solid #4169E1;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Last</button>' +
+                        '<button class="trend-preset-btn" data-mode="5min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">5m</button>' +
+                        '<button class="trend-preset-btn" data-mode="15min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">15m</button>' +
+                        '<button class="trend-preset-btn" data-mode="30min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">30m</button>' +
+                        '<button class="trend-preset-btn" data-mode="1hour" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">1h</button>' +
+                        '<button class="trend-preset-btn" data-mode="start" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Start</button>' +
+                        '<button id="btn-trend-auto" style="background:#32CD32;border:1px solid #32CD32;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;" title="Auto-escalation ON - Click to disable">AUTO</button>' +
+                    '</div>' +
+                '</div>' +
+                '<div id="trend-container" style="min-height:30px;">' +
+                    '<div style="font-size:8px;color:var(--panel-faint);text-align:center;padding:8px;">Waiting for scan...</div>' +
+                '</div>' +
+                '</div>' +
+                '<div id="playback-controls" style="display:none;position:absolute;top:5px;left:0;right:0;bottom:0;padding:0 2px;box-sizing:border-box;grid-template-rows:minmax(14px,1fr) 14px 12px;gap:2px;" aria-label="Playback controls">' +
+                    '<div id="gif-export-controls" style="display:none;position:absolute;inset:0;z-index:1;align-items:center;justify-content:center;gap:5px;background:var(--panel-solid);border-radius:3px;padding:3px;">' +
+                        '<span id="gif-export-status" role="status" style="font-size:8px;color:var(--panel-secondary);overflow-wrap:anywhere;"></span>' +
+                        '<button id="btn-cancel-gif" hidden style="font-size:8px;cursor:pointer;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;">Cancel</button>' +
+                    '</div>' +
+                    '<div style="display:flex;flex-direction:column;justify-content:center;gap:4px;min-width:0;">' +
+                        '<div id="playback-file-controls" style="display:none;align-items:center;gap:4px;min-width:0;">' +
+                            '<div id="playback-room" style="display:none;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;line-height:12px;font-weight:bold;color:var(--panel-text);"></div>' +
+                            '<button type="button" id="btn-playback-add-all-time" aria-live="polite" title="Add this file\'s highs to the room named beside this button" style="display:none;flex-shrink:0;min-width:88px;font-size:8px;line-height:12px;margin:0;padding:0 4px;white-space:nowrap;background:#4169E1;color:#fff;border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Add to all-time highs</button>' +
+                        '</div>' +
+                    '<div style="display:flex;align-items:center;justify-content:space-between;gap:3px;">' +
+                        '<strong id="playback-label" style="font-size:9px;color:var(--panel-warning);">PLAYBACK</strong>' +
+                        '<button id="playback-play" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#4169E1;color:white;border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Pause</button>' +
+                        '<select id="playback-speed" aria-label="Playback speed" style="font-size:8px;height:15px;margin:0;padding:0;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select>' +
+                        '<button id="btn-export-gif" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#ff69b4;color:white;border:1px solid #ff69b4;border-radius:2px;cursor:pointer;" title="Download this Replay as a ' + runtime.GIF_WIDTH + ' × ' + runtime.GIF_HEIGHT + ' GIF">GIF</button>' +
+                        '<button id="playback-return" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Return to Live</button>' +
+                    '</div>' +
+                    '</div>' +
+                    '<div style="display:flex;align-items:center;gap:4px;min-width:0;">' +
+                    '<button type="button" id="playback-previous" title="Previous recorded sample (pauses Replay)" aria-label="Previous recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">|&#9664;</button>' +
+                    '<input id="playback-scrubber" type="range" min="0" max="0" value="0" step="any" aria-label="Playback timeline" style="flex:1;min-width:0;width:100%;height:12px;margin:0;accent-color:var(--panel-warning);cursor:pointer;">' +
+                    '<button type="button" id="playback-next" title="Next recorded sample (pauses Replay)" aria-label="Next recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">&#9654;|</button></div>' +
+                    '<div id="playback-file-actions" style="display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:4px;min-width:0;">' +
+                        '<div id="playback-position" style="grid-column:2;font-size:9px;line-height:12px;text-align:center;white-space:nowrap;color:var(--panel-secondary);font-family:monospace;">00:00:00 / 00:00:00</div>' +
+                        '<div style="grid-column:3;justify-self:end;display:flex;gap:2px;">' +
+                            '<button type="button" id="btn-playback-save-session" aria-label="Save replay session file" title="Save the full session being replayed" style="font-size:8px;line-height:10px;height:12px;box-sizing:border-box;margin:0;padding:0 4px;background:#4169E1;color:#fff;border:1px solid #4169E1;border-radius:2px;cursor:pointer;">Save</button>' +
+                            '<button type="button" id="btn-playback-open-session" aria-label="Open session file in replay" title="Open another saved session in FILE REPLAY" style="font-size:8px;line-height:10px;height:12px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Open</button>' +
+                        '</div>' +
+                    '</div>' +
+                '</div>' +
+            '</div>' +
+
+            '<div id="control-field" style="margin-top:5px;padding:4px;background:rgba(65,105,225,0.15);border-radius:3px;border:1px solid #4169E1;">' +
+                '<div id="control-session-row" style="display:flex;justify-content:space-between;align-items:center;gap:3px;margin-bottom:4px;white-space:nowrap;">' +
+                    '<span style="font-size:9px;font-weight:bold;color:#4169E1;">🎛️ CONTROLS</span>' +
+                    '<div id="control-session-buttons" style="display:flex;gap:2px;align-items:center;">' +
+                    '<button id="btn-replay" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-warning);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;" title="Replay recorded history">Replay</button>' +
+                    '<button type="button" id="btn-control-save-session" aria-label="Save session file" title="Save this session as a file to replay later" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:#4169E1;color:white;border:1px solid #4169E1;border-radius:2px;cursor:pointer;">Save</button>' +
+                    '<button type="button" id="btn-control-open-session" aria-label="Open session file" title="Open a saved session in FILE REPLAY" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Open</button>' +
+                    '</div>' +
+                    '<span style="font-size:11px;color:var(--panel-positive);font-weight:bold;" id="control-next-scan">Next: 60s</span>' +
+                '</div>' +
+                '<div id="control-action-row" style="display:grid;grid-template-columns:minmax(max-content,1fr) auto minmax(0,1fr);align-items:center;gap:3px;">' +
+                    '<span style="font-size:12px;color:var(--panel-warning);font-family:monospace;font-weight:bold;flex-shrink:0;" id="control-tracking-timer">00:00:00</span>' +
+                    '<div id="control-action-buttons" style="display:flex;gap:2px;align-items:center;">' +
+                        '<button id="btn-download-report" style="background:#4169E1;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Download tracking report">' +
+                            '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
+                                '<line x1="12" y1="4" x2="12" y2="16"/>' +
+                                '<polyline points="6 10 12 16 18 10"/>' +
+                                '<line x1="4" y1="20" x2="20" y2="20"/>' +
+                            '</svg>' +
+                            'TXT' +
+                        '</button>' +
+                        '<button id="btn-download-csv" style="background:#4169E1;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Download all retained history as CSV">' +
+                            '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
+                                '<line x1="12" y1="4" x2="12" y2="16"/>' +
+                                '<polyline points="6 10 12 16 18 10"/>' +
+                                '<line x1="4" y1="20" x2="20" y2="20"/>' +
+                            '</svg>' +
+                            'CSV' +
+                        '</button>' +
+                        '<button id="btn-control-auto" style="background:#32CD32;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 4px;min-width:24px;" title="Auto-Refresh ON">⏸</button>' +
+                        '<button type="button" id="btn-control-stop" aria-label="Stop this session" title="Stop this session and freeze its history and elapsed time" style="background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;white-space:nowrap;">■ Stop</button>' +
+                        '<button id="btn-main-reset" style="background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Reset all tracking data">' +
+                            '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
+                                '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12"/>' +
+                                '<path d="M3 3v9h9"/>' +
+                            '</svg>' +
+                            'Reset' +
+                        '</button>' +
+                    '</div>' +
+                    '<label id="dark-mode-control" style="justify-self:end;display:inline-flex;align-items:center;gap:2px;cursor:pointer;color:var(--panel-secondary);line-height:1;">' +
+                        '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 13a9 9 0 0 1-10-10 9 9 0 1 0 10 10Z"/></svg>' +
+                        '<input type="checkbox" id="dark-mode-toggle" checked aria-label="Dark mode" style="appearance:auto;width:12px;height:12px;margin:0;cursor:pointer;accent-color:#4169E1;">' +
+                    '</label>' +
+                '</div>' +
+            '</div>' +
+
+            '<div id="tracker-footer" style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:4px;margin-top:5px;min-height:14px;">' +
+                '<div id="acquisition-status" style="max-width:80px;font-size:7px;color:var(--panel-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="No accepted sample yet">No sample</div>' +
+                '<div id="background-slider-controls" style="display:flex;align-items:center;gap:3px;min-width:0;">' +
+                    '<svg width="11" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--panel-warning)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink:0;"><path d="M9 18h6M10 22h4M8 14a6 6 0 1 1 8 0c-1 1-1 2-1 4H9c0-2 0-3-1-4Z"/></svg>' +
+                    '<input type="range" id="opacity-slider" min="30" max="100" value="95" aria-label="Background opacity" style="flex:1;min-width:0;width:100%;height:12px;margin:0;cursor:pointer;accent-color:#ff69b4;" title="Main and standard tier background opacity">' +
+                    '<span id="opacity-value" style="font-size:8px;color:var(--panel-secondary);min-width:23px;">95%</span>' +
+                '</div>' +
+                '<div id="tierscope-logo" style="justify-self:end;display:flex;align-items:center;gap:3px;white-space:nowrap;opacity:0.6;transition:opacity 0.2s;" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0.6">' +
+                '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#ff69b4" stroke-width="2" style="flex-shrink:0;">' +
+                    '<circle cx="12" cy="12" r="10"/>' +
+                    '<line x1="12" y1="2" x2="12" y2="22"/>' +
+                    '<line x1="2" y1="12" x2="22" y2="12"/>' +
+                '</svg>' +
+                '<span title="TierScope ' + runtime.TIERSCOPE_VERSION + '" style="font-size:7px;font-family:\'Courier New\',monospace;font-weight:bold;color:var(--panel-accent);letter-spacing:1px;">TIERSCOPE</span>' +
+                '</div>' +
+            '</div>' +
+        '</div>';
+
+    div.innerHTML = html;
+    document.body.appendChild(div);
+    applyPanelTheme(false);
+    document.getElementById('dark-mode-toggle').addEventListener('change', function() {
+        runtime.isDarkMode = this.checked;
+        try { GM_setValue(runtime.PANEL_THEME_KEY, runtime.isDarkMode ? 'dark' : 'bright'); }
+        catch (error) { log('Could not save theme preference'); }
+        applyPanelTheme(true);
+    });
+
+    var standardSize = document.getElementById('btn-standard-size');
+    if (standardSize) {
+        standardSize.onmousedown = function(event) { event.stopPropagation(); };
+        standardSize.onclick = function(event) { event.stopPropagation(); restoreStandardSize(); };
+    }
+    var btnCSV = document.getElementById('btn-download-csv');
+    if (btnCSV) btnCSV.onclick = downloadTrackingCSV;
+    var btnDownload = document.getElementById('btn-download-report');
+    var btnMainReset = document.getElementById('btn-main-reset');
+    var btnControlAuto = document.getElementById('btn-control-auto');
+    var btnExportGif = document.getElementById('btn-export-gif');
+    var opacitySlider = document.getElementById('opacity-slider');
+
+    if (btnDownload) btnDownload.addEventListener('click', downloadTrackingReport);
+    if (btnMainReset) btnMainReset.addEventListener('click', resetAllTracking);
+    if (btnControlAuto) btnControlAuto.addEventListener('click', toggleAutoRefresh);
+    document.getElementById('btn-control-stop').onclick = function() {
+        if (runtime.isStopped) return;
+        if (!confirm('Stop this session?\n\nHistory will remain available for Replay and downloads, but this session cannot be resumed. Starting again begins a new session.')) return;
+        stopTracking('manual');
+    };
+    if (btnExportGif) btnExportGif.addEventListener('click', generateGifFromHistory);
+    document.getElementById('btn-cancel-gif').onclick = cancelGifExport;
+    updateContainerOpacity(runtime.panelBackgroundPercent);
+    if (opacitySlider) {
+        opacitySlider.addEventListener('input', function() {
+            updateContainerOpacity(this.value);
+        });
+    }
+
+    bindPanelOptions();
+    bindPlaybackControls();
+    bindRowControls();
+    updateReplayAvailability();
+    setupDraggable();
+    setupResizable();
+    setupResizeHandler();
+
+    var btnToggle = document.getElementById('btn-toggle');
+    var btnExpand = document.getElementById('btn-expand');
+    var btnAuto = document.getElementById('btn-auto');
+    var btnTimerDown = document.getElementById('btn-timer-down');
+    var btnTimerUp = document.getElementById('btn-timer-up');
+
+    var miniMetricButton = document.getElementById('mini-metric');
+    if (miniMetricButton) miniMetricButton.onclick = function() {
+        runtime.miniMetric = runtime.MINI_METRICS[(runtime.MINI_METRICS.indexOf(runtime.miniMetric) + 1) % runtime.MINI_METRICS.length];
+        try { GM_setValue(runtime.MINI_METRIC_KEY, runtime.miniMetric); } catch (error) { log('Could not save compact chart preference'); }
+        updateDisplay();
+    };
+    var miniSettingsButton = document.getElementById('mini-settings-toggle');
+    var miniSettings = document.getElementById('mini-settings');
+    if (miniSettingsButton && miniSettings) {
+        var miniSettingsClose = document.getElementById('mini-settings-close');
+        function closeMiniSettings() {
+            miniSettings.style.display = 'none';
+            miniSettingsButton.setAttribute('aria-expanded', 'false');
+            miniSettingsButton.focus();
+        }
+        if (miniSettingsClose) miniSettingsClose.onclick = closeMiniSettings;
+        miniSettingsButton.onclick = function() {
+            if (miniSettings.style.display !== 'none') { closeMiniSettings(); return; }
+            miniSettings.style.display = 'block';
+            miniSettingsButton.setAttribute('aria-expanded', 'true');
+            if (miniSettingsClose) miniSettingsClose.focus();
+        };
+        // Capture Escape even after focus moves to the page. The listener is
+        // replaced on rebuild, independently of transient drag listeners.
+        runtime.miniSettingsKeyHandler = function(event) {
+            if (event.key === 'Escape' && miniSettings.style.display !== 'none') {
+                event.preventDefault();
+                event.stopPropagation();
+                closeMiniSettings();
+            }
+        };
+        document.addEventListener('keydown', runtime.miniSettingsKeyHandler, true);
+    }
+    if (btnToggle) btnToggle.onclick = toggleView;
+    if (btnExpand) btnExpand.onclick = toggleView;
+    if (btnAuto) btnAuto.onclick = toggleAutoRefresh;
+    if (btnTimerDown) btnTimerDown.onclick = function() { adjustTimer(-10); };
+    if (btnTimerUp) btnTimerUp.onclick = function() { adjustTimer(10); };
+
+    var presetBtns = document.querySelectorAll('.timer-preset');
+    for (var i = 0; i < presetBtns.length; i++) {
+        presetBtns[i].onclick = function() {
+            var time = parseInt(this.dataset.time);
+            runtime.scanIntervalSeconds = time;
+            if (runtime.isAutoRefreshOn) {
+                stopCountdown();
+                resetCountdown();
+                startCountdown();
+            } else {
+                resetCountdown();
+            }
+            updateCountdownDisplay();
+            var allPresets = document.querySelectorAll('.timer-preset');
+            for (var j = 0; j < allPresets.length; j++) {
+                allPresets[j].style.background = 'var(--panel-button)';
+                allPresets[j].style.color = 'var(--panel-muted)';
+                allPresets[j].style.borderColor = 'var(--panel-divider)';
+            }
+            this.style.background = '#ff69b4';
+            this.style.color = '#fff';
+            this.style.borderColor = '#ff69b4';
+        };
+    }
+    
+    var trendPresetBtns = document.querySelectorAll('.trend-preset-btn');
+    for (var k = 0; k < trendPresetBtns.length; k++) {
+        trendPresetBtns[k].onclick = function() {
+            runtime.autoTrendEscalation = false;
+            updateAutoTrendButton();
+            var mode = this.dataset.mode;
+            setTrendComparisonMode(mode);
+        };
+    }
+    
+    var btnTrendAuto = document.getElementById('btn-trend-auto');
+    if (btnTrendAuto) {
+        btnTrendAuto.onclick = toggleAutoTrendEscalation;
+    }
+    
+    updateTrendPresetButtons();
+    updateAutoTrendButton();
+    updateStopControls();
+}
+
+export function updateDisplay() {
+    updateReplayAvailability();
+    if (runtime.restoredDisplayFrame) {
+        if (runtime.presentationMode !== 'PLAYBACK') renderDisplayFrame(runtime.restoredDisplayFrame);
+        return;
+    }
+    var counts = { 'red': 0, 'green': 0, 'purple': 0, 'pink': 0, 'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0 };
+    runtime.users.forEach(function(data) {
+        if (counts[data.tier] !== undefined) counts[data.tier]++;
+        if (data.gender === 'female' || data.gender === 'trans') {
+            counts['female-trans']++;
+        }
+    });
+    var total = runtime.users.size;
+    var withTokens = counts['red'] + counts['green'] + counts['purple'] + counts['pink'] + counts['dark-blue'] + counts['light-blue'];
+    var anonymousCount = getAnonymousCount();
+    var fullRoomTotal = runtime.roomTotal > total ? runtime.roomTotal : (total + anonymousCount);
+    if (fullRoomTotal > runtime.roomTotalHigh) {
+        runtime.roomTotalHigh = fullRoomTotal;
+        runtime.roomTotalHighTime = Date.now();
+    }
+    if (runtime.presentationMode === 'PLAYBACK') return;
+    renderDisplayFrame({ counts: counts, total: total, withTokens: withTokens,
+        anonymousCount: anonymousCount, fullRoomTotal: fullRoomTotal, roomTotalHigh: runtime.roomTotalHigh,
+        history: runtime.history, isPlayback: false });
+}
+
+export function renderDisplayFrame(frame) {
+    updatePanelOptions();
+    var counts = frame.counts;
+    var total = frame.total;
+    var withTokens = frame.withTokens;
+    var anonymousCount = frame.anonymousCount;
+    var fullRoomTotal = frame.fullRoomTotal;
+    var roomTotalHigh = frame.roomTotalHigh;
+    var displayHistory = frame.history;
+    var highlights = (frame.isPlayback || frame.isRestored) ? frame.playbackNewHighTiers : runtime.newHighTiers;
+    if (runtime.highMode === 'ath') {
+        highlights = {};
+        runtime.STORAGE_HISTORY_SERIES.forEach(function(key) {
+            var value = key === 'withTokens' ? withTokens : key === 'total' ? total : key === 'anonymous' ? anonymousCount : counts[key];
+            var high = getDisplayHigh(frame, key, value);
+            if (high.source && value > 0 && value >= high.value) highlights[key] = true;
+        });
+    }
+    updateCollapsedRowStatus(frame, highlights);
+    var withTokensPct = total > 0 ? Math.round((withTokens / total) * 100) + '%' : '0%';
+    var registeredPct = fullRoomTotal > 0 ? Math.round((total / fullRoomTotal) * 100) + '%' : '0%';
+    var headerText = document.getElementById('header-text');
+    if (headerText) {
+        var roomHigh = getDisplayHigh(frame, 'roomTotal', fullRoomTotal);
+        var displayedRoomHigh = highLabel(roomHigh);
+        headerText.title = (frame.isPlayback && runtime.playback && runtime.playback.archive ? 'Replay: ' + runtime.playback.archive.room + ' · ' : '') +
+            'Room total: ' + fullRoomTotal.toLocaleString() + ' · ' + highDescription(roomHigh);
+        if (runtime.isStopped && !frame.isPlayback) {
+            headerText.textContent = 'STOPPED: ' + fullRoomTotal.toLocaleString() + ' (' + displayedRoomHigh + ')';
+        } else if (runtime.isMinimized) {
+            headerText.textContent = (frame.isPlayback ? 'PLAYBACK: ' : (frame.isRestored ? 'SAVED: ' : '')) + fullRoomTotal.toLocaleString() + ' (' + displayedRoomHigh + ')';
+        } else {
+            headerText.textContent = (frame.isPlayback ? (runtime.playback && runtime.playback.imported ? 'FILE: ' : 'PLAYBACK: ') : (frame.isRestored ? 'SAVED: ' : 'USERS: ')) + fullRoomTotal.toLocaleString() + ' (' + displayedRoomHigh + ')';
+        }
+    }
+    var miniWithTokens = document.getElementById('mini-withtokens');
+    var miniWithTokensPct = document.getElementById('mini-withtokens-pct');
+    var miniTotal = document.getElementById('mini-total');
+    var miniTotalPct = document.getElementById('mini-total-pct');
+    if (miniWithTokens) miniWithTokens.textContent = withTokens;
+    if (miniWithTokensPct) miniWithTokensPct.textContent = withTokensPct;
+    if (miniTotal) miniTotal.textContent = total;
+    if (miniTotalPct) miniTotalPct.textContent = registeredPct;
+    var miniChange = document.getElementById('mini-room-change');
+    if (miniChange) miniChange.style.display = runtime.isMinimized ? 'inline' : 'none';
+    if (miniWithTokens) miniWithTokens.parentElement && (miniWithTokens.parentElement.title = 'With Tokens: ' + withTokens.toLocaleString() + ' (' + withTokensPct + ' of registered users)');
+    if (miniTotal) miniTotal.parentElement && (miniTotal.parentElement.title = 'Registered: ' + total.toLocaleString() + ' (' + registeredPct + ' of room total)');
+    updateCompactDashboard(frame);
+    if (!runtime.isMinimized) {
+        Object.keys(runtime.TIERS).forEach(function(tier) {
+            var countEl = document.getElementById('count-' + tier);
+            var highEl = document.getElementById('high-' + tier);
+            var rowEl = document.getElementById('tier-row-' + tier);
+            var currentVal = counts[tier];
+            var highResult = getDisplayHigh(frame, tier, currentVal);
+            if (countEl) countEl.textContent = currentVal;
+            if (highEl) { highEl.textContent = highLabel(highResult, true); highEl.title = highDescription(highResult); }
+            if (rowEl) {
+                if (highlights && highlights[tier]) {
+                    rowEl.style.background = 'rgba(50, 205, 50, 0.22)';
+                } else {
+                    rowEl.style.background = 'rgba(var(--panel-row-rgb),calc(0.05 * var(--tier-background-scale, 1)))';
+                }
+            }
+        });
+        
+        var withTokensCountEl = document.getElementById('count-withtokens');
+        var withTokensPctEl = document.getElementById('pct-withtokens');
+        var withTokensHighEl = document.getElementById('high-withtokens');
+        var withTokensRowEl = document.getElementById('tier-row-withtokens');
+        var withTokensResult = getDisplayHigh(frame, 'withTokens', withTokens);
+        if (withTokensCountEl) withTokensCountEl.textContent = withTokens;
+        if (withTokensPctEl) withTokensPctEl.textContent = withTokensPct;
+        if (withTokensHighEl) { withTokensHighEl.textContent = highLabel(withTokensResult, true); withTokensHighEl.title = highDescription(withTokensResult); }
+        if (withTokensRowEl) {
+            if (highlights && highlights['withTokens']) {
+                withTokensRowEl.style.background = 'rgba(50, 205, 50, 0.22)';
+            } else {
+                withTokensRowEl.style.background = 'rgba(255,105,180,0.15)';
+            }
+        }
+        
+        var totalEl = document.getElementById('count-total');
+        var totalHighEl = document.getElementById('high-total');
+        var totalRowEl = document.getElementById('tier-row-total');
+        var totalResult = getDisplayHigh(frame, 'total', total);
+        if (totalEl) totalEl.textContent = total;
+        if (totalHighEl) { totalHighEl.textContent = highLabel(totalResult, true); totalHighEl.title = highDescription(totalResult); }
+        if (totalRowEl) {
+            if (highlights && highlights['total']) {
+                totalRowEl.style.background = 'rgba(50, 205, 50, 0.22)';
+            } else {
+                totalRowEl.style.background = 'rgba(var(--panel-row-rgb),0.1)';
+            }
+        }
+        
+        var fullAnonText = document.getElementById('anon-ratio-full');
+        var anonHighEl = document.getElementById('high-anon');
+        var anonRowEl = document.getElementById('tier-row-anon');
+        var anonResult = getDisplayHigh(frame, 'anonymous', anonymousCount);
+        if (fullAnonText) {
+            var anonLabel = anonymousCount > 0 ? anonymousCount.toLocaleString() : '0';
+            var digits = String(Math.abs(anonymousCount)).length;
+            fullAnonText.textContent = anonLabel;
+            fullAnonText.style.fontSize = digits >= 6 ? '9px' : digits === 5 ? '11px' : '13px';
+        }
+        if (anonHighEl) { anonHighEl.textContent = highLabel(anonResult, true); anonHighEl.title = highDescription(anonResult); }
+        if (anonRowEl) {
+            if (highlights && highlights['anonymous']) {
+                anonRowEl.style.background = 'rgba(50, 205, 50, 0.22)';
+            } else {
+                anonRowEl.style.background = 'rgba(136,136,136,0.15)';
+            }
+        }
+    }
+}

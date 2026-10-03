@@ -1,3 +1,4 @@
+const {instrument, prepareSource} = require('./helpers/instrument.cjs');
 const fs=require('fs');
 const assert=require('assert/strict');
 const chromium=require('playwright')[process.env.TIERSCOPE_BROWSER || 'chromium'];
@@ -5,7 +6,7 @@ const path=require('path');
 const tmp=fs.mkdtempSync(path.join(require('os').tmpdir(),'tierscope-tests-'));
 const executablePath=process.env.TIERSCOPE_CHROMIUM_PATH;
 const browserArgs=process.env.TIERSCOPE_CHROMIUM_ARGS ? JSON.parse(process.env.TIERSCOPE_CHROMIUM_ARGS) : [];
-const source=fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8');
+const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8'));
 const injected=source.replaceAll('scheduleInit(2000);','/* test controls initial setup */').replace('downloadTrackingReport: downloadTrackingReport,',`
  __test: {
    trendCase: function(diff) {
@@ -57,7 +58,7 @@ const injected=source.replaceAll('scheduleInit(2000);','/* test controls initial
  await page.route('https://tierscope.test/**',r=>r.fulfill({contentType:r.request().url().includes('/api/')?'text/plain':'text/html',body:r.request().url().includes('/api/')?'5,testroom|o|f|0,viewer|t|m|0':'<!doctype html><html><body style="margin:0;background:#303846;"></body></html>'}));
  await page.goto('https://tierscope.test/testroom/');
  await page.addScriptTag({path:require.resolve('omggif')});
- await page.addScriptTag({content:injected});
+ await page.addScriptTag({content:instrument(injected)});
  await page.evaluate(()=>ViewerTracker.__test.setup());
  if(process.env.TIERSCOPE_TRACE)console.log('TRACE setup complete');
  await page.waitForTimeout(150);
@@ -113,11 +114,11 @@ const injected=source.replaceAll('scheduleInit(2000);','/* test controls initial
  await page.mouse.move(resize.x+3,resize.y+3);await page.mouse.down();await page.mouse.move(resize.x-70,resize.y+3,{steps:5});await page.mouse.up();
  const scale=(await page.evaluate(()=>ViewerTracker.__test.extra())).scale;assert(scale>1.2);
  const saved=await page.evaluate(()=>JSON.parse(GM_getValue('tierscope:ui:geometry:v1')));
- await page.reload();await page.addScriptTag({content:injected});await page.evaluate(()=>ViewerTracker.__test.init());await page.waitForTimeout(400);
+ await page.reload();await page.addScriptTag({content:instrument(injected)});await page.evaluate(()=>ViewerTracker.__test.init());await page.waitForTimeout(400);
  assert.equal((await page.evaluate(()=>ViewerTracker.__test.extra())).scale,scale);
  const restored=await page.locator('#tracker-container').boundingBox();assert(Math.abs(restored.x-saved.left)<1);assert(Math.abs(restored.y-saved.top)<1);
  await page.click('#btn-toggle');
- await page.reload();await page.addScriptTag({content:injected});await page.evaluate(()=>ViewerTracker.__test.init());await page.waitForTimeout(400);
+ await page.reload();await page.addScriptTag({content:instrument(injected)});await page.evaluate(()=>ViewerTracker.__test.init());await page.waitForTimeout(400);
  assert.equal(await page.locator('#full-view').isVisible(),true);
  assert.equal((await page.evaluate(()=>ViewerTracker.__test.extra())).scale,scale);
  assert(Math.abs((await page.locator('#tracker-container').boundingBox()).width-restored.width)<1);
@@ -181,7 +182,7 @@ const injected=source.replaceAll('scheduleInit(2000);','/* test controls initial
    await page.setViewportSize({width:1100,height:1100});
    await page.reload();
    await page.evaluate(value=>{localStorage.removeItem('tierscope:ui:geometry:v1');document.body.style.lineHeight=value;},lineHeight);
-   await page.addScriptTag({content:injected});await page.evaluate(()=>ViewerTracker.__test.setup());
+   await page.addScriptTag({content:instrument(injected)});await page.evaluate(()=>ViewerTracker.__test.setup());
    await page.waitForTimeout(400);
    const result=await page.evaluate(keys=>{
      ViewerTracker.__test.layout([]);
@@ -242,7 +243,7 @@ const injected=source.replaceAll('scheduleInit(2000);','/* test controls initial
    for(const [urlPath,expanded] of [['testroom/',true],['b/testroom/',true],['testroom/cam/',true],['',false],['followed/',false],['featured/',false],['female-cams/',false],['trans-cams/',false],['male-cams/',false]]) {
      await page.goto('https://tierscope.test/'+urlPath);
      await page.evaluate(minimized=>GM_setValue('tierscope:ui:geometry:v1',JSON.stringify({left:40,top:40,scale:1.25,minimized})),legacyMinimized);
-     await page.addScriptTag({content:injected});await page.evaluate(()=>ViewerTracker.__test.init());await page.waitForTimeout(100);
+     await page.addScriptTag({content:instrument(injected)});await page.evaluate(()=>ViewerTracker.__test.init());await page.waitForTimeout(100);
      assert.equal(await page.locator('#full-view').isVisible(),expanded,urlPath);
      assert.equal(await page.locator('#minimized-view').isVisible(),!expanded,urlPath);
      assert.equal((await page.evaluate(()=>ViewerTracker.__test.extra())).scale,1.25);

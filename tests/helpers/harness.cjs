@@ -1,8 +1,9 @@
 const fs = require('fs');
+const {instrument, prepareSource} = require('./instrument.cjs');
 const vm = require('vm');
 const assert = require('assert/strict');
 const path = require('path');
-const source = fs.readFileSync(path.join(__dirname, '../../tierscope.user.js'), 'utf8');
+const source = prepareSource(fs.readFileSync(path.join(__dirname, '../../tierscope.user.js'), 'utf8'));
 const key = 'tierscope:v1:testroom';
 function harness(storage = new Map(), sourceText = source) {
   const elements = new Map(), timers = new Map(), logs = [], downloads = [];
@@ -76,7 +77,7 @@ function harness(storage = new Map(), sourceText = source) {
         lastAcceptedAcquisition,restoredDisplayFrame:typeof restoredDisplayFrame === 'undefined' ? null : restoredDisplayFrame,
         isScanning,presentationMode,roomTotalHigh,tierHighTimes};}},
     downloadTrackingReport: downloadTrackingReport,`);
-  vm.createContext(context); vm.runInContext(instrumented,context);
+  vm.createContext(context); vm.runInContext(instrument(instrumented),context);
   const api=context.ViewerTracker, t=api.__test;
   function runWhere(pred){for(const[id,tm]of [...timers])if(pred(tm)){if(!tm.repeat)timers.delete(id);tm.fn();}}
   return {t,api,storage,context,blobs,downloads,e:id=>elements.get(id),logs,timers,

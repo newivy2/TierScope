@@ -1,6 +1,7 @@
+const {instrument, prepareSource} = require('./helpers/instrument.cjs');
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const engine=process.env.TIERSCOPE_BROWSER||'chromium';
-const source=fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8')
+const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8'))
  .replaceAll('scheduleInit(2000);','')
  .replace('downloadTrackingReport: downloadTrackingReport,',`
  __theme:{
@@ -29,7 +30,7 @@ const source=fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8')
    window.GM_listValues=()=>Object.keys(localStorage);window.GM_getValue=(k,d)=>localStorage.getItem(k)===null?d:JSON.parse(localStorage.getItem(k));
    window.GM_setValue=(k,v)=>localStorage.setItem(k,JSON.stringify(v));window.GM_deleteValue=k=>localStorage.removeItem(k);window.confirm=()=>true;
   });
-  const setup=async(url)=>{await page.goto(url);await page.addScriptTag({content:source});await page.evaluate(()=>ViewerTracker.__theme.setup());await page.waitForTimeout(350);};
+  const setup=async(url)=>{await page.goto(url);await page.addScriptTag({content:instrument(source)});await page.evaluate(()=>ViewerTracker.__theme.setup());await page.waitForTimeout(350);};
   const styles=()=>page.evaluate(()=>{
    const s=id=>getComputedStyle(document.getElementById(id)),c=id=>document.getElementById(id).getContext('2d').strokeStyle;
    return {panel:s('tracker-container').backgroundColor,text:s('count-total').color,purple:s('count-purple').color,blue:s('count-dark-blue').color,

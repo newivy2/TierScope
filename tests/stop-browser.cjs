@@ -1,6 +1,7 @@
+const {instrument, prepareSource} = require('./helpers/instrument.cjs');
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const engine=process.env.TIERSCOPE_BROWSER||'chromium';
-const source=fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8').replaceAll('scheduleInit(2000);','')
+const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8')).replaceAll('scheduleInit(2000);','')
  .replace('downloadTrackingReport: downloadTrackingReport,',`
  __stop:{init,scan:performScanThenReturn,draw:drawAllSparklines,
    state:()=>({stopped:isStopped,time:pausedElapsedTime,history:history.timestamps.slice(),reason:stopReason,paused:isPaused,auto:isAutoRefreshOn,epoch:scanEpoch,next:nextScanAt,absencePausedAt,absenceOverrideActive}),
@@ -25,7 +26,7 @@ const source=fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8')
    window.GM_listValues=()=>Object.keys(localStorage);window.GM_getValue=(k,d)=>localStorage.getItem(k)===null?d:JSON.parse(localStorage.getItem(k));
    window.GM_setValue=(k,v)=>localStorage.setItem(k,JSON.stringify(v));window.GM_deleteValue=k=>localStorage.removeItem(k);
   });
-  await page.goto('https://tierscope.test/testroom/');await page.addScriptTag({content:source});await page.evaluate(()=>ViewerTracker.__stop.init());
+  await page.goto('https://tierscope.test/testroom/');await page.addScriptTag({content:instrument(source)});await page.evaluate(()=>ViewerTracker.__stop.init());
   await page.waitForFunction(()=>ViewerTracker.__stop.state().history.length===1);await page.waitForTimeout(350);
   const panel=page.locator('#tracker-container'),before=await panel.boundingBox();
   const controls=await page.locator('#control-field').boundingBox();
@@ -56,7 +57,7 @@ const source=fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8')
   await page.click('#btn-replay');await page.evaluate(()=>ViewerTracker.__stop.pauseReplay());assert(await page.locator('#btn-export-gif').isVisible());await page.click('#playback-return');
   assert.match(await page.locator('#header-text').textContent(),/^STOPPED:/);
   const downloadPromise=page.waitForEvent('download');await page.click('#btn-download-csv');const download=await downloadPromise;assert(download.suggestedFilename().endsWith('.csv'));
-  await page.reload();await page.addScriptTag({content:source});await page.evaluate(()=>ViewerTracker.__stop.init());
+  await page.reload();await page.addScriptTag({content:instrument(source)});await page.evaluate(()=>ViewerTracker.__stop.init());
   assert.equal(requests,n);assert((await page.evaluate(()=>ViewerTracker.__stop.state())).stopped);
   await page.getByRole('button',{name:'Start a new session'}).click();
   assert.equal(dialogs.length,3);assert.equal(dialogs[2].type,'confirm');assert.match(dialogs[2].message,/^Start a new session\?/);
@@ -89,7 +90,7 @@ const source=fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8')
   assert.equal(await page.locator('#header-text').textContent(),replayHeader);assert.equal(await page.locator('#playback-position').textContent(),replayPosition);
   assert.equal(await page.locator('#playback-room').textContent(),'Room: different_archive');await page.click('#playback-return');
   body='5,viewer|t|m|0';await page.evaluate(()=>ViewerTracker.__stop.away(15*60000));await page.evaluate(()=>ViewerTracker.__stop.scan());
-  await page.reload();await page.addScriptTag({content:source});await page.evaluate(()=>ViewerTracker.__stop.init());
+  await page.reload();await page.addScriptTag({content:instrument(source)});await page.evaluate(()=>ViewerTracker.__stop.init());
   await page.waitForFunction(()=>ViewerTracker.__stop.state().paused);assert.equal((await page.evaluate(()=>ViewerTracker.__stop.state())).auto,true);
   assert.equal(await page.locator('#btn-control-auto').getAttribute('aria-label'),'Resume recording');
   const beforeOverride=await page.evaluate(()=>ViewerTracker.__stop.state());
@@ -98,7 +99,7 @@ const source=fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8')
   assert.equal((await page.evaluate(()=>ViewerTracker.__stop.state())).absencePausedAt,null);
   assert.equal(await page.locator('#btn-control-auto').getAttribute('aria-label'),'Pause scans');
   assert.equal(dialogs.length,3,'Resume is a one-click override with no prompt');
-  await page.reload();await page.addScriptTag({content:source});await page.evaluate(()=>ViewerTracker.__stop.init());
+  await page.reload();await page.addScriptTag({content:instrument(source)});await page.evaluate(()=>ViewerTracker.__stop.init());
   await page.waitForFunction(()=>{const s=ViewerTracker.__stop.state();return s.auto&&!s.paused&&s.absenceOverrideActive;});
   await page.evaluate(()=>ViewerTracker.__stop.away(4*60*60000));
   const overridden=await page.evaluate(()=>ViewerTracker.__stop.state());
