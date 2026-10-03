@@ -18,16 +18,25 @@ Charts use periodic room-data samples. Session history is stored locally through
 - **Viewers:** follow a favorite room’s audience and learn what the tier colors represent.
 - **Moderators and studios:** use the charts and session summaries alongside your own observations when supporting broadcasters.
 
-## What’s new since 3.1.1.0
+## Main features
 
-- **Compact dashboard:** switch between Room total, With Tokens, and Registered charts, with count changes and sample age.
-- **Collapsible rows:** hide tiers or totals to give the remaining charts more space.
-- **Layout controls:** remembered position, size, and row visibility; a standard-size reset; adjustable background transparency; and dark or bright mode.
-- **Chart views and inspection:** full history or the last 4h, 2h, 1h, 30min, or 15min; timestamp spacing, orange dashed gaps, and sample values on hover or keyboard focus.
-- **Session controls:** pause or finish a session, with automatic slowdown, pause, and return detection during broadcaster absence.
-- **Replay and session files:** play samples at an even pace with animated connections through recording gaps, step through individual samples, download a session file, and reopen it for review later.
-- **Downloads:** animated GIFs, full retained CSV history, and TXT session summaries.
-- **High-count pulses:** two gentle pulses mark a new high or a return to it after a dip, following SH or ATH mode on expanded rows and collapsed markers.
+- **Live audience tracking** — Follow viewer tiers, registered and anonymous viewers, viewers with tokens, and the room’s total audience.
+
+- **Session and all-time highs** — Switch between **SH** and **ATH** to compare the current session with previous records for that room. Green highlights and gentle pulses mark counts reaching or breaking the selected high.
+
+- **Interactive charts** — View the full recorded history or focus on a recent time window. Inspect individual samples and see where recording gaps occurred.
+
+- **Smooth replay** — Replay recorded samples at an even pace, including across recording pauses. Play, pause, change speed, scrub through the timeline, or step through individual samples.
+
+- **Saved session files** — Save sessions and reopen them later. Use **Add to all-time highs** to include a saved file’s peaks in that room’s records.
+
+- **Reports and exports** — Download CSV data, TXT session summaries, and animated GIFs of your replay.
+
+- **Flexible layout** — Choose compact or expanded views, collapse individual rows, resize and reposition the panel, and adjust its theme and transparency.
+
+- **Session controls** — Pause, resume, stop, or reset tracking. Automatic absence detection reduces scanning when the broadcaster is away.
+
+Session history and all-time records are stored locally through your userscript manager. All-time highs remain separate for each room and survive session resets.
 
 ## Installation
 
