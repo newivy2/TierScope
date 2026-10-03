@@ -6,7 +6,7 @@ TierScope is a free, open-source userscript that charts how a Chaturbate room’
 **Version 3.4.0** 
 ---
 
-Version 3.4.0 adds an **SH / ATH** switch to the left of the chart-window menu. Session highs and all-time highs are tracked separately for each room. All-time records survive session Reset and expiry; hover a high to see the exact value and its recorded time. Opening a saved file does not change these records: use **Add to all-time highs** beside the room name in FILE REPLAY or in the chart-window menu to add that file's highs to its own room. Both regular Replay and FILE REPLAY include **Save** and **Open** beside the time display.
+Version 3.4.0 adds an **SH / ATH** switch to the left of the chart-window menu. Session highs and all-time highs are tracked separately for each room. All-time records survive session Reset and expiry; hover a high to see the exact value and its recorded time. Opening a saved file does not change these records: use **Add to all-time highs** beside the room name in FILE REPLAY or in the chart-window menu to add that file's highs to its own room.
 
 ![TierScope in expanded, totals-focused, collapsed, and compact views](tierscope-hero.png)
 
