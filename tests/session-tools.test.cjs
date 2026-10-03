@@ -8,6 +8,8 @@ function fresh(){const h=harness(new Map(),extra);h.t.initPanel();h.t.sample(2);
 function archive(h,room='testroom'){const a=clean(h.api.__data.captureSessionFile());a.room=room;return a;}
 function peak(h,room,value){const highs=h.api.__data.emptyAllTimeHighs();highs.red={value,time:h.context.Date.now(),source:'live'};return h.api.__data.storeAllTimeHighs(room,highs);}
 const snapshot=h=>JSON.stringify([...h.storage.entries()].sort(([a],[b])=>a.localeCompare(b)));
+function fillLibrary(h,count){const a=archive(h);for(let i=0;i<count;i++)h.storage.set('tierscope:library:v1:fixture_'+i,
+ JSON.stringify({schemaVersion:1,addedAt:h.context.Date.now(),title:'Recording '+i,archive:{...a,room:'room'+i}}));}
 
 test('session save failure is visible, preserves live data and ATH, and clears after a successful retry',async()=>{
  const h=fresh(),set=h.context.GM_setValue;h.context.GM_setValue=(key,value)=>{if(key.startsWith('tierscope:tab:'))throw new Error('disk full');set(key,value);};
@@ -28,10 +30,10 @@ test('library explicitly keeps immutable snapshots, deduplicates exact files, re
  assert.equal(h.t.state().history.red.at(-1),6);assert.notEqual(JSON.stringify(h.t.state().history),history);
 });
 test('library enforces count and byte limits without evicting recordings, and preserves unreadable records',()=>{
- const h=fresh(),d=h.api.__data;for(let i=0;i<50;i++)d.keepSessionInLibrary(archive(h,'room'+i));
+ const h=fresh(),d=h.api.__data;fillLibrary(h,499);assert.equal(d.keepSessionInLibrary(archive(h,'recording500')).added,true);
  const before=snapshot(h);assert.throws(()=>d.keepSessionInLibrary(archive(h,'overflow')),/Library full/);assert.equal(snapshot(h),before);
  assert.throws(()=>d.planLibraryAdditions([{archive:archive(h),title:'test'}],{entries:[],count:0,bytes:25*1024*1024}),/Library full/);
- h.storage.set('tierscope:library:v1:damaged','{broken');const list=d.readSessionLibrary();assert.equal(list.damaged.length,1);assert.equal(list.entries.length,50);
+ h.storage.set('tierscope:library:v1:damaged','{broken');const list=d.readSessionLibrary();assert.equal(list.damaged.length,1);assert.equal(list.entries.length,500);
  assert(h.storage.has('tierscope:library:v1:damaged'));assert.throws(()=>d.createTierScopeBackup(),/unreadable/);
  assert.equal(d.createTierScopeBackup(false).library.length,0);
 });
@@ -95,17 +97,26 @@ test('library retention is independent of session Reset and the three-hour resto
  assert.equal(d.keepSessionInLibrary(newer).added,false,'export metadata alone does not duplicate a recording');
 });
 test('a concurrent library addition cannot overflow the cap or be deleted by this tab',()=>{
- const h=fresh(),d=h.api.__data;for(let i=0;i<49;i++)d.keepSessionInLibrary(archive(h,'room'+i));
+ const h=fresh(),d=h.api.__data;fillLibrary(h,499);
  const set=h.context.GM_setValue;const other=JSON.stringify({schemaVersion:1,addedAt:h.context.Date.now(),title:'Other tab',archive:archive(h,'other_tab')});let once=true;
  h.context.GM_setValue=(key,value)=>{set(key,value);if(once&&key.startsWith('tierscope:library:')){once=false;set('tierscope:library:v1:concurrent',other);}};
  assert.throws(()=>d.keepSessionInLibrary(archive(h,'our_new_recording')),/limit reached/);
- const list=d.readSessionLibrary();assert.equal(list.count,50);assert(list.entries.some(entry=>entry.archive.room==='other_tab'));
+ const list=d.readSessionLibrary();assert.equal(list.count,500);assert(list.entries.some(entry=>entry.archive.room==='other_tab'));
  assert(!list.entries.some(entry=>entry.archive.room==='our_new_recording'));
 });
 test('a full library rejects a restore before ATH or preferences can change',()=>{
  const s=fresh();peak(s,'testroom',500);s.api.__data.keepSessionInLibrary(archive(s));const backup=clean(s.api.__data.createTierScopeBackup());
- const h=fresh(),d=h.api.__data;for(let i=0;i<50;i++)d.keepSessionInLibrary(archive(h,'room'+i));const before=snapshot(h);
+ const h=fresh(),d=h.api.__data;fillLibrary(h,500);const before=snapshot(h);
  assert.throws(()=>d.restoreTierScopeBackup(backup),/Library full/);assert.equal(snapshot(h),before);
+});
+test('a 500-recording backup round trips and rejects a 501st record without modifying storage',()=>{
+ const s=fresh();fillLibrary(s,500);const backup=clean(s.api.__data.createTierScopeBackup());assert.equal(backup.library.length,500);
+ const h=fresh(),d=h.api.__data;assert.equal(d.restoreTierScopeBackup(backup).recordings,500);
+ assert.equal(d.readSessionLibrary().count,500);assert.equal(d.restoreTierScopeBackup(backup).recordings,0);
+ const ordered=entries=>entries.sort((a,b)=>a.archive.room.localeCompare(b.archive.room));
+ assert.deepEqual(ordered(clean(d.createTierScopeBackup().library)),ordered(backup.library));
+ const before=snapshot(h);backup.library.push({...backup.library[0],archive:{...backup.library[0].archive,room:'overflow'}});
+ assert.throws(()=>d.restoreTierScopeBackup(backup),/not a supported/);assert.equal(snapshot(h),before);
 });
 test('restore reports incomplete recovery if storage also refuses rollback',()=>{
  const s=fresh();peak(s,'room_a',10);peak(s,'room_b',20);const backup=clean(s.api.__data.createTierScopeBackup(false));

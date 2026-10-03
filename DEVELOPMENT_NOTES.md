@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **beta version 3.6.0-beta.1**. Official main remains at 3.5.0. This release preserves the panel design and features while reorganizing the sources, bundling the encoder, hardening scan commits and keeping controls private; see [BUILDING.md](BUILDING.md). For a quick introduction and installation links, see the [README](readme.md).
+Detailed reference for **beta version 3.6.0-beta.2**. Official main remains at 3.5.0. This release preserves the panel design and features while reorganizing the sources, bundling the encoder, hardening scan commits and keeping controls private; see [BUILDING.md](BUILDING.md). For a quick introduction and installation links, see the [README](readme.md).
 
 ## Contents
 
@@ -262,15 +262,17 @@ Open the chart-window menu in the main header, then **Session library, analysis 
 
 **Keep current / replayed session in library** takes a frozen copy of the full retained recording, including its session highs. In file Replay it keeps the file's recording. **Import session file…** adds a downloaded recording directly. Neither action changes ATH or live history. Re-saving the same recording with a different export timestamp or producer version does not create a duplicate.
 
-Recordings are listed by their first retained sample, newest first. Search by room or title, rename, replay, download a standalone session file, or confirm deletion. Library Replay has the existing file Replay controls, including explicit Add to ATH. The library persists across session Reset and the temporary session's three-hour expiry. It is kept only in this browser's userscript storage, up to **50 recordings / 25 MB**. Nothing is automatically archived or deleted; a full library asks you to export and remove entries. Unreadable entries are retained and can be explicitly removed.
+Recordings are listed by their first retained sample, newest first. Search by room or title, rename, replay, download a standalone session file, or confirm deletion. Large lists show 50 entries at a time with **Show more**; search covers the whole library. Library Replay has the existing file Replay controls, including explicit Add to ATH. The library persists across session Reset and the temporary session's three-hour expiry. It is kept only in this browser's userscript storage, up to **500 recordings / 25 MB**. Either limit can fill the library; long recordings take more space than short ones. Nothing is automatically archived or deleted; a full library asks you to export and remove entries. Unreadable entries are retained and can be explicitly removed.
 
 ### Summary and comparison
 
-Choose the current/replayed snapshot or a library recording. **Refresh current / replayed snapshot** captures newer data without saving it to the library. Choose a metric and a non-negative count threshold, then use **Apply threshold** or press Enter to see covered time, excluded gaps, coverage, time-weighted average, peak in range, full-session high, token-holder share and time at or above the threshold.
+Choose the current/replayed snapshot or a library recording. **Refresh current / replayed snapshot** captures newer data without saving it to the library. The individual **Summary** starts with an audience overview: room audience (registered + anonymous), registered viewers, viewers with tokens and anonymous viewers, each with a time-weighted average, peak within retained history and full-session high. Hover a recording peak for its first recorded time. Audience proportions show token holders as a share of registered viewers and the whole room, plus the anonymous share of the whole room.
 
-Time calculations use original timestamps, not evenly paced Replay time. Each sample's count is held until the next sample; marked gaps and zero-duration intervals contribute no weight. The last sample adds no assumed duration. With no covered interval, averages and durations are shown as unavailable. Token-holder share is token-holder time divided by registered-viewer time; it is not an average of per-sample percentages.
+Select a metric and enter up to eight non-negative whole-number thresholds, separated by commas (for example, `25, 50, 100`), then choose **Apply thresholds** or press Enter. Duplicates are removed and the thresholds are sorted. The table shows time at or above each count and its percentage of **covered recording time**. Counts equal to a threshold are included. The selected metric also has a chart and detailed statistics below the overview. These thresholds are analysis controls, not live alerts.
 
-Compare A and B on the same elapsed-time axis, starting from each recording's first retained sample. **Match shared length** restricts both to the shorter recording's elapsed span. Turn it off to show their complete retained spans. Gaps remain blank and are excluded separately for each recording, so check coverage when comparing averages. Full-session highs may predate retained history and are not clipped to the comparison range.
+Time calculations use original timestamps, not evenly paced Replay time. Each sample's count is held until the next sample; marked gaps and zero-duration intervals contribute no weight. The last sample adds no assumed duration. With no covered interval, averages, proportions and threshold durations are shown as unavailable. A measured zero remains zero. Audience proportions divide the relevant viewer-time totals; a crowded interval contributes more than a quiet interval of the same length. They are not averages of per-sample percentages. A zero denominator is shown as unavailable.
+
+Compare A and B on the same elapsed-time axis, starting from each recording's first retained sample. Comparison keeps its single threshold control; use **Apply threshold** or press Enter to update it. **Match shared length** restricts both to the shorter recording's elapsed span. Turn it off to show their complete retained spans. Gaps remain blank and are excluded separately for each recording, so check coverage when comparing averages. Full-session highs may predate retained history and are not clipped to the comparison range.
 
 ### Backup and restore
 
@@ -450,6 +452,7 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
+| **3.6.0-beta.2** | Raise library capacity to 500 recordings while retaining the 25 MB bound; paginate large lists and search all entries. Add an individual audience overview, explicit token-holder/anonymous proportions, peak-time tooltips and multiple threshold durations/percentages, using real timestamps and excluding gaps. |
 | **3.6.0-beta.1** | Add visible session-save failures, an explicit local recording library, validated ATH/preferences/library backups with restore preview and rollback, time-weighted summaries and two-recording comparison. Preserve the main panel; bookmarks and alerts are deferred. |
 | **3.5.0** | Release modular sources with a reproducible single-script build, bundled GIF encoding, reliable scan commits, private controls, tab-aware fallback, clearer SH/ATH retention and expanded regression coverage. |
 | **3.5.0-beta.2** | Preserve accepted scans through diagnostic/storage errors; bundle the pinned GIF encoder with its license; remove the page control API and unsafeWindow grant; restore the original tab after fallback; explain SH/ATH retention; add tier, navigation and failure regression tests. |

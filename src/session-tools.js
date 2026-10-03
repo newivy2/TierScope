@@ -2,9 +2,9 @@ import { createTierScopeBackup, restoreTierScopeBackup, validateTierScopeBackup,
 import { downloadDataFile, readDataFile } from './data-io.js';
 import { captureSessionFile, openSessionReplay, validateSessionFile } from './files.js';
 import { displayedHighRoom, readAllTimeHighs, repaintHighMode } from './highs.js';
-import { ANALYSIS_METRICS, analysisSeries, compareSessions, summarizeSession } from './session-analysis.js';
+import { ANALYSIS_METRICS, analysisSeries, compareSessions, parseAnalysisThresholds, summarizeAudience, summarizeSession, summarizeThresholds } from './session-analysis.js';
 import { getSessionSaveState } from './session-health.js';
-import { keepSessionInLibrary, readSessionLibrary, removeLibrarySession, renameLibrarySession, LIBRARY_PREFIX } from './session-library.js';
+import { keepSessionInLibrary, readSessionLibrary, removeLibrarySession, renameLibrarySession, LIBRARY_PREFIX, LIBRARY_MAX_COUNT, LIBRARY_MAX_BYTES } from './session-library.js';
 import { runtime } from './runtime.js';
 import { setThemeVariables } from './theme.js';
 import { formatElapsedTime, getModelName } from './utils.js';
@@ -48,6 +48,7 @@ export function openSessionTools() {
     document.body.appendChild(dialog);
     let currentArchive = null, library = null, tab = 'library', fileRequest = 0, chartObserver = null;
     let selectedA = 'current', selectedB = '', metric = 'room', threshold = 100, sharedLength = true, pendingBackup = null;
+    let summaryThresholds = [25, 50, 100];
     try { currentArchive = captureSessionFile(); } catch (error) { /* Tools also work on directory pages. */ }
     const content = dialog.querySelector('#tools-content'), message = dialog.querySelector('#tools-message');
     const current = () => dialog.isConnected && dialog.open && origin === location.href && generation === runtime.initGuard;
@@ -89,7 +90,7 @@ export function openSessionTools() {
     }
     function renderLibrary() {
         const state = readLibrary();
-        node(content, 'p', state.count + ' / 50 recordings · ' + (state.bytes / 1024 / 1024).toFixed(2) + ' / 25 MB. Kept until you delete them; nothing is removed automatically.', 'tools-muted');
+        node(content, 'p', state.count + ' / ' + LIBRARY_MAX_COUNT + ' recordings · ' + (state.bytes / 1024 / 1024).toFixed(2) + ' / ' + LIBRARY_MAX_BYTES / 1024 / 1024 + ' MB. Kept until you delete them; nothing is removed automatically.', 'tools-muted');
         const actions = node(content, 'div', undefined, 'tools-actions');
         button(actions, 'Keep current / replayed session in library', () => {
             const archive = captureSessionFile();
@@ -104,12 +105,13 @@ export function openSessionTools() {
         const searchLabel = node(content, 'label', 'Find a recording '), search = node(searchLabel, 'input');
         search.type = 'search'; search.id = 'tools-library-search'; search.placeholder = 'Room or title';
         const list = node(content, 'div'); list.id = 'tools-library-list';
+        let shown = 50;
         function rows() {
             list.replaceChildren();
             const query = search.value.toLowerCase();
             const visible = state.entries.filter(entry => (entry.title + ' ' + entry.archive.room).toLowerCase().includes(query));
             if (!visible.length) node(list, 'p', state.entries.length ? 'No matching recordings.' : 'No recordings yet. Keep a session or import a session file.');
-            for (const entry of visible) {
+            for (const entry of visible.slice(0, shown)) {
                 const row = node(list, 'div', undefined, 'tools-row'); row.dataset.libraryId = entry.id;
                 node(row, 'strong', entry.title || entry.archive.room);
                 node(row, 'div', entry.archive.room + ' · ' + new Date(entry.archive.session.history.timestamps[0]).toLocaleString() + ' · ' + entry.archive.session.history.timestamps.length + ' samples', 'tools-muted');
@@ -126,8 +128,13 @@ export function openSessionTools() {
                     removeLibrarySession(entry.id); render('library'); tell('Library recording deleted.');
                 });
             }
+            if (visible.length > 50) node(list, 'p', 'Showing ' + Math.min(shown, visible.length) + ' of ' + visible.length + ' matching recordings.', 'tools-muted');
+            if (shown < visible.length) button(list, 'Show ' + Math.min(50, visible.length - shown) + ' more', () => {
+                shown += 50; rows();
+                (document.getElementById('tools-library-more') || search).focus();
+            }, 'tools-library-more');
         }
-        search.oninput = rows; rows();
+        search.oninput = () => { shown = 50; rows(); }; rows();
         if (state.damaged.length) {
             node(content, 'p', state.damaged.length + ' unreadable library record(s) were retained.', 'tools-muted');
             button(content, 'Remove unreadable library records…', () => {
@@ -150,15 +157,27 @@ export function openSessionTools() {
         const label = node(controls, 'label', 'Metric '), metricSelect = node(label, 'select'); metricSelect.id = 'tools-metric';
         for (const [key, name] of Object.entries(ANALYSIS_METRICS)) { const option = node(metricSelect, 'option', name); option.value = key; }
         metricSelect.value = metric; metricSelect.onchange = () => { metric = metricSelect.value; render(tab); };
-        const thresholdLabel = node(controls, 'label', 'Threshold '), input = node(thresholdLabel, 'input');
-        input.id = 'tools-threshold'; input.type = 'number'; input.min = '0'; input.max = '9007199254740991'; input.step = '1'; input.value = threshold; input.style.width = '105px';
+        const thresholdLabel = node(controls, 'label', comparing ? 'Threshold ' : 'Thresholds '), input = node(thresholdLabel, 'input');
+        input.id = 'tools-threshold'; input.style.width = comparing ? '105px' : '200px';
+        if (comparing) {
+            input.type = 'number'; input.min = '0'; input.max = '9007199254740991'; input.step = '1'; input.value = threshold;
+        } else {
+            input.type = 'text'; input.maxLength = 160; input.value = summaryThresholds.join(', '); input.placeholder = '25, 50, 100';
+            input.title = 'Up to 8 counts separated by commas. Applies to the selected metric.';
+        }
+        input.oninput = () => input.setCustomValidity('');
         function applyThreshold() {
-            if (!Number.isSafeInteger(input.valueAsNumber) || input.valueAsNumber < 0) { input.setCustomValidity('Enter a non-negative whole number.'); input.reportValidity(); return; }
+            try {
+                if (comparing) {
+                    if (!Number.isSafeInteger(input.valueAsNumber) || input.valueAsNumber < 0) throw new Error('Enter a non-negative whole number.');
+                    threshold = input.valueAsNumber;
+                } else summaryThresholds = parseAnalysisThresholds(input.value);
+            } catch (error) { input.setCustomValidity(error.message); input.reportValidity(); return; }
             input.setCustomValidity('');
-            threshold = input.valueAsNumber; render(tab);
+            render(tab);
         }
         input.onkeydown = event => { if (event.key === 'Enter') { event.preventDefault(); applyThreshold(); } };
-        button(controls, 'Apply threshold', applyThreshold, 'tools-apply-threshold');
+        button(controls, comparing ? 'Apply threshold' : 'Apply thresholds', applyThreshold, 'tools-apply-threshold');
         if (comparing) {
             const label = node(controls, 'label'), check = node(label, 'input'); check.type = 'checkbox'; check.checked = sharedLength; check.id = 'tools-shared-length';
             node(label, 'span', 'Match shared length'); check.onchange = () => { sharedLength = check.checked; render(tab); };
@@ -168,7 +187,46 @@ export function openSessionTools() {
         return sourceOptions();
     }
     const number = value => value === null ? 'Not enough data' : value.toLocaleString(undefined, { maximumFractionDigits: 1 });
-    function summaryTable(summaries, labels) {
+    const percent = value => value === null ? 'Not enough data' : number(value) + '%';
+    function audienceOverview(archive) {
+        const overview = summarizeAudience(archive), coverage = overview.audience[0];
+        node(content, 'h3', 'Audience overview');
+        node(content, 'p', archive.room + ' · ' + coverage.samples + ' samples · Covered time ' + formatElapsedTime(coverage.coveredMs) +
+            ' · Excluded gaps ' + formatElapsedTime(coverage.gapMs) + ' · Coverage ' + percent(coverage.coverage), 'tools-muted');
+        const scroll = node(content, 'div', undefined, 'tools-scroll'), table = node(scroll, 'table'); table.id = 'tools-audience-table';
+        node(table, 'caption', 'Audience across the retained recording');
+        const head = node(node(table, 'thead'), 'tr');
+        ['Audience', 'Time-weighted average', 'Peak in recording', 'Full-session high'].forEach(label => { node(head, 'th', label).scope = 'col'; });
+        const body = node(table, 'tbody');
+        for (const summary of overview.audience) {
+            const row = node(body, 'tr'); node(row, 'th', ANALYSIS_METRICS[summary.metric]).scope = 'row';
+            node(row, 'td', number(summary.mean));
+            const peak = node(row, 'td', number(summary.peak));
+            if (summary.peakTime !== null) peak.title = 'First recorded at ' + new Date(summary.peakTime).toLocaleString();
+            node(row, 'td', number(summary.sessionPeak));
+        }
+        node(content, 'p', 'Room audience = registered + anonymous viewers. A full-session high may predate retained history. Hover a recording peak for its first recorded time.', 'tools-muted');
+        const shares = node(content, 'div'); shares.id = 'tools-audience-shares';
+        node(shares, 'h3', 'Audience proportions');
+        node(shares, 'p', 'Token holders / registered viewers: ' + percent(overview.tokenShareRegistered));
+        node(shares, 'p', 'Token holders / whole room: ' + percent(overview.tokenShareRoom));
+        node(shares, 'p', 'Anonymous / whole room: ' + percent(overview.anonymousShareRoom));
+        node(shares, 'p', 'Shares use viewer-time over covered intervals. A crowded interval contributes more than a quiet interval of the same length; gaps contribute nothing.', 'tools-muted');
+    }
+    function thresholdTable(archive) {
+        const scroll = node(content, 'div', undefined, 'tools-scroll'), table = node(scroll, 'table'); table.id = 'tools-threshold-table';
+        node(table, 'caption', ANALYSIS_METRICS[metric] + ' — time at or above selected thresholds');
+        const head = node(node(table, 'thead'), 'tr');
+        ['Threshold', 'Time at or above', '% of covered time'].forEach(label => { node(head, 'th', label).scope = 'col'; });
+        const body = node(table, 'tbody');
+        for (const result of summarizeThresholds(archive, metric, summaryThresholds)) {
+            const row = node(body, 'tr'); node(row, 'th', number(result.threshold)).scope = 'row';
+            node(row, 'td', result.durationMs === null ? 'Not enough data' : formatElapsedTime(result.durationMs));
+            node(row, 'td', percent(result.percent));
+        }
+        node(content, 'p', 'Includes samples equal to the threshold. Percentages use covered recording time; gaps and time after the final sample are excluded.', 'tools-muted');
+    }
+    function summaryTable(summaries, labels, comparing = true) {
         const scroll = node(content, 'div', undefined, 'tools-scroll'), table = node(scroll, 'table'); table.id = 'tools-summary-table';
         node(table, 'caption', ANALYSIS_METRICS[metric] + ' — retained recording statistics');
         const head = node(table, 'thead'), headRow = node(head, 'tr'); node(headRow, 'th', 'Measure');
@@ -178,8 +236,8 @@ export function openSessionTools() {
             ['Covered recording time', s => formatElapsedTime(s.coveredMs)], ['Excluded gaps', s => formatElapsedTime(s.gapMs)],
             ['Coverage', s => s.coverage === null ? 'Not enough data' : number(s.coverage) + '%'],
             ['Time-weighted average', s => number(s.mean)], ['Peak in range', s => number(s.peak)],
-            ['Full-session high', s => number(s.sessionPeak)], ['Token-holder share of registered viewers', s => s.tokenShare === null ? 'Not enough data' : number(s.tokenShare) + '%'],
-            ['Time at or above ' + threshold.toLocaleString(), s => s.coveredMs ? formatElapsedTime(s.atOrAboveMs) : 'Not enough data'] ];
+            ['Full-session high', s => number(s.sessionPeak)], ['Token-holder share of registered viewers', s => s.tokenShare === null ? 'Not enough data' : number(s.tokenShare) + '%'] ];
+        if (comparing) rows.push(['Time at or above ' + threshold.toLocaleString(), s => s.coveredMs ? formatElapsedTime(s.atOrAboveMs) : 'Not enough data']);
         for (const [label, value] of rows) {
             const row = node(body, 'tr'); const cell = node(row, 'th', label); cell.scope = 'row';
             summaries.forEach(summary => node(row, 'td', value(summary)));
@@ -235,7 +293,9 @@ export function openSessionTools() {
             summaryTable([result.a, result.b], ['A', 'B']);
         } else {
             const summary = summarizeSession(a.archive, metric, threshold);
-            chart([a.archive], [a.archive.room], summary.spanMs); summaryTable([summary], [a.archive.room]);
+            audienceOverview(a.archive); thresholdTable(a.archive);
+            node(content, 'h3', ANALYSIS_METRICS[metric] + ' — chart and details');
+            chart([a.archive], [a.archive.room], summary.spanMs); summaryTable([summary], [a.archive.room], false);
         }
     }
     function checkbox(parent, id, text, checked = true) {

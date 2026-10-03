@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.6.0-beta.1
+// @version      3.6.0-beta.2
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -3100,7 +3100,7 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/session-library.js
   var LIBRARY_PREFIX = "tierscope:library:v1:";
-  var LIBRARY_MAX_COUNT = 50;
+  var LIBRARY_MAX_COUNT = 500;
   var LIBRARY_MAX_BYTES = 25 * 1024 * 1024;
   function libraryRecordKey(id) {
     if (typeof id !== "string" || !/^[a-z0-9_-]{1,100}$/i.test(id)) throw new Error("Invalid library record.");
@@ -3148,7 +3148,7 @@ underlying system, so should run in the browser, Node, or Plask.
       writes.push({ key: libraryRecordKey(id), value: raw, id });
     }
     if (library.count + writes.length > LIBRARY_MAX_COUNT || bytes > LIBRARY_MAX_BYTES) {
-      throw new Error("Library full (50 recordings / 25 MB). Export and remove recordings before adding more.");
+      throw new Error("Library full (" + LIBRARY_MAX_COUNT + " recordings / " + LIBRARY_MAX_BYTES / 1024 / 1024 + " MB). Export and remove recordings before adding more.");
     }
     return writes;
   }
@@ -3222,7 +3222,7 @@ underlying system, so should run in the browser, Node, or Plask.
     return clean;
   }
   function validateTierScopeBackup(input) {
-    if (!input || input.format !== "TierScopeBackup" || input.formatVersion !== 1 || typeof input.producerVersion !== "string" || input.producerVersion.length > 40 || !Array.isArray(input.rooms) || input.rooms.length > 1e3 || !Array.isArray(input.library) || input.library.length > 50) {
+    if (!input || input.format !== "TierScopeBackup" || input.formatVersion !== 1 || typeof input.producerVersion !== "string" || input.producerVersion.length > 40 || !Array.isArray(input.rooms) || input.rooms.length > 1e3 || !Array.isArray(input.library) || input.library.length > LIBRARY_MAX_COUNT) {
       throw new Error("This is not a supported TierScope backup.");
     }
     const seen = /* @__PURE__ */ new Set();
@@ -3392,9 +3392,13 @@ underlying system, so should run in the browser, Node, or Plask.
     const { times, values, breaks } = analysisSeries(archive, metric);
     const end = Math.min(times.length ? times[times.length - 1] : 0, limitMs);
     let coveredMs = 0, weighted = 0, registeredWeight = 0, tokenWeight = 0, atOrAboveMs = 0, peak = 0, samples = 0;
+    let peakTime = null;
     for (let i = 0; i < times.length && times[i] <= end; i++) {
       samples++;
-      peak = Math.max(peak, values[i]);
+      if (peakTime === null || values[i] > peak) {
+        peak = values[i];
+        peakTime = archive.session.history.timestamps[i];
+      }
       if (i + 1 >= times.length || breaks[i + 1]) continue;
       const duration = Math.max(0, Math.min(end, times[i + 1]) - times[i]);
       coveredMs += duration;
@@ -3411,12 +3415,44 @@ underlying system, so should run in the browser, Node, or Plask.
       coveredMs,
       gapMs: end - coveredMs,
       peak,
+      peakTime,
       sessionPeak: metric === "room" ? archive.session.roomTotalHigh : archive.session.sessionHighs[metric].value,
       mean: coveredMs ? weighted / coveredMs : null,
       tokenShare: registeredWeight ? tokenWeight / registeredWeight * 100 : null,
       atOrAboveMs,
       coverage: end ? coveredMs / end * 100 : null
     };
+  }
+  function summarizeAudience(archive) {
+    const audience = ["room", "total", "withTokens", "anonymous"].map((metric) => __spreadValues({ metric }, summarizeSession(archive, metric)));
+    const [room, registered, tokens, anonymous] = audience;
+    return {
+      audience,
+      tokenShareRegistered: registered.tokenShare,
+      tokenShareRoom: room.mean && tokens.mean !== null ? tokens.mean / room.mean * 100 : null,
+      anonymousShareRoom: room.mean && anonymous.mean !== null ? anonymous.mean / room.mean * 100 : null
+    };
+  }
+  var ANALYSIS_MAX_THRESHOLDS = 8;
+  function parseAnalysisThresholds(text) {
+    const parts = text.split(",").map((part) => part.trim());
+    if (!parts.length || parts.length > ANALYSIS_MAX_THRESHOLDS || parts.some((part) => !/^\d+$/.test(part) || !Number.isSafeInteger(Number(part)))) {
+      throw new Error("Enter 1–" + ANALYSIS_MAX_THRESHOLDS + " non-negative whole numbers separated by commas, without thousands separators.");
+    }
+    return [...new Set(parts.map(Number))].sort((a, b) => a - b);
+  }
+  function summarizeThresholds(archive, metric, thresholds) {
+    if (!thresholds.length || thresholds.length > ANALYSIS_MAX_THRESHOLDS || thresholds.some((value) => !Number.isSafeInteger(value) || value < 0)) {
+      throw new Error("Invalid analysis thresholds.");
+    }
+    return thresholds.map((threshold) => {
+      const summary = summarizeSession(archive, metric, threshold);
+      return {
+        threshold,
+        durationMs: summary.coveredMs ? summary.atOrAboveMs : null,
+        percent: summary.coveredMs ? summary.atOrAboveMs / summary.coveredMs * 100 : null
+      };
+    });
   }
   function compareSessions(a, b, metric = "room", threshold = 100, sharedLength = true) {
     const sa = analysisSeries(a, metric), sb = analysisSeries(b, metric);
@@ -3477,6 +3513,7 @@ underlying system, so should run in the browser, Node, or Plask.
     document.body.appendChild(dialog);
     let currentArchive = null, library = null, tab = "library", fileRequest = 0, chartObserver = null;
     let selectedA = "current", selectedB = "", metric = "room", threshold = 100, sharedLength = true, pendingBackup = null;
+    let summaryThresholds = [25, 50, 100];
     try {
       currentArchive = captureSessionFile();
     } catch (error) {
@@ -3560,7 +3597,7 @@ underlying system, so should run in the browser, Node, or Plask.
     }
     function renderLibrary() {
       const state = readLibrary();
-      node(content, "p", state.count + " / 50 recordings · " + (state.bytes / 1024 / 1024).toFixed(2) + " / 25 MB. Kept until you delete them; nothing is removed automatically.", "tools-muted");
+      node(content, "p", state.count + " / " + LIBRARY_MAX_COUNT + " recordings · " + (state.bytes / 1024 / 1024).toFixed(2) + " / " + LIBRARY_MAX_BYTES / 1024 / 1024 + " MB. Kept until you delete them; nothing is removed automatically.", "tools-muted");
       const actions = node(content, "div", void 0, "tools-actions");
       button(actions, "Keep current / replayed session in library", () => {
         const archive = captureSessionFile();
@@ -3581,12 +3618,13 @@ underlying system, so should run in the browser, Node, or Plask.
       search.placeholder = "Room or title";
       const list = node(content, "div");
       list.id = "tools-library-list";
+      let shown = 50;
       function rows() {
         list.replaceChildren();
         const query = search.value.toLowerCase();
         const visible = state.entries.filter((entry) => (entry.title + " " + entry.archive.room).toLowerCase().includes(query));
         if (!visible.length) node(list, "p", state.entries.length ? "No matching recordings." : "No recordings yet. Keep a session or import a session file.");
-        for (const entry of visible) {
+        for (const entry of visible.slice(0, shown)) {
           const row = node(list, "div", void 0, "tools-row");
           row.dataset.libraryId = entry.id;
           node(row, "strong", entry.title || entry.archive.room);
@@ -3615,8 +3653,17 @@ underlying system, so should run in the browser, Node, or Plask.
             tell("Library recording deleted.");
           });
         }
+        if (visible.length > 50) node(list, "p", "Showing " + Math.min(shown, visible.length) + " of " + visible.length + " matching recordings.", "tools-muted");
+        if (shown < visible.length) button(list, "Show " + Math.min(50, visible.length - shown) + " more", () => {
+          shown += 50;
+          rows();
+          (document.getElementById("tools-library-more") || search).focus();
+        }, "tools-library-more");
       }
-      search.oninput = rows;
+      search.oninput = () => {
+        shown = 50;
+        rows();
+      };
       rows();
       if (state.damaged.length) {
         node(content, "p", state.damaged.length + " unreadable library record(s) were retained.", "tools-muted");
@@ -3660,22 +3707,35 @@ underlying system, so should run in the browser, Node, or Plask.
         metric = metricSelect.value;
         render(tab);
       };
-      const thresholdLabel = node(controls, "label", "Threshold "), input = node(thresholdLabel, "input");
+      const thresholdLabel = node(controls, "label", comparing ? "Threshold " : "Thresholds "), input = node(thresholdLabel, "input");
       input.id = "tools-threshold";
-      input.type = "number";
-      input.min = "0";
-      input.max = "9007199254740991";
-      input.step = "1";
-      input.value = threshold;
-      input.style.width = "105px";
+      input.style.width = comparing ? "105px" : "200px";
+      if (comparing) {
+        input.type = "number";
+        input.min = "0";
+        input.max = "9007199254740991";
+        input.step = "1";
+        input.value = threshold;
+      } else {
+        input.type = "text";
+        input.maxLength = 160;
+        input.value = summaryThresholds.join(", ");
+        input.placeholder = "25, 50, 100";
+        input.title = "Up to 8 counts separated by commas. Applies to the selected metric.";
+      }
+      input.oninput = () => input.setCustomValidity("");
       function applyThreshold() {
-        if (!Number.isSafeInteger(input.valueAsNumber) || input.valueAsNumber < 0) {
-          input.setCustomValidity("Enter a non-negative whole number.");
+        try {
+          if (comparing) {
+            if (!Number.isSafeInteger(input.valueAsNumber) || input.valueAsNumber < 0) throw new Error("Enter a non-negative whole number.");
+            threshold = input.valueAsNumber;
+          } else summaryThresholds = parseAnalysisThresholds(input.value);
+        } catch (error) {
+          input.setCustomValidity(error.message);
           input.reportValidity();
           return;
         }
         input.setCustomValidity("");
-        threshold = input.valueAsNumber;
         render(tab);
       }
       input.onkeydown = (event) => {
@@ -3684,7 +3744,7 @@ underlying system, so should run in the browser, Node, or Plask.
           applyThreshold();
         }
       };
-      button(controls, "Apply threshold", applyThreshold, "tools-apply-threshold");
+      button(controls, comparing ? "Apply threshold" : "Apply thresholds", applyThreshold, "tools-apply-threshold");
       if (comparing) {
         const label2 = node(controls, "label"), check = node(label2, "input");
         check.type = "checkbox";
@@ -3701,7 +3761,54 @@ underlying system, so should run in the browser, Node, or Plask.
       return sourceOptions();
     }
     const number = (value) => value === null ? "Not enough data" : value.toLocaleString(void 0, { maximumFractionDigits: 1 });
-    function summaryTable(summaries, labels) {
+    const percent = (value) => value === null ? "Not enough data" : number(value) + "%";
+    function audienceOverview(archive) {
+      const overview = summarizeAudience(archive), coverage = overview.audience[0];
+      node(content, "h3", "Audience overview");
+      node(content, "p", archive.room + " · " + coverage.samples + " samples · Covered time " + formatElapsedTime(coverage.coveredMs) + " · Excluded gaps " + formatElapsedTime(coverage.gapMs) + " · Coverage " + percent(coverage.coverage), "tools-muted");
+      const scroll = node(content, "div", void 0, "tools-scroll"), table = node(scroll, "table");
+      table.id = "tools-audience-table";
+      node(table, "caption", "Audience across the retained recording");
+      const head = node(node(table, "thead"), "tr");
+      ["Audience", "Time-weighted average", "Peak in recording", "Full-session high"].forEach((label) => {
+        node(head, "th", label).scope = "col";
+      });
+      const body = node(table, "tbody");
+      for (const summary of overview.audience) {
+        const row = node(body, "tr");
+        node(row, "th", ANALYSIS_METRICS[summary.metric]).scope = "row";
+        node(row, "td", number(summary.mean));
+        const peak = node(row, "td", number(summary.peak));
+        if (summary.peakTime !== null) peak.title = "First recorded at " + new Date(summary.peakTime).toLocaleString();
+        node(row, "td", number(summary.sessionPeak));
+      }
+      node(content, "p", "Room audience = registered + anonymous viewers. A full-session high may predate retained history. Hover a recording peak for its first recorded time.", "tools-muted");
+      const shares = node(content, "div");
+      shares.id = "tools-audience-shares";
+      node(shares, "h3", "Audience proportions");
+      node(shares, "p", "Token holders / registered viewers: " + percent(overview.tokenShareRegistered));
+      node(shares, "p", "Token holders / whole room: " + percent(overview.tokenShareRoom));
+      node(shares, "p", "Anonymous / whole room: " + percent(overview.anonymousShareRoom));
+      node(shares, "p", "Shares use viewer-time over covered intervals. A crowded interval contributes more than a quiet interval of the same length; gaps contribute nothing.", "tools-muted");
+    }
+    function thresholdTable(archive) {
+      const scroll = node(content, "div", void 0, "tools-scroll"), table = node(scroll, "table");
+      table.id = "tools-threshold-table";
+      node(table, "caption", ANALYSIS_METRICS[metric] + " — time at or above selected thresholds");
+      const head = node(node(table, "thead"), "tr");
+      ["Threshold", "Time at or above", "% of covered time"].forEach((label) => {
+        node(head, "th", label).scope = "col";
+      });
+      const body = node(table, "tbody");
+      for (const result of summarizeThresholds(archive, metric, summaryThresholds)) {
+        const row = node(body, "tr");
+        node(row, "th", number(result.threshold)).scope = "row";
+        node(row, "td", result.durationMs === null ? "Not enough data" : formatElapsedTime(result.durationMs));
+        node(row, "td", percent(result.percent));
+      }
+      node(content, "p", "Includes samples equal to the threshold. Percentages use covered recording time; gaps and time after the final sample are excluded.", "tools-muted");
+    }
+    function summaryTable(summaries, labels, comparing = true) {
       const scroll = node(content, "div", void 0, "tools-scroll"), table = node(scroll, "table");
       table.id = "tools-summary-table";
       node(table, "caption", ANALYSIS_METRICS[metric] + " — retained recording statistics");
@@ -3718,9 +3825,9 @@ underlying system, so should run in the browser, Node, or Plask.
         ["Time-weighted average", (s) => number(s.mean)],
         ["Peak in range", (s) => number(s.peak)],
         ["Full-session high", (s) => number(s.sessionPeak)],
-        ["Token-holder share of registered viewers", (s) => s.tokenShare === null ? "Not enough data" : number(s.tokenShare) + "%"],
-        ["Time at or above " + threshold.toLocaleString(), (s) => s.coveredMs ? formatElapsedTime(s.atOrAboveMs) : "Not enough data"]
+        ["Token-holder share of registered viewers", (s) => s.tokenShare === null ? "Not enough data" : number(s.tokenShare) + "%"]
       ];
+      if (comparing) rows.push(["Time at or above " + threshold.toLocaleString(), (s) => s.coveredMs ? formatElapsedTime(s.atOrAboveMs) : "Not enough data"]);
       for (const [label, value] of rows) {
         const row = node(body, "tr");
         const cell = node(row, "th", label);
@@ -3808,8 +3915,11 @@ underlying system, so should run in the browser, Node, or Plask.
         summaryTable([result.a, result.b], ["A", "B"]);
       } else {
         const summary = summarizeSession(a.archive, metric, threshold);
+        audienceOverview(a.archive);
+        thresholdTable(a.archive);
+        node(content, "h3", ANALYSIS_METRICS[metric] + " — chart and details");
         chart([a.archive], [a.archive.room], summary.spanMs);
-        summaryTable([summary], [a.archive.room]);
+        summaryTable([summary], [a.archive.room], false);
       }
     }
     function checkbox(parent, id, text, checked = true) {
@@ -6399,7 +6509,7 @@ underlying system, so should run in the browser, Node, or Plask.
   // src/runtime.js
   var runtime = {};
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.6.0-beta.1";
+    runtime.TIERSCOPE_VERSION = "3.6.0-beta.2";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;

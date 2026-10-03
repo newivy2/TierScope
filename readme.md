@@ -3,7 +3,7 @@
 TierScope is a free, open-source userscript that charts how a Chaturbate room’s audience changes over time. 
 
 ---
-**Beta preview: 3.6.0-beta.1** · [Install this beta](https://raw.githubusercontent.com/newivy2/TierScope/beta/session-tools/tierscope.user.js) · [Official 3.5.0](https://github.com/newivy2/TierScope/releases/tag/v3.5.0)
+**Beta preview: 3.6.0-beta.2** · [Install this beta](https://raw.githubusercontent.com/newivy2/TierScope/beta/session-tools/tierscope.user.js) · [Official 3.5.0](https://github.com/newivy2/TierScope/releases/tag/v3.5.0)
 ---
 
 This beta adds **Session tools** to the chart-window menu: a local recording library, time-aware summaries, two-recording comparison, and ATH/preferences backup and restore. A visible warning reports failed session saves. The existing panel layout, live tracking, SH/ATH, replay and file controls are preserved. [Build and source guide](BUILDING.md).
@@ -32,9 +32,9 @@ Charts use periodic room-data samples. Session history is stored locally through
 
 - **Saved session files** — Save sessions and reopen them later. Use **Add to all-time highs** to include a saved file’s peaks in that room’s records.
 
-- **Session library** — Choose **Keep in library** to retain a recording in this browser. Search, rename, replay, download or delete recordings. The library holds up to 50 recordings / 25 MB and keeps them until you delete them.
+- **Session library** — Choose **Keep in library** to retain a recording in this browser. Search, rename, replay, download or delete recordings. The library holds up to 500 recordings / 25 MB and keeps them until you delete them.
 
-- **Summaries and comparison** — Review time-weighted averages, coverage, gaps, peaks, token-holder share and time above a chosen count. Compare two recordings from their first retained samples, optionally matching their shared duration.
+- **Summaries and comparison** — See audience averages and peaks together, token-holder proportions, coverage and gaps. Choose several thresholds to see time at or above each count and its percentage of covered time. Statistics use real timestamps and exclude recording gaps. Compare two recordings from their first retained samples, optionally matching their shared duration.
 
 - **Backups** — Export ATH for every room and saved preferences, optionally including the library. Restore with a preview and category selection; ATH merges without lowering records.
 

@@ -23,8 +23,11 @@ export function summarizeSession(archive, metric = 'room', threshold = 100, limi
     const { times, values, breaks } = analysisSeries(archive, metric);
     const end = Math.min(times.length ? times[times.length - 1] : 0, limitMs);
     let coveredMs = 0, weighted = 0, registeredWeight = 0, tokenWeight = 0, atOrAboveMs = 0, peak = 0, samples = 0;
+    /** @type {number|null} */
+    let peakTime = null;
     for (let i = 0; i < times.length && times[i] <= end; i++) {
-        samples++; peak = Math.max(peak, values[i]);
+        samples++;
+        if (peakTime === null || values[i] > peak) { peak = values[i]; peakTime = archive.session.history.timestamps[i]; }
         if (i + 1 >= times.length || breaks[i + 1]) continue;
         const duration = Math.max(0, Math.min(end, times[i + 1]) - times[i]);
         coveredMs += duration; weighted += duration * values[i];
@@ -32,11 +35,45 @@ export function summarizeSession(archive, metric = 'room', threshold = 100, limi
         tokenWeight += duration * /** @type {number[]} */ (archive.session.history.withTokens)[i];
         if (values[i] >= threshold) atOrAboveMs += duration;
     }
-    return { samples, spanMs: end, coveredMs, gapMs: end - coveredMs, peak,
+    return { samples, spanMs: end, coveredMs, gapMs: end - coveredMs, peak, peakTime,
         sessionPeak: metric === 'room' ? archive.session.roomTotalHigh : archive.session.sessionHighs[metric].value,
         mean: coveredMs ? weighted / coveredMs : null,
         tokenShare: registeredWeight ? tokenWeight / registeredWeight * 100 : null,
         atOrAboveMs, coverage: end ? coveredMs / end * 100 : null };
+}
+
+/** @param {AnalysisArchive} archive */
+export function summarizeAudience(archive) {
+    const audience = ['room', 'total', 'withTokens', 'anonymous'].map(metric => ({ metric, ...summarizeSession(archive, metric) }));
+    const [room, registered, tokens, anonymous] = audience;
+    // All four means cover exactly the same intervals. Ratios therefore use
+    // viewer-time, not an unweighted average of individual sample percentages.
+    return { audience, tokenShareRegistered: registered.tokenShare,
+        tokenShareRoom: room.mean && tokens.mean !== null ? tokens.mean / room.mean * 100 : null,
+        anonymousShareRoom: room.mean && anonymous.mean !== null ? anonymous.mean / room.mean * 100 : null };
+}
+
+export const ANALYSIS_MAX_THRESHOLDS = 8;
+
+/** @param {string} text */
+export function parseAnalysisThresholds(text) {
+    const parts = text.split(',').map(part => part.trim());
+    if (!parts.length || parts.length > ANALYSIS_MAX_THRESHOLDS || parts.some(part => !/^\d+$/.test(part) || !Number.isSafeInteger(Number(part)))) {
+        throw new Error('Enter 1–' + ANALYSIS_MAX_THRESHOLDS + ' non-negative whole numbers separated by commas, without thousands separators.');
+    }
+    return [...new Set(parts.map(Number))].sort((a, b) => a - b);
+}
+
+/** @param {AnalysisArchive} archive @param {string} metric @param {number[]} thresholds */
+export function summarizeThresholds(archive, metric, thresholds) {
+    if (!thresholds.length || thresholds.length > ANALYSIS_MAX_THRESHOLDS || thresholds.some(value => !Number.isSafeInteger(value) || value < 0)) {
+        throw new Error('Invalid analysis thresholds.');
+    }
+    return thresholds.map(threshold => {
+        const summary = summarizeSession(archive, metric, threshold);
+        return { threshold, durationMs: summary.coveredMs ? summary.atOrAboveMs : null,
+            percent: summary.coveredMs ? summary.atOrAboveMs / summary.coveredMs * 100 : null };
+    });
 }
 
 /** @param {AnalysisArchive} a @param {AnalysisArchive} b @param {string} metric @param {number} threshold @param {boolean} sharedLength */

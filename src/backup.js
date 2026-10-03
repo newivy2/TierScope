@@ -1,6 +1,6 @@
 import { allTimeRoom, emptyAllTimeHighs, mergeAllTimeHighs, readAllTimeHighs, validateAllTimeRecord } from './highs.js';
 import { validateSessionFile } from './files.js';
-import { libraryTitle, planLibraryAdditions, readSessionLibrary, verifyLibraryCapacity } from './session-library.js';
+import { libraryTitle, planLibraryAdditions, readSessionLibrary, verifyLibraryCapacity, LIBRARY_MAX_COUNT } from './session-library.js';
 import { runtime } from './runtime.js';
 import { makeStorageId } from './storage.js';
 
@@ -35,7 +35,7 @@ export function validateBackupPreferences(preferences) {
 export function validateTierScopeBackup(input) {
     if (!input || input.format !== 'TierScopeBackup' || input.formatVersion !== 1 ||
         typeof input.producerVersion !== 'string' || input.producerVersion.length > 40 ||
-        !Array.isArray(input.rooms) || input.rooms.length > 1000 || !Array.isArray(input.library) || input.library.length > 50) {
+        !Array.isArray(input.rooms) || input.rooms.length > 1000 || !Array.isArray(input.library) || input.library.length > LIBRARY_MAX_COUNT) {
         throw new Error('This is not a supported TierScope backup.');
     }
     const seen = new Set();

@@ -2,7 +2,7 @@ import { validateSessionFile } from './files.js';
 import { makeStorageId } from './storage.js';
 
 export const LIBRARY_PREFIX = 'tierscope:library:v1:';
-export const LIBRARY_MAX_COUNT = 50;
+export const LIBRARY_MAX_COUNT = 500;
 export const LIBRARY_MAX_BYTES = 25 * 1024 * 1024;
 
 export function libraryRecordKey(id) {
@@ -54,7 +54,7 @@ export function planLibraryAdditions(incoming, library = readSessionLibrary()) {
         writes.push({ key: libraryRecordKey(id), value: raw, id });
     }
     if (library.count + writes.length > LIBRARY_MAX_COUNT || bytes > LIBRARY_MAX_BYTES) {
-        throw new Error('Library full (50 recordings / 25 MB). Export and remove recordings before adding more.');
+        throw new Error('Library full (' + LIBRARY_MAX_COUNT + ' recordings / ' + LIBRARY_MAX_BYTES / 1024 / 1024 + ' MB). Export and remove recordings before adding more.');
     }
     return writes;
 }
