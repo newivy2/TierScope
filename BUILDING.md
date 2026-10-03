@@ -9,6 +9,7 @@ Use Node.js 22:
 ```sh
 npm ci
 npm run build
+npm run typecheck
 npx playwright install chromium firefox
 npm test
 ```
@@ -41,6 +42,12 @@ Set the release version in `package.json` and update `package-lock.json` with `n
 | `theme.js` | Theme tokens, bright/dark mode, and opacity. |
 | `reports.js` | TXT and CSV exports. |
 | `gif.js` | GIF drawing, encoding, and cancellation. |
+| `session-health.js` | Per-room save status and failure presentation without owning scan state. |
+| `session-library.js` | Separate immutable recording entries, deduplication, limits and explicit deletion. |
+| `backup.js` | Allowlisted preferences, validated ATH/library backups, merge plans and rollback. |
+| `session-analysis.js` | Pure, typed real-time summary and comparison calculations. |
+| `session-tools.js` | Accessible dialog, library actions, comparison charts and restore preview. |
+| `data-io.js` | Bounded JSON file reading and downloads. |
 | `startup.js` | Initialization, delayed startup, and room navigation. |
 | `utils.js` | Room names, time formatting, tier markers, and logging. |
 
@@ -52,8 +59,16 @@ Some function dependencies are circular. Feature modules only declare functions:
 
 The existing tests still execute the generated userscript. `tests/helpers/instrument.cjs` adapts their test-only hooks to shared state and bundler formatting in memory; the assertions are unchanged, and no test API is included in the installed script. The helper also exposes the private tracker only inside the test copy; the installed script does not publish `window.ViewerTracker` or request `unsafeWindow`.
 
-`tests/modular-build.test.cjs` compares all 196 extracted function syntax trees and the initialization sequence with fingerprints of 3.4.0 in `tests/fixtures/3.4.0-structure.json`. Only state access, declaration placement, and the release version are normalized. The original baseline is unchanged. Release 3.5.0 has five explicit function exceptions, each with behavior coverage: `performScanThenReturn` and `log` for commit/logging safety, `acquireDOMSnapshot` for tab restoration, `generateGifFromHistory` for its bundled encoder, and `updateHighControls` for the retention tooltip. The other 191 functions and initialization remain locked to 3.4.0. Metadata checks permit only removal of `unsafeWindow` and the external `@require`; the raw bundle is tested for absence of a page control API. The baseline commit is recorded in the fixture.
+`tests/modular-build.test.cjs` compares all 196 extracted function syntax trees and the initialization sequence with fingerprints of 3.4.0 in `tests/fixtures/3.4.0-structure.json`. Only state access, declaration placement, and the release version are normalized. The original baseline is unchanged. Release 3.5.0 introduced five explicit function exceptions, each with behavior coverage: `performScanThenReturn` and `log` for commit/logging safety, `acquireDOMSnapshot` for tab restoration, `generateGifFromHistory` for its bundled encoder, and `updateHighControls` for the retention tooltip. The 3.6.0 beta additionally changes `saveSession`, `updateAcquisitionStatus`, `updateMiniFreshness`, `bindPanelOptions` and `updatePanelOptions` for save feedback and the tools entry. Those changes have unit/browser coverage. The other 186 original functions and initialization remain locked to 3.4.0. New feature modules have behavioral tests rather than migration fingerprints. Metadata checks permit only removal of `unsafeWindow` and the external `@require`; the raw bundle is tested for absence of a page control API. The baseline commit is recorded in the fixture.
 
 These fingerprints guard the unchanged parts of the migration. A later feature change must explicitly update or retire the relevant migration checks in its reviewed change, alongside behavior tests; do not regenerate the fingerprints merely to make a failure disappear.
 
 The browser suite covers both engines, all 2,048 row-collapse combinations, themes, playback, files, ATH, pulses, acquisition, and downloads. Follow the actual-room release check in [TESTING.md](TESTING.md) before publishing a release.
+
+## Session tools development
+
+The new tools keep their own state instead of adding fields to the shared runtime. Analysis functions take an archive and return statistics without touching DOM, storage, tracking or replay. Their JSDoc types are checked with TypeScript (`npm run typecheck`), and their tests import the ES modules directly. `src/package.json` declares the source modules explicitly; existing CommonJS test helpers are unchanged.
+
+Library keys use `tierscope:library:v1:<id>`, independent of temporary sessions and ATH. Keep is explicit; no Stop hook or automatic expiry is installed. Capacity is checked before and after new writes to handle competing tabs, and only a failed operation's own entry is removed. Backup restore validates everything and preflights library capacity before writing. ATH writes are new snapshots, preserving existing ones; rollback compares values before undoing this restore's own writes. If rollback also fails, the user sees an incomplete-restore warning.
+
+Statistics hold each sample until the next accepted sample, exclude marked gaps and zero-duration intervals, and assign no duration after the last sample. Comparison alignment starts at the first retained sample, not an estimated earlier session start. Shared-duration mode clips weighted intervals at the shorter recording's span. Full-session highs stay separate from peaks within that range.

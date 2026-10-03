@@ -9,6 +9,7 @@ import { runtime } from './runtime.js';
 import { isStorageTimestamp, makeStorageId, saveSession } from './storage.js';
 import { updateTrendDisplay } from './trends.js';
 import { formatSampleAge, getModelName, log } from './utils.js';
+import { showSessionSaveWarning } from './session-health.js';
 
 export function readRequestPolicy() {
     try {
@@ -341,6 +342,7 @@ export function updateAcquisitionStatus() {
     updateMiniFreshness();
     var el = document.getElementById('acquisition-status');
     if (!el) return;
+    if (showSessionSaveWarning(el, getModelName())) return;
     if (runtime.isStopped) {
         el.textContent = 'Stopped';
         el.title = stopDescription() + ' at ' + new Date(runtime.stoppedAt).toLocaleString() + '. History and elapsed time are frozen.';

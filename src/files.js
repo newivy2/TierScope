@@ -5,6 +5,7 @@ import { createPlaybackSnapshot, isPlaybackCurrent, leavePlayback, paintPlayback
 import { runtime } from './runtime.js';
 import { getStorageKey, hasStorageField, isStorageNumber, isStorageObject, isStorageTimestamp, normalizeStoredSession, validateStoredSession } from './storage.js';
 import { getModelName, log } from './utils.js';
+import { bindSessionTools, updateSessionToolsStatus } from './session-tools.js';
 
 export function setChartWindow(value) {
     if (!hasStorageField(runtime.CHART_WINDOWS, value)) return;
@@ -126,6 +127,7 @@ export async function readSessionFile(file) {
 }
 
 export function updatePanelOptions() {
+    updateSessionToolsStatus();
     updateHighControls();
     var button = document.getElementById('btn-panel-options');
     if (button) {
@@ -150,6 +152,7 @@ export function updatePanelOptions() {
 
 export function bindPanelOptions() {
     var button = document.getElementById('btn-panel-options'), menu = document.getElementById('panel-options');
+    var cleanupSessionTools = bindSessionTools(menu);
     var input = document.getElementById('session-file-input');
     function close(focus) { menu.style.display = 'none'; button.setAttribute('aria-expanded', 'false'); if (focus) button.focus(); }
     button.onmousedown = function(event) { event.stopPropagation(); };
@@ -181,6 +184,7 @@ export function bindPanelOptions() {
     document.addEventListener('pointerdown', outside);
     document.addEventListener('keydown', escape, true);
     runtime.panelOptionsCleanup = function() {
+        cleanupSessionTools();
         document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape, true);
     };
     updatePanelOptions();

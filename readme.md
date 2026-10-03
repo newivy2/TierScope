@@ -3,10 +3,10 @@
 TierScope is a free, open-source userscript that charts how a Chaturbate room’s audience changes over time. 
 
 ---
-**Current release: 3.5.0** 
+**Beta preview: 3.6.0-beta.1** · [Install this beta](https://raw.githubusercontent.com/newivy2/TierScope/beta/session-tools/tierscope.user.js) · [Official 3.5.0](https://github.com/newivy2/TierScope/releases/tag/v3.5.0)
 ---
 
-Version 3.5.0 reorganizes development into source modules and builds one installable userscript. The panel design and existing features are preserved. This update also isolates scan commits from logging errors, bundles the GIF encoder, keeps controls private to the userscript, explains SH/ATH retention in the toggle tooltip, and restores the selected site tab after DOM fallback. If the selected tab cannot be identified, fallback skips switching tabs. [Build and source guide](BUILDING.md).
+This beta adds **Session tools** to the chart-window menu: a local recording library, time-aware summaries, two-recording comparison, and ATH/preferences backup and restore. A visible warning reports failed session saves. The existing panel layout, live tracking, SH/ATH, replay and file controls are preserved. [Build and source guide](BUILDING.md).
 
 The **SH / ATH** switch sits to the left of the chart-window menu. Session highs and all-time highs are tracked separately for each room. All-time records survive session Reset and expiry; hover a high to see the exact value and its recorded time. Opening a saved file does not change these records: use **Add to all-time highs** beside the room name in FILE REPLAY or in the chart-window menu to add that file's highs to its own room.
 
@@ -32,6 +32,12 @@ Charts use periodic room-data samples. Session history is stored locally through
 
 - **Saved session files** — Save sessions and reopen them later. Use **Add to all-time highs** to include a saved file’s peaks in that room’s records.
 
+- **Session library** — Choose **Keep in library** to retain a recording in this browser. Search, rename, replay, download or delete recordings. The library holds up to 50 recordings / 25 MB and keeps them until you delete them.
+
+- **Summaries and comparison** — Review time-weighted averages, coverage, gaps, peaks, token-holder share and time above a chosen count. Compare two recordings from their first retained samples, optionally matching their shared duration.
+
+- **Backups** — Export ATH for every room and saved preferences, optionally including the library. Restore with a preview and category selection; ATH merges without lowering records.
+
 - **Reports and exports** — Download CSV data, TXT session summaries, and animated GIFs of your replay.
 
 - **Flexible layout** — Choose compact or expanded views, collapse individual rows, resize and reposition the panel, and adjust its theme and transparency.
@@ -42,7 +48,7 @@ Session history and all-time records are stored locally through your userscript 
 
 ## Installation
 
-Install [Tampermonkey](https://www.tampermonkey.net/), follow Tampermonkey’s [userscript permission instructions](https://www.tampermonkey.net/faq.php?q=Q209) for your browser so installed scripts can run, open [tierscope.user.js](https://raw.githubusercontent.com/newivy2/TierScope/main/tierscope.user.js), and accept the installation. Refresh a Chaturbate room to start tracking.
+Install [Tampermonkey](https://www.tampermonkey.net/), follow Tampermonkey’s [userscript permission instructions](https://www.tampermonkey.net/faq.php?q=Q209) for your browser so installed scripts can run, open [the beta userscript](https://raw.githubusercontent.com/newivy2/TierScope/beta/session-tools/tierscope.user.js), and accept the installation. Refresh a Chaturbate room to start tracking.
 
 [Usage and development notes](DEVELOPMENT_NOTES.md) · [Report an issue](https://github.com/newivy2/TierScope/issues)
 

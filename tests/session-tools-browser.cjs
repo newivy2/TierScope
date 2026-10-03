@@ -1,0 +1,92 @@
+const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
+const {instrument,prepareSource}=require('./helpers/instrument.cjs');
+const engine=process.env.TIERSCOPE_BROWSER||'chromium';
+const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8')).replaceAll('scheduleInit(2000);','')
+.replace('downloadTrackingReport: downloadTrackingReport,',`__tools:{init,checkUrlChange,
+ setup:function(){loadSession(getModelName());var now=Date.now(),h={timestamps:[now-900000,now-840000,now-600000,now],breaks:[false,false,false,true]};
+ STORAGE_HISTORY_SERIES.forEach(k=>h[k]=[0,0,0,0]);h.red=[10,20,30,80];h.total=h.red.slice();h.withTokens=h.red.slice();h.anonymous=[5,5,5,5];
+ restoreSessionState(normalizeStoredSession({timestamp:now,history:h,isPaused:true,pausedElapsedTime:900000}));
+ isAutoRefreshOn=false;isMinimized=true;createPanel();toggleView();collapsedRows=new Set();applyRowLayout();repaintLivePresentation();saveSession(getModelName());
+ var highs=emptyAllTimeHighs();highs.red={value:80,time:now,source:'live'};storeAllTimeHighs(getModelName(),highs);},
+ archive:captureSessionFile,library:readSessionLibrary,records:readAllTimeHighs,
+ save:function(){saveSession(getModelName());updateAcquisitionStatus();},
+ state:()=>({history:JSON.stringify(history),paused:isPaused,mode:presentationMode,room:getModelName(),high:getSessionHigh('red',0).value})},
+ downloadTrackingReport: downloadTrackingReport,`);
+const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JSON.stringify(data))});
+(async()=>{
+ const browser=await require('playwright')[engine].launch({headless:true,executablePath:process.env.TIERSCOPE_CHROMIUM_PATH,args:JSON.parse(process.env.TIERSCOPE_CHROMIUM_ARGS||'[]')});
+ try{
+  const page=await browser.newPage({viewport:{width:1100,height:1000},acceptDownloads:true}),errors=[];
+  page.on('pageerror',e=>errors.push(e.message));
+  await page.route('https://tierscope.test/**',r=>r.fulfill({contentType:'text/html',body:'<!doctype html><body style="background:#303846"></body>'}));
+  await page.addInitScript(()=>{
+   window.GM_listValues=()=>Object.keys(localStorage);window.GM_getValue=(k,d)=>localStorage.getItem(k)===null?d:JSON.parse(localStorage.getItem(k));
+   window.GM_setValue=(k,v)=>localStorage.setItem(k,JSON.stringify(v));window.GM_deleteValue=k=>localStorage.removeItem(k);
+  });
+  await page.goto('https://tierscope.test/testroom/');await page.addScriptTag({content:instrument(source)});await page.evaluate(()=>ViewerTracker.__tools.setup());await page.waitForTimeout(350);
+  const before=await page.evaluate(()=>ViewerTracker.__tools.state()),panelBounds=await page.locator('#tracker-container').boundingBox();
+  async function openTools(){await page.click('#btn-panel-options');await page.click('#btn-session-tools');await page.locator('#tierscope-session-tools').waitFor({state:'visible'});}
+  const nav=name=>page.locator('[data-tools-tab="'+name+'"]');
+  const rowValue=(label,column=0)=>page.locator('#tools-summary-table tbody tr').filter({has:page.getByRole('rowheader',{name:label,exact:true})}).locator('td').nth(column).textContent();
+  await openTools();assert.deepEqual(await page.locator('#tracker-container').boundingBox(),panelBounds);
+  assert.match(await page.locator('#tools-content').textContent(),/0 \/ 50/);
+  await page.click('#tools-keep');assert.match(await page.locator('#tools-message').textContent(),/kept/);
+  await page.click('#tools-keep');assert.match(await page.locator('#tools-message').textContent(),/already/);
+  const first=await page.evaluate(()=>ViewerTracker.__tools.library().entries[0]);
+  await nav('summary').click();assert.equal(await rowValue('Time-weighted average'),'23');assert.equal(await rowValue('Excluded gaps'),'00:10:00');
+  await page.locator('#tools-threshold').fill('35');await page.click('#tools-apply-threshold');
+  assert.equal(await rowValue('Time at or above 35'),'00:00:00');
+  await page.locator('#tools-threshold').fill('25');await page.locator('#tools-threshold').press('Enter');
+  assert.equal(await rowValue('Time at or above 25'),'00:04:00');
+  const second=JSON.parse(JSON.stringify(first.archive));second.room='secondroom';
+  second.session.history.timestamps[3]=second.session.history.timestamps[2];
+  for(const key of ['red','total','withTokens']){second.session.history[key]=[5,10,15,40];second.session.sessionHighs[key].value=40;}
+  second.session.roomTotalHigh=45;
+  await nav('library').click();const picker=page.waitForEvent('filechooser');await page.click('#tools-import-session');await(await picker).setFiles(file('second.tierscope.json',second));
+  await page.waitForFunction(()=>ViewerTracker.__tools.library().count===2);
+  const entries=await page.evaluate(()=>ViewerTracker.__tools.library().entries),other=entries.find(e=>e.archive.room==='secondroom');
+  await nav('compare').click();await page.selectOption('#tools-source-a',first.id);await page.selectOption('#tools-source-b',other.id);
+  assert.equal(await rowValue('Time-weighted average',0),'23');assert.equal(await rowValue('Time-weighted average',1),'14');
+  assert.equal(await rowValue('Peak in range',0),'35');assert.equal(await rowValue('Full-session high',0),'85');
+  await page.uncheck('#tools-shared-length');assert.equal(await rowValue('Peak in range',0),'85');
+  await page.screenshot({path:'/tmp/tierscope-360-'+engine+'-compare.png'});
+  assert.deepEqual(await page.evaluate(()=>ViewerTracker.__tools.state()),before,'analysis and library operations do not change live data');
+  await nav('library').click();await page.locator('#tools-library-search').fill('secondroom');assert.equal(await page.locator('.tools-row').count(),1);
+  page.once('dialog',d=>d.accept('<img src=x onerror="window.bad=1">'));await page.getByRole('button',{name:'Rename',exact:true}).click();
+  assert.equal(await page.evaluate(()=>window.bad),undefined);assert.equal(await page.locator('#tools-library-list img').count(),0);
+  await nav('backup').click();const download=page.waitForEvent('download');await page.click('#tools-backup-download');
+  const backup=JSON.parse(fs.readFileSync(await(await download).path(),'utf8'));assert.equal(backup.library.length,2);assert.equal(backup.rooms[0].highs.red.value,80);
+  backup.rooms[0].highs.red.value=999;backup.preferences.theme='bright';
+  const backupPicker=page.waitForEvent('filechooser');await page.click('#tools-backup-open');await(await backupPicker).setFiles(file('backup.json',backup));
+  await page.locator('#tools-backup-restore').waitFor();assert.equal(await page.evaluate(()=>ViewerTracker.__tools.records('testroom').highs.red.value),80,'preview writes nothing');
+  page.once('dialog',d=>d.dismiss());await page.click('#tools-backup-restore');assert.equal(await page.evaluate(()=>ViewerTracker.__tools.records('testroom').highs.red.value),80);
+  page.once('dialog',d=>d.accept());await page.click('#tools-backup-restore');assert.equal(await page.evaluate(()=>ViewerTracker.__tools.records('testroom').highs.red.value),999);
+  assert.match(await page.locator('#tools-message').textContent(),/Refresh/);assert.deepEqual(await page.evaluate(()=>ViewerTracker.__tools.state()),before);
+  await page.keyboard.press('Escape');assert.equal(await page.locator('#tierscope-session-tools').count(),0);assert.equal(await page.evaluate(()=>document.activeElement.id),'btn-panel-options');
+  await page.evaluate(()=>{window.realSet=GM_setValue;window.GM_setValue=(k,v)=>{if(k.startsWith('tierscope:tab:'))throw new Error('disk full');realSet(k,v);};ViewerTracker.__tools.save();});
+  assert.equal(await page.locator('#acquisition-status').textContent(),'Session not saved');await page.click('#btn-toggle');assert.equal(await page.locator('#mini-freshness').textContent(),'Session not saved');
+  await page.evaluate(()=>{window.GM_setValue=window.realSet;ViewerTracker.__tools.save();});assert.notEqual(await page.locator('#mini-freshness').textContent(),'Session not saved');
+  await page.reload();await page.addScriptTag({content:instrument(source)});await page.evaluate(()=>ViewerTracker.__tools.init());
+  assert.equal(await page.locator('#tracker-container').getAttribute('data-theme'),'bright');await openTools();
+  assert.equal(await page.locator('.tools-row').count(),2);await nav('compare').click();await page.setViewportSize({width:380,height:740});await page.waitForTimeout(100);
+  const overflow=await page.locator('#tierscope-session-tools').evaluate(e=>({width:e.getBoundingClientRect().width,overflow:e.scrollWidth-e.clientWidth}));
+  assert(overflow.width<=380);assert(overflow.overflow<=1,JSON.stringify(overflow));
+  await page.screenshot({path:'/tmp/tierscope-360-'+engine+'-narrow.png'});
+  await page.setViewportSize({width:1100,height:1000});await nav('library').click();await page.locator('#tools-library-search').fill('secondroom');
+  page.once('dialog',d=>d.dismiss());await page.getByRole('button',{name:'Delete',exact:true}).click();assert.equal(await page.evaluate(()=>ViewerTracker.__tools.library().count),2);
+  page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'Delete',exact:true}).click();assert.equal(await page.evaluate(()=>ViewerTracker.__tools.library().count),1);
+  await page.locator('.tools-row').getByRole('button',{name:'Replay',exact:true}).click();assert.equal(await page.locator('#tierscope-session-tools').count(),0);assert.match(await page.locator('#header-text').textContent(),/^FILE:/);
+  await openTools();await nav('backup').click();const badPicker=page.waitForEvent('filechooser');await page.click('#tools-backup-open');await(await badPicker).setFiles(file('future.json',{...backup,formatVersion:999}));
+  await page.waitForFunction(()=>document.getElementById('tools-message').textContent.includes('not a supported'));
+  assert.equal(await page.locator('#tools-backup-restore').count(),0);
+  await nav('library').click();
+  await page.evaluate(()=>{const read=File.prototype.text;window.restoreFileRead=()=>{File.prototype.text=read;};File.prototype.text=function(){return read.call(this).then(text=>new Promise(resolve=>{window.finishToolsRead=()=>resolve(text);}));};});
+  const pendingPicker=page.waitForEvent('filechooser');await page.click('#tools-import-session');await(await pendingPicker).setFiles(file('pending.json',{...second,room:'pendingroom'}));
+  await page.waitForFunction(()=>typeof window.finishToolsRead==='function');
+  await page.evaluate(()=>{window.history.pushState({},'', '/otherroom/');ViewerTracker.__tools.checkUrlChange();});assert.equal(await page.locator('#tierscope-session-tools').count(),0,'navigation cleans up tools');
+  await page.evaluate(async()=>{window.restoreFileRead();window.finishToolsRead();await new Promise(resolve=>setTimeout(resolve,0));});
+  assert.equal(await page.evaluate(()=>ViewerTracker.__tools.library().count),1,'a file read completed after navigation cannot write to the library');
+  assert.deepEqual(errors,[]);
+  console.log('PASS library keep/import/search/rename/delete/reload/replay; real-time summaries, gaps and shared-length comparison; backup download/preview/confirmed restore; saved preferences; save failure feedback; keyboard, dark/bright and narrow layout; unchanged panel/live data; navigation cleanup');
+ }finally{await browser.close();}
+})().catch(error=>{console.error(error);process.exitCode=1;});

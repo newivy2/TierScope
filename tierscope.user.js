@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.5.0
+// @version      3.6.0-beta.1
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -50,10 +50,27 @@ underlying system, so should run in the browser, Node, or Plask.
 (() => {
   var __create = Object.create;
   var __defProp = Object.defineProperty;
+  var __defProps = Object.defineProperties;
   var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+  var __getOwnPropDescs = Object.getOwnPropertyDescriptors;
   var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __getOwnPropSymbols = Object.getOwnPropertySymbols;
   var __getProtoOf = Object.getPrototypeOf;
   var __hasOwnProp = Object.prototype.hasOwnProperty;
+  var __propIsEnum = Object.prototype.propertyIsEnumerable;
+  var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+  var __spreadValues = (a, b) => {
+    for (var prop in b || (b = {}))
+      if (__hasOwnProp.call(b, prop))
+        __defNormalProp(a, prop, b[prop]);
+    if (__getOwnPropSymbols)
+      for (var prop of __getOwnPropSymbols(b)) {
+        if (__propIsEnum.call(b, prop))
+          __defNormalProp(a, prop, b[prop]);
+      }
+    return a;
+  };
+  var __spreadProps = (a, b) => __defProps(a, __getOwnPropDescs(b));
   var __commonJS = (cb, mod) => function __require() {
     try {
       return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
@@ -1071,6 +1088,32 @@ underlying system, so should run in the browser, Node, or Plask.
     }
   }
 
+  // src/session-health.js
+  var sessionSaveStates = /* @__PURE__ */ new Map();
+  function noteSessionSave(room, error = "") {
+    const previous = sessionSaveStates.get(room);
+    sessionSaveStates.set(room, { savedAt: error ? previous ? previous.savedAt : null : Date.now(), error });
+  }
+  function getSessionSaveState(room) {
+    return sessionSaveStates.get(room) || { savedAt: null, error: "" };
+  }
+  function showSessionSaveWarning(element, room) {
+    const state = getSessionSaveState(room);
+    if (!element) return false;
+    if (!state.error) {
+      if (element.dataset.sessionSaveWarning) {
+        element.style.color = "";
+        delete element.dataset.sessionSaveWarning;
+      }
+      return false;
+    }
+    element.dataset.sessionSaveWarning = "true";
+    element.textContent = "Session not saved";
+    element.title = "The latest session data is only in this tab. Keep it open and use Save to download a session file. Saving will retry on the next scan. " + state.error;
+    element.style.color = "var(--panel-warning)";
+    return true;
+  }
+
   // src/scanning.js
   function readRequestPolicy() {
     try {
@@ -1436,6 +1479,7 @@ underlying system, so should run in the browser, Node, or Plask.
     updateMiniFreshness();
     var el = document.getElementById("acquisition-status");
     if (!el) return;
+    if (showSessionSaveWarning(el, getModelName())) return;
     if (runtime.isStopped) {
       el.textContent = "Stopped";
       el.title = stopDescription() + " at " + new Date(runtime.stoppedAt).toLocaleString() + ". History and elapsed time are frozen.";
@@ -1947,47 +1991,47 @@ underlying system, so should run in the browser, Node, or Plask.
   }
   function saveSession(model) {
     if (!model || model === "unknown") return;
-    var key = getStorageKey(model);
-    if (runtime.activeSessionStorageKey !== key || inspectStoredSession(model, false).protected) return;
-    if (getRoomEpoch(key) !== runtime.activeRoomEpoch) {
-      runtime.sessionStorageNotice = "Reset in another tab — local data only; export TXT/CSV before reloading";
-      updateAcquisitionStatus();
-      return;
-    }
-    runtime.STORAGE_HISTORY_SERIES.forEach(function(series) {
-      if (!runtime.sessionHighs[series]) runtime.sessionHighs[series] = getSessionHigh(series, 0);
-    });
-    var saveData = {
-      schemaVersion: runtime.STORAGE_SCHEMA_VERSION,
-      producerVersion: runtime.TIERSCOPE_VERSION,
-      timestamp: Date.now(),
-      history: runtime.history,
-      tierHighTimes: runtime.tierHighTimes,
-      withTokensHighTime: runtime.withTokensHighTime,
-      totalHighTime: runtime.totalHighTime,
-      anonHighTime: runtime.anonHighTime,
-      femaleTransHighTime: runtime.femaleTransHighTime,
-      roomTotalHigh: runtime.roomTotalHigh,
-      roomTotalHighTime: runtime.roomTotalHighTime,
-      trackingStartTime: runtime.trackingStartTime,
-      sessionStartedAt: runtime.sessionStartedAt,
-      sessionStartEstimated: runtime.sessionStartEstimated,
-      sessionHighs: runtime.sessionHighs,
-      roomEpoch: runtime.activeRoomEpoch,
-      isPaused: runtime.isPaused,
-      isStopped: runtime.isStopped,
-      stoppedAt: runtime.stoppedAt,
-      stopReason: runtime.stopReason,
-      broadcasterAbsence: runtime.broadcasterAbsence,
-      absencePausedAt: runtime.absencePausedAt,
-      absenceOverrideActive: runtime.absenceOverrideActive,
-      pausedElapsedTime: runtime.pausedElapsedTime,
-      previousCounts: runtime.previousCounts,
-      hasTrendBaseline: runtime.hasTrendBaseline,
-      trendComparisonMode: runtime.trendComparisonMode,
-      autoTrendEscalation: runtime.autoTrendEscalation
-    };
     try {
+      var key = getStorageKey(model);
+      if (runtime.activeSessionStorageKey !== key || inspectStoredSession(model, false).protected) return;
+      if (getRoomEpoch(key) !== runtime.activeRoomEpoch) {
+        runtime.sessionStorageNotice = "Reset in another tab — local data only; export TXT/CSV before reloading";
+        updateAcquisitionStatus();
+        return;
+      }
+      runtime.STORAGE_HISTORY_SERIES.forEach(function(series) {
+        if (!runtime.sessionHighs[series]) runtime.sessionHighs[series] = getSessionHigh(series, 0);
+      });
+      var saveData = {
+        schemaVersion: runtime.STORAGE_SCHEMA_VERSION,
+        producerVersion: runtime.TIERSCOPE_VERSION,
+        timestamp: Date.now(),
+        history: runtime.history,
+        tierHighTimes: runtime.tierHighTimes,
+        withTokensHighTime: runtime.withTokensHighTime,
+        totalHighTime: runtime.totalHighTime,
+        anonHighTime: runtime.anonHighTime,
+        femaleTransHighTime: runtime.femaleTransHighTime,
+        roomTotalHigh: runtime.roomTotalHigh,
+        roomTotalHighTime: runtime.roomTotalHighTime,
+        trackingStartTime: runtime.trackingStartTime,
+        sessionStartedAt: runtime.sessionStartedAt,
+        sessionStartEstimated: runtime.sessionStartEstimated,
+        sessionHighs: runtime.sessionHighs,
+        roomEpoch: runtime.activeRoomEpoch,
+        isPaused: runtime.isPaused,
+        isStopped: runtime.isStopped,
+        stoppedAt: runtime.stoppedAt,
+        stopReason: runtime.stopReason,
+        broadcasterAbsence: runtime.broadcasterAbsence,
+        absencePausedAt: runtime.absencePausedAt,
+        absenceOverrideActive: runtime.absenceOverrideActive,
+        pausedElapsedTime: runtime.pausedElapsedTime,
+        previousCounts: runtime.previousCounts,
+        hasTrendBaseline: runtime.hasTrendBaseline,
+        trendComparisonMode: runtime.trendComparisonMode,
+        autoTrendEscalation: runtime.autoTrendEscalation
+      };
       validateStoredSession(saveData);
       var raw = JSON.stringify(saveData);
       var tabRecord = runtime.tabRecords.get(key);
@@ -1998,8 +2042,10 @@ underlying system, so should run in the browser, Node, or Plask.
       tabRecord.savedAt = Date.now();
       runtime.tabRecords.set(key, tabRecord);
       runtime.sessionStorageStatus.set(key, { protected: false, raw, producerVersion: runtime.TIERSCOPE_VERSION, legacy: false });
+      noteSessionSave(model);
       log("Session saved for " + model + " (storage schema " + runtime.STORAGE_SCHEMA_VERSION + ", producer " + runtime.TIERSCOPE_VERSION + ")");
     } catch (e) {
+      noteSessionSave(model, e.message || String(e));
       log("Failed to save session: " + e);
     }
   }
@@ -3052,6 +3098,811 @@ underlying system, so should run in the browser, Node, or Plask.
     updateCountdownDisplay();
   }
 
+  // src/session-library.js
+  var LIBRARY_PREFIX = "tierscope:library:v1:";
+  var LIBRARY_MAX_COUNT = 50;
+  var LIBRARY_MAX_BYTES = 25 * 1024 * 1024;
+  function libraryRecordKey(id) {
+    if (typeof id !== "string" || !/^[a-z0-9_-]{1,100}$/i.test(id)) throw new Error("Invalid library record.");
+    return LIBRARY_PREFIX + id;
+  }
+  function libraryTitle(title) {
+    if (typeof title !== "string" || title.length > 80 || /[\x00-\x1f]/.test(title)) throw new Error("Use a title of up to 80 characters.");
+    return title.trim();
+  }
+  function libraryIdentity(archive) {
+    return JSON.stringify({ room: archive.room.toLowerCase(), session: __spreadProps(__spreadValues({}, archive.session), { timestamp: 0 }) });
+  }
+  function readSessionLibrary() {
+    const entries = [], damaged = [];
+    let bytes = 0;
+    for (const key of GM_listValues().filter((key2) => key2.startsWith(LIBRARY_PREFIX))) {
+      const raw = GM_getValue(key, null);
+      if (raw === null) continue;
+      bytes += new Blob([typeof raw === "string" ? raw : JSON.stringify(raw)]).size;
+      try {
+        const record = JSON.parse(raw);
+        if (record.schemaVersion !== 1 || !Number.isSafeInteger(record.addedAt) || record.addedAt < 0) throw new Error("Invalid library record.");
+        const id = key.slice(LIBRARY_PREFIX.length);
+        libraryRecordKey(id);
+        entries.push({ id, title: libraryTitle(record.title), addedAt: record.addedAt, archive: validateSessionFile(record.archive) });
+      } catch (error) {
+        damaged.push(key);
+      }
+    }
+    entries.sort((a, b) => b.archive.session.history.timestamps[0] - a.archive.session.history.timestamps[0] || b.addedAt - a.addedAt || a.id.localeCompare(b.id));
+    return { entries, damaged, bytes, count: entries.length + damaged.length };
+  }
+  function planLibraryAdditions(incoming, library = readSessionLibrary()) {
+    const seen = new Set(library.entries.map((entry) => libraryIdentity(entry.archive)));
+    const writes = [];
+    let bytes = library.bytes;
+    for (const entry of incoming) {
+      const archive = validateSessionFile(entry.archive), title = libraryTitle(entry.title || archive.room);
+      const signature = libraryIdentity(archive);
+      if (seen.has(signature)) continue;
+      seen.add(signature);
+      const id = makeStorageId();
+      const raw = JSON.stringify({ schemaVersion: 1, addedAt: Date.now(), title, archive });
+      bytes += new Blob([raw]).size;
+      writes.push({ key: libraryRecordKey(id), value: raw, id });
+    }
+    if (library.count + writes.length > LIBRARY_MAX_COUNT || bytes > LIBRARY_MAX_BYTES) {
+      throw new Error("Library full (50 recordings / 25 MB). Export and remove recordings before adding more.");
+    }
+    return writes;
+  }
+  function keepSessionInLibrary(archive, title = "") {
+    const library = readSessionLibrary(), clean = validateSessionFile(archive);
+    const writes = planLibraryAdditions([{ archive: clean, title }], library);
+    if (!writes.length) return { added: false, id: library.entries.find((entry) => libraryIdentity(entry.archive) === libraryIdentity(clean)).id };
+    try {
+      GM_setValue(writes[0].key, writes[0].value);
+      verifyLibraryCapacity();
+    } catch (error) {
+      try {
+        if (GM_getValue(writes[0].key, null) === writes[0].value) GM_deleteValue(writes[0].key);
+      } catch (cleanupError) {
+        throw new Error("Library save could not be completed or undone. Refresh the list before retrying.");
+      }
+      throw error;
+    }
+    return { added: true, id: writes[0].id };
+  }
+  function verifyLibraryCapacity() {
+    const state = readSessionLibrary();
+    if (state.count > LIBRARY_MAX_COUNT || state.bytes > LIBRARY_MAX_BYTES) throw new Error("Library limit reached, possibly by another tab. Refresh the list and remove recordings before retrying.");
+  }
+  function removeLibrarySession(id) {
+    GM_deleteValue(libraryRecordKey(id));
+  }
+  function renameLibrarySession(id, title) {
+    const key = libraryRecordKey(id), raw = GM_getValue(key, null);
+    if (raw === null) throw new Error("This recording was removed in another tab.");
+    const record = JSON.parse(raw);
+    validateSessionFile(record.archive);
+    record.title = libraryTitle(title);
+    const value = JSON.stringify(record);
+    if (readSessionLibrary().bytes + new Blob([value]).size - new Blob([raw]).size > LIBRARY_MAX_BYTES) throw new Error("Library full. Use a shorter title or remove a recording.");
+    GM_setValue(key, value);
+  }
+
+  // src/backup.js
+  var BACKUP_MAX_BYTES = 32 * 1024 * 1024;
+  var preferenceKeys = Object.freeze({
+    theme: "tierscope:ui:theme:v1",
+    highMode: "tierscope:ui:highMode:v1",
+    miniMetric: "tierscope:ui:miniMetric:v1",
+    chartWindow: "tierscope:ui:chartWindow:v1",
+    collapsedRows: "tierscope:ui:collapsedRows:v1",
+    geometry: "tierscope:ui:geometry:v1"
+  });
+  function validateBackupPreferences(preferences) {
+    if (!preferences || typeof preferences !== "object" || Array.isArray(preferences)) throw new Error("Invalid saved preferences.");
+    const clean = {};
+    for (const [name, value] of Object.entries(preferences)) {
+      if (!Object.prototype.hasOwnProperty.call(preferenceKeys, name)) throw new Error("Unknown saved preference: " + name);
+      const choices = {
+        theme: ["dark", "bright"],
+        highMode: ["sh", "ath"],
+        miniMetric: ["room", "withTokens", "total"],
+        chartWindow: ["full", "fourHours", "twoHours", "hour", "halfHour", "quarter"]
+      };
+      if (name === "geometry") {
+        if (!value || !Number.isFinite(value.left) || !Number.isFinite(value.top) || !Number.isFinite(value.scale) || value.scale < 0.5 || value.scale > 3) throw new Error("Invalid panel geometry.");
+        clean[name] = { left: value.left, top: value.top, scale: value.scale };
+      } else if (name === "collapsedRows") {
+        if (!Array.isArray(value) || value.length > runtime.PANEL_ROWS.length || value.some((key) => !runtime.PANEL_ROWS.some((row) => row.key === key))) throw new Error("Invalid collapsed rows.");
+        clean[name] = [...new Set(value)];
+      } else {
+        if (!choices[name].includes(value)) throw new Error("Invalid preference: " + name);
+        clean[name] = value;
+      }
+    }
+    return clean;
+  }
+  function validateTierScopeBackup(input) {
+    if (!input || input.format !== "TierScopeBackup" || input.formatVersion !== 1 || typeof input.producerVersion !== "string" || input.producerVersion.length > 40 || !Array.isArray(input.rooms) || input.rooms.length > 1e3 || !Array.isArray(input.library) || input.library.length > 50) {
+      throw new Error("This is not a supported TierScope backup.");
+    }
+    const seen = /* @__PURE__ */ new Set();
+    const rooms = input.rooms.map((record) => {
+      const room = record && allTimeRoom(record.room);
+      if (!room || seen.has(room)) throw new Error("Invalid or duplicate room in backup.");
+      seen.add(room);
+      validateAllTimeRecord({ schemaVersion: 1, room, epoch: "backup", highs: record.highs }, room);
+      const highs = emptyAllTimeHighs();
+      mergeAllTimeHighs(highs, record.highs);
+      return { room, highs };
+    });
+    const library = input.library.map((entry) => ({ title: libraryTitle(entry.title), archive: validateSessionFile(entry.archive) }));
+    const backup = {
+      format: "TierScopeBackup",
+      formatVersion: 1,
+      producerVersion: input.producerVersion,
+      rooms,
+      preferences: validateBackupPreferences(input.preferences),
+      library
+    };
+    if (new Blob([JSON.stringify(backup)]).size > BACKUP_MAX_BYTES) throw new Error("Backup exceeds 32 MB.");
+    return backup;
+  }
+  function createTierScopeBackup(includeLibrary = true) {
+    const rooms = /* @__PURE__ */ new Set();
+    for (const key of GM_listValues()) {
+      if (key.startsWith(runtime.ALL_TIME_PREFIX)) {
+        const room = allTimeRoom(key.slice(runtime.ALL_TIME_PREFIX.length).split(":")[0]);
+        if (room) rooms.add(room);
+      }
+    }
+    for (const room of runtime.allTimeCache.keys()) if (allTimeRoom(room)) rooms.add(room);
+    const records = [...rooms].sort().map((room) => {
+      const state = readAllTimeHighs(room);
+      if (state.error || state.skipped) throw new Error("Could not read all ATH records for " + room + ". Existing data was left intact.");
+      return { room, highs: state.highs };
+    });
+    const preferences = {
+      theme: runtime.isDarkMode ? "dark" : "bright",
+      highMode: runtime.highMode,
+      miniMetric: runtime.miniMetric,
+      chartWindow: runtime.chartWindowMode,
+      collapsedRows: [...runtime.collapsedRows]
+    };
+    if (runtime.panelGeometry) preferences.geometry = runtime.panelGeometry;
+    for (const [name, key] of Object.entries(preferenceKeys)) {
+      const saved = GM_getValue(key, null);
+      if (saved !== null) preferences[name] = name === "geometry" || name === "collapsedRows" ? JSON.parse(saved) : saved;
+    }
+    const library = includeLibrary ? readSessionLibrary() : { entries: [], damaged: [] };
+    if (library.damaged.length) throw new Error("The library contains unreadable recordings. Export ATH/preferences separately or resolve those entries first.");
+    return validateTierScopeBackup({
+      format: "TierScopeBackup",
+      formatVersion: 1,
+      producerVersion: runtime.TIERSCOPE_VERSION,
+      rooms: records,
+      preferences,
+      library: library.entries.map((entry) => ({ title: entry.title, archive: entry.archive }))
+    });
+  }
+  function restoreTierScopeBackup(input, options = { highs: true, preferences: true, library: true }) {
+    const backup = validateTierScopeBackup(input), writes = [], epochs = [];
+    const newLibrary = options.library ? planLibraryAdditions(backup.library) : [];
+    if (options.highs) for (const record of backup.rooms) {
+      const state = readAllTimeHighs(record.room);
+      if (state.error || state.skipped) throw new Error("Cannot safely merge ATH for " + record.room + ". No backup data was written.");
+      const highs = emptyAllTimeHighs();
+      mergeAllTimeHighs(highs, state.highs);
+      if (mergeAllTimeHighs(highs, record.highs)) {
+        const key = runtime.ALL_TIME_PREFIX + record.room + ":" + state.epoch + ":" + makeStorageId();
+        writes.push({ key, value: JSON.stringify({ schemaVersion: 1, room: record.room, epoch: state.epoch, highs }) });
+        epochs.push({ room: record.room, epoch: state.epoch });
+      }
+    }
+    writes.push(...newLibrary);
+    if (options.preferences) for (const [name, value] of Object.entries(backup.preferences)) {
+      writes.push({ key: preferenceKeys[name], value: name === "geometry" || name === "collapsedRows" ? JSON.stringify(value) : value });
+    }
+    const touched = [];
+    try {
+      for (const write of writes) {
+        const before = GM_getValue(write.key, void 0);
+        touched.push(__spreadProps(__spreadValues({}, write), { before }));
+        GM_setValue(write.key, write.value);
+      }
+      for (const { room, epoch } of epochs) {
+        if (GM_getValue(runtime.ALL_TIME_EPOCH_PREFIX + room, "initial") !== epoch) throw new Error("ATH was cleared in another tab during restore.");
+      }
+      if (newLibrary.length) verifyLibraryCapacity();
+    } catch (error) {
+      let rollbackFailed = false;
+      for (const write of touched.reverse()) {
+        try {
+          if (GM_getValue(write.key, null) !== write.value) continue;
+          if (write.before === void 0) GM_deleteValue(write.key);
+          else GM_setValue(write.key, write.before);
+        } catch (rollbackError) {
+          rollbackFailed = true;
+        }
+      }
+      backup.rooms.forEach((record) => readAllTimeHighs(record.room));
+      throw new Error((rollbackFailed ? "Restore incomplete; some changes may remain. Keep the backup and retry. " : "Restore failed; its writes were rolled back. ") + error.message);
+    }
+    backup.rooms.forEach((record) => readAllTimeHighs(record.room));
+    return {
+      rooms: epochs.length,
+      recordings: newLibrary.length,
+      preferences: options.preferences ? Object.keys(backup.preferences).length : 0
+    };
+  }
+
+  // src/data-io.js
+  function downloadDataFile(value, filename) {
+    const blob = new Blob([JSON.stringify(value)], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob), link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    try {
+      link.click();
+    } finally {
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 6e4);
+    }
+  }
+  async function readDataFile(file, maxBytes) {
+    if (!file || file.size > maxBytes) throw new Error("File is too large (maximum " + Math.round(maxBytes / 1024 / 1024) + " MB).");
+    const text = await file.text();
+    if (new Blob([text]).size > maxBytes) throw new Error("File is too large.");
+    return JSON.parse(text.replace(/^\uFEFF/, ""));
+  }
+
+  // src/session-analysis.js
+  var ANALYSIS_METRICS = Object.freeze({
+    room: "Room audience",
+    total: "Registered viewers",
+    withTokens: "Viewers with tokens",
+    red: "Moderators",
+    green: "Fan club",
+    purple: "Dark purple",
+    pink: "Light purple",
+    "dark-blue": "Dark blue",
+    "light-blue": "Light blue",
+    gray: "Grey",
+    "female-trans": "Female / trans",
+    anonymous: "Anonymous viewers"
+  });
+  function analysisSeries(archive, metric) {
+    if (!Object.prototype.hasOwnProperty.call(ANALYSIS_METRICS, metric)) throw new Error("Unknown analysis metric.");
+    const history = archive.session.history;
+    const values = metric === "room" ? (
+      /** @type {number[]} */
+      history.total.map((v, i) => v + /** @type {number[]} */
+      history.anonymous[i])
+    ) : (
+      /** @type {number[]} */
+      history[metric]
+    );
+    const origin = history.timestamps[0];
+    const times = history.timestamps.map((time) => time - origin);
+    for (let i = 0; i < times.length; i++) times[i] = Math.max(0, times[i], i ? times[i - 1] : 0);
+    return { times, values, breaks: history.breaks || times.map(() => false) };
+  }
+  function summarizeSession(archive, metric = "room", threshold = 100, limitMs = Infinity) {
+    if (!Number.isFinite(threshold) || threshold < 0 || !(limitMs >= 0)) throw new Error("Invalid summary range or threshold.");
+    const { times, values, breaks } = analysisSeries(archive, metric);
+    const end = Math.min(times.length ? times[times.length - 1] : 0, limitMs);
+    let coveredMs = 0, weighted = 0, registeredWeight = 0, tokenWeight = 0, atOrAboveMs = 0, peak = 0, samples = 0;
+    for (let i = 0; i < times.length && times[i] <= end; i++) {
+      samples++;
+      peak = Math.max(peak, values[i]);
+      if (i + 1 >= times.length || breaks[i + 1]) continue;
+      const duration = Math.max(0, Math.min(end, times[i + 1]) - times[i]);
+      coveredMs += duration;
+      weighted += duration * values[i];
+      registeredWeight += duration * /** @type {number[]} */
+      archive.session.history.total[i];
+      tokenWeight += duration * /** @type {number[]} */
+      archive.session.history.withTokens[i];
+      if (values[i] >= threshold) atOrAboveMs += duration;
+    }
+    return {
+      samples,
+      spanMs: end,
+      coveredMs,
+      gapMs: end - coveredMs,
+      peak,
+      sessionPeak: metric === "room" ? archive.session.roomTotalHigh : archive.session.sessionHighs[metric].value,
+      mean: coveredMs ? weighted / coveredMs : null,
+      tokenShare: registeredWeight ? tokenWeight / registeredWeight * 100 : null,
+      atOrAboveMs,
+      coverage: end ? coveredMs / end * 100 : null
+    };
+  }
+  function compareSessions(a, b, metric = "room", threshold = 100, sharedLength = true) {
+    const sa = analysisSeries(a, metric), sb = analysisSeries(b, metric);
+    const spanA = sa.times.length ? sa.times[sa.times.length - 1] : 0;
+    const spanB = sb.times.length ? sb.times[sb.times.length - 1] : 0;
+    const limitMs = sharedLength ? Math.min(spanA, spanB) : Infinity;
+    return {
+      a: summarizeSession(a, metric, threshold, limitMs),
+      b: summarizeSession(b, metric, threshold, limitMs),
+      limitMs,
+      axisMs: sharedLength ? limitMs : Math.max(spanA, spanB)
+    };
+  }
+
+  // src/session-tools.js
+  var closeSessionTools = null;
+  function updateSessionToolsStatus() {
+    const element = document.getElementById("session-save-info");
+    if (!element) return;
+    const state = getSessionSaveState(getModelName());
+    const warning = state.error || runtime.sessionStorageNotice;
+    element.textContent = warning ? "Session saving unavailable. Keep this tab open or download a session file." : state.savedAt ? "Session saved in this browser at " + new Date(state.savedAt).toLocaleTimeString() + "." : "No session saved in this tab yet.";
+    element.style.color = warning ? "var(--panel-warning)" : "var(--panel-muted)";
+  }
+  function bindSessionTools(menu) {
+    const button = document.createElement("button");
+    button.id = "btn-session-tools";
+    button.type = "button";
+    button.textContent = "Session library, analysis & backup…";
+    button.style.cssText = "display:block;width:100%;margin:8px 0 4px;padding:5px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:3px;cursor:pointer;";
+    button.onclick = () => {
+      menu.style.display = "none";
+      document.getElementById("btn-panel-options").setAttribute("aria-expanded", "false");
+      openSessionTools();
+    };
+    menu.appendChild(button);
+    const status = document.createElement("div");
+    status.id = "session-save-info";
+    status.setAttribute("role", "status");
+    status.style.cssText = "font-size:10px;line-height:1.4;margin-top:6px;";
+    menu.appendChild(status);
+    menu.style.maxHeight = "75vh";
+    menu.style.overflowY = "auto";
+    updateSessionToolsStatus();
+    return () => {
+      if (closeSessionTools) closeSessionTools();
+    };
+  }
+  function openSessionTools() {
+    if (closeSessionTools) closeSessionTools();
+    const origin = location.href, generation = runtime.initGuard, focusBefore = document.getElementById("btn-panel-options") || document.activeElement;
+    const dialog = document.createElement("dialog");
+    dialog.id = "tierscope-session-tools";
+    dialog.setAttribute("aria-labelledby", "tools-title");
+    dialog.style.cssText = "box-sizing:border-box;width:min(780px,94vw);max-height:90vh;padding:20px;border:1px solid #ff69b4;border-radius:10px;background:var(--panel-solid);color:var(--panel-text);font:14px/1.5 Arial,sans-serif;overflow:auto;";
+    setThemeVariables(dialog);
+    dialog.innerHTML = '<style>#tierscope-session-tools::backdrop{background:#0009}#tierscope-session-tools *{box-sizing:border-box}#tierscope-session-tools button,#tierscope-session-tools select,#tierscope-session-tools input{font:inherit;color:var(--panel-text);background:var(--panel-button);border:1px solid var(--panel-divider);border-radius:5px;padding:5px 8px;max-width:100%}#tierscope-session-tools button{cursor:pointer}#tierscope-session-tools button:disabled{opacity:.5;cursor:default}#tierscope-session-tools button:focus-visible,#tierscope-session-tools select:focus-visible,#tierscope-session-tools input:focus-visible{outline:2px solid #ff69b4;outline-offset:2px}#tierscope-session-tools button[aria-pressed=true]{border-color:#ff69b4}#tierscope-session-tools .tools-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:12px 0}#tierscope-session-tools .tools-muted{color:var(--panel-muted);font-size:12px}#tierscope-session-tools .tools-row{border-top:1px solid var(--panel-divider);padding:12px 0;overflow-wrap:anywhere}#tierscope-session-tools table{width:100%;border-collapse:collapse;font-size:13px}#tierscope-session-tools th,#tierscope-session-tools td{text-align:left;padding:7px;border-bottom:1px solid var(--panel-divider)}#tierscope-session-tools caption{text-align:left;font-weight:bold;padding:8px 0}#tierscope-session-tools .tools-scroll{overflow-x:auto}#tierscope-session-tools canvas{display:block;width:100%;height:240px}#tierscope-session-tools label{display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap;min-width:0;max-width:100%}#tierscope-session-tools h3{font-size:16px;margin:12px 0}</style><div class="tools-actions" style="justify-content:space-between;margin-top:0"><h2 id="tools-title" style="font-size:20px;margin:0">Session tools</h2><button id="tools-close" aria-label="Close session tools">Close</button></div><nav class="tools-actions" aria-label="Session tools"><button data-tools-tab="library">Library</button><button data-tools-tab="summary">Summary</button><button data-tools-tab="compare">Compare</button><button data-tools-tab="backup">Backup &amp; restore</button></nav><div id="tools-message" role="status" aria-live="polite" style="white-space:pre-line;overflow-wrap:anywhere"></div><div id="tools-content"></div>';
+    document.body.appendChild(dialog);
+    let currentArchive = null, library = null, tab = "library", fileRequest = 0, chartObserver = null;
+    let selectedA = "current", selectedB = "", metric = "room", threshold = 100, sharedLength = true, pendingBackup = null;
+    try {
+      currentArchive = captureSessionFile();
+    } catch (error) {
+    }
+    const content = dialog.querySelector("#tools-content"), message = dialog.querySelector("#tools-message");
+    const current = () => dialog.isConnected && dialog.open && origin === location.href && generation === runtime.initGuard;
+    function tell(text, error = false) {
+      message.textContent = text;
+      message.style.color = error ? "var(--panel-negative)" : "var(--panel-positive)";
+    }
+    function action(fn) {
+      return () => {
+        try {
+          fn();
+        } catch (error) {
+          tell(error.message, true);
+        }
+      };
+    }
+    function button(parent, text, fn, id) {
+      const element = document.createElement("button");
+      element.type = "button";
+      element.textContent = text;
+      if (id) element.id = id;
+      element.onclick = action(fn);
+      parent.appendChild(element);
+      return element;
+    }
+    function node(parent, tag, text, className) {
+      const element = document.createElement(tag);
+      if (text !== void 0) element.textContent = text;
+      if (className) element.className = className;
+      parent.appendChild(element);
+      return element;
+    }
+    function chooseFile(maxBytes, accept) {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = ".json,application/json";
+      input.hidden = true;
+      const request = ++fileRequest;
+      dialog.appendChild(input);
+      input.onchange = async () => {
+        const file = input.files && input.files[0];
+        if (!file) {
+          input.remove();
+          return;
+        }
+        try {
+          const value = await readDataFile(file, maxBytes);
+          if (current() && request === fileRequest) accept(value);
+        } catch (error) {
+          if (current() && request === fileRequest) tell(error.message, true);
+        } finally {
+          input.remove();
+        }
+      };
+      input.addEventListener("cancel", () => input.remove(), { once: true });
+      input.click();
+    }
+    function readLibrary() {
+      library = readSessionLibrary();
+      return library;
+    }
+    function sourceOptions() {
+      const items = [];
+      if (currentArchive) items.push({ id: "current", title: "Current / replayed snapshot — " + currentArchive.room, archive: currentArchive });
+      for (const entry of library.entries) items.push({ id: entry.id, title: (entry.title || entry.archive.room) + " — " + new Date(entry.archive.session.history.timestamps[0]).toLocaleString(), archive: entry.archive });
+      return items;
+    }
+    function selectSource(parent, label, id, selected, changed) {
+      const wrapper = node(parent, "label", label), select = node(wrapper, "select");
+      select.id = id;
+      for (const item of sourceOptions()) {
+        const option = node(select, "option", item.title);
+        option.value = item.id;
+      }
+      if (sourceOptions().some((item) => item.id === selected)) select.value = selected;
+      select.onchange = () => changed(select.value);
+      return select.value;
+    }
+    function renderLibrary() {
+      const state = readLibrary();
+      node(content, "p", state.count + " / 50 recordings · " + (state.bytes / 1024 / 1024).toFixed(2) + " / 25 MB. Kept until you delete them; nothing is removed automatically.", "tools-muted");
+      const actions = node(content, "div", void 0, "tools-actions");
+      button(actions, "Keep current / replayed session in library", () => {
+        const archive = captureSessionFile();
+        const result = keepSessionInLibrary(archive);
+        currentArchive = archive;
+        render("library");
+        tell(result.added ? "Recording kept in the library." : "This recording is already in the library.");
+      }, "tools-keep").disabled = !currentArchive;
+      button(actions, "Import session file…", () => chooseFile(runtime.SESSION_FILE_MAX_BYTES, (value) => {
+        const archive = validateSessionFile(value), result = keepSessionInLibrary(archive);
+        render("library");
+        tell(result.added ? "Recording imported into the library." : "This recording is already in the library.");
+      }), "tools-import-session");
+      button(actions, "Refresh list", () => render("library"));
+      const searchLabel = node(content, "label", "Find a recording "), search = node(searchLabel, "input");
+      search.type = "search";
+      search.id = "tools-library-search";
+      search.placeholder = "Room or title";
+      const list = node(content, "div");
+      list.id = "tools-library-list";
+      function rows() {
+        list.replaceChildren();
+        const query = search.value.toLowerCase();
+        const visible = state.entries.filter((entry) => (entry.title + " " + entry.archive.room).toLowerCase().includes(query));
+        if (!visible.length) node(list, "p", state.entries.length ? "No matching recordings." : "No recordings yet. Keep a session or import a session file.");
+        for (const entry of visible) {
+          const row = node(list, "div", void 0, "tools-row");
+          row.dataset.libraryId = entry.id;
+          node(row, "strong", entry.title || entry.archive.room);
+          node(row, "div", entry.archive.room + " · " + new Date(entry.archive.session.history.timestamps[0]).toLocaleString() + " · " + entry.archive.session.history.timestamps.length + " samples", "tools-muted");
+          const actions2 = node(row, "div", void 0, "tools-actions");
+          button(actions2, "Replay", () => {
+            openSessionReplay(entry.archive);
+            close();
+          });
+          button(actions2, "Summary", () => {
+            selectedA = entry.id;
+            render("summary");
+          });
+          button(actions2, "Download", () => downloadDataFile(entry.archive, entry.archive.room + "-session.tierscope.json"));
+          button(actions2, "Rename", () => {
+            const title = window.prompt("Recording title (up to 80 characters):", entry.title);
+            if (title !== null) {
+              renameLibrarySession(entry.id, title);
+              render("library");
+            }
+          });
+          button(actions2, "Delete", () => {
+            if (!confirm("Delete this library recording: " + (entry.title || entry.archive.room) + "?\n\nLive tracking, ATH and downloaded files are unchanged.")) return;
+            removeLibrarySession(entry.id);
+            render("library");
+            tell("Library recording deleted.");
+          });
+        }
+      }
+      search.oninput = rows;
+      rows();
+      if (state.damaged.length) {
+        node(content, "p", state.damaged.length + " unreadable library record(s) were retained.", "tools-muted");
+        button(content, "Remove unreadable library records…", () => {
+          if (!confirm("Delete the " + state.damaged.length + " unreadable library record(s)? This cannot be undone.")) return;
+          for (const key of state.damaged) removeLibrarySession(key.slice(LIBRARY_PREFIX.length));
+          render("library");
+        });
+      }
+    }
+    function analysisControls(comparing) {
+      if (!library) readLibrary();
+      if (!sourceOptions().length) {
+        node(content, "p", "Record a session or import one into the library to see analysis.");
+        return null;
+      }
+      const controls = node(content, "div", void 0, "tools-actions");
+      if (currentArchive) button(controls, "Refresh current / replayed snapshot", () => {
+        currentArchive = captureSessionFile();
+        render(tab);
+      }, "tools-refresh-snapshot");
+      selectedA = selectSource(controls, comparing ? "A " : "Recording ", "tools-source-a", selectedA, (value) => {
+        selectedA = value;
+        render(tab);
+      });
+      if (comparing) {
+        if (!sourceOptions().some((item) => item.id === selectedB)) selectedB = (sourceOptions().find((item) => item.id !== selectedA) || sourceOptions()[0]).id;
+        selectedB = selectSource(controls, "B ", "tools-source-b", selectedB, (value) => {
+          selectedB = value;
+          render(tab);
+        });
+      }
+      const label = node(controls, "label", "Metric "), metricSelect = node(label, "select");
+      metricSelect.id = "tools-metric";
+      for (const [key, name] of Object.entries(ANALYSIS_METRICS)) {
+        const option = node(metricSelect, "option", name);
+        option.value = key;
+      }
+      metricSelect.value = metric;
+      metricSelect.onchange = () => {
+        metric = metricSelect.value;
+        render(tab);
+      };
+      const thresholdLabel = node(controls, "label", "Threshold "), input = node(thresholdLabel, "input");
+      input.id = "tools-threshold";
+      input.type = "number";
+      input.min = "0";
+      input.max = "9007199254740991";
+      input.step = "1";
+      input.value = threshold;
+      input.style.width = "105px";
+      function applyThreshold() {
+        if (!Number.isSafeInteger(input.valueAsNumber) || input.valueAsNumber < 0) {
+          input.setCustomValidity("Enter a non-negative whole number.");
+          input.reportValidity();
+          return;
+        }
+        input.setCustomValidity("");
+        threshold = input.valueAsNumber;
+        render(tab);
+      }
+      input.onkeydown = (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          applyThreshold();
+        }
+      };
+      button(controls, "Apply threshold", applyThreshold, "tools-apply-threshold");
+      if (comparing) {
+        const label2 = node(controls, "label"), check = node(label2, "input");
+        check.type = "checkbox";
+        check.checked = sharedLength;
+        check.id = "tools-shared-length";
+        node(label2, "span", "Match shared length");
+        check.onchange = () => {
+          sharedLength = check.checked;
+          render(tab);
+        };
+      }
+      node(content, "p", "Aligned from the first retained sample, using real elapsed time. Averages and threshold durations hold each sample until the next; recording gaps are excluded. The final sample has no assumed duration.", "tools-muted");
+      if (comparing) node(content, "p", "A: " + sourceOptions().find((item) => item.id === selectedA).title + " · B: " + sourceOptions().find((item) => item.id === selectedB).title, "tools-muted");
+      return sourceOptions();
+    }
+    const number = (value) => value === null ? "Not enough data" : value.toLocaleString(void 0, { maximumFractionDigits: 1 });
+    function summaryTable(summaries, labels) {
+      const scroll = node(content, "div", void 0, "tools-scroll"), table = node(scroll, "table");
+      table.id = "tools-summary-table";
+      node(table, "caption", ANALYSIS_METRICS[metric] + " — retained recording statistics");
+      const head = node(table, "thead"), headRow = node(head, "tr");
+      node(headRow, "th", "Measure");
+      labels.forEach((label) => node(headRow, "th", label));
+      const body = node(table, "tbody");
+      const rows = [
+        ["Samples in range", (s) => number(s.samples)],
+        ["Elapsed span", (s) => formatElapsedTime(s.spanMs)],
+        ["Covered recording time", (s) => formatElapsedTime(s.coveredMs)],
+        ["Excluded gaps", (s) => formatElapsedTime(s.gapMs)],
+        ["Coverage", (s) => s.coverage === null ? "Not enough data" : number(s.coverage) + "%"],
+        ["Time-weighted average", (s) => number(s.mean)],
+        ["Peak in range", (s) => number(s.peak)],
+        ["Full-session high", (s) => number(s.sessionPeak)],
+        ["Token-holder share of registered viewers", (s) => s.tokenShare === null ? "Not enough data" : number(s.tokenShare) + "%"],
+        ["Time at or above " + threshold.toLocaleString(), (s) => s.coveredMs ? formatElapsedTime(s.atOrAboveMs) : "Not enough data"]
+      ];
+      for (const [label, value] of rows) {
+        const row = node(body, "tr");
+        const cell = node(row, "th", label);
+        cell.scope = "row";
+        summaries.forEach((summary) => node(row, "td", value(summary)));
+      }
+      node(content, "p", "The full-session high can predate retained history and is not limited by “Match shared length.” Token-holder share is weighted by recorded registered-viewer time.", "tools-muted");
+    }
+    function chart(archives, labels, endMs) {
+      const legend = node(content, "p", labels.map((label, i) => (i ? "B (dashed blue): " : "A (pink): ") + label).join(" · "), "tools-muted");
+      const canvas = node(content, "canvas");
+      canvas.id = "tools-analysis-chart";
+      canvas.setAttribute("role", "img");
+      canvas.setAttribute("aria-label", ANALYSIS_METRICS[metric] + " by minutes since the first retained sample. " + legend.textContent + ". Statistics are in the table below.");
+      function draw() {
+        const width = Math.max(260, canvas.clientWidth), height = 240, ratio = window.devicePixelRatio || 1;
+        canvas.width = width * ratio;
+        canvas.height = height * ratio;
+        const ctx = canvas.getContext("2d");
+        ctx.scale(ratio, ratio);
+        const series = archives.map((archive) => analysisSeries(archive, metric));
+        let max = 1;
+        series.forEach((s) => s.values.forEach((value, i) => {
+          if (s.times[i] <= endMs) max = Math.max(max, value);
+        }));
+        const left = 58, top = 16, right = width - 12, bottom = height - 38, span = endMs || 1;
+        ctx.strokeStyle = runtime.isDarkMode ? "#686875" : "#b6bdca";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(left, top);
+        ctx.lineTo(left, bottom);
+        ctx.lineTo(right, bottom);
+        ctx.stroke();
+        ctx.fillStyle = runtime.isDarkMode ? "#ddd" : "#41485a";
+        ctx.font = "11px Arial";
+        ctx.textAlign = "left";
+        ctx.fillText(number(max), 2, top + 8);
+        ctx.fillText("0", 30, bottom);
+        ctx.fillText("0m", left, bottom + 19);
+        ctx.textAlign = "right";
+        ctx.fillText(number(endMs / 6e4) + "m", right, bottom + 19);
+        series.forEach((s, j) => {
+          ctx.strokeStyle = j ? runtime.isDarkMode ? "#79baff" : "#175db0" : runtime.isDarkMode ? "#ff69b4" : "#b42370";
+          ctx.lineWidth = 2;
+          ctx.setLineDash(j ? [6, 4] : []);
+          ctx.beginPath();
+          const isolated = [];
+          let previousX = null, previousY = null;
+          for (let i = 0; i < s.times.length && s.times[i] <= endMs; i++) {
+            const x = left + s.times[i] / span * (right - left), y = bottom - s.values[i] / max * (bottom - top);
+            if (previousX === null || s.breaks[i]) ctx.moveTo(x, y);
+            else {
+              ctx.lineTo(x, previousY);
+              ctx.lineTo(x, y);
+            }
+            previousX = x;
+            previousY = y;
+            if ((i === 0 || s.breaks[i]) && (i + 1 === s.times.length || s.breaks[i + 1] || s.times[i + 1] > endMs)) isolated.push([x, y]);
+            if (i + 1 < s.times.length && s.times[i + 1] > endMs && !s.breaks[i + 1]) ctx.lineTo(right, y);
+          }
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.fillStyle = ctx.strokeStyle;
+          isolated.forEach(([x, y]) => {
+            ctx.beginPath();
+            ctx.arc(x, y, 3, 0, Math.PI * 2);
+            ctx.fill();
+          });
+        });
+      }
+      draw();
+      if (window.ResizeObserver) {
+        chartObserver = new window.ResizeObserver(draw);
+        chartObserver.observe(canvas);
+      }
+    }
+    function renderAnalysis(comparing) {
+      const options = analysisControls(comparing);
+      if (!options) return;
+      const a = options.find((item) => item.id === selectedA), b = options.find((item) => item.id === selectedB);
+      if (comparing) {
+        if (a.id === b.id) node(content, "p", "Choose a second recording to make a comparison.", "tools-muted");
+        const result = compareSessions(a.archive, b.archive, metric, threshold, sharedLength);
+        chart([a.archive, b.archive], [a.archive.room, b.archive.room], result.axisMs);
+        summaryTable([result.a, result.b], ["A", "B"]);
+      } else {
+        const summary = summarizeSession(a.archive, metric, threshold);
+        chart([a.archive], [a.archive.room], summary.spanMs);
+        summaryTable([summary], [a.archive.room]);
+      }
+    }
+    function checkbox(parent, id, text, checked = true) {
+      const label = node(parent, "label"), input = node(label, "input");
+      input.type = "checkbox";
+      input.id = id;
+      input.checked = checked;
+      node(label, "span", text);
+      return input;
+    }
+    function renderBackup() {
+      node(content, "h3", "Back up this browser");
+      node(content, "p", "Download ATH for every room and your saved preferences: theme, panel size/position, collapsed rows, compact metric, chart window and SH/ATH mode. Keep this file somewhere safe. Session-only controls such as the scan interval are not saved preferences.", "tools-muted");
+      const include = checkbox(content, "tools-backup-library", "Include library recordings");
+      const actions = node(content, "div", void 0, "tools-actions");
+      button(actions, "Download backup", () => {
+        downloadDataFile(createTierScopeBackup(include.checked), "TierScope-backup-" + (/* @__PURE__ */ new Date()).toISOString().slice(0, 10) + ".json");
+        tell("Backup download requested. Check your browser downloads.");
+      }, "tools-backup-download");
+      node(content, "h3", "Restore a backup");
+      node(content, "p", "ATH is merged without lowering existing records. Library recordings are added without replacing existing recordings. Saved preferences take effect after refreshing your room tabs.", "tools-muted");
+      button(content, "Choose backup…", () => {
+        pendingBackup = null;
+        render("backup");
+        chooseFile(BACKUP_MAX_BYTES, (value) => {
+          pendingBackup = validateTierScopeBackup(value);
+          render("backup");
+          tell("Backup validated. Review the contents and choose what to restore.");
+        });
+      }, "tools-backup-open");
+      if (pendingBackup) {
+        node(content, "p", pendingBackup.rooms.length + " rooms · " + Object.keys(pendingBackup.preferences).length + " saved preferences · " + pendingBackup.library.length + " recordings", "tools-muted");
+        const choices = node(content, "div", void 0, "tools-actions");
+        const highs = checkbox(choices, "tools-restore-highs", "Merge ATH"), preferences = checkbox(choices, "tools-restore-preferences", "Restore preferences"), recordings = checkbox(choices, "tools-restore-library", "Add library recordings");
+        button(content, "Restore selected data", () => {
+          if (!highs.checked && !preferences.checked && !recordings.checked) throw new Error("Choose at least one kind of data to restore.");
+          if (!confirm("Restore the selected backup data?\n\nATH will be merged, library recordings added, and selected saved preferences replaced. Your live session is not replaced.")) return;
+          const result = restoreTierScopeBackup(pendingBackup, { highs: highs.checked, preferences: preferences.checked, library: recordings.checked });
+          library = null;
+          if (runtime.playback) runtime.playback.allTimeState = readAllTimeHighs(displayedHighRoom());
+          repaintHighMode();
+          tell("Restored: " + result.rooms + " room ATH updates, " + result.recordings + " new recordings, " + result.preferences + " preferences." + (result.preferences ? "\nRefresh your room tabs when convenient to apply preferences." : ""));
+        }, "tools-backup-restore");
+      }
+    }
+    function render(next) {
+      const focusedId = dialog.contains(document.activeElement) ? document.activeElement.id : "";
+      if (next !== tab) library = null;
+      tab = next;
+      fileRequest++;
+      if (chartObserver) {
+        chartObserver.disconnect();
+        chartObserver = null;
+      }
+      content.replaceChildren();
+      message.textContent = "";
+      dialog.querySelectorAll("[data-tools-tab]").forEach((button2) => button2.setAttribute("aria-pressed", String(button2.dataset.toolsTab === tab)));
+      try {
+        if (tab === "library") renderLibrary();
+        else if (tab === "backup") renderBackup();
+        else renderAnalysis(tab === "compare");
+      } catch (error) {
+        tell(error.message, true);
+      }
+      if (focusedId) {
+        const target = document.getElementById(focusedId);
+        if (target && dialog.contains(target)) target.focus();
+      }
+    }
+    function close() {
+      fileRequest++;
+      if (chartObserver) chartObserver.disconnect();
+      if (dialog.open) dialog.close();
+      dialog.remove();
+      if (closeSessionTools === close) closeSessionTools = null;
+      if (focusBefore && focusBefore.isConnected) focusBefore.focus();
+    }
+    closeSessionTools = close;
+    dialog.querySelector("#tools-close").onclick = close;
+    dialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      close();
+    });
+    dialog.addEventListener("close", () => {
+      if (dialog.isConnected) close();
+    });
+    dialog.querySelectorAll("[data-tools-tab]").forEach((button2) => {
+      button2.onclick = () => render(button2.dataset.toolsTab);
+    });
+    dialog.showModal();
+    render("library");
+  }
+
   // src/files.js
   function setChartWindow(value) {
     if (!hasStorageField(runtime.CHART_WINDOWS, value)) return;
@@ -3218,6 +4069,7 @@ underlying system, so should run in the browser, Node, or Plask.
     }
   }
   function updatePanelOptions() {
+    updateSessionToolsStatus();
     updateHighControls();
     var button = document.getElementById("btn-panel-options");
     if (button) {
@@ -3240,6 +4092,7 @@ underlying system, so should run in the browser, Node, or Plask.
   }
   function bindPanelOptions() {
     var button = document.getElementById("btn-panel-options"), menu = document.getElementById("panel-options");
+    var cleanupSessionTools = bindSessionTools(menu);
     var input = document.getElementById("session-file-input");
     function close(focus) {
       menu.style.display = "none";
@@ -3300,6 +4153,7 @@ underlying system, so should run in the browser, Node, or Plask.
     document.addEventListener("pointerdown", outside);
     document.addEventListener("keydown", escape, true);
     runtime.panelOptionsCleanup = function() {
+      cleanupSessionTools();
       document.removeEventListener("pointerdown", outside);
       document.removeEventListener("keydown", escape, true);
     };
@@ -3634,6 +4488,7 @@ underlying system, so should run in the browser, Node, or Plask.
   function updateMiniFreshness() {
     var el = document.getElementById("mini-freshness");
     if (!el) return;
+    if (showSessionSaveWarning(el, getModelName())) return;
     if (runtime.isStopped) {
       el.textContent = "Stopped";
       el.title = stopDescription() + ". Start begins a new session.";
@@ -5064,7 +5919,7 @@ underlying system, so should run in the browser, Node, or Plask.
   }
 
   // src/gif.js
-  var import_omggif = __toESM(require_omggif());
+  var import_omggif = __toESM(require_omggif(), 1);
   function createGifSurface(palette) {
     var canvas = document.createElement("canvas");
     canvas.width = runtime.GIF_WIDTH;
@@ -5544,7 +6399,7 @@ underlying system, so should run in the browser, Node, or Plask.
   // src/runtime.js
   var runtime = {};
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.5.0";
+    runtime.TIERSCOPE_VERSION = "3.6.0-beta.1";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;

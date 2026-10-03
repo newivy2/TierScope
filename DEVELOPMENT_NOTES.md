@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **version 3.5.0**. This release preserves the panel design and features while reorganizing the sources, bundling the encoder, hardening scan commits and keeping controls private; see [BUILDING.md](BUILDING.md). For a quick introduction and installation links, see the [README](readme.md).
+Detailed reference for **beta version 3.6.0-beta.1**. Official main remains at 3.5.0. This release preserves the panel design and features while reorganizing the sources, bundling the encoder, hardening scan commits and keeping controls private; see [BUILDING.md](BUILDING.md). For a quick introduction and installation links, see the [README](readme.md).
 
 ## Contents
 
@@ -10,6 +10,7 @@ Detailed reference for **version 3.5.0**. This release preserves the panel desig
 - [Request failures and retries](#request-failures-and-retries)
 - [Replay](#replay)
 - [Session files](#session-files)
+- [Session tools](#session-tools)
 - [GIF export](#download-a-gif)
 - [Understanding the counts](#understanding-the-counts)
 - [TXT and CSV exports](#txt-and-csv-exports)
@@ -253,6 +254,36 @@ Leaving Replay, changing rooms, resetting tracking, or unloading the page cancel
 
 Replay controls belong to the panel. The downloaded GIF does not contain pause, seeking, or stepping controls; playback controls depend on the app displaying it.
 
+## Session tools
+
+Open the chart-window menu in the main header, then **Session library, analysis & backup…**. The window supports keyboard navigation, Escape to close, dark/bright themes and small viewports. Closing it returns focus to the header menu. Room navigation closes it and discards pending file reads.
+
+### Library
+
+**Keep current / replayed session in library** takes a frozen copy of the full retained recording, including its session highs. In file Replay it keeps the file's recording. **Import session file…** adds a downloaded recording directly. Neither action changes ATH or live history. Re-saving the same recording with a different export timestamp or producer version does not create a duplicate.
+
+Recordings are listed by their first retained sample, newest first. Search by room or title, rename, replay, download a standalone session file, or confirm deletion. Library Replay has the existing file Replay controls, including explicit Add to ATH. The library persists across session Reset and the temporary session's three-hour expiry. It is kept only in this browser's userscript storage, up to **50 recordings / 25 MB**. Nothing is automatically archived or deleted; a full library asks you to export and remove entries. Unreadable entries are retained and can be explicitly removed.
+
+### Summary and comparison
+
+Choose the current/replayed snapshot or a library recording. **Refresh current / replayed snapshot** captures newer data without saving it to the library. Choose a metric and a non-negative count threshold, then use **Apply threshold** or press Enter to see covered time, excluded gaps, coverage, time-weighted average, peak in range, full-session high, token-holder share and time at or above the threshold.
+
+Time calculations use original timestamps, not evenly paced Replay time. Each sample's count is held until the next sample; marked gaps and zero-duration intervals contribute no weight. The last sample adds no assumed duration. With no covered interval, averages and durations are shown as unavailable. Token-holder share is token-holder time divided by registered-viewer time; it is not an average of per-sample percentages.
+
+Compare A and B on the same elapsed-time axis, starting from each recording's first retained sample. **Match shared length** restricts both to the shorter recording's elapsed span. Turn it off to show their complete retained spans. Gaps remain blank and are excluded separately for each recording, so check coverage when comparing averages. Full-session highs may predate retained history and are not clipped to the comparison range.
+
+### Backup and restore
+
+**Download backup** includes ATH for every room and saved preferences: theme, panel size/position, collapsed rows, compact metric, chart window and SH/ATH mode. Include library recordings by leaving its checkbox selected. Temporary live-session restore records and session-only controls such as scan interval are not included; use Save or Keep in library for recordings you want to retain. Keep backups outside the browser for device changes or reinstallation.
+
+Choose a backup of up to **32 MB** to validate it and preview its room/preference/recording counts. Select the categories and confirm **Restore selected data**. ATH merges without lowering existing records; library recordings are added without replacing existing recordings, with duplicates skipped. Only the known saved preferences are accepted. Refresh room tabs when convenient to apply restored preferences; the live session is not replaced or restarted automatically.
+
+Invalid or future formats are rejected before writing. A restore checks available library space before modifying ATH or preferences. If saving fails partway through, it attempts to undo only its own writes. If undoing also fails, it explicitly reports that some changes may remain. Preserve the backup and retry after resolving the storage failure.
+
+### Session save feedback
+
+A failed automatic session save displays **Session not saved** in expanded and compact modes. The chart-window menu shows the last successful save time or a storage warning. Live tracking continues; keep the tab open and use Save to download the current session. The warning clears after a successful save. ATH retains its separate storage feedback.
+
 ## Understanding the counts
 
 The seven color tiers follow the site’s username classifications:
@@ -419,6 +450,7 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
+| **3.6.0-beta.1** | Add visible session-save failures, an explicit local recording library, validated ATH/preferences/library backups with restore preview and rollback, time-weighted summaries and two-recording comparison. Preserve the main panel; bookmarks and alerts are deferred. |
 | **3.5.0** | Release modular sources with a reproducible single-script build, bundled GIF encoding, reliable scan commits, private controls, tab-aware fallback, clearer SH/ATH retention and expanded regression coverage. |
 | **3.5.0-beta.2** | Preserve accepted scans through diagnostic/storage errors; bundle the pinned GIF encoder with its license; remove the page control API and unsafeWindow grant; restore the original tab after fallback; explain SH/ATH retention; add tier, navigation and failure regression tests. |
 | **3.5.0-beta.1** | Extract feature modules with explicit imports and shared runtime state; build one installable script with esbuild, verify generated output in CI, and check preservation of the 3.4.0 logic and UI. |

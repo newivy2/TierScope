@@ -5,6 +5,7 @@ import { createPlaybackSnapshot, getPlaybackFrame, leavePlayback } from './repla
 import { runtime } from './runtime.js';
 import { updateAcquisitionStatus } from './scanning.js';
 import { log } from './utils.js';
+import { noteSessionSave } from './session-health.js';
 
 export function getStorageKey(model) {
     return runtime.STORAGE_KEY_PREFIX + model.toLowerCase();
@@ -341,47 +342,47 @@ export function getStorageReportStatus(model) {
 
 export function saveSession(model) {
     if (!model || model === 'unknown') return;
-    var key = getStorageKey(model);
-    if (runtime.activeSessionStorageKey !== key || inspectStoredSession(model, false).protected) return;
-    if (getRoomEpoch(key) !== runtime.activeRoomEpoch) {
-        runtime.sessionStorageNotice = 'Reset in another tab — local data only; export TXT/CSV before reloading';
-        updateAcquisitionStatus();
-        return;
-    }
-    runtime.STORAGE_HISTORY_SERIES.forEach(function(series) {
-        if (!runtime.sessionHighs[series]) runtime.sessionHighs[series] = getSessionHigh(series, 0);
-    });
-    var saveData = {
-        schemaVersion: runtime.STORAGE_SCHEMA_VERSION,
-        producerVersion: runtime.TIERSCOPE_VERSION,
-        timestamp: Date.now(),
-        history: runtime.history,
-        tierHighTimes: runtime.tierHighTimes,
-        withTokensHighTime: runtime.withTokensHighTime,
-        totalHighTime: runtime.totalHighTime,
-        anonHighTime: runtime.anonHighTime,
-        femaleTransHighTime: runtime.femaleTransHighTime,
-        roomTotalHigh: runtime.roomTotalHigh,
-        roomTotalHighTime: runtime.roomTotalHighTime,
-        trackingStartTime: runtime.trackingStartTime,
-        sessionStartedAt: runtime.sessionStartedAt,
-        sessionStartEstimated: runtime.sessionStartEstimated,
-        sessionHighs: runtime.sessionHighs,
-        roomEpoch: runtime.activeRoomEpoch,
-        isPaused: runtime.isPaused,
-        isStopped: runtime.isStopped,
-        stoppedAt: runtime.stoppedAt,
-        stopReason: runtime.stopReason,
-        broadcasterAbsence: runtime.broadcasterAbsence,
-        absencePausedAt: runtime.absencePausedAt,
-        absenceOverrideActive: runtime.absenceOverrideActive,
-        pausedElapsedTime: runtime.pausedElapsedTime,
-        previousCounts: runtime.previousCounts,
-        hasTrendBaseline: runtime.hasTrendBaseline,
-        trendComparisonMode: runtime.trendComparisonMode,
-        autoTrendEscalation: runtime.autoTrendEscalation
-    };
     try {
+        var key = getStorageKey(model);
+        if (runtime.activeSessionStorageKey !== key || inspectStoredSession(model, false).protected) return;
+        if (getRoomEpoch(key) !== runtime.activeRoomEpoch) {
+            runtime.sessionStorageNotice = 'Reset in another tab — local data only; export TXT/CSV before reloading';
+            updateAcquisitionStatus();
+            return;
+        }
+        runtime.STORAGE_HISTORY_SERIES.forEach(function(series) {
+            if (!runtime.sessionHighs[series]) runtime.sessionHighs[series] = getSessionHigh(series, 0);
+        });
+        var saveData = {
+            schemaVersion: runtime.STORAGE_SCHEMA_VERSION,
+            producerVersion: runtime.TIERSCOPE_VERSION,
+            timestamp: Date.now(),
+            history: runtime.history,
+            tierHighTimes: runtime.tierHighTimes,
+            withTokensHighTime: runtime.withTokensHighTime,
+            totalHighTime: runtime.totalHighTime,
+            anonHighTime: runtime.anonHighTime,
+            femaleTransHighTime: runtime.femaleTransHighTime,
+            roomTotalHigh: runtime.roomTotalHigh,
+            roomTotalHighTime: runtime.roomTotalHighTime,
+            trackingStartTime: runtime.trackingStartTime,
+            sessionStartedAt: runtime.sessionStartedAt,
+            sessionStartEstimated: runtime.sessionStartEstimated,
+            sessionHighs: runtime.sessionHighs,
+            roomEpoch: runtime.activeRoomEpoch,
+            isPaused: runtime.isPaused,
+            isStopped: runtime.isStopped,
+            stoppedAt: runtime.stoppedAt,
+            stopReason: runtime.stopReason,
+            broadcasterAbsence: runtime.broadcasterAbsence,
+            absencePausedAt: runtime.absencePausedAt,
+            absenceOverrideActive: runtime.absenceOverrideActive,
+            pausedElapsedTime: runtime.pausedElapsedTime,
+            previousCounts: runtime.previousCounts,
+            hasTrendBaseline: runtime.hasTrendBaseline,
+            trendComparisonMode: runtime.trendComparisonMode,
+            autoTrendEscalation: runtime.autoTrendEscalation
+        };
         validateStoredSession(saveData);
         var raw = JSON.stringify(saveData);
         // A tab returning after expiration gets a new record ID. No read/modify/
@@ -394,8 +395,10 @@ export function saveSession(model) {
         tabRecord.savedAt = Date.now();
         runtime.tabRecords.set(key, tabRecord);
         runtime.sessionStorageStatus.set(key, { protected: false, raw: raw, producerVersion: runtime.TIERSCOPE_VERSION, legacy: false });
+        noteSessionSave(model);
         log('Session saved for ' + model + ' (storage schema ' + runtime.STORAGE_SCHEMA_VERSION + ', producer ' + runtime.TIERSCOPE_VERSION + ')');
     } catch (e) {
+        noteSessionSave(model, e.message || String(e));
         log('Failed to save session: ' + e);
     }
 }
