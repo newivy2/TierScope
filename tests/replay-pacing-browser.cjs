@@ -85,7 +85,7 @@ const source = fs.readFileSync(path.join(__dirname, '../tierscope.user.js'), 'ut
       assert(later.endTime > early.endTime);
       assert.notEqual(later.pixels, early.pixels, 'even a flat gap must visibly keep moving');
       assert.equal(await page.locator('#count-red').textContent(), '20');
-      assert.equal(await page.locator('#high-red').textContent(), 'H:20');
+      assert.equal(await page.locator('#high-red').textContent(), 'SH:20');
       assert(Math.abs(Number(await page.locator('#playback-scrubber').inputValue()) - 1.65) < 1e-9);
 
       await page.locator('#playback-play').click({force: true});

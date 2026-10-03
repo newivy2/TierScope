@@ -1,7 +1,9 @@
 # TierScope
 
 TierScope is a free, open-source userscript that charts how a Chaturbate room’s audience changes over time. 
-**Current release: 3.3.7**
+**Beta preview: 3.4.0-beta.1** · [Install this beta](https://raw.githubusercontent.com/newivy2/TierScope/beta/all-time-highs/tierscope.user.js) · [Official release: 3.3.7](https://github.com/newivy2/TierScope/releases/tag/v3.3.7)
+
+This beta adds an **SH / ATH** switch to the left of the chart-window menu. Session highs and all-time highs are tracked separately for each room. All-time records survive session Reset and expiry; hover a high to see the exact value and its recorded time. Opening a saved file does not change these records: use **Add to all-time highs** in the chart-window menu to add that file's highs to its own room.
 
 ![TierScope in expanded, totals-focused, collapsed, and compact views](tierscope-hero.png)
 
@@ -22,7 +24,7 @@ Charts use periodic room-data samples. Session history is stored locally through
 - **Session controls:** pause or finish a session, with automatic slowdown, pause, and return detection during broadcaster absence.
 - **Replay and session files:** play samples at an even pace with animated connections through recording gaps, step through individual samples, download a session file, and reopen it for review later.
 - **Downloads:** animated GIFs, full retained CSV history, and TXT session summaries.
-- **High-count pulses:** two gentle pulses mark a new session high or a return to it after a dip, on expanded rows and collapsed markers.
+- **High-count pulses:** two gentle pulses mark a new high or a return to it after a dip, following SH or ATH mode on expanded rows and collapsed markers.
 
 ## Installation
 

@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **version 3.3.7**. For a quick introduction and installation link, see the [README](readme.md).
+Detailed reference for **beta version 3.4.0-beta.1**. The official release remains 3.3.7 while this beta is reviewed. For a quick introduction and installation links, see the [README](readme.md).
 
 ## Contents
 
@@ -101,7 +101,7 @@ Absence and the automatic-pause time are saved with the session. Restoring an el
 
 The minimized panel retains its 140-pixel content width. Click the chart label to cycle **Room total → 💎 (With Tokens) → 📊 (Registered)**. This preference is saved across rooms and refreshes, independently of collapsed rows.
 
-The chart shows the last **15 recorded minutes**, ending at the latest retained sample. Horizontal positions follow sample timestamps; vertical scale fits the plotted values. When a missing interval crosses the window’s left edge, the preceding recorded endpoint is included in the scale so its orange connector can continue into view; it is not counted as a sample inside the window. A single sample is a dot, and a constant series is a horizontal line. Hover over the chart for its value range, sample count, and end time. The adjacent H value is the session high, not merely the high within the visible window.
+The chart shows the last **15 recorded minutes**, ending at the latest retained sample. Horizontal positions follow sample timestamps; vertical scale fits the plotted values. When a missing interval crosses the window’s left edge, the preceding recorded endpoint is included in the scale so its orange connector can continue into view; it is not counted as a sample inside the window. A single sample is a dot, and a constant series is a horizontal line. Hover over the chart for its value range, sample count, and end time. The adjacent SH or ATH value is the selected session or all-time high, independent of the visible window; click it to switch modes.
 
 The header shows room total and its change; the two rows below the chart show With Tokens and Registered counts and changes. Changes use the main panel's selected comparison window. Restored snapshots leave changes blank until a fresh sample is accepted; a comparison also needs sufficient history. Hover over counts for exact values and percentages, changes for their comparison window, and the header for room name and room high.
 
@@ -151,11 +151,25 @@ The trend display uses green for increases, red for decreases, and yellow for un
 
 Choose **Last**, **5m**, **15m**, **30m**, **1h**, or **Start**. A manual selection turns automatic escalation off. **AUTO** toggles escalation through Last → 5m → 15m → 30m → 1h as tracking time grows. If a requested window extends before available history, the earliest retained sample is used.
 
-A row’s green high-value highlight is separate from its trend indicator: it appears whenever a positive count equals the session high, including a return to that value after a dip. In Replay, it compares against the retained history through the selected sample.
+A row’s green high-value highlight is separate from its trend indicator. In SH mode, it appears whenever a positive count equals the session high, including a return to that value after a dip. In ATH mode, it compares against the room's saved all-time high. In Replay, SH compares against retained history through the selected sample; ATH compares against the saved room records opened with Replay.
+
+### Session highs and all-time highs
+
+The **SH / ATH** button immediately left of the chart-window menu switches every tier and summary high, including the room total. **SH** is the current session high. **ATH** is the greatest accepted value TierScope has recorded for that room across sessions in this browser's userscript storage. Both are tracked regardless of the selected display mode. The preference is remembered across rooms and refreshes. In compact view, click the high beside the chart metric to switch modes.
+
+Hover a high for its full value, recorded date/time when available, and whether an ATH came from live recording, a restored local session, or an explicitly added file. Long values are abbreviated in the narrow high-value column; the tooltip retains the exact number. `ATH:—` means there is no record yet. Highlights and live high-value pulses follow the selected mode; switching modes or replaying history never triggers a pulse.
+
+ATH records are separate for every room, including across multiple tabs. They survive normal session Reset, Stop/Start, the three-hour session restore window, and history rollover. The first upgrade can seed them from an available validated local session. Missing or previously deleted history cannot be recovered. Records do not automatically sync between browsers or devices, and clearing userscript-manager storage can remove them.
+
+Opening a session file is read-only. To include its peaks, open the chart-window menu during FILE REPLAY and click **Add to all-time highs**. This adds the complete file's session highs, including peaks older than its retained chart samples, to the **room named in the file**, even when another room is currently open. Lower values never reduce a record; equal values retain the earliest known timestamp. Repeating the action is safe. It does not change live history, the file, or the selected Replay position.
+
+Replay uses the room's ATH records captured when it opens, so background live scans do not change its comparison. Switching SH/ATH refreshes that comparison from storage; explicitly adding the file also refreshes it. SH retains its existing historical meaning. TXT/CSV/GIF and session-file exports retain their session-based values and formats.
+
+**Clear all-time highs…** in the same menu is a separate, confirmed action for the displayed room (the file's room during FILE REPLAY). It preserves session history and files. After clearing, only new accepted samples or an explicit file addition start new records; reloading an old session does not restore the cleared peaks. A storage failure is reported in the menu and high-value tooltip; unsaved peaks remain local to the open tab and are retried on later accepted scans. Invalid or unsupported stored records are skipped and preserved.
 
 ### High-value pulses
 
-An accepted live sample triggers two gentle pulses when a row sets a new positive session high or returns to its high after a dip. The visible expanded row or collapsed marker pulses for about 1.7 seconds, then retains its steady green highlight. Text, counts, chart lines, and icons do not fade.
+An accepted live sample triggers two gentle pulses when a row sets a new positive high or returns to its high after a dip, using session highs in SH mode and all-time highs in ATH mode. The visible expanded row or collapsed marker pulses for about 1.7 seconds, then retains its steady green highlight. Text, counts, chart lines, and icons do not fade.
 
 A count staying at its high does not restart the cue. Collapsing or restoring a row cancels its current pulse and never starts another. Entering Replay, minimizing the panel, resetting, or changing rooms cancels active pulses. Saved snapshots and Replay never pulse, and events while the compact panel or Replay is open are not queued for later. Zero counts do not trigger a pulse.
 
@@ -207,7 +221,7 @@ Replay freezes the available history when opened. New scans continue updating th
 
 Click **Save** beside Replay in Controls. The download ends in `.tierscope.json` and contains the room name, capture time, full retained sample history, gap markers, session highs and their recorded times, session start information, active elapsed time, and paused/stopped state. It contains aggregate counts, without viewer username collections. A running session can be saved without pausing or stopping it. Save becomes available after the first recorded sample.
 
-Click **Open** beside Save to reopen a download. It opens paused in a separate **FILE REPLAY** view, with the same stepping, playback speed, row controls, chart windows, and GIF export as ordinary Replay. The file’s room name stays visible above the Replay controls, independently of the room currently open in the browser. Long names shorten with an ellipsis; hover over the name to read it in full. The options menu shows its room, capture time, sample count, and whole-session room high. The Replay time tooltip includes captured active time and session state. Replay highs still use retained samples through the selected frame; the file also preserves whole-session highs that may predate those samples.
+Click **Open** beside Save to reopen a download. It opens paused in a separate **FILE REPLAY** view, with the same stepping, playback speed, row controls, chart windows, and GIF export as ordinary Replay. The file’s room name stays visible above the Replay controls, independently of the room currently open in the browser. Long names shorten with an ellipsis; hover over the name to read it in full. The options menu shows its room, capture time, sample count, and whole-session room high. The Replay time tooltip includes captured active time and session state. Replay SH values still use retained samples through the selected frame; the file also preserves whole-session highs that may predate those samples. ATH mode compares against the file room's saved all-time records. Opening the file does not add its highs; use the separate **Add to all-time highs** action in the menu.
 
 The header menu retains **Save session file** and **Open session file…** so both actions remain available during Replay, when live Controls are hidden. Open is also available without a live session; on directory pages, expand the panel to reach Controls.
 
@@ -308,7 +322,7 @@ Reset starts a new storage generation for the room and clears its saved records.
 When restored history contains a sample, TierScope displays that sample until a new scan is accepted:
 
 - The header reads **SAVED:** and the footer reads **Saved** with the sample’s age.
-- Counts and charts come from saved history; highs come from the saved session-high records. They are not treated as a fresh acquisition.
+- Counts and charts come from saved history; SH comes from saved session-high records and ATH from the room's separate all-time records. They are not treated as a fresh acquisition.
 - Trends wait for a fresh sample, avoiding false drops caused by an empty live user list after reload.
 - The report labels the figures as **last saved stats**, includes the sample timestamp, and distinguishes them from live acquisition details.
 - A failed scan leaves the saved display intact. The first accepted scan replaces it with fresh data and resumes normal trend comparisons.
@@ -367,7 +381,7 @@ Look for their boxed markers below the header and click to restore them. Moderat
 
 **The panel shrank after collapsing rows**
 
-This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only version 3.3.7 is enabled, refresh the tab, and report the browser and steps that reproduce it.
+This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only one TierScope version is enabled, refresh the tab, and report the version, browser, and steps that reproduce it.
 
 **The panel is too large or near a screen edge**
 
@@ -407,7 +421,8 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
-| **3.3.7** | Smooth ordinary and saved-file Replay with evenly paced samples and animated connections through recording gaps; preserve pause/resume progress and start duplicate-timestamp recordings at their first sample. Counts, highs, timestamps, and saved history remain based on recorded samples. |
+| **3.4.0-beta.1** | Preview persistent per-room all-time highs, an SH/ATH display switch, explicit Add to all-time highs for saved files, and separate confirmed clearing. |
+| 3.3.7 | Smooth ordinary and saved-file Replay with evenly paced samples and animated connections through recording gaps; preserve pause/resume progress and start duplicate-timestamp recordings at their first sample. Counts, highs, timestamps, and saved history remain based on recorded samples. |
 | 3.3.6 | Added Save and Open beside Replay in Controls; moved Stop between Pause and Reset. |
 | 3.3.5 | One-click Resume overrides automatic absence pause and Stop until a confirmed broadcaster return; override is preserved across refresh and manual Pause/Resume. |
 | 3.3.4 | Check for the broadcaster every minute while auto-paused; retain the three-hour auto-pause Stop deadline. |

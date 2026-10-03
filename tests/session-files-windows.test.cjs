@@ -31,7 +31,7 @@ test('a session file survives more than three hours and retains highs outside th
  archive.session.roomTotalHigh=999;archive.session.roomTotalHighTime=archive.session.sessionHighs.red.time;
  h.advance(7*86400000);const before=live(h),saved=clean([...h.storage]);
  assert(f.openSessionReplay(archive));assert.equal(f.state().playback.archive.session.sessionHighs.red.value,999);
- assert.equal(h.e('high-red').textContent,'H:3','Replay highs remain limited to samples through its frame');
+ assert.equal(h.e('high-red').textContent,'SH:3','Replay highs remain limited to samples through its frame');
  assert.deepEqual(live(h),before);assert.deepEqual(clean([...h.storage]),saved);
  h.t.leavePlayback(true);assert.deepEqual(live(h),before);
 });
