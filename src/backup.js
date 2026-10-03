@@ -1,6 +1,6 @@
 import { allTimeRoom, emptyAllTimeHighs, mergeAllTimeHighs, readAllTimeHighs, validateAllTimeRecord } from './highs.js';
 import { validateSessionFile } from './files.js';
-import { libraryTitle, planLibraryAdditions, readSessionLibrary, verifyLibraryCapacity, LIBRARY_MAX_COUNT } from './session-library.js';
+import { finalizeLibraryWrites, libraryTitle, planLibraryAdditions, readSessionLibrary, verifyLibraryCapacity, LIBRARY_MAX_COUNT } from './session-library.js';
 import { runtime } from './runtime.js';
 import { makeStorageId } from './storage.js';
 
@@ -125,7 +125,9 @@ export function restoreTierScopeBackup(input, options = { highs: true, preferenc
         backup.rooms.forEach(record => readAllTimeHighs(record.room));
         throw new Error((rollbackFailed ? 'Restore incomplete; some changes may remain. Keep the backup and retry. ' : 'Restore failed; its writes were rolled back. ') + error.message);
     }
+    finalizeLibraryWrites(newLibrary);
     backup.rooms.forEach(record => readAllTimeHighs(record.room));
-    return { rooms: epochs.length, recordings: newLibrary.length,
+    return { rooms: epochs.length, recordings: newLibrary.filter(write => !write.updated).length,
+        updatedRecordings: newLibrary.filter(write => write.updated).length,
         preferences: options.preferences ? Object.keys(backup.preferences).length : 0 };
 }

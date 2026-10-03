@@ -25,6 +25,7 @@ const reviewedChanges = new Set([
   'updateMiniFreshness', // save failure feedback: session-tools-browser.cjs
   'bindPanelOptions', // session tools entry and cleanup: session-tools-browser.cjs
   'updatePanelOptions', // save status in options: session-tools-browser.cjs
+  'createPanel', // direct replay Keep in library control: session-files-browser.cjs
 ]);
 const featureModules = new Set(['backup.js', 'data-io.js', 'session-analysis.js', 'session-health.js', 'session-library.js', 'session-tools.js']);
 

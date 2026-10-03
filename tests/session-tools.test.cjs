@@ -126,3 +126,52 @@ test('restore reports incomplete recovery if storage also refuses rollback',()=>
  assert.throws(()=>h.api.__data.restoreTierScopeBackup(backup),/Restore incomplete; some changes may remain/);
  assert.equal(h.api.__data.readAllTimeHighs('room_a').highs.red.value,10);
 });
+
+test('keeping a growing session updates its entry and name, ignores shorter copies and separates a new session',()=>{
+ const h=fresh(),d=h.api.__data,old=archive(h);const first=d.keepSessionInLibrary(old,'Custom name');
+ h.advance(60000);h.t.sample(6);const longer=archive(h),updated=d.keepSessionInLibrary(longer);
+ assert.equal(updated.updated,true);assert.equal(updated.added,false);assert.equal(d.readSessionLibrary().count,1);
+ assert.equal(d.readSessionLibrary().entries[0].title,'Custom name');assert.equal(d.readSessionLibrary().entries[0].archive.session.history.timestamps.length,3);
+ assert.equal(h.storage.has('tierscope:library:v1:'+first.id),false,'old snapshot is removed only after the replacement is saved');
+ assert.equal(d.keepSessionInLibrary(old).updated,false);assert.equal(d.keepSessionInLibrary(longer).updated,false);assert.equal(d.readSessionLibrary().count,1);
+ h.t.resetAllTracking();h.advance(60000);h.t.sample(8);assert.equal(d.keepSessionInLibrary(archive(h)).added,true);assert.equal(d.readSessionLibrary().count,2);
+});
+test('different counts at the same recorded start remain separate rather than overwriting each other',()=>{
+ const h=fresh(),d=h.api.__data,a=archive(h);d.keepSessionInLibrary(a);
+ const b=clean(a);b.session.history.red[0]=1;
+ assert.equal(d.keepSessionInLibrary(b).added,true);assert.equal(d.readSessionLibrary().count,2);
+});
+test('concurrent updates show the fullest snapshot even if an older write arrives later',()=>{
+ const h=fresh(),d=h.api.__data;d.keepSessionInLibrary(archive(h),'Named');h.advance(60000);h.t.sample(6);const shorter=archive(h);
+ h.advance(60000);h.t.sample(8);const longer=archive(h),set=h.context.GM_setValue;let once=true;
+ h.context.GM_setValue=(key,value)=>{if(once&&key.startsWith('tierscope:library:')){once=false;
+  set('tierscope:library:v1:concurrent',JSON.stringify({schemaVersion:1,addedAt:h.context.Date.now(),title:'Named',archive:longer}));}set(key,value);};
+ d.keepSessionInLibrary(shorter);let state=d.readSessionLibrary();assert.equal(state.count,1);assert.equal(state.entries[0].archive.session.history.timestamps.length,4);
+ assert.equal(d.keepSessionInLibrary(shorter).updated,false);
+ d.renameLibrarySession(state.entries[0].id,'Renamed');state=d.readSessionLibrary();assert.equal(state.entries[0].title,'Renamed');
+ d.removeLibrarySession(state.entries[0].id);assert.equal(d.readSessionLibrary().count,0,'deleting removes redundant snapshots too');
+});
+test('failed updates and backup rollback retain the original recording and its custom name',()=>{
+ const h=fresh(),d=h.api.__data;d.keepSessionInLibrary(archive(h),'Preserve me');h.advance(60000);h.t.sample(6);const next=archive(h);
+ const before=snapshot(h),set=h.context.GM_setValue;
+ h.context.GM_setValue=(key,value)=>{set(key,value);if(key.startsWith('tierscope:library:'))throw new Error('failed after write');};
+ assert.throws(()=>d.keepSessionInLibrary(next),/failed after write/);assert.equal(snapshot(h),before);
+ h.context.GM_setValue=set;const backup=clean(d.createTierScopeBackup(false));backup.library=[{title:'Incoming title',archive:next}];
+ h.context.GM_setValue=(key,value)=>{if(key.startsWith('tierscope:ui:'))throw new Error('preference failed');set(key,value);};
+ assert.throws(()=>d.restoreTierScopeBackup(backup),/rolled back/);assert.equal(snapshot(h),before);
+ h.context.GM_setValue=set;const result=d.restoreTierScopeBackup(backup);assert.equal(result.recordings,0);assert.equal(result.updatedRecordings,1);
+ assert.equal(d.readSessionLibrary().count,1);assert.equal(d.readSessionLibrary().entries[0].title,'Preserve me');
+ assert.equal(d.readSessionLibrary().entries[0].archive.session.history.timestamps.length,3);
+});
+test('a full 500-entry library can update a session without consuming another recording slot',()=>{
+ const h=fresh(),d=h.api.__data;fillLibrary(h,500);h.advance(60000);h.t.sample(6);
+ assert.equal(d.keepSessionInLibrary(archive(h,'room0')).updated,true);assert.equal(d.readSessionLibrary().count,500);
+});
+test('updates recognize retained-history rollover without merging unrelated estimated windows',()=>{
+ const h=fresh(),d=h.api.__data,a=archive(h);d.keepSessionInLibrary(a);h.advance(60000);h.t.sample(6);const b=archive(h);
+ for(const key of Object.keys(b.session.history))b.session.history[key]=b.session.history[key].slice(1);
+ assert.equal(d.keepSessionInLibrary(b).updated,true);assert.equal(d.readSessionLibrary().count,1);
+ assert.equal(d.readSessionLibrary().entries[0].archive.session.history.red[0],4);
+ const c=clean(b);c.session.sessionStartEstimated=true;c.session.history.timestamps=c.session.history.timestamps.map(t=>t+3600000);c.session.timestamp+=3600000;
+ assert.equal(d.keepSessionInLibrary(c).added,true,'an estimated start cannot connect non-overlapping windows');assert.equal(d.readSessionLibrary().count,2);
+});

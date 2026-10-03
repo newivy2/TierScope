@@ -6,12 +6,44 @@ import { ANALYSIS_METRICS, analysisSeries, compareSessions, parseAnalysisThresho
 import { getSessionSaveState } from './session-health.js';
 import { keepSessionInLibrary, readSessionLibrary, removeLibrarySession, renameLibrarySession, LIBRARY_PREFIX, LIBRARY_MAX_COUNT, LIBRARY_MAX_BYTES } from './session-library.js';
 import { runtime } from './runtime.js';
+import { isPlaybackCurrent } from './replay.js';
 import { setThemeVariables } from './theme.js';
 import { formatElapsedTime, getModelName } from './utils.js';
 
 let closeSessionTools = null;
+let replayKeepState = { archive: null, label: 'Keep in library', message: '' };
+
+export function updateReplayLibraryButton() {
+    const button = document.getElementById('btn-playback-keep-library');
+    if (!button) return;
+    const archive = isPlaybackCurrent(runtime.playback) ? runtime.playback.archive : null;
+    if (replayKeepState.archive !== archive) replayKeepState = { archive, label: 'Keep in library', message: '' };
+    button.disabled = !archive;
+    // Playback repaints frequently; announce feedback only when it changes.
+    if (button.textContent !== replayKeepState.label) button.textContent = replayKeepState.label;
+    const title = replayKeepState.message || 'Keep the full replayed recording in this browser\'s library';
+    if (button.title !== title) button.title = title;
+    const label = replayKeepState.label + '. ' + title;
+    if (button.getAttribute('aria-label') !== label) button.setAttribute('aria-label', label);
+}
+
+export function keepReplayInLibrary() {
+    if (!isPlaybackCurrent(runtime.playback) || !runtime.playback.archive) return;
+    const archive = runtime.playback.archive;
+    try {
+        const result = keepSessionInLibrary(archive);
+        replayKeepState = { archive, label: result.added ? 'Kept in library' : result.updated ? 'Updated library' : 'Already kept',
+            message: archive.room + ': ' + (result.added ? 'Full recording kept in the library.' : result.updated ?
+                'Library recording updated; its name was preserved.' : 'An equal or fuller recording is already in the library.') };
+    } catch (error) {
+        replayKeepState = { archive, label: 'Retry keep', message: 'Could not keep this recording: ' + error.message };
+        alert(replayKeepState.message);
+    }
+    updateReplayLibraryButton();
+}
 
 export function updateSessionToolsStatus() {
+    updateReplayLibraryButton();
     const element = document.getElementById('session-save-info');
     if (!element) return;
     const state = getSessionSaveState(getModelName());
@@ -22,6 +54,9 @@ export function updateSessionToolsStatus() {
 }
 
 export function bindSessionTools(menu) {
+    document.getElementById('btn-playback-keep-library').onclick = keepReplayInLibrary;
+    const libraryButton = document.getElementById('btn-control-library');
+    libraryButton.onclick = () => openSessionTools(libraryButton);
     const button = document.createElement('button');
     button.id = 'btn-session-tools'; button.type = 'button'; button.textContent = 'Session library, analysis & backup…';
     button.style.cssText = 'display:block;width:100%;margin:8px 0 4px;padding:5px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:3px;cursor:pointer;';
@@ -34,9 +69,9 @@ export function bindSessionTools(menu) {
     return () => { if (closeSessionTools) closeSessionTools(); };
 }
 
-export function openSessionTools() {
+export function openSessionTools(focusTarget) {
     if (closeSessionTools) closeSessionTools();
-    const origin = location.href, generation = runtime.initGuard, focusBefore = document.getElementById('btn-panel-options') || document.activeElement;
+    const origin = location.href, generation = runtime.initGuard, focusBefore = focusTarget || document.getElementById('btn-panel-options') || document.activeElement;
     const dialog = document.createElement('dialog');
     dialog.id = 'tierscope-session-tools'; dialog.setAttribute('aria-labelledby', 'tools-title');
     dialog.style.cssText = 'box-sizing:border-box;width:min(780px,94vw);max-height:90vh;padding:20px;border:1px solid #ff69b4;border-radius:10px;background:var(--panel-solid);color:var(--panel-text);font:14px/1.5 Arial,sans-serif;overflow:auto;';
@@ -48,7 +83,7 @@ export function openSessionTools() {
     document.body.appendChild(dialog);
     let currentArchive = null, library = null, tab = 'library', fileRequest = 0, chartObserver = null;
     let selectedA = 'current', selectedB = '', metric = 'room', threshold = 100, sharedLength = true, pendingBackup = null;
-    let summaryThresholds = [25, 50, 100];
+    let summaryThresholds = [25, 50, 100], libraryRoom = null;
     try { currentArchive = captureSessionFile(); } catch (error) { /* Tools also work on directory pages. */ }
     const content = dialog.querySelector('#tools-content'), message = dialog.querySelector('#tools-message');
     const current = () => dialog.isConnected && dialog.open && origin === location.href && generation === runtime.initGuard;
@@ -90,28 +125,58 @@ export function openSessionTools() {
     }
     function renderLibrary() {
         const state = readLibrary();
+        const folders = new Map();
+        for (const entry of state.entries) {
+            const room = entry.archive.room.toLowerCase();
+            if (!folders.has(room)) folders.set(room, []);
+            folders.get(room).push(entry);
+        }
+        if (libraryRoom && !folders.has(libraryRoom)) libraryRoom = null;
         node(content, 'p', state.count + ' / ' + LIBRARY_MAX_COUNT + ' recordings · ' + (state.bytes / 1024 / 1024).toFixed(2) + ' / ' + LIBRARY_MAX_BYTES / 1024 / 1024 + ' MB. Kept until you delete them; nothing is removed automatically.', 'tools-muted');
         const actions = node(content, 'div', undefined, 'tools-actions');
         button(actions, 'Keep current / replayed session in library', () => {
             const archive = captureSessionFile();
             const result = keepSessionInLibrary(archive);
-            currentArchive = archive; render('library'); tell(result.added ? 'Recording kept in the library.' : 'This recording is already in the library.');
+            currentArchive = archive; libraryRoom = archive.room.toLowerCase();
+            render('library'); tell(result.added ? 'Recording kept in the library.' : result.updated ? 'Library recording updated.' : 'An equal or fuller recording is already in the library.');
         }, 'tools-keep').disabled = !currentArchive;
         button(actions, 'Import session file…', () => chooseFile(runtime.SESSION_FILE_MAX_BYTES, value => {
             const archive = validateSessionFile(value), result = keepSessionInLibrary(archive);
-            render('library'); tell(result.added ? 'Recording imported into the library.' : 'This recording is already in the library.');
+            libraryRoom = archive.room.toLowerCase();
+            render('library'); tell(result.added ? 'Recording imported into the library.' : result.updated ? 'Library recording updated from the file.' : 'An equal or fuller recording is already in the library.');
         }), 'tools-import-session');
         button(actions, 'Refresh list', () => render('library'));
         const searchLabel = node(content, 'label', 'Find a recording '), search = node(searchLabel, 'input');
-        search.type = 'search'; search.id = 'tools-library-search'; search.placeholder = 'Room or title';
+        search.type = 'search'; search.id = 'tools-library-search'; search.placeholder = 'Model or title — all models';
+        search.title = 'Search all recordings, including those in other model folders.';
         const list = node(content, 'div'); list.id = 'tools-library-list';
         let shown = 50;
         function rows() {
             list.replaceChildren();
-            const query = search.value.toLowerCase();
-            const visible = state.entries.filter(entry => (entry.title + ' ' + entry.archive.room).toLowerCase().includes(query));
+            const query = search.value.trim().toLowerCase();
+            const browsingFolders = !query && !libraryRoom;
+            const visible = query ? state.entries.filter(entry => (entry.title + ' ' + entry.archive.room).toLowerCase().includes(query)) :
+                libraryRoom ? folders.get(libraryRoom) : [...folders.keys()].sort((a, b) => a.localeCompare(b));
+            const heading = node(list, 'div', undefined, 'tools-actions');
+            if (!browsingFolders) button(heading, 'All models', () => {
+                const previous = libraryRoom; libraryRoom = null; search.value = ''; shown = 50; rows();
+                (document.getElementById('tools-folder-' + previous) || search).focus();
+            }, 'tools-library-all-models');
+            node(heading, 'h3', query ? 'Search results — all models' : libraryRoom ? 'Folder: ' + libraryRoom : 'Model folders');
+            if (browsingFolders) node(list, 'p', folders.size + ' model folder(s). Open a folder to see its recordings, newest first.', 'tools-muted');
             if (!visible.length) node(list, 'p', state.entries.length ? 'No matching recordings.' : 'No recordings yet. Keep a session or import a session file.');
-            for (const entry of visible.slice(0, shown)) {
+            if (browsingFolders) for (const room of visible.slice(0, shown)) {
+                const entries = folders.get(room), row = node(list, 'div', undefined, 'tools-folder');
+                row.style.cssText = 'border-top:1px solid var(--panel-divider);padding:12px 0;overflow-wrap:anywhere;';
+                const open = button(row, '📁 ' + room, () => {
+                    libraryRoom = room; shown = 50; rows();
+                    document.getElementById('tools-library-all-models').focus();
+                }, 'tools-folder-' + room);
+                open.setAttribute('aria-label', 'Open recordings for ' + room);
+                node(row, 'div', entries.length + (entries.length === 1 ? ' recording' : ' recordings') + ' · Latest: ' +
+                    new Date(entries[0].archive.session.history.timestamps[0]).toLocaleString(), 'tools-muted');
+            }
+            else for (const entry of visible.slice(0, shown)) {
                 const row = node(list, 'div', undefined, 'tools-row'); row.dataset.libraryId = entry.id;
                 node(row, 'strong', entry.title || entry.archive.room);
                 node(row, 'div', entry.archive.room + ' · ' + new Date(entry.archive.session.history.timestamps[0]).toLocaleString() + ' · ' + entry.archive.session.history.timestamps.length + ' samples', 'tools-muted');
@@ -128,7 +193,8 @@ export function openSessionTools() {
                     removeLibrarySession(entry.id); render('library'); tell('Library recording deleted.');
                 });
             }
-            if (visible.length > 50) node(list, 'p', 'Showing ' + Math.min(shown, visible.length) + ' of ' + visible.length + ' matching recordings.', 'tools-muted');
+            if (visible.length > 50) node(list, 'p', 'Showing ' + Math.min(shown, visible.length) + ' of ' + visible.length +
+                (browsingFolders ? ' model folders.' : ' matching recordings.'), 'tools-muted');
             if (shown < visible.length) button(list, 'Show ' + Math.min(50, visible.length - shown) + ' more', () => {
                 shown += 50; rows();
                 (document.getElementById('tools-library-more') || search).focus();
@@ -311,7 +377,7 @@ export function openSessionTools() {
             tell('Backup download requested. Check your browser downloads.');
         }, 'tools-backup-download');
         node(content, 'h3', 'Restore a backup');
-        node(content, 'p', 'ATH is merged without lowering existing records. Library recordings are added without replacing existing recordings. Saved preferences take effect after refreshing your room tabs.', 'tools-muted');
+        node(content, 'p', 'ATH is merged without lowering existing records. New library sessions are added; fuller versions of the same session update its entry and keep its name. Saved preferences take effect after refreshing your room tabs.', 'tools-muted');
         button(content, 'Choose backup…', () => {
             pendingBackup = null; render('backup');
             chooseFile(BACKUP_MAX_BYTES, value => {
@@ -324,12 +390,12 @@ export function openSessionTools() {
             const highs = checkbox(choices, 'tools-restore-highs', 'Merge ATH'), preferences = checkbox(choices, 'tools-restore-preferences', 'Restore preferences'), recordings = checkbox(choices, 'tools-restore-library', 'Add library recordings');
             button(content, 'Restore selected data', () => {
                 if (!highs.checked && !preferences.checked && !recordings.checked) throw new Error('Choose at least one kind of data to restore.');
-                if (!confirm('Restore the selected backup data?\n\nATH will be merged, library recordings added, and selected saved preferences replaced. Your live session is not replaced.')) return;
+                if (!confirm('Restore the selected backup data?\n\nATH will be merged, library recordings added or updated with fuller versions, and selected saved preferences replaced. Your live session is not replaced.')) return;
                 const result = restoreTierScopeBackup(pendingBackup, { highs: highs.checked, preferences: preferences.checked, library: recordings.checked });
                 library = null;
                 if (runtime.playback) runtime.playback.allTimeState = readAllTimeHighs(displayedHighRoom());
                 repaintHighMode();
-                tell('Restored: ' + result.rooms + ' room ATH updates, ' + result.recordings + ' new recordings, ' + result.preferences + ' preferences.' + (result.preferences ? '\nRefresh your room tabs when convenient to apply preferences.' : ''));
+                tell('Restored: ' + result.rooms + ' room ATH updates, ' + result.recordings + ' new recordings, ' + result.updatedRecordings + ' updated recordings, ' + result.preferences + ' preferences.' + (result.preferences ? '\nRefresh your room tabs when convenient to apply preferences.' : ''));
             }, 'tools-backup-restore');
         }
     }

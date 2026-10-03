@@ -25,6 +25,12 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
   });
   await page.goto('https://tierscope.test/testroom/');await page.addScriptTag({content:instrument(source)});await page.evaluate(()=>ViewerTracker.__tools.setup());await page.waitForTimeout(350);
   const before=await page.evaluate(()=>ViewerTracker.__tools.state()),panelBounds=await page.locator('#tracker-container').boundingBox();
+  await page.locator('#btn-control-library').focus();await page.keyboard.press('Enter');await page.locator('#tierscope-session-tools').waitFor({state:'visible'});
+  for(const tab of ['library','summary','compare','backup'])assert(await page.locator('[data-tools-tab="'+tab+'"]').isVisible(),'Library opens all Session tools tabs');
+  assert.match(await page.locator('#tools-library-list').textContent(),/Model folders/);
+  assert.equal(await page.locator('#panel-options').isVisible(),false,'direct Library needs no header menu');
+  await page.keyboard.press('Escape');assert.equal(await page.evaluate(()=>document.activeElement.id),'btn-control-library');
+  assert.deepEqual(await page.locator('#tracker-container').boundingBox(),panelBounds);
   async function openTools(){await page.click('#btn-panel-options');await page.click('#btn-session-tools');await page.locator('#tierscope-session-tools').waitFor({state:'visible'});}
   const nav=name=>page.locator('[data-tools-tab="'+name+'"]');
   const rowValue=(label,column=0)=>page.locator('#tools-summary-table tbody tr').filter({has:page.getByRole('rowheader',{name:label,exact:true})}).locator('td').nth(column).textContent();
@@ -82,7 +88,10 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
   await page.evaluate(()=>{window.GM_setValue=window.realSet;ViewerTracker.__tools.save();});assert.notEqual(await page.locator('#mini-freshness').textContent(),'Session not saved');
   await page.reload();await page.addScriptTag({content:instrument(source)});await page.evaluate(()=>ViewerTracker.__tools.init());
   assert.equal(await page.locator('#tracker-container').getAttribute('data-theme'),'bright');await openTools();
-  assert.equal(await page.locator('.tools-row').count(),2);await nav('compare').click();await page.setViewportSize({width:380,height:740});await page.waitForTimeout(100);
+  assert.equal(await page.locator('.tools-folder').count(),2,'recordings are organized by model on opening');
+  await page.locator('#tools-folder-testroom').focus();await page.keyboard.press('Enter');assert.equal(await page.locator('.tools-row').count(),1);
+  assert.match(await page.locator('#tools-library-list').textContent(),/Folder: testroom/);
+  await nav('compare').click();await page.setViewportSize({width:380,height:740});await page.waitForTimeout(100);
   const overflow=await page.locator('#tierscope-session-tools').evaluate(e=>({width:e.getBoundingClientRect().width,overflow:e.scrollWidth-e.clientWidth}));
   assert(overflow.width<=380);assert(overflow.overflow<=1,JSON.stringify(overflow));
   await page.screenshot({path:'/tmp/tierscope-360-'+engine+'-narrow.png'});
@@ -97,13 +106,20 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
   assert.equal(await page.locator('#tools-backup-restore').count(),0);
   await nav('library').click();
   await page.evaluate(()=>{const archive=ViewerTracker.__tools.library().entries[0].archive;
-   for(let i=0;i<55;i++)GM_setValue('tierscope:library:v1:paged_'+i,JSON.stringify({schemaVersion:1,addedAt:Date.now()+i,title:'Paged '+i,archive:{...archive,room:'paged'+i}}));});
-  await page.getByRole('button',{name:'Refresh list',exact:true}).click();assert.equal(await page.locator('.tools-row').count(),50);
-  assert.match(await page.locator('#tools-content').textContent(),/56 \/ 500 recordings/);
-  await page.click('#tools-library-more');assert.equal(await page.locator('.tools-row').count(),56);
+   for(let i=0;i<55;i++)GM_setValue('tierscope:library:v1:paged_'+i,JSON.stringify({schemaVersion:1,addedAt:Date.now()+i,title:'Paged '+i,archive:{...archive,room:'paged'+i}}));
+   const later=JSON.parse(JSON.stringify(archive));later.session.history.timestamps=later.session.history.timestamps.map(t=>t+86400000);later.session.sessionStartedAt+=86400000;later.session.timestamp+=86400000;
+   GM_setValue('tierscope:library:v1:nested',JSON.stringify({schemaVersion:1,addedAt:Date.now(),title:'Another session for the same model',archive:later}));});
+  await page.getByRole('button',{name:'Refresh list',exact:true}).click();assert.equal(await page.locator('.tools-folder').count(),50);
+  assert.match(await page.locator('#tools-content').textContent(),/57 \/ 500 recordings/);
+  await page.click('#tools-library-more');assert.equal(await page.locator('.tools-folder').count(),56);
+  await page.click('#tools-folder-testroom');assert.equal(await page.locator('.tools-row').count(),2);
+  assert.equal(await page.locator('.tools-row').first().getAttribute('data-library-id'),'nested','model folders show newest recordings first');
+  await page.screenshot({path:'/tmp/tierscope-beta3-'+engine+'-model-folder.png'});
   await page.locator('#tools-library-search').fill('paged54');assert.equal(await page.locator('.tools-row').count(),1);assert.match(await page.locator('.tools-row').textContent(),/paged54/);
-  await page.evaluate(()=>{for(let i=0;i<55;i++)GM_deleteValue('tierscope:library:v1:paged_'+i);});
+  await page.click('#tools-library-all-models');assert.equal(await page.locator('.tools-folder').count(),50);
+  await page.evaluate(()=>{for(let i=0;i<55;i++)GM_deleteValue('tierscope:library:v1:paged_'+i);GM_deleteValue('tierscope:library:v1:nested');});
   await page.getByRole('button',{name:'Refresh list',exact:true}).click();
+  assert.equal(await page.locator('.tools-folder').count(),1);
   await page.evaluate(()=>{const read=File.prototype.text;window.restoreFileRead=()=>{File.prototype.text=read;};File.prototype.text=function(){return read.call(this).then(text=>new Promise(resolve=>{window.finishToolsRead=()=>resolve(text);}));};});
   const pendingPicker=page.waitForEvent('filechooser');await page.click('#tools-import-session');await(await pendingPicker).setFiles(file('pending.json',{...second,room:'pendingroom'}));
   await page.waitForFunction(()=>typeof window.finishToolsRead==='function');
@@ -111,6 +127,6 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
   await page.evaluate(async()=>{window.restoreFileRead();window.finishToolsRead();await new Promise(resolve=>setTimeout(resolve,0));});
   assert.equal(await page.evaluate(()=>ViewerTracker.__tools.library().count),1,'a file read completed after navigation cannot write to the library');
   assert.deepEqual(errors,[]);
-  console.log('PASS library keep/import/search/paging/rename/delete/reload/replay; audience overview, proportions, multiple thresholds, real-time gaps and shared-length comparison; backup download/preview/confirmed restore; saved preferences; save failure feedback; keyboard, dark/bright and narrow layout; unchanged panel/live data; navigation cleanup');
+  console.log('PASS library keep/import/model folders/global search/paging/rename/delete/reload/replay; audience overview, proportions, multiple thresholds, real-time gaps and comparison; backup download/preview/restore; saved preferences; save failure feedback; keyboard/themes/narrow layout; unchanged panel/live data; navigation cleanup');
  }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

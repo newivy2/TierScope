@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.6.0-beta.2
+// @version      3.6.0-beta.3
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -2391,7 +2391,7 @@ underlying system, so should run in the browser, Node, or Plask.
       var t = runtime.TIERS[key];
       html += '<div id="tier-row-' + key + '" data-tier="' + key + '" style="display:flex;align-items:center;padding:1px 3px;margin:1px 0;background:rgba(var(--panel-row-rgb),calc(0.05 * var(--tier-background-scale, 1)));border-radius:3px;border-left:3px solid ' + t.color + ';"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml(key) + '</div><canvas id="spark-' + key + '" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-' + key + '" style="font-weight:bold;color:' + t.color + ';font-size:14px;">0</span><div id="high-' + key + '" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div>';
     });
-    html += '<div id="summary-tier-rows" style="border-top:1px solid var(--panel-divider);margin-top:4px;padding-top:4px;"><div id="tier-row-withtokens" data-tier="withtokens" style="display:flex;align-items:center;padding:2px 3px;background:rgba(255,105,180,0.15);border-radius:3px;border:1px solid #ff69b4;margin-bottom:3px;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("withtokens") + '</div><canvas id="spark-withtokens" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-withtokens" style="font-weight:bold;color:#ff69b4;font-size:14px;">0</span><span id="pct-withtokens" style="font-size:8px;color:#ff69b4;margin-left:2px;">0%</span><div id="high-withtokens" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div><div id="tier-row-total" data-tier="total" style="display:flex;align-items:center;padding:2px 3px;background:rgba(var(--panel-row-rgb),0.1);border-radius:3px;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("total") + '</div><canvas id="spark-total" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-total" style="font-weight:bold;color:var(--panel-text);font-size:14px;">0</span><div id="high-total" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div></div><div id="tier-row-anon" data-tier="anonymous" style="margin-top:5px;padding:5px;background:rgba(136,136,136,0.15);border-radius:3px;border:1px solid #888;"><div style="display:flex;align-items:center;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("anon") + `</div><canvas id="spark-anon" width="105" height="50" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="anon-ratio-full" style="font-size:13px;font-weight:bold;color:#ff69b4;">--</span><div id="high-anon" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div></div></div><div id="trend-section" style="position:relative;border-top:1px solid #4169E1;margin-top:5px;padding-top:5px;"><div id="live-trend"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;flex-wrap:wrap;gap:2px;"><span id="trend-header-label" style="font-size:9px;font-weight:bold;color:#4169E1;">📈 TREND</span><div style="display:flex;gap:2px;flex-wrap:wrap;"><button class="trend-preset-btn" data-mode="last" style="background:#4169E1;border:1px solid #4169E1;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Last</button><button class="trend-preset-btn" data-mode="5min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">5m</button><button class="trend-preset-btn" data-mode="15min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">15m</button><button class="trend-preset-btn" data-mode="30min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">30m</button><button class="trend-preset-btn" data-mode="1hour" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">1h</button><button class="trend-preset-btn" data-mode="start" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Start</button><button id="btn-trend-auto" style="background:#32CD32;border:1px solid #32CD32;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;" title="Auto-escalation ON - Click to disable">AUTO</button></div></div><div id="trend-container" style="min-height:30px;"><div style="font-size:8px;color:var(--panel-faint);text-align:center;padding:8px;">Waiting for scan...</div></div></div><div id="playback-controls" style="display:none;position:absolute;top:5px;left:0;right:0;bottom:0;padding:0 2px;box-sizing:border-box;grid-template-rows:minmax(14px,1fr) 14px 12px;gap:2px;" aria-label="Playback controls"><div id="gif-export-controls" style="display:none;position:absolute;inset:0;z-index:1;align-items:center;justify-content:center;gap:5px;background:var(--panel-solid);border-radius:3px;padding:3px;"><span id="gif-export-status" role="status" style="font-size:8px;color:var(--panel-secondary);overflow-wrap:anywhere;"></span><button id="btn-cancel-gif" hidden style="font-size:8px;cursor:pointer;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;">Cancel</button></div><div style="display:flex;flex-direction:column;justify-content:center;gap:4px;min-width:0;"><div id="playback-file-controls" style="display:none;align-items:center;gap:4px;min-width:0;"><div id="playback-room" style="display:none;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;line-height:12px;font-weight:bold;color:var(--panel-text);"></div><button type="button" id="btn-playback-add-all-time" aria-live="polite" title="Add this file's highs to the room named beside this button" style="display:none;flex-shrink:0;min-width:88px;font-size:8px;line-height:12px;margin:0;padding:0 4px;white-space:nowrap;background:#4169E1;color:#fff;border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Add to all-time highs</button></div><div style="display:flex;align-items:center;justify-content:space-between;gap:3px;"><strong id="playback-label" style="font-size:9px;color:var(--panel-warning);">PLAYBACK</strong><button id="playback-play" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#4169E1;color:white;border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Pause</button><select id="playback-speed" aria-label="Playback speed" style="font-size:8px;height:15px;margin:0;padding:0;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select><button id="btn-export-gif" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#ff69b4;color:white;border:1px solid #ff69b4;border-radius:2px;cursor:pointer;" title="Download this Replay as a ` + runtime.GIF_WIDTH + " × " + runtime.GIF_HEIGHT + ' GIF">GIF</button><button id="playback-return" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Return to Live</button></div></div><div style="display:flex;align-items:center;gap:4px;min-width:0;"><button type="button" id="playback-previous" title="Previous recorded sample (pauses Replay)" aria-label="Previous recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">|&#9664;</button><input id="playback-scrubber" type="range" min="0" max="0" value="0" step="any" aria-label="Playback timeline" style="flex:1;min-width:0;width:100%;height:12px;margin:0;accent-color:var(--panel-warning);cursor:pointer;"><button type="button" id="playback-next" title="Next recorded sample (pauses Replay)" aria-label="Next recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">&#9654;|</button></div><div id="playback-file-actions" style="display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:4px;min-width:0;"><div id="playback-position" style="grid-column:2;font-size:9px;line-height:12px;text-align:center;white-space:nowrap;color:var(--panel-secondary);font-family:monospace;">00:00:00 / 00:00:00</div><div style="grid-column:3;justify-self:end;display:flex;gap:2px;"><button type="button" id="btn-playback-save-session" aria-label="Save replay session file" title="Save the full session being replayed" style="font-size:8px;line-height:10px;height:12px;box-sizing:border-box;margin:0;padding:0 4px;background:#4169E1;color:#fff;border:1px solid #4169E1;border-radius:2px;cursor:pointer;">Save</button><button type="button" id="btn-playback-open-session" aria-label="Open session file in replay" title="Open another saved session in FILE REPLAY" style="font-size:8px;line-height:10px;height:12px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Open</button></div></div></div></div><div id="control-field" style="margin-top:5px;padding:4px;background:rgba(65,105,225,0.15);border-radius:3px;border:1px solid #4169E1;"><div id="control-session-row" style="display:flex;justify-content:space-between;align-items:center;gap:3px;margin-bottom:4px;white-space:nowrap;"><span style="font-size:9px;font-weight:bold;color:#4169E1;">🎛️ CONTROLS</span><div id="control-session-buttons" style="display:flex;gap:2px;align-items:center;"><button id="btn-replay" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-warning);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;" title="Replay recorded history">Replay</button><button type="button" id="btn-control-save-session" aria-label="Save session file" title="Save this session as a file to replay later" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:#4169E1;color:white;border:1px solid #4169E1;border-radius:2px;cursor:pointer;">Save</button><button type="button" id="btn-control-open-session" aria-label="Open session file" title="Open a saved session in FILE REPLAY" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Open</button></div><span style="font-size:11px;color:var(--panel-positive);font-weight:bold;" id="control-next-scan">Next: 60s</span></div><div id="control-action-row" style="display:grid;grid-template-columns:minmax(max-content,1fr) auto minmax(0,1fr);align-items:center;gap:3px;"><span style="font-size:12px;color:var(--panel-warning);font-family:monospace;font-weight:bold;flex-shrink:0;" id="control-tracking-timer">00:00:00</span><div id="control-action-buttons" style="display:flex;gap:2px;align-items:center;"><button id="btn-download-report" style="background:#4169E1;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Download tracking report"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="4" x2="12" y2="16"/><polyline points="6 10 12 16 18 10"/><line x1="4" y1="20" x2="20" y2="20"/></svg>TXT</button><button id="btn-download-csv" style="background:#4169E1;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Download all retained history as CSV"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="4" x2="12" y2="16"/><polyline points="6 10 12 16 18 10"/><line x1="4" y1="20" x2="20" y2="20"/></svg>CSV</button><button id="btn-control-auto" style="background:#32CD32;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 4px;min-width:24px;" title="Auto-Refresh ON">⏸</button><button type="button" id="btn-control-stop" aria-label="Stop this session" title="Stop this session and freeze its history and elapsed time" style="background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;white-space:nowrap;">■ Stop</button><button id="btn-main-reset" style="background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Reset all tracking data"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12"/><path d="M3 3v9h9"/></svg>Reset</button></div><label id="dark-mode-control" style="justify-self:end;display:inline-flex;align-items:center;gap:2px;cursor:pointer;color:var(--panel-secondary);line-height:1;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 13a9 9 0 0 1-10-10 9 9 0 1 0 10 10Z"/></svg><input type="checkbox" id="dark-mode-toggle" checked aria-label="Dark mode" style="appearance:auto;width:12px;height:12px;margin:0;cursor:pointer;accent-color:#4169E1;"></label></div></div><div id="tracker-footer" style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:4px;margin-top:5px;min-height:14px;"><div id="acquisition-status" style="max-width:80px;font-size:7px;color:var(--panel-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="No accepted sample yet">No sample</div><div id="background-slider-controls" style="display:flex;align-items:center;gap:3px;min-width:0;"><svg width="11" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--panel-warning)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink:0;"><path d="M9 18h6M10 22h4M8 14a6 6 0 1 1 8 0c-1 1-1 2-1 4H9c0-2 0-3-1-4Z"/></svg><input type="range" id="opacity-slider" min="30" max="100" value="95" aria-label="Background opacity" style="flex:1;min-width:0;width:100%;height:12px;margin:0;cursor:pointer;accent-color:#ff69b4;" title="Main and standard tier background opacity"><span id="opacity-value" style="font-size:8px;color:var(--panel-secondary);min-width:23px;">95%</span></div><div id="tierscope-logo" style="justify-self:end;display:flex;align-items:center;gap:3px;white-space:nowrap;opacity:0.6;transition:opacity 0.2s;" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0.6"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#ff69b4" stroke-width="2" style="flex-shrink:0;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="2" x2="12" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/></svg><span title="TierScope ' + runtime.TIERSCOPE_VERSION + `" style="font-size:7px;font-family:'Courier New',monospace;font-weight:bold;color:var(--panel-accent);letter-spacing:1px;">TIERSCOPE</span></div></div></div>`;
+    html += '<div id="summary-tier-rows" style="border-top:1px solid var(--panel-divider);margin-top:4px;padding-top:4px;"><div id="tier-row-withtokens" data-tier="withtokens" style="display:flex;align-items:center;padding:2px 3px;background:rgba(255,105,180,0.15);border-radius:3px;border:1px solid #ff69b4;margin-bottom:3px;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("withtokens") + '</div><canvas id="spark-withtokens" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-withtokens" style="font-weight:bold;color:#ff69b4;font-size:14px;">0</span><span id="pct-withtokens" style="font-size:8px;color:#ff69b4;margin-left:2px;">0%</span><div id="high-withtokens" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div><div id="tier-row-total" data-tier="total" style="display:flex;align-items:center;padding:2px 3px;background:rgba(var(--panel-row-rgb),0.1);border-radius:3px;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("total") + '</div><canvas id="spark-total" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-total" style="font-weight:bold;color:var(--panel-text);font-size:14px;">0</span><div id="high-total" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div></div><div id="tier-row-anon" data-tier="anonymous" style="margin-top:5px;padding:5px;background:rgba(136,136,136,0.15);border-radius:3px;border:1px solid #888;"><div style="display:flex;align-items:center;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("anon") + `</div><canvas id="spark-anon" width="105" height="50" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="anon-ratio-full" style="font-size:13px;font-weight:bold;color:#ff69b4;">--</span><div id="high-anon" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div></div></div><div id="trend-section" style="position:relative;border-top:1px solid #4169E1;margin-top:5px;padding-top:5px;"><div id="live-trend"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;flex-wrap:wrap;gap:2px;"><span id="trend-header-label" style="font-size:9px;font-weight:bold;color:#4169E1;">📈 TREND</span><div style="display:flex;gap:2px;flex-wrap:wrap;"><button class="trend-preset-btn" data-mode="last" style="background:#4169E1;border:1px solid #4169E1;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Last</button><button class="trend-preset-btn" data-mode="5min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">5m</button><button class="trend-preset-btn" data-mode="15min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">15m</button><button class="trend-preset-btn" data-mode="30min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">30m</button><button class="trend-preset-btn" data-mode="1hour" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">1h</button><button class="trend-preset-btn" data-mode="start" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Start</button><button id="btn-trend-auto" style="background:#32CD32;border:1px solid #32CD32;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;" title="Auto-escalation ON - Click to disable">AUTO</button></div></div><div id="trend-container" style="min-height:30px;"><div style="font-size:8px;color:var(--panel-faint);text-align:center;padding:8px;">Waiting for scan...</div></div></div><div id="playback-controls" style="display:none;position:absolute;top:5px;left:0;right:0;bottom:0;padding:0 2px;box-sizing:border-box;grid-template-rows:minmax(14px,1fr) 14px 12px;gap:2px;" aria-label="Playback controls"><div id="gif-export-controls" style="display:none;position:absolute;inset:0;z-index:1;align-items:center;justify-content:center;gap:5px;background:var(--panel-solid);border-radius:3px;padding:3px;"><span id="gif-export-status" role="status" style="font-size:8px;color:var(--panel-secondary);overflow-wrap:anywhere;"></span><button id="btn-cancel-gif" hidden style="font-size:8px;cursor:pointer;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;">Cancel</button></div><div style="display:flex;flex-direction:column;justify-content:center;gap:4px;min-width:0;"><div id="playback-file-controls" style="display:none;align-items:center;gap:4px;min-width:0;"><div id="playback-room" style="display:none;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;line-height:12px;font-weight:bold;color:var(--panel-text);"></div><button type="button" id="btn-playback-add-all-time" aria-live="polite" title="Add this file's highs to the room named beside this button" style="display:none;flex-shrink:0;min-width:88px;font-size:8px;line-height:12px;margin:0;padding:0 4px;white-space:nowrap;background:#4169E1;color:#fff;border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Add to all-time highs</button></div><div style="display:flex;align-items:center;justify-content:space-between;gap:3px;"><strong id="playback-label" style="font-size:9px;color:var(--panel-warning);">PLAYBACK</strong><button id="playback-play" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#4169E1;color:white;border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Pause</button><select id="playback-speed" aria-label="Playback speed" style="font-size:8px;height:15px;margin:0;padding:0;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select><button id="btn-export-gif" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#ff69b4;color:white;border:1px solid #ff69b4;border-radius:2px;cursor:pointer;" title="Download this Replay as a ` + runtime.GIF_WIDTH + " × " + runtime.GIF_HEIGHT + ` GIF">GIF</button><button id="playback-return" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Return to Live</button></div></div><div style="display:flex;align-items:center;gap:4px;min-width:0;"><button type="button" id="playback-previous" title="Previous recorded sample (pauses Replay)" aria-label="Previous recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">|&#9664;</button><input id="playback-scrubber" type="range" min="0" max="0" value="0" step="any" aria-label="Playback timeline" style="flex:1;min-width:0;width:100%;height:12px;margin:0;accent-color:var(--panel-warning);cursor:pointer;"><button type="button" id="playback-next" title="Next recorded sample (pauses Replay)" aria-label="Next recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">&#9654;|</button></div><div id="playback-file-actions" style="display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:4px;min-width:0;"><button type="button" id="btn-playback-keep-library" aria-live="polite" title="Keep the full replayed recording in this browser's library" style="grid-column:1;justify-self:start;white-space:nowrap;font-size:8px;line-height:10px;height:12px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Keep in library</button><div id="playback-position" style="grid-column:2;font-size:9px;line-height:12px;text-align:center;white-space:nowrap;color:var(--panel-secondary);font-family:monospace;">00:00:00 / 00:00:00</div><div style="grid-column:3;justify-self:end;display:flex;gap:2px;"><button type="button" id="btn-playback-save-session" aria-label="Save replay session file" title="Save the full session being replayed" style="font-size:8px;line-height:10px;height:12px;box-sizing:border-box;margin:0;padding:0 4px;background:#4169E1;color:#fff;border:1px solid #4169E1;border-radius:2px;cursor:pointer;">Save</button><button type="button" id="btn-playback-open-session" aria-label="Open session file in replay" title="Open another saved session in FILE REPLAY" style="font-size:8px;line-height:10px;height:12px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Open</button></div></div></div></div><div id="control-field" style="margin-top:5px;padding:4px;background:rgba(65,105,225,0.15);border-radius:3px;border:1px solid #4169E1;"><div id="control-session-row" style="display:flex;justify-content:space-between;align-items:center;gap:3px;margin-bottom:4px;white-space:nowrap;"><span style="font-size:9px;font-weight:bold;color:#4169E1;">🎛️ CONTROLS</span><div id="control-session-buttons" style="display:flex;gap:2px;align-items:center;"><button id="btn-replay" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-warning);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;" title="Replay recorded history">Replay</button><button type="button" id="btn-control-save-session" aria-label="Save session file" title="Save this session as a file to replay later" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:#4169E1;color:white;border:1px solid #4169E1;border-radius:2px;cursor:pointer;">Save</button><button type="button" id="btn-control-open-session" aria-label="Open session file" title="Open a saved session in FILE REPLAY" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Open</button><button type="button" id="btn-control-library" aria-label="Open session library" title="Open model folders, session summaries, comparisons and backups" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Library</button></div><span style="font-size:11px;color:var(--panel-positive);font-weight:bold;" id="control-next-scan">Next: 60s</span></div><div id="control-action-row" style="display:grid;grid-template-columns:minmax(max-content,1fr) auto minmax(0,1fr);align-items:center;gap:3px;"><span style="font-size:12px;color:var(--panel-warning);font-family:monospace;font-weight:bold;flex-shrink:0;" id="control-tracking-timer">00:00:00</span><div id="control-action-buttons" style="display:flex;gap:2px;align-items:center;"><button id="btn-download-report" style="background:#4169E1;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Download tracking report"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="4" x2="12" y2="16"/><polyline points="6 10 12 16 18 10"/><line x1="4" y1="20" x2="20" y2="20"/></svg>TXT</button><button id="btn-download-csv" style="background:#4169E1;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Download all retained history as CSV"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="4" x2="12" y2="16"/><polyline points="6 10 12 16 18 10"/><line x1="4" y1="20" x2="20" y2="20"/></svg>CSV</button><button id="btn-control-auto" style="background:#32CD32;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 4px;min-width:24px;" title="Auto-Refresh ON">⏸</button><button type="button" id="btn-control-stop" aria-label="Stop this session" title="Stop this session and freeze its history and elapsed time" style="background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;white-space:nowrap;">■ Stop</button><button id="btn-main-reset" style="background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Reset all tracking data"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12"/><path d="M3 3v9h9"/></svg>Reset</button></div><label id="dark-mode-control" style="justify-self:end;display:inline-flex;align-items:center;gap:2px;cursor:pointer;color:var(--panel-secondary);line-height:1;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 13a9 9 0 0 1-10-10 9 9 0 1 0 10 10Z"/></svg><input type="checkbox" id="dark-mode-toggle" checked aria-label="Dark mode" style="appearance:auto;width:12px;height:12px;margin:0;cursor:pointer;accent-color:#4169E1;"></label></div></div><div id="tracker-footer" style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:4px;margin-top:5px;min-height:14px;"><div id="acquisition-status" style="max-width:80px;font-size:7px;color:var(--panel-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="No accepted sample yet">No sample</div><div id="background-slider-controls" style="display:flex;align-items:center;gap:3px;min-width:0;"><svg width="11" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--panel-warning)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink:0;"><path d="M9 18h6M10 22h4M8 14a6 6 0 1 1 8 0c-1 1-1 2-1 4H9c0-2 0-3-1-4Z"/></svg><input type="range" id="opacity-slider" min="30" max="100" value="95" aria-label="Background opacity" style="flex:1;min-width:0;width:100%;height:12px;margin:0;cursor:pointer;accent-color:#ff69b4;" title="Main and standard tier background opacity"><span id="opacity-value" style="font-size:8px;color:var(--panel-secondary);min-width:23px;">95%</span></div><div id="tierscope-logo" style="justify-self:end;display:flex;align-items:center;gap:3px;white-space:nowrap;opacity:0.6;transition:opacity 0.2s;" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0.6"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#ff69b4" stroke-width="2" style="flex-shrink:0;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="2" x2="12" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/></svg><span title="TierScope ` + runtime.TIERSCOPE_VERSION + `" style="font-size:7px;font-family:'Courier New',monospace;font-weight:bold;color:var(--panel-accent);letter-spacing:1px;">TIERSCOPE</span></div></div></div>`;
     div.innerHTML = html;
     document.body.appendChild(div);
     applyPanelTheme(false);
@@ -3113,8 +3113,35 @@ underlying system, so should run in the browser, Node, or Plask.
   function libraryIdentity(archive) {
     return JSON.stringify({ room: archive.room.toLowerCase(), session: __spreadProps(__spreadValues({}, archive.session), { timestamp: 0 }) });
   }
+  function librarySessionKey(archive) {
+    var _a;
+    return archive.room.toLowerCase() + ":" + ((_a = archive.session.sessionStartedAt) != null ? _a : archive.session.history.timestamps[0]);
+  }
+  function compareLibrarySessions(existing, incoming) {
+    if (librarySessionKey(existing) !== librarySessionKey(incoming)) return null;
+    if (libraryIdentity(existing) === libraryIdentity(incoming)) return 0;
+    const a = existing.session, b = incoming.session, ah = a.history, bh = b.history;
+    const at = ah.timestamps, bt = bh.timestamps;
+    let ai = at.indexOf(bt[0]), bi = 0;
+    if (ai < 0) {
+      ai = 0;
+      bi = bt.indexOf(at[0]);
+    }
+    if (bi < 0) {
+      if (a.sessionStartEstimated || b.sessionStartEstimated || !(at.at(-1) < bt[0] || bt.at(-1) < at[0])) return null;
+    } else {
+      const series = Object.keys(ah).filter((key) => key !== "timestamps" && key !== "breaks");
+      for (; ai < at.length && bi < bt.length; ai++, bi++) {
+        if (at[ai] !== bt[bi] || series.some((key) => ah[key][ai] !== bh[key][bi]) || ai > 0 && bi > 0 && ah.breaks[ai] !== bh.breaks[bi]) return null;
+      }
+    }
+    const dominates = (left, right) => left.history.timestamps.length >= right.history.timestamps.length && left.history.timestamps.at(-1) >= right.history.timestamps.at(-1) && left.roomTotalHigh >= right.roomTotalHigh && Object.keys(right.sessionHighs).every((key) => left.sessionHighs[key].value >= right.sessionHighs[key].value);
+    const newer = dominates(b, a), older = dominates(a, b);
+    if (newer && older) return b.timestamp > a.timestamp ? 1 : -1;
+    return newer ? 1 : older ? -1 : null;
+  }
   function readSessionLibrary() {
-    const entries = [], damaged = [];
+    const entries = [], damaged = [], sessions = /* @__PURE__ */ new Map();
     let bytes = 0;
     for (const key of GM_listValues().filter((key2) => key2.startsWith(LIBRARY_PREFIX))) {
       const raw = GM_getValue(key, null);
@@ -3125,7 +3152,19 @@ underlying system, so should run in the browser, Node, or Plask.
         if (record.schemaVersion !== 1 || !Number.isSafeInteger(record.addedAt) || record.addedAt < 0) throw new Error("Invalid library record.");
         const id = key.slice(LIBRARY_PREFIX.length);
         libraryRecordKey(id);
-        entries.push({ id, title: libraryTitle(record.title), addedAt: record.addedAt, archive: validateSessionFile(record.archive) });
+        const entry = { id, title: libraryTitle(record.title), addedAt: record.addedAt, archive: validateSessionFile(record.archive), records: [{ key, value: raw }] };
+        const sessionKey = librarySessionKey(entry.archive), siblings = sessions.get(sessionKey) || [];
+        const previous = siblings.find((other) => compareLibrarySessions(other.archive, entry.archive) !== null);
+        if (previous) {
+          const records = previous.records.concat(entry.records), addedAt = Math.min(previous.addedAt, entry.addedAt);
+          if (compareLibrarySessions(previous.archive, entry.archive) === 1) Object.assign(previous, entry);
+          previous.records = records;
+          previous.addedAt = addedAt;
+        } else {
+          entries.push(entry);
+          siblings.push(entry);
+          sessions.set(sessionKey, siblings);
+        }
       } catch (error) {
         damaged.push(key);
       }
@@ -3134,28 +3173,44 @@ underlying system, so should run in the browser, Node, or Plask.
     return { entries, damaged, bytes, count: entries.length + damaged.length };
   }
   function planLibraryAdditions(incoming, library = readSessionLibrary()) {
-    const seen = new Set(library.entries.map((entry) => libraryIdentity(entry.archive)));
-    const writes = [];
+    const entries = library.entries.slice(), writes = [];
     let bytes = library.bytes;
     for (const entry of incoming) {
-      const archive = validateSessionFile(entry.archive), title = libraryTitle(entry.title || archive.room);
-      const signature = libraryIdentity(archive);
-      if (seen.has(signature)) continue;
-      seen.add(signature);
+      const archive = validateSessionFile(entry.archive);
+      const index = entries.findIndex((saved) => compareLibrarySessions(saved.archive, archive) !== null);
+      const previous = index >= 0 ? entries[index] : null;
+      if (previous && compareLibrarySessions(previous.archive, archive) !== 1) continue;
+      const title = previous ? previous.title : libraryTitle(entry.title || archive.room);
       const id = makeStorageId();
-      const raw = JSON.stringify({ schemaVersion: 1, addedAt: Date.now(), title, archive });
+      const addedAt = previous ? previous.addedAt : Date.now();
+      const raw = JSON.stringify({ schemaVersion: 1, addedAt, title, archive }), key = libraryRecordKey(id);
       bytes += new Blob([raw]).size;
-      writes.push({ key: libraryRecordKey(id), value: raw, id });
+      writes.push({ key, value: raw, id, updated: !!previous, replaces: previous ? previous.records : [] });
+      const next = { id, title, addedAt, archive, records: [{ key, value: raw }] };
+      if (previous) entries[index] = next;
+      else entries.push(next);
     }
-    if (library.count + writes.length > LIBRARY_MAX_COUNT || bytes > LIBRARY_MAX_BYTES) {
+    if (library.count - library.entries.length + entries.length > LIBRARY_MAX_COUNT || bytes > LIBRARY_MAX_BYTES) {
       throw new Error("Library full (" + LIBRARY_MAX_COUNT + " recordings / " + LIBRARY_MAX_BYTES / 1024 / 1024 + " MB). Export and remove recordings before adding more.");
     }
     return writes;
   }
+  function finalizeLibraryWrites(writes) {
+    for (const write of writes) for (const old of write.replaces) {
+      try {
+        if (GM_getValue(old.key, null) === old.value) GM_deleteValue(old.key);
+      } catch (error) {
+      }
+    }
+  }
   function keepSessionInLibrary(archive, title = "") {
     const library = readSessionLibrary(), clean = validateSessionFile(archive);
     const writes = planLibraryAdditions([{ archive: clean, title }], library);
-    if (!writes.length) return { added: false, id: library.entries.find((entry) => libraryIdentity(entry.archive) === libraryIdentity(clean)).id };
+    if (!writes.length) return {
+      added: false,
+      updated: false,
+      id: library.entries.find((entry) => compareLibrarySessions(entry.archive, clean) !== null).id
+    };
     try {
       GM_setValue(writes[0].key, writes[0].value);
       verifyLibraryCapacity();
@@ -3167,24 +3222,34 @@ underlying system, so should run in the browser, Node, or Plask.
       }
       throw error;
     }
-    return { added: true, id: writes[0].id };
+    finalizeLibraryWrites(writes);
+    return { added: !writes[0].updated, updated: writes[0].updated, id: writes[0].id };
   }
   function verifyLibraryCapacity() {
     const state = readSessionLibrary();
     if (state.count > LIBRARY_MAX_COUNT || state.bytes > LIBRARY_MAX_BYTES) throw new Error("Library limit reached, possibly by another tab. Refresh the list and remove recordings before retrying.");
   }
   function removeLibrarySession(id) {
-    GM_deleteValue(libraryRecordKey(id));
+    const key = libraryRecordKey(id), state = readSessionLibrary();
+    const entry = state.entries.find((entry2) => entry2.records.some((record) => record.key === key));
+    if (!entry) {
+      if (state.damaged.includes(key)) GM_deleteValue(key);
+      return;
+    }
+    for (const record of entry.records) if (GM_getValue(record.key, null) === record.value) GM_deleteValue(record.key);
   }
   function renameLibrarySession(id, title) {
-    const key = libraryRecordKey(id), raw = GM_getValue(key, null);
-    if (raw === null) throw new Error("This recording was removed in another tab.");
-    const record = JSON.parse(raw);
-    validateSessionFile(record.archive);
-    record.title = libraryTitle(title);
-    const value = JSON.stringify(record);
-    if (readSessionLibrary().bytes + new Blob([value]).size - new Blob([raw]).size > LIBRARY_MAX_BYTES) throw new Error("Library full. Use a shorter title or remove a recording.");
-    GM_setValue(key, value);
+    const key = libraryRecordKey(id), state = readSessionLibrary();
+    const entry = state.entries.find((entry2) => entry2.records.some((record) => record.key === key));
+    if (!entry) throw new Error("This recording changed in another tab. Refresh the list.");
+    const cleanTitle = libraryTitle(title);
+    const writes = entry.records.map((record) => __spreadProps(__spreadValues({}, record), { next: JSON.stringify(__spreadProps(__spreadValues({}, JSON.parse(record.value)), { title: cleanTitle })) }));
+    const bytes = state.bytes + writes.reduce((total, write) => total + new Blob([write.next]).size - new Blob([write.value]).size, 0);
+    if (bytes > LIBRARY_MAX_BYTES) throw new Error("Library full. Use a shorter title or remove a recording.");
+    for (const write of writes) {
+      if (GM_getValue(write.key, null) !== write.value) throw new Error("This recording changed in another tab. Refresh the list.");
+      GM_setValue(write.key, write.next);
+    }
   }
 
   // src/backup.js
@@ -3327,10 +3392,12 @@ underlying system, so should run in the browser, Node, or Plask.
       backup.rooms.forEach((record) => readAllTimeHighs(record.room));
       throw new Error((rollbackFailed ? "Restore incomplete; some changes may remain. Keep the backup and retry. " : "Restore failed; its writes were rolled back. ") + error.message);
     }
+    finalizeLibraryWrites(newLibrary);
     backup.rooms.forEach((record) => readAllTimeHighs(record.room));
     return {
       rooms: epochs.length,
-      recordings: newLibrary.length,
+      recordings: newLibrary.filter((write) => !write.updated).length,
+      updatedRecordings: newLibrary.filter((write) => write.updated).length,
       preferences: options.preferences ? Object.keys(backup.preferences).length : 0
     };
   }
@@ -3469,7 +3536,37 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/session-tools.js
   var closeSessionTools = null;
+  var replayKeepState = { archive: null, label: "Keep in library", message: "" };
+  function updateReplayLibraryButton() {
+    const button = document.getElementById("btn-playback-keep-library");
+    if (!button) return;
+    const archive = isPlaybackCurrent(runtime.playback) ? runtime.playback.archive : null;
+    if (replayKeepState.archive !== archive) replayKeepState = { archive, label: "Keep in library", message: "" };
+    button.disabled = !archive;
+    if (button.textContent !== replayKeepState.label) button.textContent = replayKeepState.label;
+    const title = replayKeepState.message || "Keep the full replayed recording in this browser's library";
+    if (button.title !== title) button.title = title;
+    const label = replayKeepState.label + ". " + title;
+    if (button.getAttribute("aria-label") !== label) button.setAttribute("aria-label", label);
+  }
+  function keepReplayInLibrary() {
+    if (!isPlaybackCurrent(runtime.playback) || !runtime.playback.archive) return;
+    const archive = runtime.playback.archive;
+    try {
+      const result = keepSessionInLibrary(archive);
+      replayKeepState = {
+        archive,
+        label: result.added ? "Kept in library" : result.updated ? "Updated library" : "Already kept",
+        message: archive.room + ": " + (result.added ? "Full recording kept in the library." : result.updated ? "Library recording updated; its name was preserved." : "An equal or fuller recording is already in the library.")
+      };
+    } catch (error) {
+      replayKeepState = { archive, label: "Retry keep", message: "Could not keep this recording: " + error.message };
+      alert(replayKeepState.message);
+    }
+    updateReplayLibraryButton();
+  }
   function updateSessionToolsStatus() {
+    updateReplayLibraryButton();
     const element = document.getElementById("session-save-info");
     if (!element) return;
     const state = getSessionSaveState(getModelName());
@@ -3478,6 +3575,9 @@ underlying system, so should run in the browser, Node, or Plask.
     element.style.color = warning ? "var(--panel-warning)" : "var(--panel-muted)";
   }
   function bindSessionTools(menu) {
+    document.getElementById("btn-playback-keep-library").onclick = keepReplayInLibrary;
+    const libraryButton = document.getElementById("btn-control-library");
+    libraryButton.onclick = () => openSessionTools(libraryButton);
     const button = document.createElement("button");
     button.id = "btn-session-tools";
     button.type = "button";
@@ -3501,9 +3601,9 @@ underlying system, so should run in the browser, Node, or Plask.
       if (closeSessionTools) closeSessionTools();
     };
   }
-  function openSessionTools() {
+  function openSessionTools(focusTarget) {
     if (closeSessionTools) closeSessionTools();
-    const origin = location.href, generation = runtime.initGuard, focusBefore = document.getElementById("btn-panel-options") || document.activeElement;
+    const origin = location.href, generation = runtime.initGuard, focusBefore = focusTarget || document.getElementById("btn-panel-options") || document.activeElement;
     const dialog = document.createElement("dialog");
     dialog.id = "tierscope-session-tools";
     dialog.setAttribute("aria-labelledby", "tools-title");
@@ -3513,7 +3613,7 @@ underlying system, so should run in the browser, Node, or Plask.
     document.body.appendChild(dialog);
     let currentArchive = null, library = null, tab = "library", fileRequest = 0, chartObserver = null;
     let selectedA = "current", selectedB = "", metric = "room", threshold = 100, sharedLength = true, pendingBackup = null;
-    let summaryThresholds = [25, 50, 100];
+    let summaryThresholds = [25, 50, 100], libraryRoom = null;
     try {
       currentArchive = captureSessionFile();
     } catch (error) {
@@ -3597,34 +3697,68 @@ underlying system, so should run in the browser, Node, or Plask.
     }
     function renderLibrary() {
       const state = readLibrary();
+      const folders = /* @__PURE__ */ new Map();
+      for (const entry of state.entries) {
+        const room = entry.archive.room.toLowerCase();
+        if (!folders.has(room)) folders.set(room, []);
+        folders.get(room).push(entry);
+      }
+      if (libraryRoom && !folders.has(libraryRoom)) libraryRoom = null;
       node(content, "p", state.count + " / " + LIBRARY_MAX_COUNT + " recordings · " + (state.bytes / 1024 / 1024).toFixed(2) + " / " + LIBRARY_MAX_BYTES / 1024 / 1024 + " MB. Kept until you delete them; nothing is removed automatically.", "tools-muted");
       const actions = node(content, "div", void 0, "tools-actions");
       button(actions, "Keep current / replayed session in library", () => {
         const archive = captureSessionFile();
         const result = keepSessionInLibrary(archive);
         currentArchive = archive;
+        libraryRoom = archive.room.toLowerCase();
         render("library");
-        tell(result.added ? "Recording kept in the library." : "This recording is already in the library.");
+        tell(result.added ? "Recording kept in the library." : result.updated ? "Library recording updated." : "An equal or fuller recording is already in the library.");
       }, "tools-keep").disabled = !currentArchive;
       button(actions, "Import session file…", () => chooseFile(runtime.SESSION_FILE_MAX_BYTES, (value) => {
         const archive = validateSessionFile(value), result = keepSessionInLibrary(archive);
+        libraryRoom = archive.room.toLowerCase();
         render("library");
-        tell(result.added ? "Recording imported into the library." : "This recording is already in the library.");
+        tell(result.added ? "Recording imported into the library." : result.updated ? "Library recording updated from the file." : "An equal or fuller recording is already in the library.");
       }), "tools-import-session");
       button(actions, "Refresh list", () => render("library"));
       const searchLabel = node(content, "label", "Find a recording "), search = node(searchLabel, "input");
       search.type = "search";
       search.id = "tools-library-search";
-      search.placeholder = "Room or title";
+      search.placeholder = "Model or title — all models";
+      search.title = "Search all recordings, including those in other model folders.";
       const list = node(content, "div");
       list.id = "tools-library-list";
       let shown = 50;
       function rows() {
         list.replaceChildren();
-        const query = search.value.toLowerCase();
-        const visible = state.entries.filter((entry) => (entry.title + " " + entry.archive.room).toLowerCase().includes(query));
+        const query = search.value.trim().toLowerCase();
+        const browsingFolders = !query && !libraryRoom;
+        const visible = query ? state.entries.filter((entry) => (entry.title + " " + entry.archive.room).toLowerCase().includes(query)) : libraryRoom ? folders.get(libraryRoom) : [...folders.keys()].sort((a, b) => a.localeCompare(b));
+        const heading = node(list, "div", void 0, "tools-actions");
+        if (!browsingFolders) button(heading, "All models", () => {
+          const previous = libraryRoom;
+          libraryRoom = null;
+          search.value = "";
+          shown = 50;
+          rows();
+          (document.getElementById("tools-folder-" + previous) || search).focus();
+        }, "tools-library-all-models");
+        node(heading, "h3", query ? "Search results — all models" : libraryRoom ? "Folder: " + libraryRoom : "Model folders");
+        if (browsingFolders) node(list, "p", folders.size + " model folder(s). Open a folder to see its recordings, newest first.", "tools-muted");
         if (!visible.length) node(list, "p", state.entries.length ? "No matching recordings." : "No recordings yet. Keep a session or import a session file.");
-        for (const entry of visible.slice(0, shown)) {
+        if (browsingFolders) for (const room of visible.slice(0, shown)) {
+          const entries = folders.get(room), row = node(list, "div", void 0, "tools-folder");
+          row.style.cssText = "border-top:1px solid var(--panel-divider);padding:12px 0;overflow-wrap:anywhere;";
+          const open = button(row, "📁 " + room, () => {
+            libraryRoom = room;
+            shown = 50;
+            rows();
+            document.getElementById("tools-library-all-models").focus();
+          }, "tools-folder-" + room);
+          open.setAttribute("aria-label", "Open recordings for " + room);
+          node(row, "div", entries.length + (entries.length === 1 ? " recording" : " recordings") + " · Latest: " + new Date(entries[0].archive.session.history.timestamps[0]).toLocaleString(), "tools-muted");
+        }
+        else for (const entry of visible.slice(0, shown)) {
           const row = node(list, "div", void 0, "tools-row");
           row.dataset.libraryId = entry.id;
           node(row, "strong", entry.title || entry.archive.room);
@@ -3653,7 +3787,7 @@ underlying system, so should run in the browser, Node, or Plask.
             tell("Library recording deleted.");
           });
         }
-        if (visible.length > 50) node(list, "p", "Showing " + Math.min(shown, visible.length) + " of " + visible.length + " matching recordings.", "tools-muted");
+        if (visible.length > 50) node(list, "p", "Showing " + Math.min(shown, visible.length) + " of " + visible.length + (browsingFolders ? " model folders." : " matching recordings."), "tools-muted");
         if (shown < visible.length) button(list, "Show " + Math.min(50, visible.length - shown) + " more", () => {
           shown += 50;
           rows();
@@ -3940,7 +4074,7 @@ underlying system, so should run in the browser, Node, or Plask.
         tell("Backup download requested. Check your browser downloads.");
       }, "tools-backup-download");
       node(content, "h3", "Restore a backup");
-      node(content, "p", "ATH is merged without lowering existing records. Library recordings are added without replacing existing recordings. Saved preferences take effect after refreshing your room tabs.", "tools-muted");
+      node(content, "p", "ATH is merged without lowering existing records. New library sessions are added; fuller versions of the same session update its entry and keep its name. Saved preferences take effect after refreshing your room tabs.", "tools-muted");
       button(content, "Choose backup…", () => {
         pendingBackup = null;
         render("backup");
@@ -3956,12 +4090,12 @@ underlying system, so should run in the browser, Node, or Plask.
         const highs = checkbox(choices, "tools-restore-highs", "Merge ATH"), preferences = checkbox(choices, "tools-restore-preferences", "Restore preferences"), recordings = checkbox(choices, "tools-restore-library", "Add library recordings");
         button(content, "Restore selected data", () => {
           if (!highs.checked && !preferences.checked && !recordings.checked) throw new Error("Choose at least one kind of data to restore.");
-          if (!confirm("Restore the selected backup data?\n\nATH will be merged, library recordings added, and selected saved preferences replaced. Your live session is not replaced.")) return;
+          if (!confirm("Restore the selected backup data?\n\nATH will be merged, library recordings added or updated with fuller versions, and selected saved preferences replaced. Your live session is not replaced.")) return;
           const result = restoreTierScopeBackup(pendingBackup, { highs: highs.checked, preferences: preferences.checked, library: recordings.checked });
           library = null;
           if (runtime.playback) runtime.playback.allTimeState = readAllTimeHighs(displayedHighRoom());
           repaintHighMode();
-          tell("Restored: " + result.rooms + " room ATH updates, " + result.recordings + " new recordings, " + result.preferences + " preferences." + (result.preferences ? "\nRefresh your room tabs when convenient to apply preferences." : ""));
+          tell("Restored: " + result.rooms + " room ATH updates, " + result.recordings + " new recordings, " + result.updatedRecordings + " updated recordings, " + result.preferences + " preferences." + (result.preferences ? "\nRefresh your room tabs when convenient to apply preferences." : ""));
         }, "tools-backup-restore");
       }
     }
@@ -6509,7 +6643,7 @@ underlying system, so should run in the browser, Node, or Plask.
   // src/runtime.js
   var runtime = {};
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.6.0-beta.2";
+    runtime.TIERSCOPE_VERSION = "3.6.0-beta.3";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;
