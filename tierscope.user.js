@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.6.0
+// @version      3.6.1
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -707,6 +707,56 @@ underlying system, so should run in the browser, Node, or Plask.
     }
   }
 
+  // src/diagnostics.js
+  function diagnostic(level, message, ...details) {
+    try {
+      console[level]("[TierScope " + runtime.TIERSCOPE_VERSION + "] " + message, ...details);
+    } catch (error) {
+    }
+  }
+
+  // src/room-context.js
+  var NON_ROOM_PATHS = /* @__PURE__ */ new Set([
+    "b",
+    "followed",
+    "featured",
+    "tags",
+    "accounts",
+    "login",
+    "register",
+    "supporter",
+    "settings",
+    "apps",
+    "explore",
+    "trending",
+    "new",
+    "female",
+    "male",
+    "couple",
+    "trans",
+    "hd",
+    "north-american",
+    "european",
+    "asian",
+    "south-american",
+    "exhibitionist",
+    "followed-cams",
+    "female-cams",
+    "trans-cams",
+    "male-cams",
+    "couple-cams",
+    "unknown"
+  ]);
+  function roomFromUrl(url) {
+    try {
+      const path = new URL(url).pathname;
+      const match = path.match(/^\/b\/([a-z0-9_-]{1,100})\/?$/i) || path.match(/^\/([a-z0-9_-]{1,100})\/cam\/?$/i) || path.match(/^\/([a-z0-9_-]{1,100})\/?$/i);
+      return match && !NON_ROOM_PATHS.has(match[1].toLowerCase()) ? match[1] : null;
+    } catch (error) {
+      return null;
+    }
+  }
+
   // src/utils.js
   function getTierMarker(tier) {
     var config = runtime.TIERS[tier];
@@ -714,94 +764,13 @@ underlying system, so should run in the browser, Node, or Plask.
     return '<span role="img" aria-label="' + config.name + '" title="' + config.name + '" style="display:inline-block;width:10px;height:10px;border-radius:50%;vertical-align:middle;background:' + config.color + ';"></span>';
   }
   function log(msg) {
-    try {
-      console.log("[TierScope " + runtime.TIERSCOPE_VERSION + "] " + msg);
-    } catch (error) {
-    }
+    diagnostic("log", msg);
   }
   function getModelNameFromUrl(url) {
-    if (!url) return "unknown";
-    var path = new URL(url).pathname;
-    var bMatch = path.match(/\/b\/([^\/\?#]+)/);
-    if (bMatch) return bMatch[1];
-    var camMatch = path.match(/^\/([^\/]+)\/cam\/?$/);
-    if (camMatch) return camMatch[1];
-    var normalMatch = path.match(/\/([^\/\?#]+)\/?$/);
-    if (normalMatch) {
-      var name = normalMatch[1];
-      var nonRoomPaths = [
-        "followed",
-        "featured",
-        "tags",
-        "accounts",
-        "login",
-        "register",
-        "supporter",
-        "settings",
-        "apps",
-        "explore",
-        "trending",
-        "new",
-        "female",
-        "male",
-        "couple",
-        "trans",
-        "hd",
-        "north-american",
-        "european",
-        "asian",
-        "south-american",
-        "exhibitionist",
-        "followed-cams",
-        "female-cams",
-        "trans-cams",
-        "male-cams",
-        "couple-cams"
-      ];
-      if (nonRoomPaths.indexOf(name) === -1) return name;
-    }
-    return "unknown";
+    return roomFromUrl(url) || "unknown";
   }
   function isBroadcastRoom() {
-    var path = window.location.pathname;
-    var pathParts = path.split("/").filter(function(p) {
-      return p;
-    });
-    if (pathParts.length === 0) return false;
-    var nonRoomPaths = [
-      "followed",
-      "featured",
-      "tags",
-      "accounts",
-      "login",
-      "register",
-      "supporter",
-      "settings",
-      "apps",
-      "explore",
-      "trending",
-      "new",
-      "female",
-      "male",
-      "couple",
-      "trans",
-      "hd",
-      "north-american",
-      "european",
-      "asian",
-      "south-american",
-      "exhibitionist",
-      "followed-cams",
-      "female-cams",
-      "trans-cams",
-      "male-cams",
-      "couple-cams"
-    ];
-    if (nonRoomPaths.indexOf(pathParts[0]) !== -1) return false;
-    if (pathParts[0] === "b" && pathParts.length >= 2) return true;
-    if (pathParts.length === 1) return true;
-    if (pathParts.length === 2 && pathParts[1] === "cam") return true;
-    return false;
+    return roomFromUrl(location.href) !== null;
   }
   function formatElapsedTime(ms) {
     ms = Math.max(0, ms);
@@ -1396,7 +1365,7 @@ underlying system, so should run in the browser, Node, or Plask.
       return snapshot;
     } catch (err) {
       if (!isAcquisitionCurrent(context)) return null;
-      console.warn("[TierScope " + runtime.TIERSCOPE_VERSION + "] API failed: " + err.message);
+      diagnostic("warn", "API failed: " + err.message);
       var policy = recordRequestFailure(err);
       if (policy.blocked) {
         pauseForAccessRestriction();
@@ -1422,7 +1391,7 @@ underlying system, so should run in the browser, Node, or Plask.
       return fallback;
     } catch (err) {
       if (!isAcquisitionCurrent(context)) return null;
-      console.warn("[TierScope " + runtime.TIERSCOPE_VERSION + "] DOM fallback failed: " + err.message + "; retaining previous valid data (no history point)");
+      diagnostic("warn", "DOM fallback failed: " + err.message + "; retaining previous valid data (no history point)");
       return null;
     } finally {
       runtime.domFallbackReadyAtByRoom.set(roomKey, Math.max(
@@ -1666,10 +1635,7 @@ underlying system, so should run in the browser, Node, or Plask.
           log("Could not update all-time highs: " + error.message);
         }
         pulseAcceptedHighs(priorState);
-        try {
-          if (diagnostics) console.log("[TierScope " + runtime.TIERSCOPE_VERSION + "] API scan accepted", diagnostics);
-        } catch (error) {
-        }
+        if (diagnostics) diagnostic("log", "API scan accepted", diagnostics);
       }
       if (isAcquisitionCurrent(context)) {
         runtime.isScanning = false;
@@ -4924,6 +4890,12 @@ underlying system, so should run in the browser, Node, or Plask.
     return false;
   }
   function updateStopControls() {
+    var reset = document.getElementById("btn-main-reset");
+    if (reset) {
+      reset.disabled = !isBroadcastRoom();
+      reset.style.opacity = reset.disabled ? "0.5" : "1";
+      reset.title = reset.disabled ? "Open a room to reset tracking" : "Reset all tracking data";
+    }
     var stop = document.getElementById("btn-control-stop");
     if (stop) {
       stop.disabled = runtime.isStopped;
@@ -5052,6 +5024,7 @@ underlying system, so should run in the browser, Node, or Plask.
     updateTrackingTimer();
   }
   function resetAllTracking() {
+    if (!isBroadcastRoom()) return;
     if (!confirm("Reset all tracking data?\n\nThis will clear:\n- All session history\n- Trend tracking\n- Elapsed timer\n\nA new scan will start immediately.")) {
       return;
     }
@@ -5059,6 +5032,7 @@ underlying system, so should run in the browser, Node, or Plask.
   }
   function resetTrackingData(deleteSaved) {
     var modelName = getModelName();
+    if (modelName === "unknown") return;
     leavePlayback(false);
     cancelGifExport();
     log("Performing main reset...");
@@ -5355,7 +5329,7 @@ underlying system, so should run in the browser, Node, or Plask.
     if (!runtime.domHealthStatus.isHealthy) {
       runtime.domHealthStatus.consecutiveFailures++;
       if (runtime.domHealthStatus.consecutiveFailures === 1 || runtime.domHealthStatus.consecutiveFailures % 10 === 0) {
-        console.warn("[TierScope " + runtime.TIERSCOPE_VERSION + "] DOM health check failed:", health);
+        diagnostic("warn", "DOM health check failed:", health);
         if (container) {
           const statusEl = document.getElementById("auto-status");
           if (statusEl) {
@@ -5365,12 +5339,12 @@ underlying system, so should run in the browser, Node, or Plask.
         }
       }
       if (runtime.domHealthStatus.consecutiveFailures > 5 && runtime.isAutoRefreshOn) {
-        console.warn("[TierScope " + runtime.TIERSCOPE_VERSION + "] Auto-pausing due to DOM health issues");
+        diagnostic("warn", "Auto-pausing due to DOM health issues");
         pauseAutoRefresh();
       }
     } else {
       if (!wasHealthy && runtime.domHealthStatus.consecutiveFailures > 0) {
-        console.log("[TierScope " + runtime.TIERSCOPE_VERSION + "] DOM health restored");
+        log("DOM health restored");
         const statusEl = document.getElementById("auto-status");
         if (statusEl && runtime.isAutoRefreshOn) {
           statusEl.textContent = "Next: " + runtime.countdownSeconds + "s";
@@ -6643,7 +6617,7 @@ underlying system, so should run in the browser, Node, or Plask.
   // src/runtime.js
   var runtime = {};
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.6.0";
+    runtime.TIERSCOPE_VERSION = "3.6.1";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;

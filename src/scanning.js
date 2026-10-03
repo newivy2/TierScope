@@ -10,6 +10,7 @@ import { isStorageTimestamp, makeStorageId, saveSession } from './storage.js';
 import { updateTrendDisplay } from './trends.js';
 import { formatSampleAge, getModelName, log } from './utils.js';
 import { showSessionSaveWarning } from './session-health.js';
+import { diagnostic } from './diagnostics.js';
 
 export function readRequestPolicy() {
     try {
@@ -278,7 +279,7 @@ export async function acquireRoomSnapshot(context, returnToChat) {
         return snapshot;
     } catch (err) {
         if (!isAcquisitionCurrent(context)) return null;
-        console.warn('[TierScope ' + runtime.TIERSCOPE_VERSION + '] API failed: ' + err.message);
+        diagnostic('warn', 'API failed: ' + err.message);
         var policy = recordRequestFailure(err);
         if (policy.blocked) { pauseForAccessRestriction(); return null; }
         // Do not switch acquisition routes around a rate limit or explicit server wait.
@@ -302,7 +303,7 @@ export async function acquireRoomSnapshot(context, returnToChat) {
         return fallback;
     } catch (err) {
         if (!isAcquisitionCurrent(context)) return null;
-        console.warn('[TierScope ' + runtime.TIERSCOPE_VERSION + '] DOM fallback failed: ' + err.message +
+        diagnostic('warn', 'DOM fallback failed: ' + err.message +
             '; retaining previous valid data (no history point)');
         return null;
     } finally {
@@ -510,9 +511,7 @@ export async function performScanThenReturn(returnToChat) {
             try { recordAcceptedAllTimeHighs(context.room); updateDisplay(); }
             catch (error) { log('Could not update all-time highs: ' + error.message); }
             pulseAcceptedHighs(priorState);
-            try {
-                if (diagnostics) console.log('[TierScope ' + runtime.TIERSCOPE_VERSION + '] API scan accepted', diagnostics);
-            } catch (error) { /* Logging cannot invalidate an accepted sample. */ }
+            if (diagnostics) diagnostic('log', 'API scan accepted', diagnostics);
         }
         if (isAcquisitionCurrent(context)) {
             runtime.isScanning = false;

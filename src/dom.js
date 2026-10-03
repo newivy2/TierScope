@@ -1,6 +1,7 @@
 import { pauseAutoRefresh } from './lifecycle.js';
 import { runtime } from './runtime.js';
 import { log } from './utils.js';
+import { diagnostic } from './diagnostics.js';
 
 export function validateDOMHealth() {
     const now = Date.now();
@@ -28,7 +29,7 @@ export function validateDOMHealth() {
     if (!runtime.domHealthStatus.isHealthy) {
         runtime.domHealthStatus.consecutiveFailures++;
         if (runtime.domHealthStatus.consecutiveFailures === 1 || runtime.domHealthStatus.consecutiveFailures % 10 === 0) {
-            console.warn('[TierScope ' + runtime.TIERSCOPE_VERSION + '] DOM health check failed:', health);
+            diagnostic('warn', 'DOM health check failed:', health);
             if (container) {
                 const statusEl = document.getElementById('auto-status');
                 if (statusEl) {
@@ -38,12 +39,12 @@ export function validateDOMHealth() {
             }
         }
         if (runtime.domHealthStatus.consecutiveFailures > 5 && runtime.isAutoRefreshOn) {
-            console.warn('[TierScope ' + runtime.TIERSCOPE_VERSION + '] Auto-pausing due to DOM health issues');
+            diagnostic('warn', 'Auto-pausing due to DOM health issues');
             pauseAutoRefresh();
         }
     } else {
         if (!wasHealthy && runtime.domHealthStatus.consecutiveFailures > 0) {
-            console.log('[TierScope ' + runtime.TIERSCOPE_VERSION + '] DOM health restored');
+            log('DOM health restored');
             const statusEl = document.getElementById('auto-status');
             if (statusEl && runtime.isAutoRefreshOn) {
                 statusEl.textContent = 'Next: ' + runtime.countdownSeconds + 's';
