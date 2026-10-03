@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **beta version 3.4.0-beta.3**. The official release remains 3.3.7 while this beta is reviewed. For a quick introduction and installation links, see the [README](readme.md).
+Detailed reference for **version 3.4.0**. For a quick introduction and installation links, see the [README](readme.md).
 
 ## Contents
 
@@ -421,6 +421,7 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
+| **3.4.0** | Release per-room all-time highs, SH/ATH controls and matching pulses, explicit saved-file Add and confirmed clearing, and direct Save/Open controls in Replay. |
 | **3.4.0-beta.3** | Add direct Save and Open buttons to ordinary Replay and FILE REPLAY beside the time display. |
 | **3.4.0-beta.2** | Add a direct Add to all-time highs button beside the FILE REPLAY room name, with visible result feedback. |
 | **3.4.0-beta.1** | Preview persistent per-room all-time highs, an SH/ATH display switch, explicit Add to all-time highs for saved files, and separate confirmed clearing. |
