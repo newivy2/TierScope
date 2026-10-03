@@ -144,11 +144,13 @@ test('failed and rolled-back scans cannot raise ATH, and a failed write retries 
   assert.equal(high(h).value, 9);
   h.ath.toggle();
   assert.match(h.e('high-red').title, /Local only, not saved/);
+  assert.match(h.e('all-time-info').textContent, /local only/, 'changing modes must not hide an unsaved-record warning');
   const other = setup(h.storage);
   assert.equal(high(other).value, 3, 'the unsaved peak must not be presented as persisted');
   h.context.GM_setValue = set;
   await scan(h, 4);
   assert.equal(h.ath.read('testroom').pending, false);
+  assert.doesNotMatch(h.e('all-time-info').textContent, /local only/, 'a successful retry clears the warning');
   assert.equal(high(setup(h.storage)).value, 9, 'a later smaller scan still retries the highest unsaved value');
 });
 

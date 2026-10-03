@@ -240,6 +240,7 @@ const ViewerTracker = (function() {
 
     function updateHighControls() {
         var state = displayedAllTimeState();
+        var warning = state.error || (state.pending ? 'All-time highs are local only: saving is pending. Keep this tab open to retry.' : '');
         var toggle = document.getElementById('btn-high-mode');
         if (toggle) {
             toggle.style.display = isMinimized ? 'none' : '';
@@ -247,14 +248,14 @@ const ViewerTracker = (function() {
             toggle.setAttribute('aria-pressed', String(highMode === 'ath'));
             toggle.setAttribute('aria-label', highMode === 'ath' ? 'All-time highs. Switch to session highs' : 'Session highs. Switch to all-time highs');
             toggle.title = (highMode === 'ath' ? 'All-time highs recorded for this room in this browser' : 'Session highs') +
-                '. Click to switch. ' + (state.error || '');
+                '. Click to switch. ' + warning;
         }
         var add = document.getElementById('btn-add-all-time');
         if (add) add.style.display = isPlaybackCurrent(playback) && playback.imported ? 'block' : 'none';
         var clear = document.getElementById('btn-clear-all-time');
         if (clear) { clear.disabled = !state.room; clear.title = state.room ? 'Clear all-time records for ' + state.room + ' only' : 'Open a room or session file first'; }
         var info = document.getElementById('all-time-info');
-        if (info) info.textContent = state.error || (state.skipped ? state.skipped + ' unreadable all-time record(s) were skipped and retained.' :
+        if (info) info.textContent = warning || (state.skipped ? state.skipped + ' unreadable all-time record(s) were skipped and retained.' :
             'All-time highs are saved per room in this browser and survive session Reset.');
     }
 
