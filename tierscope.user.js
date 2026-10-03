@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.4.0-beta.2
+// @version      3.4.0-beta.3
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -18,7 +18,7 @@
 const ViewerTracker = (function() {
     'use strict';
 
-    const TIERSCOPE_VERSION = '3.4.0-beta.2';
+    const TIERSCOPE_VERSION = '3.4.0-beta.3';
     const API_TIMEOUT_MS = 10000;
     const DEFAULT_API_INTERVAL_SECONDS = 60;
     const DOM_FALLBACK_INTERVAL_SECONDS = 60;
@@ -1156,7 +1156,7 @@ const ViewerTracker = (function() {
         }
         var select = document.getElementById('chart-window-select');
         if (select) select.value = chartWindowMode;
-        ['btn-save-session', 'btn-control-save-session'].forEach(function(id) {
+        ['btn-save-session', 'btn-control-save-session', 'btn-playback-save-session'].forEach(function(id) {
             var save = document.getElementById(id);
             if (save) save.disabled = !((isPlaybackCurrent(playback) && playback.archive) || history.timestamps.length);
         });
@@ -1184,9 +1184,11 @@ const ViewerTracker = (function() {
         document.getElementById('chart-window-select').onchange = function() { setChartWindow(this.value); };
         document.getElementById('btn-save-session').onclick = function() { downloadSessionFile(); close(true); };
         document.getElementById('btn-control-save-session').onclick = downloadSessionFile;
+        document.getElementById('btn-playback-save-session').onclick = downloadSessionFile;
         function chooseSessionFile() { input.value = ''; input.click(); }
         document.getElementById('btn-open-session').onclick = chooseSessionFile;
         document.getElementById('btn-control-open-session').onclick = chooseSessionFile;
+        document.getElementById('btn-playback-open-session').onclick = chooseSessionFile;
         document.getElementById('btn-high-mode').onclick = toggleHighMode;
         document.getElementById('mini-high').onclick = toggleHighMode;
         document.getElementById('btn-add-all-time').onclick = addFileToAllTimeHighs;
@@ -4389,7 +4391,13 @@ const ViewerTracker = (function() {
                         '<button type="button" id="playback-previous" title="Previous recorded sample (pauses Replay)" aria-label="Previous recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">|&#9664;</button>' +
                         '<input id="playback-scrubber" type="range" min="0" max="0" value="0" step="any" aria-label="Playback timeline" style="flex:1;min-width:0;width:100%;height:12px;margin:0;accent-color:var(--panel-warning);cursor:pointer;">' +
                         '<button type="button" id="playback-next" title="Next recorded sample (pauses Replay)" aria-label="Next recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">&#9654;|</button></div>' +
-                        '<div id="playback-position" style="font-size:9px;line-height:12px;text-align:center;color:var(--panel-secondary);font-family:monospace;">00:00:00 / 00:00:00</div>' +
+                        '<div id="playback-file-actions" style="display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:4px;min-width:0;">' +
+                            '<div id="playback-position" style="grid-column:2;font-size:9px;line-height:12px;text-align:center;white-space:nowrap;color:var(--panel-secondary);font-family:monospace;">00:00:00 / 00:00:00</div>' +
+                            '<div style="grid-column:3;justify-self:end;display:flex;gap:2px;">' +
+                                '<button type="button" id="btn-playback-save-session" aria-label="Save replay session file" title="Save the full session being replayed" style="font-size:8px;line-height:10px;height:12px;box-sizing:border-box;margin:0;padding:0 4px;background:#4169E1;color:#fff;border:1px solid #4169E1;border-radius:2px;cursor:pointer;">Save</button>' +
+                                '<button type="button" id="btn-playback-open-session" aria-label="Open session file in replay" title="Open another saved session in FILE REPLAY" style="font-size:8px;line-height:10px;height:12px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Open</button>' +
+                            '</div>' +
+                        '</div>' +
                     '</div>' +
                 '</div>' +
 

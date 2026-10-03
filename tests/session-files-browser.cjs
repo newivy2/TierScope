@@ -32,6 +32,7 @@ async function downloaded(page,action){const [download]=await Promise.all([page.
  const before=await page.evaluate(()=>ViewerTracker.__files.state());
  const options=page.getByRole('button',{name:'Chart window and session files'}),menu=page.locator('#panel-options');
  const save=page.locator('#btn-control-save-session'),open=page.locator('#btn-control-open-session');
+ const replaySave=page.getByRole('button',{name:'Save replay session file',exact:true}),replayOpen=page.getByRole('button',{name:'Open session file in replay',exact:true});
  assert(await save.isVisible());assert(await save.isEnabled());assert(await open.isVisible());
  assert(!(await menu.isVisible()),'session buttons are available without opening the menu');
  const windowSelect=page.getByLabel('Chart window',{exact:true});
@@ -55,6 +56,15 @@ async function downloaded(page,action){const [download]=await Promise.all([page.
  await page.click('#btn-replay');await page.evaluate(()=>ViewerTracker.__files.pause());
  await page.locator('#playback-scrubber').evaluate(e=>{e.value='110';e.dispatchEvent(new Event('input'));});
  const index=(await page.evaluate(()=>ViewerTracker.__files.state())).index;assert.equal(index,110);
+ assert(await replaySave.isVisible());assert(await replaySave.isEnabled());assert(await replayOpen.isVisible());
+ const replayBeforeSave=await page.evaluate(()=>ViewerTracker.__files.state());
+ await replaySave.focus();
+ const replayExport=await downloaded(page,()=>page.keyboard.press('Enter'));
+ const replayArchive=JSON.parse(replayExport.bytes);
+ assert(replayArchive.session.timestamp>=archive.session.timestamp,'Replay captures a new snapshot time');
+ assert.deepEqual(replayArchive,{...archive,session:{...archive.session,timestamp:replayArchive.session.timestamp}},'ordinary Replay Save downloads the full frozen session');
+ assert.deepEqual(await page.evaluate(()=>ViewerTracker.__files.state()),replayBeforeSave,'Replay Save preserves position and live session');
+ if(process.env.TIERSCOPE_FILE_SHOTS)await panel.screenshot({path:process.env.TIERSCOPE_FILE_SHOTS+'-ordinary-replay.png'});
  await options.click();
  for(const [mode,minutes]of [['full',Infinity],['fourHours',240],['twoHours',120],['hour',60],['halfHour',30],['quarter',15]]){
   await windowSelect.selectOption(mode);assert.equal((await page.evaluate(()=>ViewerTracker.__files.state())).index,index);
@@ -73,14 +83,17 @@ async function downloaded(page,action){const [download]=await Promise.all([page.
  await page.waitForTimeout(100);assert.match(dialogs.at(-1),/Could not open session file/);assert.equal((await page.evaluate(()=>ViewerTracker.__files.state())).room,'archived_room');
  await page.evaluate(()=>ViewerTracker.__files.scan());assert.equal((await page.evaluate(()=>ViewerTracker.__files.state())).history.length,122);assert.equal((await page.evaluate(()=>ViewerTracker.__files.state())).room,'archived_room');
  assert.equal(await roomLabel.textContent(),'Room: archived_room','live scans preserve the file source label');
- await options.click();const reexported=await downloaded(page,()=>page.getByRole('button',{name:'Save session file',exact:true}).click());
+ assert(await replaySave.isVisible());assert(await replayOpen.isVisible());assert(!(await menu.isVisible()));
+ const fileBeforeSave=await page.evaluate(()=>ViewerTracker.__files.state());
+ const reexported=await downloaded(page,()=>replaySave.click());
  assert.deepEqual(JSON.parse(reexported.bytes),archive,'file Replay downloads its original full session, not current room data');
+ assert.deepEqual(await page.evaluate(()=>ViewerTracker.__files.state()),fileBeforeSave,'file Save preserves playback and the background live session');
  const gif=await downloaded(page,()=>page.click('#btn-export-gif'));assert(gif.name.startsWith('archived_room-replay-'));
  const reader=new GifReader(gif.bytes);assert.equal(reader.numFrames(),60);assert.equal(reader.width,480);assert.equal(reader.height,640);
  const rgba=new Uint8Array(480*640*4);reader.decodeAndBlitFrameRGBA(59,rgba);assert(rgba.some((v,i)=>i%4===0&&v>0));
  if(process.env.TIERSCOPE_FILE_SHOTS){await page.click('#playback-next');await panel.screenshot({path:process.env.TIERSCOPE_FILE_SHOTS+'-replay.png'});}
  const longArchive={...archive,room:'archived_room_'.repeat(6)+'long_name'};
- await options.click();const replayPicker=page.waitForEvent('filechooser');await menu.getByRole('button',{name:'Open session file…',exact:true}).click();
+ const replayPicker=page.waitForEvent('filechooser');await replayOpen.focus();await page.keyboard.press('Enter');
  await(await replayPicker).setFiles({name:'long.tierscope.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(longArchive))});
  await page.waitForFunction(room=>ViewerTracker.__files.state().room===room,longArchive.room);
  assert.equal(await roomLabel.textContent(),'Room: '+longArchive.room);assert.equal(await roomLabel.getAttribute('title'),'Saved session from '+longArchive.room);
@@ -93,11 +106,22 @@ async function downloaded(page,action){const [download]=await Promise.all([page.
  assert(addBounds.y+addBounds.height<=playBounds.y,'ATH action does not overlap playback buttons');
  assert(roomBounds.y+roomBounds.height<=playBounds.y,'room label does not overlap the buttons');
  assert(playBounds.y+playBounds.height<=timelineBounds.y,'buttons do not overlap the timeline');
+ const timeBounds=await page.locator('#playback-position').boundingBox(),saveBounds=await replaySave.boundingBox(),openBounds=await replayOpen.boundingBox();
+ assert(timelineBounds.y+timelineBounds.height<=saveBounds.y,'file actions sit below the timeline');
+ assert(timeBounds.x+timeBounds.width<=saveBounds.x,'Save does not cover the replay time');
+ assert(saveBounds.x+saveBounds.width<=openBounds.x,'file actions do not overlap');
+ assert(openBounds.x+openBounds.width<=bounds.x+bounds.width,'file actions stay inside the panel');
  if(process.env.TIERSCOPE_FILE_SHOTS)await panel.screenshot({path:process.env.TIERSCOPE_FILE_SHOTS+'-long-name.png'});
  await page.click('#playback-return');assert.equal((await page.evaluate(()=>ViewerTracker.__files.state())).imported,false);
  assert(!(await roomLabel.isVisible()),'file source disappears on return to live');
+ assert(!(await replaySave.isVisible()));assert(!(await replayOpen.isVisible()));
  assert.equal((await page.evaluate(()=>ViewerTracker.__files.state())).paused,true);assert.match(await page.locator('#header-text').textContent(),/^USERS:/);
- await page.click('#btn-replay');await page.evaluate(()=>ViewerTracker.__files.pause());assert(!(await roomLabel.isVisible()));assert.equal(await roomLabel.textContent(),'','ordinary Replay clears the file source');await page.click('#playback-return');
+ await page.click('#btn-replay');await page.evaluate(()=>ViewerTracker.__files.pause());assert(!(await roomLabel.isVisible()));assert.equal(await roomLabel.textContent(),'','ordinary Replay clears the file source');
+ const ordinaryPicker=page.waitForEvent('filechooser');await replayOpen.click();await(await ordinaryPicker).setFiles(file);
+ await page.waitForFunction(()=>ViewerTracker.__files.state().imported);
+ assert.equal(await roomLabel.textContent(),'Room: archived_room','ordinary Replay can open a file directly');
+ assert.deepEqual((await page.evaluate(()=>ViewerTracker.__files.state())).history,fileBeforeSave.history,'Open leaves the background live session intact');
+ await page.click('#playback-return');
  await page.reload();await page.addScriptTag({content:source});await page.evaluate(()=>ViewerTracker.__files.init());
  assert.equal(await page.locator('#btn-panel-options').textContent(),'15m ▾');assert.equal((await page.evaluate(()=>ViewerTracker.__files.state())).imported,false,'reload restores only the room session');
  const priorRequests=requests;
@@ -107,6 +131,6 @@ async function downloaded(page,action){const [download]=await Promise.all([page.
  assert(await roomLabel.isVisible());assert.equal(await roomLabel.textContent(),'Room: archived_room');
  await page.click('#playback-next');await page.click('#playback-return');assert.equal(requests,priorRequests,'opening a file on a directory page causes no acquisition');
  assert.deepEqual(errors,[]);
- console.log('PASS direct Save/Open controls, empty-session availability, Replay menu Save/Open, session files and exports, visible file room identity across background scans and replacement files, long-name layout, source clearing on exit, all six chart windows, frozen Replay position and unchanged panel geometry');
+ console.log('PASS direct live and Replay Save/Open controls, keyboard access, full replay exports, empty-session availability, file replacement from ordinary/file Replay, background session isolation, long-name and file-action layout, source clearing on exit, all six chart windows, frozen Replay position and unchanged panel geometry');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1});

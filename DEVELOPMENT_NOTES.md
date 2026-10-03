@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **beta version 3.4.0-beta.2**. The official release remains 3.3.7 while this beta is reviewed. For a quick introduction and installation links, see the [README](readme.md).
+Detailed reference for **beta version 3.4.0-beta.3**. The official release remains 3.3.7 while this beta is reviewed. For a quick introduction and installation links, see the [README](readme.md).
 
 ## Contents
 
@@ -223,7 +223,7 @@ Click **Save** beside Replay in Controls. The download ends in `.tierscope.json`
 
 Click **Open** beside Save to reopen a download. It opens paused in a separate **FILE REPLAY** view, with the same stepping, playback speed, row controls, chart windows, and GIF export as ordinary Replay. The file’s room name stays visible above the Replay controls, independently of the room currently open in the browser. Long names shorten with an ellipsis; hover over the name to read it in full. The options menu shows its room, capture time, sample count, and whole-session room high. The Replay time tooltip includes captured active time and session state. Replay SH values still use retained samples through the selected frame; the file also preserves whole-session highs that may predate those samples. ATH mode compares against the file room's saved all-time records. Opening the file does not add its highs; use the separate **Add to all-time highs** action beside the room name or in the menu.
 
-The header menu retains **Save session file** and **Open session file…** so both actions remain available during Replay, when live Controls are hidden. Open is also available without a live session; on directory pages, expand the panel to reach Controls.
+Both ordinary Replay and FILE REPLAY have **Save** and **Open** buttons below the timeline, beside the time display. Save downloads the full session being replayed without moving playback; Open switches to another saved file. The header menu also retains **Save session file** and **Open session file…**. Open is also available without a live session; on directory pages, expand the panel to reach Controls.
 
 Opening a file does not replace, merge, save over, or resume the current room session. Current live acquisition continues with its existing pause/Stop state. **Close Replay** returns to that room’s latest data. It is also possible to expand TierScope on a directory page and open a file there; opening the file itself makes no acquisition requests. Imported Replay is not automatically restored after refresh or navigation: reopen the file when needed.
 
@@ -421,6 +421,7 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
+| **3.4.0-beta.3** | Add direct Save and Open buttons to ordinary Replay and FILE REPLAY beside the time display. |
 | **3.4.0-beta.2** | Add a direct Add to all-time highs button beside the FILE REPLAY room name, with visible result feedback. |
 | **3.4.0-beta.1** | Preview persistent per-room all-time highs, an SH/ATH display switch, explicit Add to all-time highs for saved files, and separate confirmed clearing. |
 | 3.3.7 | Smooth ordinary and saved-file Replay with evenly paced samples and animated connections through recording gaps; preserve pause/resume progress and start duplicate-timestamp recordings at their first sample. Counts, highs, timestamps, and saved history remain based on recorded samples. |
