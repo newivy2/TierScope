@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **version 3.3.6**. For a quick introduction and installation link, see the [README](readme.md).
+Detailed reference for **version 3.3.7**. For a quick introduction and installation link, see the [README](readme.md).
 
 ## Contents
 
@@ -367,7 +367,7 @@ Look for their boxed markers below the header and click to restore them. Moderat
 
 **The panel shrank after collapsing rows**
 
-This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only version 3.3.6 is enabled, refresh the tab, and report the browser and steps that reproduce it.
+This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only version 3.3.7 is enabled, refresh the tab, and report the browser and steps that reproduce it.
 
 **The panel is too large or near a screen edge**
 
@@ -407,7 +407,8 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
-| **3.3.6** | Added Save and Open beside Replay in Controls; moved Stop between Pause and Reset. |
+| **3.3.7** | Smooth ordinary and saved-file Replay with evenly paced samples and animated connections through recording gaps; preserve pause/resume progress and start duplicate-timestamp recordings at their first sample. Counts, highs, timestamps, and saved history remain based on recorded samples. |
+| 3.3.6 | Added Save and Open beside Replay in Controls; moved Stop between Pause and Reset. |
 | 3.3.5 | One-click Resume overrides automatic absence pause and Stop until a confirmed broadcaster return; override is preserved across refresh and manual Pause/Resume. |
 | 3.3.4 | Check for the broadcaster every minute while auto-paused; retain the three-hour auto-pause Stop deadline. |
 | 3.3.3 | Auto-pause recording after 15 minutes of broadcaster absence, check for returns every five minutes, resume automatically on return, and Stop after three hours auto-paused. |
