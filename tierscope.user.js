@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.4.0-beta.1
+// @version      3.4.0-beta.2
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -18,7 +18,7 @@
 const ViewerTracker = (function() {
     'use strict';
 
-    const TIERSCOPE_VERSION = '3.4.0-beta.1';
+    const TIERSCOPE_VERSION = '3.4.0-beta.2';
     const API_TIMEOUT_MS = 10000;
     const DEFAULT_API_INTERVAL_SECONDS = 60;
     const DOM_FALLBACK_INTERVAL_SECONDS = 60;
@@ -208,6 +208,17 @@ const ViewerTracker = (function() {
         repaintHighMode();
     }
 
+    function setAllTimeActionStatus(message, replayLabel) {
+        var status = document.getElementById('all-time-action-status');
+        if (status) status.textContent = message;
+        var button = document.getElementById('btn-playback-add-all-time');
+        if (button) {
+            button.textContent = replayLabel || 'Add to all-time highs';
+            button.title = message || 'Add this file\'s highs to the room named beside this button';
+            button.setAttribute('aria-label', replayLabel ? replayLabel + '. ' + message : 'Add to all-time highs');
+        }
+    }
+
     function addFileToAllTimeHighs() {
         if (!isPlaybackCurrent(playback) || !playback.imported) return;
         try {
@@ -215,9 +226,9 @@ const ViewerTracker = (function() {
             var result = storeAllTimeHighs(archive.room, sessionAllTimeHighs(archive.session, 'file'));
             playback.allTimeState = result.state;
             repaintHighMode();
-            var status = document.getElementById('all-time-action-status');
-            if (status) status.textContent = result.saved ? (result.changed ? 'Records updated for ' : 'No higher records in this file for ') + archive.room + '.' :
-                result.state.error || 'Records changed in another tab. Try adding this file again.';
+            setAllTimeActionStatus(result.saved ? (result.changed ? 'Records updated for ' : 'No higher records in this file for ') + archive.room + '.' :
+                result.state.error || 'Records changed in another tab. Try adding this file again.',
+                result.saved ? (result.changed ? 'Added to ATH' : 'Already in ATH') : 'Retry adding to ATH');
         } catch (error) { alert('Could not add all-time highs: ' + error.message); }
     }
 
@@ -233,8 +244,7 @@ const ViewerTracker = (function() {
             var state = readAllTimeHighs(room);
             if (isPlaybackCurrent(playback)) playback.allTimeState = state;
             repaintHighMode();
-            var status = document.getElementById('all-time-action-status');
-            if (status) status.textContent = 'All-time highs cleared for ' + room + '.';
+            setAllTimeActionStatus('All-time highs cleared for ' + room + '.');
         } catch (error) { alert('Could not clear all-time highs: ' + error.message); }
     }
 
@@ -250,8 +260,10 @@ const ViewerTracker = (function() {
             toggle.title = (highMode === 'ath' ? 'All-time highs recorded for this room in this browser' : 'Session highs') +
                 '. Click to switch. ' + warning;
         }
-        var add = document.getElementById('btn-add-all-time');
-        if (add) add.style.display = isPlaybackCurrent(playback) && playback.imported ? 'block' : 'none';
+        ['btn-add-all-time', 'btn-playback-add-all-time'].forEach(function(id) {
+            var add = document.getElementById(id);
+            if (add) add.style.display = isPlaybackCurrent(playback) && playback.imported ? 'block' : 'none';
+        });
         var clear = document.getElementById('btn-clear-all-time');
         if (clear) { clear.disabled = !state.room; clear.title = state.room ? 'Clear all-time records for ' + state.room + ' only' : 'Open a room or session file first'; }
         var info = document.getElementById('all-time-info');
@@ -1178,6 +1190,7 @@ const ViewerTracker = (function() {
         document.getElementById('btn-high-mode').onclick = toggleHighMode;
         document.getElementById('mini-high').onclick = toggleHighMode;
         document.getElementById('btn-add-all-time').onclick = addFileToAllTimeHighs;
+        document.getElementById('btn-playback-add-all-time').onclick = addFileToAllTimeHighs;
         document.getElementById('btn-clear-all-time').onclick = clearAllTimeHighs;
         input.onchange = function() { var file = input.files && input.files[0]; if (file) { close(false); readSessionFile(file); } };
         function outside(event) { if (!menu.contains(event.target) && !button.contains(event.target)) close(false); }
@@ -1341,8 +1354,7 @@ const ViewerTracker = (function() {
 
     function leavePlayback(renderLive) {
         sessionFileLoadGeneration++;
-        var highStatus = document.getElementById('all-time-action-status');
-        if (highStatus) highStatus.textContent = '';
+        setAllTimeActionStatus('');
         hideChartTooltip();
         cancelHighPulses();
         cancelGifExport();
@@ -1502,6 +1514,8 @@ const ViewerTracker = (function() {
             room.title = sourceRoom ? 'Saved session from ' + sourceRoom : '';
             room.style.display = sourceRoom ? 'block' : 'none';
         }
+        var fileControls = document.getElementById('playback-file-controls');
+        if (fileControls) fileControls.style.display = playback.imported ? 'flex' : 'none';
         // A saved/empty trend is shorter than the live trend grid. The hidden
         // Controls area below it provides room for the file label without
         // changing the panel's dimensions.
@@ -4359,7 +4373,10 @@ const ViewerTracker = (function() {
                             '<button id="btn-cancel-gif" hidden style="font-size:8px;cursor:pointer;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;">Cancel</button>' +
                         '</div>' +
                         '<div style="display:flex;flex-direction:column;justify-content:center;gap:4px;min-width:0;">' +
-                            '<div id="playback-room" style="display:none;flex-shrink:0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center;font-size:10px;line-height:12px;font-weight:bold;color:var(--panel-text);"></div>' +
+                            '<div id="playback-file-controls" style="display:none;align-items:center;gap:4px;min-width:0;">' +
+                                '<div id="playback-room" style="display:none;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;line-height:12px;font-weight:bold;color:var(--panel-text);"></div>' +
+                                '<button type="button" id="btn-playback-add-all-time" aria-live="polite" title="Add this file\'s highs to the room named beside this button" style="display:none;flex-shrink:0;min-width:88px;font-size:8px;line-height:12px;margin:0;padding:0 4px;white-space:nowrap;background:#4169E1;color:#fff;border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Add to all-time highs</button>' +
+                            '</div>' +
                         '<div style="display:flex;align-items:center;justify-content:space-between;gap:3px;">' +
                             '<strong id="playback-label" style="font-size:9px;color:var(--panel-warning);">PLAYBACK</strong>' +
                             '<button id="playback-play" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#4169E1;color:white;border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Pause</button>' +

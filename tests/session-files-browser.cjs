@@ -87,6 +87,10 @@ async function downloaded(page,action){const [download]=await Promise.all([page.
  assert.deepEqual(await panel.boundingBox(),bounds,'a long room name does not grow the panel');
  assert(await roomLabel.evaluate(e=>e.scrollWidth>e.clientWidth && getComputedStyle(e).textOverflow==='ellipsis'),'long names are shortened visually');
  const roomBounds=await roomLabel.boundingBox(),playBounds=await page.locator('#playback-play').boundingBox(),timelineBounds=await page.locator('#playback-scrubber').boundingBox();
+ const addBounds=await page.locator('#btn-playback-add-all-time').boundingBox();
+ assert(roomBounds.x+roomBounds.width<=addBounds.x,'long room names leave room for the ATH action');
+ assert(addBounds.x+addBounds.width<=bounds.x+bounds.width,'ATH action stays inside the panel');
+ assert(addBounds.y+addBounds.height<=playBounds.y,'ATH action does not overlap playback buttons');
  assert(roomBounds.y+roomBounds.height<=playBounds.y,'room label does not overlap the buttons');
  assert(playBounds.y+playBounds.height<=timelineBounds.y,'buttons do not overlap the timeline');
  if(process.env.TIERSCOPE_FILE_SHOTS)await panel.screenshot({path:process.env.TIERSCOPE_FILE_SHOTS+'-long-name.png'});

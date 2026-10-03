@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **beta version 3.4.0-beta.1**. The official release remains 3.3.7 while this beta is reviewed. For a quick introduction and installation links, see the [README](readme.md).
+Detailed reference for **beta version 3.4.0-beta.2**. The official release remains 3.3.7 while this beta is reviewed. For a quick introduction and installation links, see the [README](readme.md).
 
 ## Contents
 
@@ -161,7 +161,7 @@ Hover a high for its full value, recorded date/time when available, and whether 
 
 ATH records are separate for every room, including across multiple tabs. They survive normal session Reset, Stop/Start, the three-hour session restore window, and history rollover. The first upgrade can seed them from an available validated local session. Missing or previously deleted history cannot be recovered. Records do not automatically sync between browsers or devices, and clearing userscript-manager storage can remove them.
 
-Opening a session file is read-only. To include its peaks, open the chart-window menu during FILE REPLAY and click **Add to all-time highs**. This adds the complete file's session highs, including peaks older than its retained chart samples, to the **room named in the file**, even when another room is currently open. Lower values never reduce a record; equal values retain the earliest known timestamp. Repeating the action is safe. It does not change live history, the file, or the selected Replay position.
+Opening a session file is read-only. To include its peaks, click **Add to all-time highs** beside the room name in FILE REPLAY. The same action is also available in the chart-window menu. The replay button confirms **Added to ATH** or **Already in ATH**; hover it for the room and full result. A failed save shows **Retry adding to ATH**. This adds the complete file's session highs, including peaks older than its retained chart samples, to the **room named in the file**, even when another room is currently open. Lower values never reduce a record; equal values retain the earliest known timestamp. Repeating the action is safe. It does not change live history, the file, or the selected Replay position.
 
 Replay uses the room's ATH records captured when it opens, so background live scans do not change its comparison. Switching SH/ATH refreshes that comparison from storage; explicitly adding the file also refreshes it. SH retains its existing historical meaning. TXT/CSV/GIF and session-file exports retain their session-based values and formats.
 
@@ -221,7 +221,7 @@ Replay freezes the available history when opened. New scans continue updating th
 
 Click **Save** beside Replay in Controls. The download ends in `.tierscope.json` and contains the room name, capture time, full retained sample history, gap markers, session highs and their recorded times, session start information, active elapsed time, and paused/stopped state. It contains aggregate counts, without viewer username collections. A running session can be saved without pausing or stopping it. Save becomes available after the first recorded sample.
 
-Click **Open** beside Save to reopen a download. It opens paused in a separate **FILE REPLAY** view, with the same stepping, playback speed, row controls, chart windows, and GIF export as ordinary Replay. The file’s room name stays visible above the Replay controls, independently of the room currently open in the browser. Long names shorten with an ellipsis; hover over the name to read it in full. The options menu shows its room, capture time, sample count, and whole-session room high. The Replay time tooltip includes captured active time and session state. Replay SH values still use retained samples through the selected frame; the file also preserves whole-session highs that may predate those samples. ATH mode compares against the file room's saved all-time records. Opening the file does not add its highs; use the separate **Add to all-time highs** action in the menu.
+Click **Open** beside Save to reopen a download. It opens paused in a separate **FILE REPLAY** view, with the same stepping, playback speed, row controls, chart windows, and GIF export as ordinary Replay. The file’s room name stays visible above the Replay controls, independently of the room currently open in the browser. Long names shorten with an ellipsis; hover over the name to read it in full. The options menu shows its room, capture time, sample count, and whole-session room high. The Replay time tooltip includes captured active time and session state. Replay SH values still use retained samples through the selected frame; the file also preserves whole-session highs that may predate those samples. ATH mode compares against the file room's saved all-time records. Opening the file does not add its highs; use the separate **Add to all-time highs** action beside the room name or in the menu.
 
 The header menu retains **Save session file** and **Open session file…** so both actions remain available during Replay, when live Controls are hidden. Open is also available without a live session; on directory pages, expand the panel to reach Controls.
 
@@ -421,6 +421,7 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
+| **3.4.0-beta.2** | Add a direct Add to all-time highs button beside the FILE REPLAY room name, with visible result feedback. |
 | **3.4.0-beta.1** | Preview persistent per-room all-time highs, an SH/ATH display switch, explicit Add to all-time highs for saved files, and separate confirmed clearing. |
 | 3.3.7 | Smooth ordinary and saved-file Replay with evenly paced samples and animated connections through recording gaps; preserve pause/resume progress and start duplicate-timestamp recordings at their first sample. Counts, highs, timestamps, and saved history remain based on recorded samples. |
 | 3.3.6 | Added Save and Open beside Replay in Controls; moved Stop between Pause and Reset. |
