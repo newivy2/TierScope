@@ -53,7 +53,7 @@ async function downloaded(page,action){const [download]=await Promise.all([page.
  await canvas.focus();await page.keyboard.press('Home');assert.match(await page.locator('#tierscope-chart-tooltip').textContent(),/Sample 1\/16/);
  await page.keyboard.press('Escape');
  await page.click('#btn-replay');await page.evaluate(()=>ViewerTracker.__files.pause());
- await page.locator('#playback-scrubber').evaluate(e=>{e.value='6600000';e.dispatchEvent(new Event('input'));});
+ await page.locator('#playback-scrubber').evaluate(e=>{e.value='110';e.dispatchEvent(new Event('input'));});
  const index=(await page.evaluate(()=>ViewerTracker.__files.state())).index;assert.equal(index,110);
  await options.click();
  for(const [mode,minutes]of [['full',Infinity],['fourHours',240],['twoHours',120],['hour',60],['halfHour',30],['quarter',15]]){

@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **version 3.3.6**. For a quick introduction and installation link, see the [README](readme.md).
+Detailed reference for **version 3.3.7**. For a quick introduction and installation link, see the [README](readme.md).
 
 ## Contents
 
@@ -135,15 +135,15 @@ Collapsing a row changes presentation only. All rows continue to be tracked and 
 
 ### Charts and sample inspection
 
-Expanded charts default to **Full history**, up to 10,000 retained samples. The header menu offers **Full history**, **Last 4 hours**, **Last 2 hours**, **Last hour**, **Last 30 minutes**, and **Last 15 minutes**, in that order. The selected window ends at the latest recorded sample, or the selected Replay sample, and stays still while no new sample arrives. Short sessions use the available span. Horizontal positions follow sample timestamps; Full history continues to fit the whole retained span as history grows. Replay never draws samples beyond its selected frame. Each row scales independently to the values drawn in that window; a preceding endpoint may be included to connect and clip a segment crossing its left boundary. A single sample appears as a dot; a constant series is centered vertically.
+Expanded charts default to **Full history**, up to 10,000 retained samples. The header menu offers **Full history**, **Last 4 hours**, **Last 2 hours**, **Last hour**, **Last 30 minutes**, and **Last 15 minutes**, in that order. In live view, the selected window ends at the latest recorded sample and stays still while no new sample arrives. In Replay, it follows the moving connection toward the next recorded sample, including across gaps. Short sessions use the available span. Horizontal positions follow sample timestamps; Full history continues to fit the whole retained span as history grows. Replay's recorded points and sample inspection stop at the selected sample; the animated connection adds no samples. Each row scales independently to the values drawn in that window; a preceding endpoint may be included to connect and clip a segment crossing its left boundary. A single sample appears as a dot; a constant series is centered vertically.
 
 The window choice is remembered across rooms and refreshes. It changes chart presentation only: counts, session highs, comparisons, stored samples, CSV, GIFs, and session-file exports keep their existing full retained range. Reset keeps the preference. The compact chart keeps its independent 15-minute window. Changing windows during Replay preserves the selected sample and Play/Pause state. The menu overlays the panel, adds no height, and closes with ×, Escape, or an outside click.
 
-Known pauses, failed acquisition attempts, refresh boundaries, and unusually long acquisition intervals interrupt the measured line. Thin, dashed orange connectors join the recorded endpoints across those intervals in expanded charts, the compact chart, Replay, and GIFs. The actual duration remains on the time axis. These connectors are visual annotations: they add no samples and do not alter counts, highs, trend comparisons, TXT reports, or CSV history. Until the next accepted sample exists, the line ends at the last observation; nothing is projected forward. Breaks are saved with new history. For older sessions without break metadata, gaps are inferred conservatively from unusually long timestamp intervals; the original pause boundaries cannot always be recovered. If the system clock moves backward, horizontal positions are clamped to preserve sample order; inspection still shows the original recorded timestamp.
+Known pauses, failed acquisition attempts, refresh boundaries, and unusually long acquisition intervals interrupt the measured line. Thin, dashed orange connectors join the recorded endpoints across those intervals in expanded charts, the compact chart, Replay, and GIFs. The actual duration remains on the time axis. These connectors are visual annotations: they add no samples and do not alter counts, highs, trend comparisons, TXT reports, or CSV history. Until the next accepted sample exists, the live line ends at the last observation; nothing is projected forward. Replay already has both recorded endpoints, so it animates the connection across a gap; moving dashes show progress even when the endpoint counts match. Breaks are saved with new history. For older sessions without break metadata, gaps are inferred conservatively from unusually long timestamp intervals; the original pause boundaries cannot always be recovered. If the system clock moves backward, horizontal positions are clamped to preserve sample order; inspection still shows the original recorded timestamp.
 
 Hover over an expanded or compact chart to see the nearest recorded sample’s count and local time, its sample number, and the plotted minimum and maximum. Hovering inside a marked gap shows “No samples recorded during this interval,” the two endpoint times, and an explanation of the orange dashes. It does not display an estimated count for the missing interval. Keyboard users can Tab to a chart, use Left/Right to move between samples, Home/End to jump to either end, and Escape to close the tooltip. Inspection adds no panel height.
 
-Dense charts preserve the first, last, minimum, and maximum samples in each pixel column. This reduces drawing work without discarding stored samples or changing CSV counts. Replay reuses its frozen history and repaints when the selected sample or layout changes.
+Dense charts preserve the first, last, minimum, and maximum samples in each pixel column. This reduces drawing work without discarding stored samples or changing CSV counts. Replay reuses its frozen history and updates the animated connection every 50 milliseconds while playing. Paused Replay repaints only when its position or layout changes.
 
 ### Trends and highlights
 
@@ -195,11 +195,11 @@ Replay displays recorded audience samples. It does not record or play broadcast 
 4. Use the previous/next sample buttons beside the timeline to step through individual saved samples.
 5. Click **Return to Live** to return to the latest accepted sample, or the saved snapshot if no fresh scan has succeeded since restoration.
 
-At 1×, recorded time is compressed by 60×, with playback capped at 30 seconds. The speed selector adjusts that playback duration. The displayed timeline represents recorded elapsed time.
+At 1×, each transition between recorded samples takes one second, with the total playback capped at 30 seconds. Longer recordings divide those 30 seconds evenly among their sample transitions. The speed selector adjusts that playback duration. Recording pauses and changes in scan frequency do not slow Replay down. The slider follows sample progress evenly; the time display and chart spacing retain the original recorded timing.
 
 Each step pauses Replay and moves to the previous or next recorded sample. Step buttons stop at the first and last samples; samples with identical timestamps can still be inspected separately. Hover over the time display to see the selected sample number. With only one sample, both step buttons are disabled.
 
-Counts, highs, green highlights, and sparklines follow the selected sample. A single saved sample can be inspected, but has no time span to play. Minimize is disabled during Replay.
+The chart line moves between recorded samples, with animated orange dashes across gaps. Counts, highs, and green highlights change only when Replay reaches an actual sample. Pausing Replay freezes the animation, and resuming continues from the same position. A single saved sample can be inspected, but has no next sample to play toward. Multiple samples can play even if their timestamps match. These controls and pacing also apply to Replay opened from a session file. Minimize is disabled during Replay.
 
 Replay freezes the available history when opened. New scans continue updating the live session, but do not enter the open Replay. Return to Live and reopen Replay to include them. Replay Pause does not pause live scans; pause acquisition in live Controls first if needed.
 
@@ -367,7 +367,7 @@ Look for their boxed markers below the header and click to restore them. Moderat
 
 **The panel shrank after collapsing rows**
 
-This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only version 3.3.6 is enabled, refresh the tab, and report the browser and steps that reproduce it.
+This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only version 3.3.7 is enabled, refresh the tab, and report the browser and steps that reproduce it.
 
 **The panel is too large or near a screen edge**
 
@@ -375,11 +375,11 @@ Click **100%** to restore standard scale, or use the resize handle. Expanding fr
 
 **Replay is unavailable, or Play is disabled**
 
-Replay needs a recorded sample for this room. Play needs a nonzero recorded time span. Check the `PLAYBACK` header if you expected current live counts.
+Replay needs a recorded sample for this room. Play needs at least two samples, even if their timestamps match. Check the `PLAYBACK` header if you expected current live counts.
 
 **The step buttons are disabled**
 
-The previous button is disabled at the first sample and the next button at the last. Both are disabled for a single-sample recording. Play may be unavailable when the recording has no time span, even if there are multiple samples to step through.
+The previous button is disabled at the first sample and the next button at the last. Both are disabled for a single-sample recording.
 
 **No CSV download**
 
@@ -407,7 +407,8 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
-| **3.3.6** | Added Save and Open beside Replay in Controls; moved Stop between Pause and Reset. |
+| **3.3.7** | Smooth ordinary and saved-file Replay with evenly paced samples and animated connections through recording gaps; preserve pause/resume progress and start duplicate-timestamp recordings at their first sample. Counts, highs, timestamps, and saved history remain based on recorded samples. |
+| 3.3.6 | Added Save and Open beside Replay in Controls; moved Stop between Pause and Reset. |
 | 3.3.5 | One-click Resume overrides automatic absence pause and Stop until a confirmed broadcaster return; override is preserved across refresh and manual Pause/Resume. |
 | 3.3.4 | Check for the broadcaster every minute while auto-paused; retain the three-hour auto-pause Stop deadline. |
 | 3.3.3 | Auto-pause recording after 15 minutes of broadcaster absence, check for returns every five minutes, resume automatically on return, and Stop after three hours auto-paused. |

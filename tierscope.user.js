@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.3.6
+// @version      3.3.7
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -18,7 +18,7 @@
 const ViewerTracker = (function() {
     'use strict';
 
-    const TIERSCOPE_VERSION = '3.3.6';
+    const TIERSCOPE_VERSION = '3.3.7';
     const API_TIMEOUT_MS = 10000;
     const DEFAULT_API_INTERVAL_SECONDS = 60;
     const DOM_FALLBACK_INTERVAL_SECONDS = 60;
@@ -880,7 +880,7 @@ const ViewerTracker = (function() {
         if (isMinimized) toggleView();
         playback = { url: location.href, key: activeSessionStorageKey, generation: initGuard,
             imported: true, archive: archive, snapshot: createPlaybackSnapshot(archive.session.history),
-            positionMs: 0, speed: 1, lastTickAt: Date.now(), playing: false, timer: null };
+            positionMs: 0, samplePosition: 0, stepIndex: 0, speed: 1, lastTickAt: Date.now(), playing: false, timer: null };
         cancelHighPulses();
         presentationMode = 'PLAYBACK';
         setPlaybackLayout(true);
@@ -975,7 +975,22 @@ const ViewerTracker = (function() {
         });
         var durationMs = timeline.length ? timeline[timeline.length - 1] : 0;
         return { history: copiedHistory, timeline: timeline, highs: highs,
-            durationMs: durationMs, replayDurationMs: Math.min(30000, durationMs / 60) };
+            // Recording gaps affect the chart's time axis, not how long Replay
+            // waits for its next sample. Keep one second per step, capped at 30s.
+            durationMs: durationMs, replayDurationMs: Math.min(30000, Math.max(0, timeline.length - 1) * 1000) };
+    }
+
+    function setPlaybackSamplePosition(state, position) {
+        var last = state.snapshot.timeline.length - 1;
+        state.samplePosition = Math.max(0, Math.min(last, position));
+        // Avoid holding a sample for an extra tick after accumulating fractions.
+        if (Math.abs(state.samplePosition - Math.round(state.samplePosition)) < 1e-9) {
+            state.samplePosition = Math.round(state.samplePosition);
+        }
+        state.stepIndex = Math.floor(state.samplePosition);
+        var time = state.snapshot.timeline[state.stepIndex];
+        var nextTime = state.snapshot.timeline[Math.min(last, state.stepIndex + 1)];
+        state.positionMs = time + (nextTime - time) * (state.samplePosition - state.stepIndex);
     }
 
     function getPlaybackSampleIndex(snapshot, positionMs, exactIndex) {
@@ -1041,9 +1056,9 @@ const ViewerTracker = (function() {
         if (!isPlaybackCurrent(state)) return false;
         try {
             var index = getPlaybackSampleIndex(state.snapshot, state.positionMs, state.stepIndex);
-            if (state.paintedIndex !== index || state.paintLayout !== chartLayoutRevision) {
-                renderPlaybackFrame(getPlaybackFrame(state.snapshot, state.positionMs, state.stepIndex));
-                state.paintedIndex = index;
+            if (state.paintedPosition !== state.samplePosition || state.paintLayout !== chartLayoutRevision) {
+                renderPlaybackFrame(getPlaybackFrame(state.snapshot, state.positionMs, state.stepIndex), state.samplePosition - index);
+                state.paintedPosition = state.samplePosition;
                 state.paintLayout = chartLayoutRevision;
             }
             updatePlaybackControls();
@@ -1069,8 +1084,8 @@ const ViewerTracker = (function() {
             var archive = captureSessionFile();
             var snapshot = createPlaybackSnapshot(archive.session.history);
             playback = { url: location.href, key: activeSessionStorageKey, generation: initGuard,
-                archive: archive, snapshot: snapshot, positionMs: 0, speed: 1, lastTickAt: Date.now(),
-                playing: snapshot.durationMs > 0, timer: null };
+                archive: archive, snapshot: snapshot, positionMs: 0, samplePosition: 0, stepIndex: 0,
+                speed: 1, lastTickAt: Date.now(), playing: snapshot.replayDurationMs > 0, timer: null };
             cancelHighPulses();
             presentationMode = 'PLAYBACK';
             setPlaybackLayout(true);
@@ -1116,14 +1131,13 @@ const ViewerTracker = (function() {
             return false;
         }
         if (!state.playing) return false;
-        state.stepIndex = null;
         var now = Date.now();
         var elapsed = Math.max(0, now - state.lastTickAt);
         state.lastTickAt = now;
-        var rate = state.snapshot.replayDurationMs > 0 ?
-            state.snapshot.durationMs / state.snapshot.replayDurationMs : 0;
-        state.positionMs = Math.min(state.snapshot.durationMs, state.positionMs + elapsed * rate * state.speed);
-        if (state.positionMs >= state.snapshot.durationMs) {
+        var last = state.snapshot.timeline.length - 1;
+        var rate = state.snapshot.replayDurationMs > 0 ? last / state.snapshot.replayDurationMs : 0;
+        setPlaybackSamplePosition(state, state.samplePosition + elapsed * rate * state.speed);
+        if (state.samplePosition >= last) {
             state.playing = false;
             stopPlaybackClock(state);
         }
@@ -1136,15 +1150,14 @@ const ViewerTracker = (function() {
             if (state) leavePlayback(false);
             return false;
         }
-        if (!state.snapshot.durationMs) return false;
+        if (!state.snapshot.replayDurationMs) return false;
         if (state.playing) {
             tickPlayback(state);
             state.playing = false;
             stopPlaybackClock(state);
         } else {
-            if (state.positionMs >= state.snapshot.durationMs) state.positionMs = 0;
+            if (state.samplePosition >= state.snapshot.timeline.length - 1) setPlaybackSamplePosition(state, 0);
             state.playing = true;
-            state.stepIndex = null;
             state.lastTickAt = Date.now();
         }
         if (!paintPlayback(state)) return false;
@@ -1152,18 +1165,17 @@ const ViewerTracker = (function() {
         return true;
     }
 
-    function scrubPlayback(positionMs) {
+    function scrubPlayback(samplePosition) {
         var state = playback;
         if (!isPlaybackCurrent(state)) {
             if (state) leavePlayback(false);
             return false;
         }
-        var position = Number(positionMs);
+        var position = Number(samplePosition);
         if (!Number.isFinite(position)) return false;
         state.playing = false;
         stopPlaybackClock(state);
-        state.stepIndex = null;
-        state.positionMs = Math.max(0, Math.min(state.snapshot.durationMs, position));
+        setPlaybackSamplePosition(state, position);
         state.lastTickAt = Date.now();
         return paintPlayback(state);
     }
@@ -1175,8 +1187,7 @@ const ViewerTracker = (function() {
         if (index < 0) return false;
         state.playing = false;
         stopPlaybackClock(state);
-        state.stepIndex = Math.max(0, Math.min(state.snapshot.timeline.length - 1, index + direction));
-        state.positionMs = state.snapshot.timeline[state.stepIndex];
+        setPlaybackSamplePosition(state, index + direction);
         state.lastTickAt = Date.now();
         return paintPlayback(state);
     }
@@ -1267,30 +1278,31 @@ const ViewerTracker = (function() {
         var button = document.getElementById('playback-play');
         if (button) {
             button.textContent = playback.playing ? 'Pause' : 'Play';
-            button.disabled = playback.snapshot.durationMs === 0;
-            button.title = playback.playing ? 'Pause playback only' : 'Play recorded history';
+            button.disabled = playback.snapshot.replayDurationMs === 0;
+            button.title = playback.playing ? 'Pause playback only' : 'Play recorded samples at an even pace';
         }
         var slider = document.getElementById('playback-scrubber');
         if (slider) {
-            slider.max = String(playback.snapshot.durationMs);
-            slider.value = String(playback.positionMs);
-            slider.disabled = playback.snapshot.durationMs === 0;
+            slider.max = String(Math.max(0, playback.snapshot.timeline.length - 1));
+            slider.value = String(playback.samplePosition);
+            slider.disabled = playback.snapshot.replayDurationMs === 0;
+            slider.setAttribute('aria-valuetext', 'Sample ' + (index + 1) + ' of ' + playback.snapshot.timeline.length);
         }
         var speed = document.getElementById('playback-speed');
         if (speed) speed.value = String(playback.speed);
         var position = document.getElementById('playback-position');
         if (position) {
             position.textContent = formatElapsedTime(playback.positionMs) + ' / ' + formatElapsedTime(playback.snapshot.durationMs);
-            position.title = 'Sample ' + (index + 1) + ' of ' + playback.snapshot.timeline.length + '. Recorded range captured on Replay entry. Highs are through the selected sample. Live acquisition continues independently.';
+            position.title = 'Sample ' + (index + 1) + ' of ' + playback.snapshot.timeline.length + '. Samples play at an even pace; the time display and chart gaps retain recorded timing. The moving line connects recorded samples; counts and highs change only at a recorded sample. Live acquisition continues independently.';
             if (playback.archive) position.title += '\n' + playback.archive.room + ' · ' +
                 new Date(playback.archive.session.timestamp).toLocaleString() + ' · Active time: ' + formatElapsedTime(playback.archive.session.pausedElapsedTime) +
                 (playback.archive.session.isStopped ? ' · Stopped session' : playback.archive.session.isPaused ? ' · Paused session' : ' · Running session snapshot');
         }
     }
 
-    function renderPlaybackFrame(frame) {
+    function renderPlaybackFrame(frame, progress) {
         renderDisplayFrame(Object.assign({}, frame, { isPlayback: true }));
-        drawHistorySparklines(frame.history, frame.historyEndIndex);
+        drawHistorySparklines(frame.history, frame.historyEndIndex, progress);
     }
 
     function clearPlaybackPresentation() {
@@ -3357,16 +3369,20 @@ const ViewerTracker = (function() {
 
     // Preserve first/last and extrema in each pixel column, in sample order.
     // Only drawing is reduced; tooltips, histories and exports retain every sample.
-    function buildChartPlot(values, times, breaks, width, lastIndex, windowMs) {
+    function buildChartPlot(values, times, breaks, width, lastIndex, windowMs, replayProgress) {
         var end = Math.min(values.length, times.length) - 1;
         if (Number.isInteger(lastIndex)) end = Math.min(end, lastIndex);
         if (end < 0) return { points: [], min: 0, max: 0, end: -1 };
-        var axis = getChartTimes(times), startTime = windowMs ? Math.max(axis[0], axis[end] - windowMs) : axis[0];
+        var axis = getChartTimes(times);
+        var progress = end + 1 < Math.min(values.length, times.length) && Number.isFinite(replayProgress) ?
+            Math.max(0, Math.min(1, replayProgress)) : 0;
+        var endTime = axis[end] + (progress ? (axis[end + 1] - axis[end]) * progress : 0);
+        var startTime = windowMs ? Math.max(axis[0], endTime - windowMs) : axis[0];
         var start = 0;
         while (start < end && axis[start] < startTime) start++;
         // Include the preceding real endpoint for a clipped boundary segment.
         // It remains outside keyboard sample inspection for the selected window.
-        var firstDrawn = start > 0 && axis[start] > startTime ? start - 1 : start, span = axis[end] - startTime;
+        var firstDrawn = start > 0 && axis[start] > startTime ? start - 1 : start, span = endTime - startTime;
         var min = Infinity, max = -Infinity, points = [], bucket = null, breakNext = true;
         function flush() {
             if (!bucket) return;
@@ -3392,7 +3408,17 @@ const ViewerTracker = (function() {
             }
         }
         flush();
-        return { points: points, min: min, max: max, start: start, end: end, startTime: startTime, endTime: axis[end] };
+        // Animation is a separate visual connector, never a recorded point.
+        // Counts, highs, inspection, exports, and the source history keep using
+        // only real samples through `end`.
+        var continuation = progress ? {
+            fromX: span ? (axis[end] - startTime) / span * width : width / 2,
+            toX: span ? width : width / 2,
+            fromValue: values[end], value: values[end] + (values[end + 1] - values[end]) * progress,
+            gap: !!(breaks && breaks[end + 1]), progress: progress
+        } : null;
+        return { points: points, min: min, max: max, start: start, end: end, startTime: startTime, endTime: endTime,
+            continuation: continuation };
     }
 
     function hideChartTooltip() {
@@ -3451,7 +3477,8 @@ const ViewerTracker = (function() {
             var time = m.plot.startTime + fraction * (m.plot.endTime - m.plot.startTime);
             var axis = getChartTimes(m.times), index = nearestChartSample(axis, m.plot.end, time);
             var next = axis[index] > time ? index : index + 1;
-            var gap = next > 0 && next <= m.plot.end && m.breaks[next] && time > axis[next - 1] && time < axis[next];
+            var gapEnd = m.plot.end + (m.plot.continuation ? 1 : 0);
+            var gap = next > 0 && next <= gapEnd && m.breaks[next] && time > axis[next - 1] && time < axis[next];
             showChartTooltip(canvas, index, event.clientX, event.clientY, gap ? next : 0);
         });
         canvas.addEventListener('pointerleave', hideChartTooltip);
@@ -3493,7 +3520,7 @@ const ViewerTracker = (function() {
         ctx.stroke();
     }
 
-    function drawSparkline(canvasId, data, color, customHeight, times, breaks, lastIndex, label) {
+    function drawSparkline(canvasId, data, color, customHeight, times, breaks, lastIndex, label, replayProgress) {
         var canvas = document.getElementById(canvasId);
         if (!canvas) return;
         var ctx = canvas.getContext('2d');
@@ -3504,15 +3531,32 @@ const ViewerTracker = (function() {
         var width = canvas.clientWidth || 105;
         canvas.width = Math.ceil(width * scale); canvas.height = Math.ceil(height * scale);
         ctx.scale(scale, scale); ctx.clearRect(0, 0, width, height);
-        var plot = buildChartPlot(data, times, breaks, Math.max(1, width - 4), lastIndex, CHART_WINDOWS[chartWindowMode]);
+        var plot = buildChartPlot(data, times, breaks, Math.max(1, width - 4), lastIndex, CHART_WINDOWS[chartWindowMode], replayProgress);
         bindChartInspection(canvas, { values: data, times: times, breaks: breaks, firstIndex: plot.start || 0, plot: plot, width: width, label: label });
+        var continuation = plot.continuation;
+        var min = continuation ? Math.min(plot.min, continuation.value) : plot.min;
+        var max = continuation ? Math.max(plot.max, continuation.value) : plot.max;
+        function y(value) { return max === min ? height / 2 : height - 2 - (value - min) / (max - min) * (height - 4); }
         ctx.strokeStyle = color;
         ctx.save(); ctx.beginPath(); ctx.rect(2, 0, width - 2, height); ctx.clip();
         drawCanvasChart(ctx, plot.points.map(function(point) {
             return { x: 2 + point.x,
-                y: plot.max === plot.min ? height / 2 : height - 2 - (point.value - plot.min) / (plot.max - plot.min) * (height - 4),
+                y: y(point.value),
                 move: point.move };
         }), color);
+        if (continuation) {
+            ctx.save();
+            ctx.strokeStyle = continuation.gap ? themeColor('gap') : color;
+            ctx.lineWidth = continuation.gap ? 1.5 : 2;
+            ctx.setLineDash(continuation.gap ? [4, 3] : []);
+            // Moving dashes also show progress when both endpoint counts match.
+            ctx.lineDashOffset = continuation.gap ? -continuation.progress * 14 : 0;
+            ctx.beginPath();
+            ctx.moveTo(2 + continuation.fromX, y(continuation.fromValue));
+            ctx.lineTo(2 + continuation.toX, y(continuation.value));
+            ctx.stroke();
+            ctx.restore();
+        }
         ctx.restore();
     }
 
@@ -3521,7 +3565,7 @@ const ViewerTracker = (function() {
         drawHistorySparklines(history);
     }
 
-    function drawHistorySparklines(displayHistory, lastIndex) {
+    function drawHistorySparklines(displayHistory, lastIndex, replayProgress) {
         hideChartTooltip();
         if (rowLayoutNeedsMeasure) applyRowLayout();
         var breaks = getHistoryBreaks(displayHistory);
@@ -3529,7 +3573,7 @@ const ViewerTracker = (function() {
             if (collapsedRows.has(row.key)) return;
             var key = row.key === 'withtokens' ? 'withTokens' : row.key === 'anon' ? 'anonymous' : row.key;
             drawSparkline('spark-' + row.key, displayHistory[key], row.key === 'total' ? themeColor('text') : row.color,
-                panelChartHeights[row.key] || row.height, displayHistory.timestamps, breaks, lastIndex, row.label);
+                panelChartHeights[row.key] || row.height, displayHistory.timestamps, breaks, lastIndex, row.label, replayProgress);
         });
     }
 
@@ -4051,7 +4095,7 @@ const ViewerTracker = (function() {
                         '</div>' +
                         '<div style="display:flex;align-items:center;gap:4px;min-width:0;">' +
                         '<button type="button" id="playback-previous" title="Previous recorded sample (pauses Replay)" aria-label="Previous recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">|&#9664;</button>' +
-                        '<input id="playback-scrubber" type="range" min="0" max="0" value="0" step="1" aria-label="Playback timeline" style="flex:1;min-width:0;width:100%;height:12px;margin:0;accent-color:var(--panel-warning);cursor:pointer;">' +
+                        '<input id="playback-scrubber" type="range" min="0" max="0" value="0" step="any" aria-label="Playback timeline" style="flex:1;min-width:0;width:100%;height:12px;margin:0;accent-color:var(--panel-warning);cursor:pointer;">' +
                         '<button type="button" id="playback-next" title="Next recorded sample (pauses Replay)" aria-label="Next recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">&#9654;|</button></div>' +
                         '<div id="playback-position" style="font-size:9px;line-height:12px;text-align:center;color:var(--panel-secondary);font-family:monospace;">00:00:00 / 00:00:00</div>' +
                     '</div>' +

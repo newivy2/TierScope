@@ -1,7 +1,7 @@
 # TierScope
 
 TierScope is a free, open-source userscript that charts how a Chaturbate room’s audience changes over time. 
-**Current release: 3.3.6**
+**Current release: 3.3.7**
 
 ![TierScope in expanded, totals-focused, collapsed, and compact views](tierscope-hero.png)
 
@@ -20,7 +20,7 @@ Charts use periodic room-data samples. Session history is stored locally through
 - **Layout controls:** remembered position, size, and row visibility; a standard-size reset; adjustable background transparency; and dark or bright mode.
 - **Chart views and inspection:** full history or the last 4h, 2h, 1h, 30min, or 15min; timestamp spacing, orange dashed gaps, and sample values on hover or keyboard focus.
 - **Session controls:** pause or finish a session, with automatic slowdown, pause, and return detection during broadcaster absence.
-- **Replay and session files:** step through saved samples, download a session file, and reopen it for review later.
+- **Replay and session files:** play samples at an even pace with animated connections through recording gaps, step through individual samples, download a session file, and reopen it for review later.
 - **Downloads:** animated GIFs, full retained CSV history, and TXT session summaries.
 - **High-count pulses:** two gentle pulses mark a new session high or a return to it after a dip, on expanded rows and collapsed markers.
 
