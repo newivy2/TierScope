@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.5.0
+// @version      3.6.0
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -50,10 +50,27 @@ underlying system, so should run in the browser, Node, or Plask.
 (() => {
   var __create = Object.create;
   var __defProp = Object.defineProperty;
+  var __defProps = Object.defineProperties;
   var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+  var __getOwnPropDescs = Object.getOwnPropertyDescriptors;
   var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __getOwnPropSymbols = Object.getOwnPropertySymbols;
   var __getProtoOf = Object.getPrototypeOf;
   var __hasOwnProp = Object.prototype.hasOwnProperty;
+  var __propIsEnum = Object.prototype.propertyIsEnumerable;
+  var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+  var __spreadValues = (a, b) => {
+    for (var prop in b || (b = {}))
+      if (__hasOwnProp.call(b, prop))
+        __defNormalProp(a, prop, b[prop]);
+    if (__getOwnPropSymbols)
+      for (var prop of __getOwnPropSymbols(b)) {
+        if (__propIsEnum.call(b, prop))
+          __defNormalProp(a, prop, b[prop]);
+      }
+    return a;
+  };
+  var __spreadProps = (a, b) => __defProps(a, __getOwnPropDescs(b));
   var __commonJS = (cb, mod) => function __require() {
     try {
       return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
@@ -1071,6 +1088,32 @@ underlying system, so should run in the browser, Node, or Plask.
     }
   }
 
+  // src/session-health.js
+  var sessionSaveStates = /* @__PURE__ */ new Map();
+  function noteSessionSave(room, error = "") {
+    const previous = sessionSaveStates.get(room);
+    sessionSaveStates.set(room, { savedAt: error ? previous ? previous.savedAt : null : Date.now(), error });
+  }
+  function getSessionSaveState(room) {
+    return sessionSaveStates.get(room) || { savedAt: null, error: "" };
+  }
+  function showSessionSaveWarning(element, room) {
+    const state = getSessionSaveState(room);
+    if (!element) return false;
+    if (!state.error) {
+      if (element.dataset.sessionSaveWarning) {
+        element.style.color = "";
+        delete element.dataset.sessionSaveWarning;
+      }
+      return false;
+    }
+    element.dataset.sessionSaveWarning = "true";
+    element.textContent = "Session not saved";
+    element.title = "The latest session data is only in this tab. Keep it open and use Save to download a session file. Saving will retry on the next scan. " + state.error;
+    element.style.color = "var(--panel-warning)";
+    return true;
+  }
+
   // src/scanning.js
   function readRequestPolicy() {
     try {
@@ -1436,6 +1479,7 @@ underlying system, so should run in the browser, Node, or Plask.
     updateMiniFreshness();
     var el = document.getElementById("acquisition-status");
     if (!el) return;
+    if (showSessionSaveWarning(el, getModelName())) return;
     if (runtime.isStopped) {
       el.textContent = "Stopped";
       el.title = stopDescription() + " at " + new Date(runtime.stoppedAt).toLocaleString() + ". History and elapsed time are frozen.";
@@ -1947,47 +1991,47 @@ underlying system, so should run in the browser, Node, or Plask.
   }
   function saveSession(model) {
     if (!model || model === "unknown") return;
-    var key = getStorageKey(model);
-    if (runtime.activeSessionStorageKey !== key || inspectStoredSession(model, false).protected) return;
-    if (getRoomEpoch(key) !== runtime.activeRoomEpoch) {
-      runtime.sessionStorageNotice = "Reset in another tab — local data only; export TXT/CSV before reloading";
-      updateAcquisitionStatus();
-      return;
-    }
-    runtime.STORAGE_HISTORY_SERIES.forEach(function(series) {
-      if (!runtime.sessionHighs[series]) runtime.sessionHighs[series] = getSessionHigh(series, 0);
-    });
-    var saveData = {
-      schemaVersion: runtime.STORAGE_SCHEMA_VERSION,
-      producerVersion: runtime.TIERSCOPE_VERSION,
-      timestamp: Date.now(),
-      history: runtime.history,
-      tierHighTimes: runtime.tierHighTimes,
-      withTokensHighTime: runtime.withTokensHighTime,
-      totalHighTime: runtime.totalHighTime,
-      anonHighTime: runtime.anonHighTime,
-      femaleTransHighTime: runtime.femaleTransHighTime,
-      roomTotalHigh: runtime.roomTotalHigh,
-      roomTotalHighTime: runtime.roomTotalHighTime,
-      trackingStartTime: runtime.trackingStartTime,
-      sessionStartedAt: runtime.sessionStartedAt,
-      sessionStartEstimated: runtime.sessionStartEstimated,
-      sessionHighs: runtime.sessionHighs,
-      roomEpoch: runtime.activeRoomEpoch,
-      isPaused: runtime.isPaused,
-      isStopped: runtime.isStopped,
-      stoppedAt: runtime.stoppedAt,
-      stopReason: runtime.stopReason,
-      broadcasterAbsence: runtime.broadcasterAbsence,
-      absencePausedAt: runtime.absencePausedAt,
-      absenceOverrideActive: runtime.absenceOverrideActive,
-      pausedElapsedTime: runtime.pausedElapsedTime,
-      previousCounts: runtime.previousCounts,
-      hasTrendBaseline: runtime.hasTrendBaseline,
-      trendComparisonMode: runtime.trendComparisonMode,
-      autoTrendEscalation: runtime.autoTrendEscalation
-    };
     try {
+      var key = getStorageKey(model);
+      if (runtime.activeSessionStorageKey !== key || inspectStoredSession(model, false).protected) return;
+      if (getRoomEpoch(key) !== runtime.activeRoomEpoch) {
+        runtime.sessionStorageNotice = "Reset in another tab — local data only; export TXT/CSV before reloading";
+        updateAcquisitionStatus();
+        return;
+      }
+      runtime.STORAGE_HISTORY_SERIES.forEach(function(series) {
+        if (!runtime.sessionHighs[series]) runtime.sessionHighs[series] = getSessionHigh(series, 0);
+      });
+      var saveData = {
+        schemaVersion: runtime.STORAGE_SCHEMA_VERSION,
+        producerVersion: runtime.TIERSCOPE_VERSION,
+        timestamp: Date.now(),
+        history: runtime.history,
+        tierHighTimes: runtime.tierHighTimes,
+        withTokensHighTime: runtime.withTokensHighTime,
+        totalHighTime: runtime.totalHighTime,
+        anonHighTime: runtime.anonHighTime,
+        femaleTransHighTime: runtime.femaleTransHighTime,
+        roomTotalHigh: runtime.roomTotalHigh,
+        roomTotalHighTime: runtime.roomTotalHighTime,
+        trackingStartTime: runtime.trackingStartTime,
+        sessionStartedAt: runtime.sessionStartedAt,
+        sessionStartEstimated: runtime.sessionStartEstimated,
+        sessionHighs: runtime.sessionHighs,
+        roomEpoch: runtime.activeRoomEpoch,
+        isPaused: runtime.isPaused,
+        isStopped: runtime.isStopped,
+        stoppedAt: runtime.stoppedAt,
+        stopReason: runtime.stopReason,
+        broadcasterAbsence: runtime.broadcasterAbsence,
+        absencePausedAt: runtime.absencePausedAt,
+        absenceOverrideActive: runtime.absenceOverrideActive,
+        pausedElapsedTime: runtime.pausedElapsedTime,
+        previousCounts: runtime.previousCounts,
+        hasTrendBaseline: runtime.hasTrendBaseline,
+        trendComparisonMode: runtime.trendComparisonMode,
+        autoTrendEscalation: runtime.autoTrendEscalation
+      };
       validateStoredSession(saveData);
       var raw = JSON.stringify(saveData);
       var tabRecord = runtime.tabRecords.get(key);
@@ -1998,8 +2042,10 @@ underlying system, so should run in the browser, Node, or Plask.
       tabRecord.savedAt = Date.now();
       runtime.tabRecords.set(key, tabRecord);
       runtime.sessionStorageStatus.set(key, { protected: false, raw, producerVersion: runtime.TIERSCOPE_VERSION, legacy: false });
+      noteSessionSave(model);
       log("Session saved for " + model + " (storage schema " + runtime.STORAGE_SCHEMA_VERSION + ", producer " + runtime.TIERSCOPE_VERSION + ")");
     } catch (e) {
+      noteSessionSave(model, e.message || String(e));
       log("Failed to save session: " + e);
     }
   }
@@ -2345,7 +2391,7 @@ underlying system, so should run in the browser, Node, or Plask.
       var t = runtime.TIERS[key];
       html += '<div id="tier-row-' + key + '" data-tier="' + key + '" style="display:flex;align-items:center;padding:1px 3px;margin:1px 0;background:rgba(var(--panel-row-rgb),calc(0.05 * var(--tier-background-scale, 1)));border-radius:3px;border-left:3px solid ' + t.color + ';"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml(key) + '</div><canvas id="spark-' + key + '" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-' + key + '" style="font-weight:bold;color:' + t.color + ';font-size:14px;">0</span><div id="high-' + key + '" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div>';
     });
-    html += '<div id="summary-tier-rows" style="border-top:1px solid var(--panel-divider);margin-top:4px;padding-top:4px;"><div id="tier-row-withtokens" data-tier="withtokens" style="display:flex;align-items:center;padding:2px 3px;background:rgba(255,105,180,0.15);border-radius:3px;border:1px solid #ff69b4;margin-bottom:3px;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("withtokens") + '</div><canvas id="spark-withtokens" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-withtokens" style="font-weight:bold;color:#ff69b4;font-size:14px;">0</span><span id="pct-withtokens" style="font-size:8px;color:#ff69b4;margin-left:2px;">0%</span><div id="high-withtokens" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div><div id="tier-row-total" data-tier="total" style="display:flex;align-items:center;padding:2px 3px;background:rgba(var(--panel-row-rgb),0.1);border-radius:3px;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("total") + '</div><canvas id="spark-total" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-total" style="font-weight:bold;color:var(--panel-text);font-size:14px;">0</span><div id="high-total" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div></div><div id="tier-row-anon" data-tier="anonymous" style="margin-top:5px;padding:5px;background:rgba(136,136,136,0.15);border-radius:3px;border:1px solid #888;"><div style="display:flex;align-items:center;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("anon") + `</div><canvas id="spark-anon" width="105" height="50" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="anon-ratio-full" style="font-size:13px;font-weight:bold;color:#ff69b4;">--</span><div id="high-anon" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div></div></div><div id="trend-section" style="position:relative;border-top:1px solid #4169E1;margin-top:5px;padding-top:5px;"><div id="live-trend"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;flex-wrap:wrap;gap:2px;"><span id="trend-header-label" style="font-size:9px;font-weight:bold;color:#4169E1;">📈 TREND</span><div style="display:flex;gap:2px;flex-wrap:wrap;"><button class="trend-preset-btn" data-mode="last" style="background:#4169E1;border:1px solid #4169E1;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Last</button><button class="trend-preset-btn" data-mode="5min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">5m</button><button class="trend-preset-btn" data-mode="15min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">15m</button><button class="trend-preset-btn" data-mode="30min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">30m</button><button class="trend-preset-btn" data-mode="1hour" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">1h</button><button class="trend-preset-btn" data-mode="start" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Start</button><button id="btn-trend-auto" style="background:#32CD32;border:1px solid #32CD32;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;" title="Auto-escalation ON - Click to disable">AUTO</button></div></div><div id="trend-container" style="min-height:30px;"><div style="font-size:8px;color:var(--panel-faint);text-align:center;padding:8px;">Waiting for scan...</div></div></div><div id="playback-controls" style="display:none;position:absolute;top:5px;left:0;right:0;bottom:0;padding:0 2px;box-sizing:border-box;grid-template-rows:minmax(14px,1fr) 14px 12px;gap:2px;" aria-label="Playback controls"><div id="gif-export-controls" style="display:none;position:absolute;inset:0;z-index:1;align-items:center;justify-content:center;gap:5px;background:var(--panel-solid);border-radius:3px;padding:3px;"><span id="gif-export-status" role="status" style="font-size:8px;color:var(--panel-secondary);overflow-wrap:anywhere;"></span><button id="btn-cancel-gif" hidden style="font-size:8px;cursor:pointer;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;">Cancel</button></div><div style="display:flex;flex-direction:column;justify-content:center;gap:4px;min-width:0;"><div id="playback-file-controls" style="display:none;align-items:center;gap:4px;min-width:0;"><div id="playback-room" style="display:none;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;line-height:12px;font-weight:bold;color:var(--panel-text);"></div><button type="button" id="btn-playback-add-all-time" aria-live="polite" title="Add this file's highs to the room named beside this button" style="display:none;flex-shrink:0;min-width:88px;font-size:8px;line-height:12px;margin:0;padding:0 4px;white-space:nowrap;background:#4169E1;color:#fff;border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Add to all-time highs</button></div><div style="display:flex;align-items:center;justify-content:space-between;gap:3px;"><strong id="playback-label" style="font-size:9px;color:var(--panel-warning);">PLAYBACK</strong><button id="playback-play" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#4169E1;color:white;border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Pause</button><select id="playback-speed" aria-label="Playback speed" style="font-size:8px;height:15px;margin:0;padding:0;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select><button id="btn-export-gif" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#ff69b4;color:white;border:1px solid #ff69b4;border-radius:2px;cursor:pointer;" title="Download this Replay as a ` + runtime.GIF_WIDTH + " × " + runtime.GIF_HEIGHT + ' GIF">GIF</button><button id="playback-return" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Return to Live</button></div></div><div style="display:flex;align-items:center;gap:4px;min-width:0;"><button type="button" id="playback-previous" title="Previous recorded sample (pauses Replay)" aria-label="Previous recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">|&#9664;</button><input id="playback-scrubber" type="range" min="0" max="0" value="0" step="any" aria-label="Playback timeline" style="flex:1;min-width:0;width:100%;height:12px;margin:0;accent-color:var(--panel-warning);cursor:pointer;"><button type="button" id="playback-next" title="Next recorded sample (pauses Replay)" aria-label="Next recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">&#9654;|</button></div><div id="playback-file-actions" style="display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:4px;min-width:0;"><div id="playback-position" style="grid-column:2;font-size:9px;line-height:12px;text-align:center;white-space:nowrap;color:var(--panel-secondary);font-family:monospace;">00:00:00 / 00:00:00</div><div style="grid-column:3;justify-self:end;display:flex;gap:2px;"><button type="button" id="btn-playback-save-session" aria-label="Save replay session file" title="Save the full session being replayed" style="font-size:8px;line-height:10px;height:12px;box-sizing:border-box;margin:0;padding:0 4px;background:#4169E1;color:#fff;border:1px solid #4169E1;border-radius:2px;cursor:pointer;">Save</button><button type="button" id="btn-playback-open-session" aria-label="Open session file in replay" title="Open another saved session in FILE REPLAY" style="font-size:8px;line-height:10px;height:12px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Open</button></div></div></div></div><div id="control-field" style="margin-top:5px;padding:4px;background:rgba(65,105,225,0.15);border-radius:3px;border:1px solid #4169E1;"><div id="control-session-row" style="display:flex;justify-content:space-between;align-items:center;gap:3px;margin-bottom:4px;white-space:nowrap;"><span style="font-size:9px;font-weight:bold;color:#4169E1;">🎛️ CONTROLS</span><div id="control-session-buttons" style="display:flex;gap:2px;align-items:center;"><button id="btn-replay" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-warning);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;" title="Replay recorded history">Replay</button><button type="button" id="btn-control-save-session" aria-label="Save session file" title="Save this session as a file to replay later" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:#4169E1;color:white;border:1px solid #4169E1;border-radius:2px;cursor:pointer;">Save</button><button type="button" id="btn-control-open-session" aria-label="Open session file" title="Open a saved session in FILE REPLAY" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Open</button></div><span style="font-size:11px;color:var(--panel-positive);font-weight:bold;" id="control-next-scan">Next: 60s</span></div><div id="control-action-row" style="display:grid;grid-template-columns:minmax(max-content,1fr) auto minmax(0,1fr);align-items:center;gap:3px;"><span style="font-size:12px;color:var(--panel-warning);font-family:monospace;font-weight:bold;flex-shrink:0;" id="control-tracking-timer">00:00:00</span><div id="control-action-buttons" style="display:flex;gap:2px;align-items:center;"><button id="btn-download-report" style="background:#4169E1;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Download tracking report"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="4" x2="12" y2="16"/><polyline points="6 10 12 16 18 10"/><line x1="4" y1="20" x2="20" y2="20"/></svg>TXT</button><button id="btn-download-csv" style="background:#4169E1;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Download all retained history as CSV"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="4" x2="12" y2="16"/><polyline points="6 10 12 16 18 10"/><line x1="4" y1="20" x2="20" y2="20"/></svg>CSV</button><button id="btn-control-auto" style="background:#32CD32;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 4px;min-width:24px;" title="Auto-Refresh ON">⏸</button><button type="button" id="btn-control-stop" aria-label="Stop this session" title="Stop this session and freeze its history and elapsed time" style="background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;white-space:nowrap;">■ Stop</button><button id="btn-main-reset" style="background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Reset all tracking data"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12"/><path d="M3 3v9h9"/></svg>Reset</button></div><label id="dark-mode-control" style="justify-self:end;display:inline-flex;align-items:center;gap:2px;cursor:pointer;color:var(--panel-secondary);line-height:1;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 13a9 9 0 0 1-10-10 9 9 0 1 0 10 10Z"/></svg><input type="checkbox" id="dark-mode-toggle" checked aria-label="Dark mode" style="appearance:auto;width:12px;height:12px;margin:0;cursor:pointer;accent-color:#4169E1;"></label></div></div><div id="tracker-footer" style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:4px;margin-top:5px;min-height:14px;"><div id="acquisition-status" style="max-width:80px;font-size:7px;color:var(--panel-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="No accepted sample yet">No sample</div><div id="background-slider-controls" style="display:flex;align-items:center;gap:3px;min-width:0;"><svg width="11" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--panel-warning)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink:0;"><path d="M9 18h6M10 22h4M8 14a6 6 0 1 1 8 0c-1 1-1 2-1 4H9c0-2 0-3-1-4Z"/></svg><input type="range" id="opacity-slider" min="30" max="100" value="95" aria-label="Background opacity" style="flex:1;min-width:0;width:100%;height:12px;margin:0;cursor:pointer;accent-color:#ff69b4;" title="Main and standard tier background opacity"><span id="opacity-value" style="font-size:8px;color:var(--panel-secondary);min-width:23px;">95%</span></div><div id="tierscope-logo" style="justify-self:end;display:flex;align-items:center;gap:3px;white-space:nowrap;opacity:0.6;transition:opacity 0.2s;" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0.6"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#ff69b4" stroke-width="2" style="flex-shrink:0;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="2" x2="12" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/></svg><span title="TierScope ' + runtime.TIERSCOPE_VERSION + `" style="font-size:7px;font-family:'Courier New',monospace;font-weight:bold;color:var(--panel-accent);letter-spacing:1px;">TIERSCOPE</span></div></div></div>`;
+    html += '<div id="summary-tier-rows" style="border-top:1px solid var(--panel-divider);margin-top:4px;padding-top:4px;"><div id="tier-row-withtokens" data-tier="withtokens" style="display:flex;align-items:center;padding:2px 3px;background:rgba(255,105,180,0.15);border-radius:3px;border:1px solid #ff69b4;margin-bottom:3px;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("withtokens") + '</div><canvas id="spark-withtokens" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-withtokens" style="font-weight:bold;color:#ff69b4;font-size:14px;">0</span><span id="pct-withtokens" style="font-size:8px;color:#ff69b4;margin-left:2px;">0%</span><div id="high-withtokens" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div><div id="tier-row-total" data-tier="total" style="display:flex;align-items:center;padding:2px 3px;background:rgba(var(--panel-row-rgb),0.1);border-radius:3px;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("total") + '</div><canvas id="spark-total" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-total" style="font-weight:bold;color:var(--panel-text);font-size:14px;">0</span><div id="high-total" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div></div><div id="tier-row-anon" data-tier="anonymous" style="margin-top:5px;padding:5px;background:rgba(136,136,136,0.15);border-radius:3px;border:1px solid #888;"><div style="display:flex;align-items:center;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("anon") + `</div><canvas id="spark-anon" width="105" height="50" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="anon-ratio-full" style="font-size:13px;font-weight:bold;color:#ff69b4;">--</span><div id="high-anon" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div></div></div><div id="trend-section" style="position:relative;border-top:1px solid #4169E1;margin-top:5px;padding-top:5px;"><div id="live-trend"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;flex-wrap:wrap;gap:2px;"><span id="trend-header-label" style="font-size:9px;font-weight:bold;color:#4169E1;">📈 TREND</span><div style="display:flex;gap:2px;flex-wrap:wrap;"><button class="trend-preset-btn" data-mode="last" style="background:#4169E1;border:1px solid #4169E1;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Last</button><button class="trend-preset-btn" data-mode="5min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">5m</button><button class="trend-preset-btn" data-mode="15min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">15m</button><button class="trend-preset-btn" data-mode="30min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">30m</button><button class="trend-preset-btn" data-mode="1hour" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">1h</button><button class="trend-preset-btn" data-mode="start" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Start</button><button id="btn-trend-auto" style="background:#32CD32;border:1px solid #32CD32;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;" title="Auto-escalation ON - Click to disable">AUTO</button></div></div><div id="trend-container" style="min-height:30px;"><div style="font-size:8px;color:var(--panel-faint);text-align:center;padding:8px;">Waiting for scan...</div></div></div><div id="playback-controls" style="display:none;position:absolute;top:5px;left:0;right:0;bottom:0;padding:0 2px;box-sizing:border-box;grid-template-rows:minmax(14px,1fr) 14px 12px;gap:2px;" aria-label="Playback controls"><div id="gif-export-controls" style="display:none;position:absolute;inset:0;z-index:1;align-items:center;justify-content:center;gap:5px;background:var(--panel-solid);border-radius:3px;padding:3px;"><span id="gif-export-status" role="status" style="font-size:8px;color:var(--panel-secondary);overflow-wrap:anywhere;"></span><button id="btn-cancel-gif" hidden style="font-size:8px;cursor:pointer;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;">Cancel</button></div><div style="display:flex;flex-direction:column;justify-content:center;gap:4px;min-width:0;"><div id="playback-file-controls" style="display:none;align-items:center;gap:4px;min-width:0;"><div id="playback-room" style="display:none;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;line-height:12px;font-weight:bold;color:var(--panel-text);"></div><button type="button" id="btn-playback-add-all-time" aria-live="polite" title="Add this file's highs to the room named beside this button" style="display:none;flex-shrink:0;min-width:88px;font-size:8px;line-height:12px;margin:0;padding:0 4px;white-space:nowrap;background:#4169E1;color:#fff;border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Add to all-time highs</button></div><div style="display:flex;align-items:center;justify-content:space-between;gap:3px;"><strong id="playback-label" style="font-size:9px;color:var(--panel-warning);">PLAYBACK</strong><button id="playback-play" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#4169E1;color:white;border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Pause</button><select id="playback-speed" aria-label="Playback speed" style="font-size:8px;height:15px;margin:0;padding:0;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select><button id="btn-export-gif" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#ff69b4;color:white;border:1px solid #ff69b4;border-radius:2px;cursor:pointer;" title="Download this Replay as a ` + runtime.GIF_WIDTH + " × " + runtime.GIF_HEIGHT + ` GIF">GIF</button><button id="playback-return" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Return to Live</button></div></div><div style="display:flex;align-items:center;gap:4px;min-width:0;"><button type="button" id="playback-previous" title="Previous recorded sample (pauses Replay)" aria-label="Previous recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">|&#9664;</button><input id="playback-scrubber" type="range" min="0" max="0" value="0" step="any" aria-label="Playback timeline" style="flex:1;min-width:0;width:100%;height:12px;margin:0;accent-color:var(--panel-warning);cursor:pointer;"><button type="button" id="playback-next" title="Next recorded sample (pauses Replay)" aria-label="Next recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">&#9654;|</button></div><div id="playback-file-actions" style="display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:4px;min-width:0;"><button type="button" id="btn-playback-keep-library" aria-live="polite" title="Keep the full replayed recording in this browser's library" style="grid-column:1;justify-self:start;white-space:nowrap;font-size:8px;line-height:10px;height:12px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Keep in library</button><div id="playback-position" style="grid-column:2;font-size:9px;line-height:12px;text-align:center;white-space:nowrap;color:var(--panel-secondary);font-family:monospace;">00:00:00 / 00:00:00</div><div style="grid-column:3;justify-self:end;display:flex;gap:2px;"><button type="button" id="btn-playback-save-session" aria-label="Save replay session file" title="Save the full session being replayed" style="font-size:8px;line-height:10px;height:12px;box-sizing:border-box;margin:0;padding:0 4px;background:#4169E1;color:#fff;border:1px solid #4169E1;border-radius:2px;cursor:pointer;">Save</button><button type="button" id="btn-playback-open-session" aria-label="Open session file in replay" title="Open another saved session in FILE REPLAY" style="font-size:8px;line-height:10px;height:12px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Open</button></div></div></div></div><div id="control-field" style="margin-top:5px;padding:4px;background:rgba(65,105,225,0.15);border-radius:3px;border:1px solid #4169E1;"><div id="control-session-row" style="display:flex;justify-content:space-between;align-items:center;gap:3px;margin-bottom:4px;white-space:nowrap;"><span style="font-size:9px;font-weight:bold;color:#4169E1;">🎛️ CONTROLS</span><div id="control-session-buttons" style="display:flex;gap:2px;align-items:center;"><button id="btn-replay" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-warning);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;" title="Replay recorded history">Replay</button><button type="button" id="btn-control-save-session" aria-label="Save session file" title="Save this session as a file to replay later" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:#4169E1;color:white;border:1px solid #4169E1;border-radius:2px;cursor:pointer;">Save</button><button type="button" id="btn-control-open-session" aria-label="Open session file" title="Open a saved session in FILE REPLAY" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Open</button><button type="button" id="btn-control-library" aria-label="Open session library" title="Open model folders, session summaries, comparisons and backups" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Library</button></div><span style="font-size:11px;color:var(--panel-positive);font-weight:bold;" id="control-next-scan">Next: 60s</span></div><div id="control-action-row" style="display:grid;grid-template-columns:minmax(max-content,1fr) auto minmax(0,1fr);align-items:center;gap:3px;"><span style="font-size:12px;color:var(--panel-warning);font-family:monospace;font-weight:bold;flex-shrink:0;" id="control-tracking-timer">00:00:00</span><div id="control-action-buttons" style="display:flex;gap:2px;align-items:center;"><button id="btn-download-report" style="background:#4169E1;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Download tracking report"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="4" x2="12" y2="16"/><polyline points="6 10 12 16 18 10"/><line x1="4" y1="20" x2="20" y2="20"/></svg>TXT</button><button id="btn-download-csv" style="background:#4169E1;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Download all retained history as CSV"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="4" x2="12" y2="16"/><polyline points="6 10 12 16 18 10"/><line x1="4" y1="20" x2="20" y2="20"/></svg>CSV</button><button id="btn-control-auto" style="background:#32CD32;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 4px;min-width:24px;" title="Auto-Refresh ON">⏸</button><button type="button" id="btn-control-stop" aria-label="Stop this session" title="Stop this session and freeze its history and elapsed time" style="background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;white-space:nowrap;">■ Stop</button><button id="btn-main-reset" style="background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Reset all tracking data"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12"/><path d="M3 3v9h9"/></svg>Reset</button></div><label id="dark-mode-control" style="justify-self:end;display:inline-flex;align-items:center;gap:2px;cursor:pointer;color:var(--panel-secondary);line-height:1;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 13a9 9 0 0 1-10-10 9 9 0 1 0 10 10Z"/></svg><input type="checkbox" id="dark-mode-toggle" checked aria-label="Dark mode" style="appearance:auto;width:12px;height:12px;margin:0;cursor:pointer;accent-color:#4169E1;"></label></div></div><div id="tracker-footer" style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:4px;margin-top:5px;min-height:14px;"><div id="acquisition-status" style="max-width:80px;font-size:7px;color:var(--panel-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="No accepted sample yet">No sample</div><div id="background-slider-controls" style="display:flex;align-items:center;gap:3px;min-width:0;"><svg width="11" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--panel-warning)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink:0;"><path d="M9 18h6M10 22h4M8 14a6 6 0 1 1 8 0c-1 1-1 2-1 4H9c0-2 0-3-1-4Z"/></svg><input type="range" id="opacity-slider" min="30" max="100" value="95" aria-label="Background opacity" style="flex:1;min-width:0;width:100%;height:12px;margin:0;cursor:pointer;accent-color:#ff69b4;" title="Main and standard tier background opacity"><span id="opacity-value" style="font-size:8px;color:var(--panel-secondary);min-width:23px;">95%</span></div><div id="tierscope-logo" style="justify-self:end;display:flex;align-items:center;gap:3px;white-space:nowrap;opacity:0.6;transition:opacity 0.2s;" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0.6"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#ff69b4" stroke-width="2" style="flex-shrink:0;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="2" x2="12" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/></svg><span title="TierScope ` + runtime.TIERSCOPE_VERSION + `" style="font-size:7px;font-family:'Courier New',monospace;font-weight:bold;color:var(--panel-accent);letter-spacing:1px;">TIERSCOPE</span></div></div></div>`;
     div.innerHTML = html;
     document.body.appendChild(div);
     applyPanelTheme(false);
@@ -3052,6 +3098,1055 @@ underlying system, so should run in the browser, Node, or Plask.
     updateCountdownDisplay();
   }
 
+  // src/session-library.js
+  var LIBRARY_PREFIX = "tierscope:library:v1:";
+  var LIBRARY_MAX_COUNT = 500;
+  var LIBRARY_MAX_BYTES = 25 * 1024 * 1024;
+  function libraryRecordKey(id) {
+    if (typeof id !== "string" || !/^[a-z0-9_-]{1,100}$/i.test(id)) throw new Error("Invalid library record.");
+    return LIBRARY_PREFIX + id;
+  }
+  function libraryTitle(title) {
+    if (typeof title !== "string" || title.length > 80 || /[\x00-\x1f]/.test(title)) throw new Error("Use a title of up to 80 characters.");
+    return title.trim();
+  }
+  function libraryIdentity(archive) {
+    return JSON.stringify({ room: archive.room.toLowerCase(), session: __spreadProps(__spreadValues({}, archive.session), { timestamp: 0 }) });
+  }
+  function librarySessionKey(archive) {
+    var _a;
+    return archive.room.toLowerCase() + ":" + ((_a = archive.session.sessionStartedAt) != null ? _a : archive.session.history.timestamps[0]);
+  }
+  function compareLibrarySessions(existing, incoming) {
+    if (librarySessionKey(existing) !== librarySessionKey(incoming)) return null;
+    if (libraryIdentity(existing) === libraryIdentity(incoming)) return 0;
+    const a = existing.session, b = incoming.session, ah = a.history, bh = b.history;
+    const at = ah.timestamps, bt = bh.timestamps;
+    let ai = at.indexOf(bt[0]), bi = 0;
+    if (ai < 0) {
+      ai = 0;
+      bi = bt.indexOf(at[0]);
+    }
+    if (bi < 0) {
+      if (a.sessionStartEstimated || b.sessionStartEstimated || !(at.at(-1) < bt[0] || bt.at(-1) < at[0])) return null;
+    } else {
+      const series = Object.keys(ah).filter((key) => key !== "timestamps" && key !== "breaks");
+      for (; ai < at.length && bi < bt.length; ai++, bi++) {
+        if (at[ai] !== bt[bi] || series.some((key) => ah[key][ai] !== bh[key][bi]) || ai > 0 && bi > 0 && ah.breaks[ai] !== bh.breaks[bi]) return null;
+      }
+    }
+    const dominates = (left, right) => left.history.timestamps.length >= right.history.timestamps.length && left.history.timestamps.at(-1) >= right.history.timestamps.at(-1) && left.roomTotalHigh >= right.roomTotalHigh && Object.keys(right.sessionHighs).every((key) => left.sessionHighs[key].value >= right.sessionHighs[key].value);
+    const newer = dominates(b, a), older = dominates(a, b);
+    if (newer && older) return b.timestamp > a.timestamp ? 1 : -1;
+    return newer ? 1 : older ? -1 : null;
+  }
+  function readSessionLibrary() {
+    const entries = [], damaged = [], sessions = /* @__PURE__ */ new Map();
+    let bytes = 0;
+    for (const key of GM_listValues().filter((key2) => key2.startsWith(LIBRARY_PREFIX))) {
+      const raw = GM_getValue(key, null);
+      if (raw === null) continue;
+      bytes += new Blob([typeof raw === "string" ? raw : JSON.stringify(raw)]).size;
+      try {
+        const record = JSON.parse(raw);
+        if (record.schemaVersion !== 1 || !Number.isSafeInteger(record.addedAt) || record.addedAt < 0) throw new Error("Invalid library record.");
+        const id = key.slice(LIBRARY_PREFIX.length);
+        libraryRecordKey(id);
+        const entry = { id, title: libraryTitle(record.title), addedAt: record.addedAt, archive: validateSessionFile(record.archive), records: [{ key, value: raw }] };
+        const sessionKey = librarySessionKey(entry.archive), siblings = sessions.get(sessionKey) || [];
+        const previous = siblings.find((other) => compareLibrarySessions(other.archive, entry.archive) !== null);
+        if (previous) {
+          const records = previous.records.concat(entry.records), addedAt = Math.min(previous.addedAt, entry.addedAt);
+          if (compareLibrarySessions(previous.archive, entry.archive) === 1) Object.assign(previous, entry);
+          previous.records = records;
+          previous.addedAt = addedAt;
+        } else {
+          entries.push(entry);
+          siblings.push(entry);
+          sessions.set(sessionKey, siblings);
+        }
+      } catch (error) {
+        damaged.push(key);
+      }
+    }
+    entries.sort((a, b) => b.archive.session.history.timestamps[0] - a.archive.session.history.timestamps[0] || b.addedAt - a.addedAt || a.id.localeCompare(b.id));
+    return { entries, damaged, bytes, count: entries.length + damaged.length };
+  }
+  function planLibraryAdditions(incoming, library = readSessionLibrary()) {
+    const entries = library.entries.slice(), writes = [];
+    let bytes = library.bytes;
+    for (const entry of incoming) {
+      const archive = validateSessionFile(entry.archive);
+      const index = entries.findIndex((saved) => compareLibrarySessions(saved.archive, archive) !== null);
+      const previous = index >= 0 ? entries[index] : null;
+      if (previous && compareLibrarySessions(previous.archive, archive) !== 1) continue;
+      const title = previous ? previous.title : libraryTitle(entry.title || archive.room);
+      const id = makeStorageId();
+      const addedAt = previous ? previous.addedAt : Date.now();
+      const raw = JSON.stringify({ schemaVersion: 1, addedAt, title, archive }), key = libraryRecordKey(id);
+      bytes += new Blob([raw]).size;
+      writes.push({ key, value: raw, id, updated: !!previous, replaces: previous ? previous.records : [] });
+      const next = { id, title, addedAt, archive, records: [{ key, value: raw }] };
+      if (previous) entries[index] = next;
+      else entries.push(next);
+    }
+    if (library.count - library.entries.length + entries.length > LIBRARY_MAX_COUNT || bytes > LIBRARY_MAX_BYTES) {
+      throw new Error("Library full (" + LIBRARY_MAX_COUNT + " recordings / " + LIBRARY_MAX_BYTES / 1024 / 1024 + " MB). Export and remove recordings before adding more.");
+    }
+    return writes;
+  }
+  function finalizeLibraryWrites(writes) {
+    for (const write of writes) for (const old of write.replaces) {
+      try {
+        if (GM_getValue(old.key, null) === old.value) GM_deleteValue(old.key);
+      } catch (error) {
+      }
+    }
+  }
+  function keepSessionInLibrary(archive, title = "") {
+    const library = readSessionLibrary(), clean = validateSessionFile(archive);
+    const writes = planLibraryAdditions([{ archive: clean, title }], library);
+    if (!writes.length) return {
+      added: false,
+      updated: false,
+      id: library.entries.find((entry) => compareLibrarySessions(entry.archive, clean) !== null).id
+    };
+    try {
+      GM_setValue(writes[0].key, writes[0].value);
+      verifyLibraryCapacity();
+    } catch (error) {
+      try {
+        if (GM_getValue(writes[0].key, null) === writes[0].value) GM_deleteValue(writes[0].key);
+      } catch (cleanupError) {
+        throw new Error("Library save could not be completed or undone. Refresh the list before retrying.");
+      }
+      throw error;
+    }
+    finalizeLibraryWrites(writes);
+    return { added: !writes[0].updated, updated: writes[0].updated, id: writes[0].id };
+  }
+  function verifyLibraryCapacity() {
+    const state = readSessionLibrary();
+    if (state.count > LIBRARY_MAX_COUNT || state.bytes > LIBRARY_MAX_BYTES) throw new Error("Library limit reached, possibly by another tab. Refresh the list and remove recordings before retrying.");
+  }
+  function removeLibrarySession(id) {
+    const key = libraryRecordKey(id), state = readSessionLibrary();
+    const entry = state.entries.find((entry2) => entry2.records.some((record) => record.key === key));
+    if (!entry) {
+      if (state.damaged.includes(key)) GM_deleteValue(key);
+      return;
+    }
+    for (const record of entry.records) if (GM_getValue(record.key, null) === record.value) GM_deleteValue(record.key);
+  }
+  function renameLibrarySession(id, title) {
+    const key = libraryRecordKey(id), state = readSessionLibrary();
+    const entry = state.entries.find((entry2) => entry2.records.some((record) => record.key === key));
+    if (!entry) throw new Error("This recording changed in another tab. Refresh the list.");
+    const cleanTitle = libraryTitle(title);
+    const writes = entry.records.map((record) => __spreadProps(__spreadValues({}, record), { next: JSON.stringify(__spreadProps(__spreadValues({}, JSON.parse(record.value)), { title: cleanTitle })) }));
+    const bytes = state.bytes + writes.reduce((total, write) => total + new Blob([write.next]).size - new Blob([write.value]).size, 0);
+    if (bytes > LIBRARY_MAX_BYTES) throw new Error("Library full. Use a shorter title or remove a recording.");
+    for (const write of writes) {
+      if (GM_getValue(write.key, null) !== write.value) throw new Error("This recording changed in another tab. Refresh the list.");
+      GM_setValue(write.key, write.next);
+    }
+  }
+
+  // src/backup.js
+  var BACKUP_MAX_BYTES = 32 * 1024 * 1024;
+  var preferenceKeys = Object.freeze({
+    theme: "tierscope:ui:theme:v1",
+    highMode: "tierscope:ui:highMode:v1",
+    miniMetric: "tierscope:ui:miniMetric:v1",
+    chartWindow: "tierscope:ui:chartWindow:v1",
+    collapsedRows: "tierscope:ui:collapsedRows:v1",
+    geometry: "tierscope:ui:geometry:v1"
+  });
+  function validateBackupPreferences(preferences) {
+    if (!preferences || typeof preferences !== "object" || Array.isArray(preferences)) throw new Error("Invalid saved preferences.");
+    const clean = {};
+    for (const [name, value] of Object.entries(preferences)) {
+      if (!Object.prototype.hasOwnProperty.call(preferenceKeys, name)) throw new Error("Unknown saved preference: " + name);
+      const choices = {
+        theme: ["dark", "bright"],
+        highMode: ["sh", "ath"],
+        miniMetric: ["room", "withTokens", "total"],
+        chartWindow: ["full", "fourHours", "twoHours", "hour", "halfHour", "quarter"]
+      };
+      if (name === "geometry") {
+        if (!value || !Number.isFinite(value.left) || !Number.isFinite(value.top) || !Number.isFinite(value.scale) || value.scale < 0.5 || value.scale > 3) throw new Error("Invalid panel geometry.");
+        clean[name] = { left: value.left, top: value.top, scale: value.scale };
+      } else if (name === "collapsedRows") {
+        if (!Array.isArray(value) || value.length > runtime.PANEL_ROWS.length || value.some((key) => !runtime.PANEL_ROWS.some((row) => row.key === key))) throw new Error("Invalid collapsed rows.");
+        clean[name] = [...new Set(value)];
+      } else {
+        if (!choices[name].includes(value)) throw new Error("Invalid preference: " + name);
+        clean[name] = value;
+      }
+    }
+    return clean;
+  }
+  function validateTierScopeBackup(input) {
+    if (!input || input.format !== "TierScopeBackup" || input.formatVersion !== 1 || typeof input.producerVersion !== "string" || input.producerVersion.length > 40 || !Array.isArray(input.rooms) || input.rooms.length > 1e3 || !Array.isArray(input.library) || input.library.length > LIBRARY_MAX_COUNT) {
+      throw new Error("This is not a supported TierScope backup.");
+    }
+    const seen = /* @__PURE__ */ new Set();
+    const rooms = input.rooms.map((record) => {
+      const room = record && allTimeRoom(record.room);
+      if (!room || seen.has(room)) throw new Error("Invalid or duplicate room in backup.");
+      seen.add(room);
+      validateAllTimeRecord({ schemaVersion: 1, room, epoch: "backup", highs: record.highs }, room);
+      const highs = emptyAllTimeHighs();
+      mergeAllTimeHighs(highs, record.highs);
+      return { room, highs };
+    });
+    const library = input.library.map((entry) => ({ title: libraryTitle(entry.title), archive: validateSessionFile(entry.archive) }));
+    const backup = {
+      format: "TierScopeBackup",
+      formatVersion: 1,
+      producerVersion: input.producerVersion,
+      rooms,
+      preferences: validateBackupPreferences(input.preferences),
+      library
+    };
+    if (new Blob([JSON.stringify(backup)]).size > BACKUP_MAX_BYTES) throw new Error("Backup exceeds 32 MB.");
+    return backup;
+  }
+  function createTierScopeBackup(includeLibrary = true) {
+    const rooms = /* @__PURE__ */ new Set();
+    for (const key of GM_listValues()) {
+      if (key.startsWith(runtime.ALL_TIME_PREFIX)) {
+        const room = allTimeRoom(key.slice(runtime.ALL_TIME_PREFIX.length).split(":")[0]);
+        if (room) rooms.add(room);
+      }
+    }
+    for (const room of runtime.allTimeCache.keys()) if (allTimeRoom(room)) rooms.add(room);
+    const records = [...rooms].sort().map((room) => {
+      const state = readAllTimeHighs(room);
+      if (state.error || state.skipped) throw new Error("Could not read all ATH records for " + room + ". Existing data was left intact.");
+      return { room, highs: state.highs };
+    });
+    const preferences = {
+      theme: runtime.isDarkMode ? "dark" : "bright",
+      highMode: runtime.highMode,
+      miniMetric: runtime.miniMetric,
+      chartWindow: runtime.chartWindowMode,
+      collapsedRows: [...runtime.collapsedRows]
+    };
+    if (runtime.panelGeometry) preferences.geometry = runtime.panelGeometry;
+    for (const [name, key] of Object.entries(preferenceKeys)) {
+      const saved = GM_getValue(key, null);
+      if (saved !== null) preferences[name] = name === "geometry" || name === "collapsedRows" ? JSON.parse(saved) : saved;
+    }
+    const library = includeLibrary ? readSessionLibrary() : { entries: [], damaged: [] };
+    if (library.damaged.length) throw new Error("The library contains unreadable recordings. Export ATH/preferences separately or resolve those entries first.");
+    return validateTierScopeBackup({
+      format: "TierScopeBackup",
+      formatVersion: 1,
+      producerVersion: runtime.TIERSCOPE_VERSION,
+      rooms: records,
+      preferences,
+      library: library.entries.map((entry) => ({ title: entry.title, archive: entry.archive }))
+    });
+  }
+  function restoreTierScopeBackup(input, options = { highs: true, preferences: true, library: true }) {
+    const backup = validateTierScopeBackup(input), writes = [], epochs = [];
+    const newLibrary = options.library ? planLibraryAdditions(backup.library) : [];
+    if (options.highs) for (const record of backup.rooms) {
+      const state = readAllTimeHighs(record.room);
+      if (state.error || state.skipped) throw new Error("Cannot safely merge ATH for " + record.room + ". No backup data was written.");
+      const highs = emptyAllTimeHighs();
+      mergeAllTimeHighs(highs, state.highs);
+      if (mergeAllTimeHighs(highs, record.highs)) {
+        const key = runtime.ALL_TIME_PREFIX + record.room + ":" + state.epoch + ":" + makeStorageId();
+        writes.push({ key, value: JSON.stringify({ schemaVersion: 1, room: record.room, epoch: state.epoch, highs }) });
+        epochs.push({ room: record.room, epoch: state.epoch });
+      }
+    }
+    writes.push(...newLibrary);
+    if (options.preferences) for (const [name, value] of Object.entries(backup.preferences)) {
+      writes.push({ key: preferenceKeys[name], value: name === "geometry" || name === "collapsedRows" ? JSON.stringify(value) : value });
+    }
+    const touched = [];
+    try {
+      for (const write of writes) {
+        const before = GM_getValue(write.key, void 0);
+        touched.push(__spreadProps(__spreadValues({}, write), { before }));
+        GM_setValue(write.key, write.value);
+      }
+      for (const { room, epoch } of epochs) {
+        if (GM_getValue(runtime.ALL_TIME_EPOCH_PREFIX + room, "initial") !== epoch) throw new Error("ATH was cleared in another tab during restore.");
+      }
+      if (newLibrary.length) verifyLibraryCapacity();
+    } catch (error) {
+      let rollbackFailed = false;
+      for (const write of touched.reverse()) {
+        try {
+          if (GM_getValue(write.key, null) !== write.value) continue;
+          if (write.before === void 0) GM_deleteValue(write.key);
+          else GM_setValue(write.key, write.before);
+        } catch (rollbackError) {
+          rollbackFailed = true;
+        }
+      }
+      backup.rooms.forEach((record) => readAllTimeHighs(record.room));
+      throw new Error((rollbackFailed ? "Restore incomplete; some changes may remain. Keep the backup and retry. " : "Restore failed; its writes were rolled back. ") + error.message);
+    }
+    finalizeLibraryWrites(newLibrary);
+    backup.rooms.forEach((record) => readAllTimeHighs(record.room));
+    return {
+      rooms: epochs.length,
+      recordings: newLibrary.filter((write) => !write.updated).length,
+      updatedRecordings: newLibrary.filter((write) => write.updated).length,
+      preferences: options.preferences ? Object.keys(backup.preferences).length : 0
+    };
+  }
+
+  // src/data-io.js
+  function downloadDataFile(value, filename) {
+    const blob = new Blob([JSON.stringify(value)], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob), link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    try {
+      link.click();
+    } finally {
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 6e4);
+    }
+  }
+  async function readDataFile(file, maxBytes) {
+    if (!file || file.size > maxBytes) throw new Error("File is too large (maximum " + Math.round(maxBytes / 1024 / 1024) + " MB).");
+    const text = await file.text();
+    if (new Blob([text]).size > maxBytes) throw new Error("File is too large.");
+    return JSON.parse(text.replace(/^\uFEFF/, ""));
+  }
+
+  // src/session-analysis.js
+  var ANALYSIS_METRICS = Object.freeze({
+    room: "Room audience",
+    total: "Registered viewers",
+    withTokens: "Viewers with tokens",
+    red: "Moderators",
+    green: "Fan club",
+    purple: "Dark purple",
+    pink: "Light purple",
+    "dark-blue": "Dark blue",
+    "light-blue": "Light blue",
+    gray: "Grey",
+    "female-trans": "Female / trans",
+    anonymous: "Anonymous viewers"
+  });
+  function analysisSeries(archive, metric) {
+    if (!Object.prototype.hasOwnProperty.call(ANALYSIS_METRICS, metric)) throw new Error("Unknown analysis metric.");
+    const history = archive.session.history;
+    const values = metric === "room" ? (
+      /** @type {number[]} */
+      history.total.map((v, i) => v + /** @type {number[]} */
+      history.anonymous[i])
+    ) : (
+      /** @type {number[]} */
+      history[metric]
+    );
+    const origin = history.timestamps[0];
+    const times = history.timestamps.map((time) => time - origin);
+    for (let i = 0; i < times.length; i++) times[i] = Math.max(0, times[i], i ? times[i - 1] : 0);
+    return { times, values, breaks: history.breaks || times.map(() => false) };
+  }
+  function summarizeSession(archive, metric = "room", threshold = 100, limitMs = Infinity) {
+    if (!Number.isFinite(threshold) || threshold < 0 || !(limitMs >= 0)) throw new Error("Invalid summary range or threshold.");
+    const { times, values, breaks } = analysisSeries(archive, metric);
+    const end = Math.min(times.length ? times[times.length - 1] : 0, limitMs);
+    let coveredMs = 0, weighted = 0, registeredWeight = 0, tokenWeight = 0, atOrAboveMs = 0, peak = 0, samples = 0;
+    let peakTime = null;
+    for (let i = 0; i < times.length && times[i] <= end; i++) {
+      samples++;
+      if (peakTime === null || values[i] > peak) {
+        peak = values[i];
+        peakTime = archive.session.history.timestamps[i];
+      }
+      if (i + 1 >= times.length || breaks[i + 1]) continue;
+      const duration = Math.max(0, Math.min(end, times[i + 1]) - times[i]);
+      coveredMs += duration;
+      weighted += duration * values[i];
+      registeredWeight += duration * /** @type {number[]} */
+      archive.session.history.total[i];
+      tokenWeight += duration * /** @type {number[]} */
+      archive.session.history.withTokens[i];
+      if (values[i] >= threshold) atOrAboveMs += duration;
+    }
+    return {
+      samples,
+      spanMs: end,
+      coveredMs,
+      gapMs: end - coveredMs,
+      peak,
+      peakTime,
+      sessionPeak: metric === "room" ? archive.session.roomTotalHigh : archive.session.sessionHighs[metric].value,
+      mean: coveredMs ? weighted / coveredMs : null,
+      tokenShare: registeredWeight ? tokenWeight / registeredWeight * 100 : null,
+      atOrAboveMs,
+      coverage: end ? coveredMs / end * 100 : null
+    };
+  }
+  function summarizeAudience(archive) {
+    const audience = ["room", "total", "withTokens", "anonymous"].map((metric) => __spreadValues({ metric }, summarizeSession(archive, metric)));
+    const [room, registered, tokens, anonymous] = audience;
+    return {
+      audience,
+      tokenShareRegistered: registered.tokenShare,
+      tokenShareRoom: room.mean && tokens.mean !== null ? tokens.mean / room.mean * 100 : null,
+      anonymousShareRoom: room.mean && anonymous.mean !== null ? anonymous.mean / room.mean * 100 : null
+    };
+  }
+  var ANALYSIS_MAX_THRESHOLDS = 8;
+  function parseAnalysisThresholds(text) {
+    const parts = text.split(",").map((part) => part.trim());
+    if (!parts.length || parts.length > ANALYSIS_MAX_THRESHOLDS || parts.some((part) => !/^\d+$/.test(part) || !Number.isSafeInteger(Number(part)))) {
+      throw new Error("Enter 1–" + ANALYSIS_MAX_THRESHOLDS + " non-negative whole numbers separated by commas, without thousands separators.");
+    }
+    return [...new Set(parts.map(Number))].sort((a, b) => a - b);
+  }
+  function summarizeThresholds(archive, metric, thresholds) {
+    if (!thresholds.length || thresholds.length > ANALYSIS_MAX_THRESHOLDS || thresholds.some((value) => !Number.isSafeInteger(value) || value < 0)) {
+      throw new Error("Invalid analysis thresholds.");
+    }
+    return thresholds.map((threshold) => {
+      const summary = summarizeSession(archive, metric, threshold);
+      return {
+        threshold,
+        durationMs: summary.coveredMs ? summary.atOrAboveMs : null,
+        percent: summary.coveredMs ? summary.atOrAboveMs / summary.coveredMs * 100 : null
+      };
+    });
+  }
+  function compareSessions(a, b, metric = "room", threshold = 100, sharedLength = true) {
+    const sa = analysisSeries(a, metric), sb = analysisSeries(b, metric);
+    const spanA = sa.times.length ? sa.times[sa.times.length - 1] : 0;
+    const spanB = sb.times.length ? sb.times[sb.times.length - 1] : 0;
+    const limitMs = sharedLength ? Math.min(spanA, spanB) : Infinity;
+    return {
+      a: summarizeSession(a, metric, threshold, limitMs),
+      b: summarizeSession(b, metric, threshold, limitMs),
+      limitMs,
+      axisMs: sharedLength ? limitMs : Math.max(spanA, spanB)
+    };
+  }
+
+  // src/session-tools.js
+  var closeSessionTools = null;
+  var replayKeepState = { archive: null, label: "Keep in library", message: "" };
+  function updateReplayLibraryButton() {
+    const button = document.getElementById("btn-playback-keep-library");
+    if (!button) return;
+    const archive = isPlaybackCurrent(runtime.playback) ? runtime.playback.archive : null;
+    if (replayKeepState.archive !== archive) replayKeepState = { archive, label: "Keep in library", message: "" };
+    button.disabled = !archive;
+    if (button.textContent !== replayKeepState.label) button.textContent = replayKeepState.label;
+    const title = replayKeepState.message || "Keep the full replayed recording in this browser's library";
+    if (button.title !== title) button.title = title;
+    const label = replayKeepState.label + ". " + title;
+    if (button.getAttribute("aria-label") !== label) button.setAttribute("aria-label", label);
+  }
+  function keepReplayInLibrary() {
+    if (!isPlaybackCurrent(runtime.playback) || !runtime.playback.archive) return;
+    const archive = runtime.playback.archive;
+    try {
+      const result = keepSessionInLibrary(archive);
+      replayKeepState = {
+        archive,
+        label: result.added ? "Kept in library" : result.updated ? "Updated library" : "Already kept",
+        message: archive.room + ": " + (result.added ? "Full recording kept in the library." : result.updated ? "Library recording updated; its name was preserved." : "An equal or fuller recording is already in the library.")
+      };
+    } catch (error) {
+      replayKeepState = { archive, label: "Retry keep", message: "Could not keep this recording: " + error.message };
+      alert(replayKeepState.message);
+    }
+    updateReplayLibraryButton();
+  }
+  function updateSessionToolsStatus() {
+    updateReplayLibraryButton();
+    const element = document.getElementById("session-save-info");
+    if (!element) return;
+    const state = getSessionSaveState(getModelName());
+    const warning = state.error || runtime.sessionStorageNotice;
+    element.textContent = warning ? "Session saving unavailable. Keep this tab open or download a session file." : state.savedAt ? "Session saved in this browser at " + new Date(state.savedAt).toLocaleTimeString() + "." : "No session saved in this tab yet.";
+    element.style.color = warning ? "var(--panel-warning)" : "var(--panel-muted)";
+  }
+  function bindSessionTools(menu) {
+    document.getElementById("btn-playback-keep-library").onclick = keepReplayInLibrary;
+    const libraryButton = document.getElementById("btn-control-library");
+    libraryButton.onclick = () => openSessionTools(libraryButton);
+    const button = document.createElement("button");
+    button.id = "btn-session-tools";
+    button.type = "button";
+    button.textContent = "Session library, analysis & backup…";
+    button.style.cssText = "display:block;width:100%;margin:8px 0 4px;padding:5px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:3px;cursor:pointer;";
+    button.onclick = () => {
+      menu.style.display = "none";
+      document.getElementById("btn-panel-options").setAttribute("aria-expanded", "false");
+      openSessionTools();
+    };
+    menu.appendChild(button);
+    const status = document.createElement("div");
+    status.id = "session-save-info";
+    status.setAttribute("role", "status");
+    status.style.cssText = "font-size:10px;line-height:1.4;margin-top:6px;";
+    menu.appendChild(status);
+    menu.style.maxHeight = "75vh";
+    menu.style.overflowY = "auto";
+    updateSessionToolsStatus();
+    return () => {
+      if (closeSessionTools) closeSessionTools();
+    };
+  }
+  function openSessionTools(focusTarget) {
+    if (closeSessionTools) closeSessionTools();
+    const origin = location.href, generation = runtime.initGuard, focusBefore = focusTarget || document.getElementById("btn-panel-options") || document.activeElement;
+    const dialog = document.createElement("dialog");
+    dialog.id = "tierscope-session-tools";
+    dialog.setAttribute("aria-labelledby", "tools-title");
+    dialog.style.cssText = "box-sizing:border-box;width:min(780px,94vw);max-height:90vh;padding:20px;border:1px solid #ff69b4;border-radius:10px;background:var(--panel-solid);color:var(--panel-text);font:14px/1.5 Arial,sans-serif;overflow:auto;";
+    setThemeVariables(dialog);
+    dialog.innerHTML = '<style>#tierscope-session-tools::backdrop{background:#0009}#tierscope-session-tools *{box-sizing:border-box}#tierscope-session-tools button,#tierscope-session-tools select,#tierscope-session-tools input{font:inherit;color:var(--panel-text);background:var(--panel-button);border:1px solid var(--panel-divider);border-radius:5px;padding:5px 8px;max-width:100%}#tierscope-session-tools button{cursor:pointer}#tierscope-session-tools button:disabled{opacity:.5;cursor:default}#tierscope-session-tools button:focus-visible,#tierscope-session-tools select:focus-visible,#tierscope-session-tools input:focus-visible{outline:2px solid #ff69b4;outline-offset:2px}#tierscope-session-tools button[aria-pressed=true]{border-color:#ff69b4}#tierscope-session-tools .tools-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:12px 0}#tierscope-session-tools .tools-muted{color:var(--panel-muted);font-size:12px}#tierscope-session-tools .tools-row{border-top:1px solid var(--panel-divider);padding:12px 0;overflow-wrap:anywhere}#tierscope-session-tools table{width:100%;border-collapse:collapse;font-size:13px}#tierscope-session-tools th,#tierscope-session-tools td{text-align:left;padding:7px;border-bottom:1px solid var(--panel-divider)}#tierscope-session-tools caption{text-align:left;font-weight:bold;padding:8px 0}#tierscope-session-tools .tools-scroll{overflow-x:auto}#tierscope-session-tools canvas{display:block;width:100%;height:240px}#tierscope-session-tools label{display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap;min-width:0;max-width:100%}#tierscope-session-tools h3{font-size:16px;margin:12px 0}</style><div class="tools-actions" style="justify-content:space-between;margin-top:0"><h2 id="tools-title" style="font-size:20px;margin:0">Session tools</h2><button id="tools-close" aria-label="Close session tools">Close</button></div><nav class="tools-actions" aria-label="Session tools"><button data-tools-tab="library">Library</button><button data-tools-tab="summary">Summary</button><button data-tools-tab="compare">Compare</button><button data-tools-tab="backup">Backup &amp; restore</button></nav><div id="tools-message" role="status" aria-live="polite" style="white-space:pre-line;overflow-wrap:anywhere"></div><div id="tools-content"></div>';
+    document.body.appendChild(dialog);
+    let currentArchive = null, library = null, tab = "library", fileRequest = 0, chartObserver = null;
+    let selectedA = "current", selectedB = "", metric = "room", threshold = 100, sharedLength = true, pendingBackup = null;
+    let summaryThresholds = [25, 50, 100], libraryRoom = null;
+    try {
+      currentArchive = captureSessionFile();
+    } catch (error) {
+    }
+    const content = dialog.querySelector("#tools-content"), message = dialog.querySelector("#tools-message");
+    const current = () => dialog.isConnected && dialog.open && origin === location.href && generation === runtime.initGuard;
+    function tell(text, error = false) {
+      message.textContent = text;
+      message.style.color = error ? "var(--panel-negative)" : "var(--panel-positive)";
+    }
+    function action(fn) {
+      return () => {
+        try {
+          fn();
+        } catch (error) {
+          tell(error.message, true);
+        }
+      };
+    }
+    function button(parent, text, fn, id) {
+      const element = document.createElement("button");
+      element.type = "button";
+      element.textContent = text;
+      if (id) element.id = id;
+      element.onclick = action(fn);
+      parent.appendChild(element);
+      return element;
+    }
+    function node(parent, tag, text, className) {
+      const element = document.createElement(tag);
+      if (text !== void 0) element.textContent = text;
+      if (className) element.className = className;
+      parent.appendChild(element);
+      return element;
+    }
+    function chooseFile(maxBytes, accept) {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = ".json,application/json";
+      input.hidden = true;
+      const request = ++fileRequest;
+      dialog.appendChild(input);
+      input.onchange = async () => {
+        const file = input.files && input.files[0];
+        if (!file) {
+          input.remove();
+          return;
+        }
+        try {
+          const value = await readDataFile(file, maxBytes);
+          if (current() && request === fileRequest) accept(value);
+        } catch (error) {
+          if (current() && request === fileRequest) tell(error.message, true);
+        } finally {
+          input.remove();
+        }
+      };
+      input.addEventListener("cancel", () => input.remove(), { once: true });
+      input.click();
+    }
+    function readLibrary() {
+      library = readSessionLibrary();
+      return library;
+    }
+    function sourceOptions() {
+      const items = [];
+      if (currentArchive) items.push({ id: "current", title: "Current / replayed snapshot — " + currentArchive.room, archive: currentArchive });
+      for (const entry of library.entries) items.push({ id: entry.id, title: (entry.title || entry.archive.room) + " — " + new Date(entry.archive.session.history.timestamps[0]).toLocaleString(), archive: entry.archive });
+      return items;
+    }
+    function selectSource(parent, label, id, selected, changed) {
+      const wrapper = node(parent, "label", label), select = node(wrapper, "select");
+      select.id = id;
+      for (const item of sourceOptions()) {
+        const option = node(select, "option", item.title);
+        option.value = item.id;
+      }
+      if (sourceOptions().some((item) => item.id === selected)) select.value = selected;
+      select.onchange = () => changed(select.value);
+      return select.value;
+    }
+    function renderLibrary() {
+      const state = readLibrary();
+      const folders = /* @__PURE__ */ new Map();
+      for (const entry of state.entries) {
+        const room = entry.archive.room.toLowerCase();
+        if (!folders.has(room)) folders.set(room, []);
+        folders.get(room).push(entry);
+      }
+      if (libraryRoom && !folders.has(libraryRoom)) libraryRoom = null;
+      node(content, "p", state.count + " / " + LIBRARY_MAX_COUNT + " recordings · " + (state.bytes / 1024 / 1024).toFixed(2) + " / " + LIBRARY_MAX_BYTES / 1024 / 1024 + " MB. Kept until you delete them; nothing is removed automatically.", "tools-muted");
+      const actions = node(content, "div", void 0, "tools-actions");
+      button(actions, "Keep current / replayed session in library", () => {
+        const archive = captureSessionFile();
+        const result = keepSessionInLibrary(archive);
+        currentArchive = archive;
+        libraryRoom = archive.room.toLowerCase();
+        render("library");
+        tell(result.added ? "Recording kept in the library." : result.updated ? "Library recording updated." : "An equal or fuller recording is already in the library.");
+      }, "tools-keep").disabled = !currentArchive;
+      button(actions, "Import session file…", () => chooseFile(runtime.SESSION_FILE_MAX_BYTES, (value) => {
+        const archive = validateSessionFile(value), result = keepSessionInLibrary(archive);
+        libraryRoom = archive.room.toLowerCase();
+        render("library");
+        tell(result.added ? "Recording imported into the library." : result.updated ? "Library recording updated from the file." : "An equal or fuller recording is already in the library.");
+      }), "tools-import-session");
+      button(actions, "Refresh list", () => render("library"));
+      const searchLabel = node(content, "label", "Find a recording "), search = node(searchLabel, "input");
+      search.type = "search";
+      search.id = "tools-library-search";
+      search.placeholder = "Model or title — all models";
+      search.title = "Search all recordings, including those in other model folders.";
+      const list = node(content, "div");
+      list.id = "tools-library-list";
+      let shown = 50;
+      function rows() {
+        list.replaceChildren();
+        const query = search.value.trim().toLowerCase();
+        const browsingFolders = !query && !libraryRoom;
+        const visible = query ? state.entries.filter((entry) => (entry.title + " " + entry.archive.room).toLowerCase().includes(query)) : libraryRoom ? folders.get(libraryRoom) : [...folders.keys()].sort((a, b) => a.localeCompare(b));
+        const heading = node(list, "div", void 0, "tools-actions");
+        if (!browsingFolders) button(heading, "All models", () => {
+          const previous = libraryRoom;
+          libraryRoom = null;
+          search.value = "";
+          shown = 50;
+          rows();
+          (document.getElementById("tools-folder-" + previous) || search).focus();
+        }, "tools-library-all-models");
+        node(heading, "h3", query ? "Search results — all models" : libraryRoom ? "Folder: " + libraryRoom : "Model folders");
+        if (browsingFolders) node(list, "p", folders.size + " model folder(s). Open a folder to see its recordings, newest first.", "tools-muted");
+        if (!visible.length) node(list, "p", state.entries.length ? "No matching recordings." : "No recordings yet. Keep a session or import a session file.");
+        if (browsingFolders) for (const room of visible.slice(0, shown)) {
+          const entries = folders.get(room), row = node(list, "div", void 0, "tools-folder");
+          row.style.cssText = "border-top:1px solid var(--panel-divider);padding:12px 0;overflow-wrap:anywhere;";
+          const open = button(row, "📁 " + room, () => {
+            libraryRoom = room;
+            shown = 50;
+            rows();
+            document.getElementById("tools-library-all-models").focus();
+          }, "tools-folder-" + room);
+          open.setAttribute("aria-label", "Open recordings for " + room);
+          node(row, "div", entries.length + (entries.length === 1 ? " recording" : " recordings") + " · Latest: " + new Date(entries[0].archive.session.history.timestamps[0]).toLocaleString(), "tools-muted");
+        }
+        else for (const entry of visible.slice(0, shown)) {
+          const row = node(list, "div", void 0, "tools-row");
+          row.dataset.libraryId = entry.id;
+          node(row, "strong", entry.title || entry.archive.room);
+          node(row, "div", entry.archive.room + " · " + new Date(entry.archive.session.history.timestamps[0]).toLocaleString() + " · " + entry.archive.session.history.timestamps.length + " samples", "tools-muted");
+          const actions2 = node(row, "div", void 0, "tools-actions");
+          button(actions2, "Replay", () => {
+            openSessionReplay(entry.archive);
+            close();
+          });
+          button(actions2, "Summary", () => {
+            selectedA = entry.id;
+            render("summary");
+          });
+          button(actions2, "Download", () => downloadDataFile(entry.archive, entry.archive.room + "-session.tierscope.json"));
+          button(actions2, "Rename", () => {
+            const title = window.prompt("Recording title (up to 80 characters):", entry.title);
+            if (title !== null) {
+              renameLibrarySession(entry.id, title);
+              render("library");
+            }
+          });
+          button(actions2, "Delete", () => {
+            if (!confirm("Delete this library recording: " + (entry.title || entry.archive.room) + "?\n\nLive tracking, ATH and downloaded files are unchanged.")) return;
+            removeLibrarySession(entry.id);
+            render("library");
+            tell("Library recording deleted.");
+          });
+        }
+        if (visible.length > 50) node(list, "p", "Showing " + Math.min(shown, visible.length) + " of " + visible.length + (browsingFolders ? " model folders." : " matching recordings."), "tools-muted");
+        if (shown < visible.length) button(list, "Show " + Math.min(50, visible.length - shown) + " more", () => {
+          shown += 50;
+          rows();
+          (document.getElementById("tools-library-more") || search).focus();
+        }, "tools-library-more");
+      }
+      search.oninput = () => {
+        shown = 50;
+        rows();
+      };
+      rows();
+      if (state.damaged.length) {
+        node(content, "p", state.damaged.length + " unreadable library record(s) were retained.", "tools-muted");
+        button(content, "Remove unreadable library records…", () => {
+          if (!confirm("Delete the " + state.damaged.length + " unreadable library record(s)? This cannot be undone.")) return;
+          for (const key of state.damaged) removeLibrarySession(key.slice(LIBRARY_PREFIX.length));
+          render("library");
+        });
+      }
+    }
+    function analysisControls(comparing) {
+      if (!library) readLibrary();
+      if (!sourceOptions().length) {
+        node(content, "p", "Record a session or import one into the library to see analysis.");
+        return null;
+      }
+      const controls = node(content, "div", void 0, "tools-actions");
+      if (currentArchive) button(controls, "Refresh current / replayed snapshot", () => {
+        currentArchive = captureSessionFile();
+        render(tab);
+      }, "tools-refresh-snapshot");
+      selectedA = selectSource(controls, comparing ? "A " : "Recording ", "tools-source-a", selectedA, (value) => {
+        selectedA = value;
+        render(tab);
+      });
+      if (comparing) {
+        if (!sourceOptions().some((item) => item.id === selectedB)) selectedB = (sourceOptions().find((item) => item.id !== selectedA) || sourceOptions()[0]).id;
+        selectedB = selectSource(controls, "B ", "tools-source-b", selectedB, (value) => {
+          selectedB = value;
+          render(tab);
+        });
+      }
+      const label = node(controls, "label", "Metric "), metricSelect = node(label, "select");
+      metricSelect.id = "tools-metric";
+      for (const [key, name] of Object.entries(ANALYSIS_METRICS)) {
+        const option = node(metricSelect, "option", name);
+        option.value = key;
+      }
+      metricSelect.value = metric;
+      metricSelect.onchange = () => {
+        metric = metricSelect.value;
+        render(tab);
+      };
+      const thresholdLabel = node(controls, "label", comparing ? "Threshold " : "Thresholds "), input = node(thresholdLabel, "input");
+      input.id = "tools-threshold";
+      input.style.width = comparing ? "105px" : "200px";
+      if (comparing) {
+        input.type = "number";
+        input.min = "0";
+        input.max = "9007199254740991";
+        input.step = "1";
+        input.value = threshold;
+      } else {
+        input.type = "text";
+        input.maxLength = 160;
+        input.value = summaryThresholds.join(", ");
+        input.placeholder = "25, 50, 100";
+        input.title = "Up to 8 counts separated by commas. Applies to the selected metric.";
+      }
+      input.oninput = () => input.setCustomValidity("");
+      function applyThreshold() {
+        try {
+          if (comparing) {
+            if (!Number.isSafeInteger(input.valueAsNumber) || input.valueAsNumber < 0) throw new Error("Enter a non-negative whole number.");
+            threshold = input.valueAsNumber;
+          } else summaryThresholds = parseAnalysisThresholds(input.value);
+        } catch (error) {
+          input.setCustomValidity(error.message);
+          input.reportValidity();
+          return;
+        }
+        input.setCustomValidity("");
+        render(tab);
+      }
+      input.onkeydown = (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          applyThreshold();
+        }
+      };
+      button(controls, comparing ? "Apply threshold" : "Apply thresholds", applyThreshold, "tools-apply-threshold");
+      if (comparing) {
+        const label2 = node(controls, "label"), check = node(label2, "input");
+        check.type = "checkbox";
+        check.checked = sharedLength;
+        check.id = "tools-shared-length";
+        node(label2, "span", "Match shared length");
+        check.onchange = () => {
+          sharedLength = check.checked;
+          render(tab);
+        };
+      }
+      node(content, "p", "Aligned from the first retained sample, using real elapsed time. Averages and threshold durations hold each sample until the next; recording gaps are excluded. The final sample has no assumed duration.", "tools-muted");
+      if (comparing) node(content, "p", "A: " + sourceOptions().find((item) => item.id === selectedA).title + " · B: " + sourceOptions().find((item) => item.id === selectedB).title, "tools-muted");
+      return sourceOptions();
+    }
+    const number = (value) => value === null ? "Not enough data" : value.toLocaleString(void 0, { maximumFractionDigits: 1 });
+    const percent = (value) => value === null ? "Not enough data" : number(value) + "%";
+    function audienceOverview(archive) {
+      const overview = summarizeAudience(archive), coverage = overview.audience[0];
+      node(content, "h3", "Audience overview");
+      node(content, "p", archive.room + " · " + coverage.samples + " samples · Covered time " + formatElapsedTime(coverage.coveredMs) + " · Excluded gaps " + formatElapsedTime(coverage.gapMs) + " · Coverage " + percent(coverage.coverage), "tools-muted");
+      const scroll = node(content, "div", void 0, "tools-scroll"), table = node(scroll, "table");
+      table.id = "tools-audience-table";
+      node(table, "caption", "Audience across the retained recording");
+      const head = node(node(table, "thead"), "tr");
+      ["Audience", "Time-weighted average", "Peak in recording", "Full-session high"].forEach((label) => {
+        node(head, "th", label).scope = "col";
+      });
+      const body = node(table, "tbody");
+      for (const summary of overview.audience) {
+        const row = node(body, "tr");
+        node(row, "th", ANALYSIS_METRICS[summary.metric]).scope = "row";
+        node(row, "td", number(summary.mean));
+        const peak = node(row, "td", number(summary.peak));
+        if (summary.peakTime !== null) peak.title = "First recorded at " + new Date(summary.peakTime).toLocaleString();
+        node(row, "td", number(summary.sessionPeak));
+      }
+      node(content, "p", "Room audience = registered + anonymous viewers. A full-session high may predate retained history. Hover a recording peak for its first recorded time.", "tools-muted");
+      const shares = node(content, "div");
+      shares.id = "tools-audience-shares";
+      node(shares, "h3", "Audience proportions");
+      node(shares, "p", "Token holders / registered viewers: " + percent(overview.tokenShareRegistered));
+      node(shares, "p", "Token holders / whole room: " + percent(overview.tokenShareRoom));
+      node(shares, "p", "Anonymous / whole room: " + percent(overview.anonymousShareRoom));
+      node(shares, "p", "Shares use viewer-time over covered intervals. A crowded interval contributes more than a quiet interval of the same length; gaps contribute nothing.", "tools-muted");
+    }
+    function thresholdTable(archive) {
+      const scroll = node(content, "div", void 0, "tools-scroll"), table = node(scroll, "table");
+      table.id = "tools-threshold-table";
+      node(table, "caption", ANALYSIS_METRICS[metric] + " — time at or above selected thresholds");
+      const head = node(node(table, "thead"), "tr");
+      ["Threshold", "Time at or above", "% of covered time"].forEach((label) => {
+        node(head, "th", label).scope = "col";
+      });
+      const body = node(table, "tbody");
+      for (const result of summarizeThresholds(archive, metric, summaryThresholds)) {
+        const row = node(body, "tr");
+        node(row, "th", number(result.threshold)).scope = "row";
+        node(row, "td", result.durationMs === null ? "Not enough data" : formatElapsedTime(result.durationMs));
+        node(row, "td", percent(result.percent));
+      }
+      node(content, "p", "Includes samples equal to the threshold. Percentages use covered recording time; gaps and time after the final sample are excluded.", "tools-muted");
+    }
+    function summaryTable(summaries, labels, comparing = true) {
+      const scroll = node(content, "div", void 0, "tools-scroll"), table = node(scroll, "table");
+      table.id = "tools-summary-table";
+      node(table, "caption", ANALYSIS_METRICS[metric] + " — retained recording statistics");
+      const head = node(table, "thead"), headRow = node(head, "tr");
+      node(headRow, "th", "Measure");
+      labels.forEach((label) => node(headRow, "th", label));
+      const body = node(table, "tbody");
+      const rows = [
+        ["Samples in range", (s) => number(s.samples)],
+        ["Elapsed span", (s) => formatElapsedTime(s.spanMs)],
+        ["Covered recording time", (s) => formatElapsedTime(s.coveredMs)],
+        ["Excluded gaps", (s) => formatElapsedTime(s.gapMs)],
+        ["Coverage", (s) => s.coverage === null ? "Not enough data" : number(s.coverage) + "%"],
+        ["Time-weighted average", (s) => number(s.mean)],
+        ["Peak in range", (s) => number(s.peak)],
+        ["Full-session high", (s) => number(s.sessionPeak)],
+        ["Token-holder share of registered viewers", (s) => s.tokenShare === null ? "Not enough data" : number(s.tokenShare) + "%"]
+      ];
+      if (comparing) rows.push(["Time at or above " + threshold.toLocaleString(), (s) => s.coveredMs ? formatElapsedTime(s.atOrAboveMs) : "Not enough data"]);
+      for (const [label, value] of rows) {
+        const row = node(body, "tr");
+        const cell = node(row, "th", label);
+        cell.scope = "row";
+        summaries.forEach((summary) => node(row, "td", value(summary)));
+      }
+      node(content, "p", "The full-session high can predate retained history and is not limited by “Match shared length.” Token-holder share is weighted by recorded registered-viewer time.", "tools-muted");
+    }
+    function chart(archives, labels, endMs) {
+      const legend = node(content, "p", labels.map((label, i) => (i ? "B (dashed blue): " : "A (pink): ") + label).join(" · "), "tools-muted");
+      const canvas = node(content, "canvas");
+      canvas.id = "tools-analysis-chart";
+      canvas.setAttribute("role", "img");
+      canvas.setAttribute("aria-label", ANALYSIS_METRICS[metric] + " by minutes since the first retained sample. " + legend.textContent + ". Statistics are in the table below.");
+      function draw() {
+        const width = Math.max(260, canvas.clientWidth), height = 240, ratio = window.devicePixelRatio || 1;
+        canvas.width = width * ratio;
+        canvas.height = height * ratio;
+        const ctx = canvas.getContext("2d");
+        ctx.scale(ratio, ratio);
+        const series = archives.map((archive) => analysisSeries(archive, metric));
+        let max = 1;
+        series.forEach((s) => s.values.forEach((value, i) => {
+          if (s.times[i] <= endMs) max = Math.max(max, value);
+        }));
+        const left = 58, top = 16, right = width - 12, bottom = height - 38, span = endMs || 1;
+        ctx.strokeStyle = runtime.isDarkMode ? "#686875" : "#b6bdca";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(left, top);
+        ctx.lineTo(left, bottom);
+        ctx.lineTo(right, bottom);
+        ctx.stroke();
+        ctx.fillStyle = runtime.isDarkMode ? "#ddd" : "#41485a";
+        ctx.font = "11px Arial";
+        ctx.textAlign = "left";
+        ctx.fillText(number(max), 2, top + 8);
+        ctx.fillText("0", 30, bottom);
+        ctx.fillText("0m", left, bottom + 19);
+        ctx.textAlign = "right";
+        ctx.fillText(number(endMs / 6e4) + "m", right, bottom + 19);
+        series.forEach((s, j) => {
+          ctx.strokeStyle = j ? runtime.isDarkMode ? "#79baff" : "#175db0" : runtime.isDarkMode ? "#ff69b4" : "#b42370";
+          ctx.lineWidth = 2;
+          ctx.setLineDash(j ? [6, 4] : []);
+          ctx.beginPath();
+          const isolated = [];
+          let previousX = null, previousY = null;
+          for (let i = 0; i < s.times.length && s.times[i] <= endMs; i++) {
+            const x = left + s.times[i] / span * (right - left), y = bottom - s.values[i] / max * (bottom - top);
+            if (previousX === null || s.breaks[i]) ctx.moveTo(x, y);
+            else {
+              ctx.lineTo(x, previousY);
+              ctx.lineTo(x, y);
+            }
+            previousX = x;
+            previousY = y;
+            if ((i === 0 || s.breaks[i]) && (i + 1 === s.times.length || s.breaks[i + 1] || s.times[i + 1] > endMs)) isolated.push([x, y]);
+            if (i + 1 < s.times.length && s.times[i + 1] > endMs && !s.breaks[i + 1]) ctx.lineTo(right, y);
+          }
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.fillStyle = ctx.strokeStyle;
+          isolated.forEach(([x, y]) => {
+            ctx.beginPath();
+            ctx.arc(x, y, 3, 0, Math.PI * 2);
+            ctx.fill();
+          });
+        });
+      }
+      draw();
+      if (window.ResizeObserver) {
+        chartObserver = new window.ResizeObserver(draw);
+        chartObserver.observe(canvas);
+      }
+    }
+    function renderAnalysis(comparing) {
+      const options = analysisControls(comparing);
+      if (!options) return;
+      const a = options.find((item) => item.id === selectedA), b = options.find((item) => item.id === selectedB);
+      if (comparing) {
+        if (a.id === b.id) node(content, "p", "Choose a second recording to make a comparison.", "tools-muted");
+        const result = compareSessions(a.archive, b.archive, metric, threshold, sharedLength);
+        chart([a.archive, b.archive], [a.archive.room, b.archive.room], result.axisMs);
+        summaryTable([result.a, result.b], ["A", "B"]);
+      } else {
+        const summary = summarizeSession(a.archive, metric, threshold);
+        audienceOverview(a.archive);
+        thresholdTable(a.archive);
+        node(content, "h3", ANALYSIS_METRICS[metric] + " — chart and details");
+        chart([a.archive], [a.archive.room], summary.spanMs);
+        summaryTable([summary], [a.archive.room], false);
+      }
+    }
+    function checkbox(parent, id, text, checked = true) {
+      const label = node(parent, "label"), input = node(label, "input");
+      input.type = "checkbox";
+      input.id = id;
+      input.checked = checked;
+      node(label, "span", text);
+      return input;
+    }
+    function renderBackup() {
+      node(content, "h3", "Back up this browser");
+      node(content, "p", "Download ATH for every room and your saved preferences: theme, panel size/position, collapsed rows, compact metric, chart window and SH/ATH mode. Keep this file somewhere safe. Session-only controls such as the scan interval are not saved preferences.", "tools-muted");
+      const include = checkbox(content, "tools-backup-library", "Include library recordings");
+      const actions = node(content, "div", void 0, "tools-actions");
+      button(actions, "Download backup", () => {
+        downloadDataFile(createTierScopeBackup(include.checked), "TierScope-backup-" + (/* @__PURE__ */ new Date()).toISOString().slice(0, 10) + ".json");
+        tell("Backup download requested. Check your browser downloads.");
+      }, "tools-backup-download");
+      node(content, "h3", "Restore a backup");
+      node(content, "p", "ATH is merged without lowering existing records. New library sessions are added; fuller versions of the same session update its entry and keep its name. Saved preferences take effect after refreshing your room tabs.", "tools-muted");
+      button(content, "Choose backup…", () => {
+        pendingBackup = null;
+        render("backup");
+        chooseFile(BACKUP_MAX_BYTES, (value) => {
+          pendingBackup = validateTierScopeBackup(value);
+          render("backup");
+          tell("Backup validated. Review the contents and choose what to restore.");
+        });
+      }, "tools-backup-open");
+      if (pendingBackup) {
+        node(content, "p", pendingBackup.rooms.length + " rooms · " + Object.keys(pendingBackup.preferences).length + " saved preferences · " + pendingBackup.library.length + " recordings", "tools-muted");
+        const choices = node(content, "div", void 0, "tools-actions");
+        const highs = checkbox(choices, "tools-restore-highs", "Merge ATH"), preferences = checkbox(choices, "tools-restore-preferences", "Restore preferences"), recordings = checkbox(choices, "tools-restore-library", "Add library recordings");
+        button(content, "Restore selected data", () => {
+          if (!highs.checked && !preferences.checked && !recordings.checked) throw new Error("Choose at least one kind of data to restore.");
+          if (!confirm("Restore the selected backup data?\n\nATH will be merged, library recordings added or updated with fuller versions, and selected saved preferences replaced. Your live session is not replaced.")) return;
+          const result = restoreTierScopeBackup(pendingBackup, { highs: highs.checked, preferences: preferences.checked, library: recordings.checked });
+          library = null;
+          if (runtime.playback) runtime.playback.allTimeState = readAllTimeHighs(displayedHighRoom());
+          repaintHighMode();
+          tell("Restored: " + result.rooms + " room ATH updates, " + result.recordings + " new recordings, " + result.updatedRecordings + " updated recordings, " + result.preferences + " preferences." + (result.preferences ? "\nRefresh your room tabs when convenient to apply preferences." : ""));
+        }, "tools-backup-restore");
+      }
+    }
+    function render(next) {
+      const focusedId = dialog.contains(document.activeElement) ? document.activeElement.id : "";
+      if (next !== tab) library = null;
+      tab = next;
+      fileRequest++;
+      if (chartObserver) {
+        chartObserver.disconnect();
+        chartObserver = null;
+      }
+      content.replaceChildren();
+      message.textContent = "";
+      dialog.querySelectorAll("[data-tools-tab]").forEach((button2) => button2.setAttribute("aria-pressed", String(button2.dataset.toolsTab === tab)));
+      try {
+        if (tab === "library") renderLibrary();
+        else if (tab === "backup") renderBackup();
+        else renderAnalysis(tab === "compare");
+      } catch (error) {
+        tell(error.message, true);
+      }
+      if (focusedId) {
+        const target = document.getElementById(focusedId);
+        if (target && dialog.contains(target)) target.focus();
+      }
+    }
+    function close() {
+      fileRequest++;
+      if (chartObserver) chartObserver.disconnect();
+      if (dialog.open) dialog.close();
+      dialog.remove();
+      if (closeSessionTools === close) closeSessionTools = null;
+      if (focusBefore && focusBefore.isConnected) focusBefore.focus();
+    }
+    closeSessionTools = close;
+    dialog.querySelector("#tools-close").onclick = close;
+    dialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      close();
+    });
+    dialog.addEventListener("close", () => {
+      if (dialog.isConnected) close();
+    });
+    dialog.querySelectorAll("[data-tools-tab]").forEach((button2) => {
+      button2.onclick = () => render(button2.dataset.toolsTab);
+    });
+    dialog.showModal();
+    render("library");
+  }
+
   // src/files.js
   function setChartWindow(value) {
     if (!hasStorageField(runtime.CHART_WINDOWS, value)) return;
@@ -3218,6 +4313,7 @@ underlying system, so should run in the browser, Node, or Plask.
     }
   }
   function updatePanelOptions() {
+    updateSessionToolsStatus();
     updateHighControls();
     var button = document.getElementById("btn-panel-options");
     if (button) {
@@ -3240,6 +4336,7 @@ underlying system, so should run in the browser, Node, or Plask.
   }
   function bindPanelOptions() {
     var button = document.getElementById("btn-panel-options"), menu = document.getElementById("panel-options");
+    var cleanupSessionTools = bindSessionTools(menu);
     var input = document.getElementById("session-file-input");
     function close(focus) {
       menu.style.display = "none";
@@ -3300,6 +4397,7 @@ underlying system, so should run in the browser, Node, or Plask.
     document.addEventListener("pointerdown", outside);
     document.addEventListener("keydown", escape, true);
     runtime.panelOptionsCleanup = function() {
+      cleanupSessionTools();
       document.removeEventListener("pointerdown", outside);
       document.removeEventListener("keydown", escape, true);
     };
@@ -3634,6 +4732,7 @@ underlying system, so should run in the browser, Node, or Plask.
   function updateMiniFreshness() {
     var el = document.getElementById("mini-freshness");
     if (!el) return;
+    if (showSessionSaveWarning(el, getModelName())) return;
     if (runtime.isStopped) {
       el.textContent = "Stopped";
       el.title = stopDescription() + ". Start begins a new session.";
@@ -5064,7 +6163,7 @@ underlying system, so should run in the browser, Node, or Plask.
   }
 
   // src/gif.js
-  var import_omggif = __toESM(require_omggif());
+  var import_omggif = __toESM(require_omggif(), 1);
   function createGifSurface(palette) {
     var canvas = document.createElement("canvas");
     canvas.width = runtime.GIF_WIDTH;
@@ -5544,7 +6643,7 @@ underlying system, so should run in the browser, Node, or Plask.
   // src/runtime.js
   var runtime = {};
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.5.0";
+    runtime.TIERSCOPE_VERSION = "3.6.0";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;

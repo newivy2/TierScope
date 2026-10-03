@@ -19,6 +19,7 @@ Individual commands:
 
 ```sh
 npm run build:check
+npm run typecheck
 npm run test:unit
 npm run test:browser
 npm run test:firefox
@@ -35,7 +36,12 @@ npm run test:performance
 
 | Test | What it verifies |
 | --- | --- |
-| Modular build | The generated userscript matches source and version metadata; 191 unchanged extracted functions and startup initialization match 3.4.0 after state-access normalization; five documented 3.5.0 fixes have behavioral coverage. Explicit imports, bundled encoder license, only the intended metadata removals, no runtime module imports or shipped page/test API. |
+| Modular build | The generated userscript matches source and version metadata; 185 unchanged extracted functions and startup initialization match 3.4.0 after state-access normalization; eleven documented 3.5.0/3.6.0 changes have behavioral coverage. Explicit imports, bundled encoder license, only the intended metadata removals, no runtime module imports or shipped page/test API. |
+| Session tools | Real file import, explicit Keep/deduplication, automatic model folders with multiple sessions ordered newest first, global search from inside a folder, incremental display, safe title rendering, rename, confirmed delete, reload and library Replay; audience overview/proportions, peak-time tooltips, multiple threshold input validation and metric changes; backup download, validation preview, cancellation and confirmed restore; restored preferences, visible save errors and retry, dark/bright/narrow layouts, keyboard/focus, unchanged panel geometry/live history and navigation cleanup. |
+| Library updates | Growing sessions replace their logical entry, preserve names, and reject older copies as replacements. Distinct starts or conflicting samples stay separate. History rollover, ambiguous legacy windows, concurrent later-arriving shorter snapshots, retained originals after failed writes/restore, update capacity at 500 entries, and cleanup of redundant versions on rename/delete. |
+| Direct library controls | Library opens every Session tools tab and starts with model folders, with keyboard access and focus returned to its opener. Keep in library works in ordinary/file Replay: Enter/Space, full frozen recording beyond the playhead, correct file room despite background scans, deduplication and growing-session updates, failure/retry, feedback reset for a different file, no ATH writes, unchanged playback/live data, action/clock/timeline bounds and hidden control after leaving Replay. |
+| Library and backup storage | Separate retention through Reset/expiry; 500-record/25 MB bounds, complete 500-record backup round trip, competing tabs, damaged-record preservation; per-room ATH merge without lowering values; allowlisted preferences; library deduplication; full validation/capacity before writes; rollback before/after each failing write and clear incomplete-rollback feedback; cross-tab ATH clear and unsaved local highs. |
+| Session statistics | Direct module tests and JSDoc type checking; time weighting across changing scan intervals, gap exclusion, zero/duplicate/backward timestamps, final-sample bounds, zero totals, clipped comparison intervals, out-of-range peaks and their first recorded times, session-high separation, viewer-time-weighted token/anonymous shares with explicit denominators, and multiple inclusive threshold durations/percentages using covered time. |
 | Session clock | Session start survives repeated pause/resume and reload; active time excludes pauses; reported high offsets use wall time. |
 | Session highs | Values and matching timestamps survive the 10,000-sample rollover, equal highs, lower samples, and reload. Saved highlights use session highs; Replay uses highs through the selected frame. |
 | All-time highs | Accepted live peaks and timestamps; SH/ATH labels, header placement, keyboard and compact controls, mode-specific highlights and pulses; session Reset, Stop/Start and expiry; room isolation and persisted preference; explicit file Add including retained session peaks, idempotence and Replay isolation; concurrent writes/compaction, late writes after Clear, confirmation, corrupt records, failed acquisition/rendering/storage and retry. |

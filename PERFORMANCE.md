@@ -12,3 +12,7 @@ This run reduced mean frame-render time by about 33%. These are local fixture me
 The revised renderer groups dense samples into pixel columns while preserving their first, last, minimum and maximum values in order. Pauses keep separate line segments. Exact sample data remains available to tooltips and exports. Replay frames reference the frozen snapshot instead of allocating copies of every history array, and unchanged frames are not repainted unless the layout changes.
 
 Run `npm run test:performance` to repeat the measurement. `TIERSCOPE_SOURCE` can select an older userscript file for comparison. Browser-launch overrides are described in TESTING.md.
+
+## 3.6.0-beta.1 regression check
+
+The same 120-frame fixture completed in headless Chromium with Node.js 22: mean **3.20 ms**, 95th percentile **4.10 ms**, maximum **7.20 ms**. This is a local rendering check, not a measured improvement over 3.5.0; no paired 3.5.0 run was performed. It does not measure library loading, backup operations or the new analysis dialog.

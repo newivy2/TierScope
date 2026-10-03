@@ -20,11 +20,19 @@ const reviewedChanges = new Set([
   'acquireDOMSnapshot', // tab restoration: browser.cjs
   'generateGifFromHistory', // bundled encoder: gif.test.cjs
   'updateHighControls', // SH/ATH retention explanation: review-regressions.test.cjs
+  'saveSession', // save failure feedback: session-tools.test.cjs
+  'updateAcquisitionStatus', // save failure feedback: session-tools.test.cjs
+  'updateMiniFreshness', // save failure feedback: session-tools-browser.cjs
+  'bindPanelOptions', // session tools entry and cleanup: session-tools-browser.cjs
+  'updatePanelOptions', // save status in options: session-tools-browser.cjs
+  'createPanel', // direct replay Keep in library control: session-files-browser.cjs
 ]);
+const featureModules = new Set(['backup.js', 'data-io.js', 'session-analysis.js', 'session-health.js', 'session-library.js', 'session-tools.js']);
 
-test('all extracted functions except the five covered beta.2 fixes preserve 3.4.0', () => {
+test('unchanged extracted functions preserve 3.4.0; reviewed changes have behavior coverage', () => {
   const actual = {};
-  for (const {ast} of modules) {
+  for (const {file, ast} of modules) {
+    if (featureModules.has(file)) continue;
     for (const node of ast.body) {
       const fn = node.type === 'ExportNamedDeclaration' && node.declaration;
       if (!fn || fn.type !== 'FunctionDeclaration' || fn.id.name === 'initializeRuntime') continue;

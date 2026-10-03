@@ -13,7 +13,7 @@ function harness(storage = new Map(), sourceText = source) {
     let html = '', text = '', id = '';
     const e = {
       tagName: tag.toUpperCase(), style: {setProperty(k,v){ this[k] = v; }}, dataset: {},
-      addEventListener: noop, removeEventListener: noop, setAttribute(k,v){this[k]=v;},
+      addEventListener: noop, removeEventListener: noop, setAttribute(k,v){this[k]=v;},getAttribute(k){return this[k]??null;},
       getBoundingClientRect(){return {x:0,y:0,left:0,top:0,width:280,height:600};},
       appendChild(child){if(child.id) elements.set(child.id,child);}, removeChild: noop,
       querySelector(){return null;}, querySelectorAll(){return [];}, remove(){elements.delete(id);},

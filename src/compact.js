@@ -6,6 +6,7 @@ import { readRequestPolicy, requestPolicyMessage } from './scanning.js';
 import { themeColor } from './theme.js';
 import { getComparisonCounts } from './trends.js';
 import { formatSampleAge, getModelName } from './utils.js';
+import { showSessionSaveWarning } from './session-health.js';
 
 export function compactNumber(value) {
     return value >= 1000000 ? (value / 1000000).toFixed(1).replace(/\.0$/, '') + 'm' :
@@ -15,6 +16,7 @@ export function compactNumber(value) {
 export function updateMiniFreshness() {
     var el = document.getElementById('mini-freshness');
     if (!el) return;
+    if (showSessionSaveWarning(el, getModelName())) return;
     if (runtime.isStopped) {
         el.textContent = 'Stopped'; el.title = stopDescription() + '. Start begins a new session.';
         el.style.color = 'var(--panel-muted)'; return;
