@@ -139,7 +139,9 @@ const injected=source.replaceAll('scheduleInit(2000);','/* test controls initial
  assert.equal((await page.evaluate(()=>ViewerTracker.__test.extra())).index,1);
  await page.evaluate(()=>ViewerTracker.__test.duplicateSamples());
  await page.click('#btn-replay');await page.evaluate(()=>ViewerTracker.__test.pausePlayback());
- await page.click('#playback-previous');assert.equal((await page.evaluate(()=>ViewerTracker.__test.extra())).index,0);
+ assert.equal((await page.evaluate(()=>ViewerTracker.__test.extra())).index,0,'Replay starts at the first sample even when timestamps match');
+ assert.equal(await page.locator('#playback-previous').isDisabled(),true);
+ await page.evaluate(()=>ViewerTracker.__test.step(-1));assert.equal((await page.evaluate(()=>ViewerTracker.__test.extra())).index,0);
  await page.click('#playback-next');assert.equal((await page.evaluate(()=>ViewerTracker.__test.extra())).index,1);
  await page.click('#playback-next');assert.equal((await page.evaluate(()=>ViewerTracker.__test.extra())).index,2);
  assert.equal(await page.locator('#playback-next').isDisabled(),true);
