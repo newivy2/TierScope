@@ -29,13 +29,13 @@ npm run test:performance
 
 ## Tier-map evidence
 
-`tests/fixtures/user-list-tiers.json` is synthetic. Its distinct per-tier counts detect accidental mapping swaps, but do not independently prove the current website protocol. A captured, anonymized `getchatuserlist` response paired with independently checked displayed tier totals is still needed for that gate. No real capture was available for this beta. Unknown codes remain unclassified and appear in diagnostics; this update does not invent new mappings.
+`tests/fixtures/user-list-tiers.json` is synthetic. Its distinct per-tier counts detect accidental mapping swaps, but do not independently prove the current website protocol. A captured, anonymized `getchatuserlist` response paired with independently checked displayed tier totals is still needed for that gate. No real capture was available for release 3.5.0. Unknown codes remain unclassified and appear in diagnostics; this update does not invent new mappings.
 
 ## Coverage
 
 | Test | What it verifies |
 | --- | --- |
-| Modular build | The generated userscript matches source and version metadata; 191 unchanged extracted functions and startup initialization match 3.4.0 after state-access normalization; five documented beta.2 fixes have behavioral coverage. Explicit imports, bundled encoder license, only the intended metadata removals, no runtime module imports or shipped page/test API. |
+| Modular build | The generated userscript matches source and version metadata; 191 unchanged extracted functions and startup initialization match 3.4.0 after state-access normalization; five documented 3.5.0 fixes have behavioral coverage. Explicit imports, bundled encoder license, only the intended metadata removals, no runtime module imports or shipped page/test API. |
 | Session clock | Session start survives repeated pause/resume and reload; active time excludes pauses; reported high offsets use wall time. |
 | Session highs | Values and matching timestamps survive the 10,000-sample rollover, equal highs, lower samples, and reload. Saved highlights use session highs; Replay uses highs through the selected frame. |
 | All-time highs | Accepted live peaks and timestamps; SH/ATH labels, header placement, keyboard and compact controls, mode-specific highlights and pulses; session Reset, Stop/Start and expiry; room isolation and persisted preference; explicit file Add including retained session peaks, idempotence and Replay isolation; concurrent writes/compaction, late writes after Clear, confirmation, corrupt records, failed acquisition/rendering/storage and retry. |

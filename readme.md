@@ -3,12 +3,12 @@
 TierScope is a free, open-source userscript that charts how a Chaturbate room’s audience changes over time. 
 
 ---
-**Beta preview: 3.5.0-beta.2** · [Install this beta](https://raw.githubusercontent.com/newivy2/TierScope/beta/modular-build/tierscope.user.js) · [Official release: 3.4.0](https://github.com/newivy2/TierScope/releases/tag/v3.4.0)
+**Current release: 3.5.0** · [Install TierScope](https://raw.githubusercontent.com/newivy2/TierScope/main/tierscope.user.js) · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.5.0)
 ---
 
-This beta reorganizes development into source modules and builds one installable userscript. The panel design and existing features are preserved. This update also isolates scan commits from logging errors, bundles the GIF encoder, keeps controls private to the userscript, explains SH/ATH retention in the toggle tooltip, and restores the selected site tab after DOM fallback. If the selected tab cannot be identified, fallback skips switching tabs. [Build and source guide](BUILDING.md).
+Version 3.5.0 reorganizes development into source modules and builds one installable userscript. The panel design and existing features are preserved. This update also isolates scan commits from logging errors, bundles the GIF encoder, keeps controls private to the userscript, explains SH/ATH retention in the toggle tooltip, and restores the selected site tab after DOM fallback. If the selected tab cannot be identified, fallback skips switching tabs. [Build and source guide](BUILDING.md).
 
-Version 3.4.0 adds an **SH / ATH** switch to the left of the chart-window menu. Session highs and all-time highs are tracked separately for each room. All-time records survive session Reset and expiry; hover a high to see the exact value and its recorded time. Opening a saved file does not change these records: use **Add to all-time highs** beside the room name in FILE REPLAY or in the chart-window menu to add that file's highs to its own room.
+The **SH / ATH** switch sits to the left of the chart-window menu. Session highs and all-time highs are tracked separately for each room. All-time records survive session Reset and expiry; hover a high to see the exact value and its recorded time. Opening a saved file does not change these records: use **Add to all-time highs** beside the room name in FILE REPLAY or in the chart-window menu to add that file's highs to its own room.
 
 ![TierScope in expanded, totals-focused, collapsed, and compact views](tierscope-hero.png)
 

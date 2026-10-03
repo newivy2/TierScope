@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **beta version 3.5.0-beta.2**. The official release remains 3.4.0. This beta preserves the panel design and features while reorganizing the sources, bundling the encoder, hardening scan commits and keeping controls private; see [BUILDING.md](BUILDING.md). For a quick introduction and installation links, see the [README](readme.md).
+Detailed reference for **version 3.5.0**. This release preserves the panel design and features while reorganizing the sources, bundling the encoder, hardening scan commits and keeping controls private; see [BUILDING.md](BUILDING.md). For a quick introduction and installation links, see the [README](readme.md).
 
 ## Contents
 
@@ -26,7 +26,7 @@ Detailed reference for **beta version 3.5.0-beta.2**. The official release remai
 3. Open [tierscope.user.js](https://raw.githubusercontent.com/newivy2/TierScope/main/tierscope.user.js) and accept the Tampermonkey installation prompt. Alternatively, open the [GitHub source file](https://github.com/newivy2/TierScope/blob/main/tierscope.user.js) and select **Raw**.
 4. Refresh a Chaturbate broadcast room. TierScope appears at its saved position, or near the upper-right corner if no layout has been saved. A new session begins acquiring samples; a restored session keeps its saved pause state.
 
-When updating, install the complete userscript, including its metadata header. The beta bundles the pinned GIF encoder into the script; no external `@require` or separate encoder download is needed. Its MIT license is included in the script and [THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.txt).
+When updating, install the complete userscript, including its metadata header. TierScope bundles the pinned GIF encoder into the script; no external `@require` or separate encoder download is needed. Its MIT license is included in the script and [THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.txt).
 
 The script also requests `GM_listValues` to find the separate saved records for each room.
 
@@ -357,7 +357,7 @@ TierScope depends on Chaturbate’s room data and page structure; changes to eit
 
 The script does not upload TXT reports, CSV files, GIFs, or tracking history to a TierScope server. It makes room-data requests to Chaturbate; GIF encoding uses the bundled encoder without contacting a CDN. Usernames returned by acquisition are used transiently in memory to validate and count the current sample. They are no longer collected into session name lists or written in new saved-session records. The room name remains part of storage keys and exported filenames/CSV rows.
 
-The beta no longer publishes a `ViewerTracker` API to page scripts. Use the panel controls for Reset and exports; existing panel functionality is unchanged.
+TierScope no longer publishes a `ViewerTracker` API to page scripts. Use the panel controls for Reset and exports; existing panel functionality is unchanged.
 
 ## Troubleshooting
 
@@ -403,7 +403,7 @@ Click **Replay** first. GIF export is deliberately absent from live Controls.
 
 **“GIF encoder missing”**
 
-Reinstall the complete beta script and refresh the room. The encoder is included in the script, so no CDN request is needed. Developers should run `npm ci` and `npm run build` to regenerate the complete artifact.
+Reinstall the complete script and refresh the room. The encoder is included in the script, so no CDN request is needed. Developers should run `npm ci` and `npm run build` to regenerate the complete artifact.
 
 **A download does not appear**
 
@@ -419,6 +419,7 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
+| **3.5.0** | Release modular sources with a reproducible single-script build, bundled GIF encoding, reliable scan commits, private controls, tab-aware fallback, clearer SH/ATH retention and expanded regression coverage. |
 | **3.5.0-beta.2** | Preserve accepted scans through diagnostic/storage errors; bundle the pinned GIF encoder with its license; remove the page control API and unsafeWindow grant; restore the original tab after fallback; explain SH/ATH retention; add tier, navigation and failure regression tests. |
 | **3.5.0-beta.1** | Extract feature modules with explicit imports and shared runtime state; build one installable script with esbuild, verify generated output in CI, and check preservation of the 3.4.0 logic and UI. |
 | **3.4.0** | Release per-room all-time highs, SH/ATH controls and matching pulses, explicit saved-file Add and confirmed clearing, and direct Save/Open controls in Replay. |
