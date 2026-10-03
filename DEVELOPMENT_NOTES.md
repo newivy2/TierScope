@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **beta version 3.6.0-beta.3**. Official main remains at 3.5.0. This release preserves the panel design and features while reorganizing the sources, bundling the encoder, hardening scan commits and keeping controls private; see [BUILDING.md](BUILDING.md). For a quick introduction and installation links, see the [README](readme.md).
+Detailed reference for **version 3.6.0**. This release adds a model-organized recording library, time-aware summaries, comparison, backup and restore, and visible session-save feedback while preserving the existing panel and tracking features. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For a quick introduction and installation links, see the [README](readme.md).
 
 ## Contents
 
@@ -456,6 +456,7 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
+| **3.6.0** | Release Session tools with model folders, a 500-recording / 25 MB library, safe updates to growing sessions, direct Library and replay Keep controls, time-weighted audience summaries and thresholds, two-recording comparison, validated ATH/preferences/library backup and restore, and visible session-save failures. |
 | **3.6.0-beta.3** | Add a Library shortcut to the full Session tools window, direct replay Keep in library, automatic model folders with global search, and safe updates for fuller versions of an existing session. Preserve custom names, fuller recordings, playback/live state and ATH; retain prior snapshots through failed updates/restore. |
 | **3.6.0-beta.2** | Raise library capacity to 500 recordings while retaining the 25 MB bound; paginate large lists and search all entries. Add an individual audience overview, explicit token-holder/anonymous proportions, peak-time tooltips and multiple threshold durations/percentages, using real timestamps and excluding gaps. |
 | **3.6.0-beta.1** | Add visible session-save failures, an explicit local recording library, validated ATH/preferences/library backups with restore preview and rollback, time-weighted summaries and two-recording comparison. Preserve the main panel; bookmarks and alerts are deferred. |
