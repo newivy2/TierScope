@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.3.7
+// @version      3.4.0
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -18,7 +18,7 @@
 const ViewerTracker = (function() {
     'use strict';
 
-    const TIERSCOPE_VERSION = '3.3.7';
+    const TIERSCOPE_VERSION = '3.4.0';
     const API_TIMEOUT_MS = 10000;
     const DEFAULT_API_INTERVAL_SECONDS = 60;
     const DOM_FALLBACK_INTERVAL_SECONDS = 60;
@@ -41,6 +41,235 @@ const ViewerTracker = (function() {
     var sessionStartedAt = null;
     var sessionStartEstimated = false;
     var sessionHighs = {};
+
+    const ALL_TIME_PREFIX = 'tierscope:ath:v1:';
+    const ALL_TIME_EPOCH_PREFIX = 'tierscope:ath-epoch:v1:';
+    const HIGH_MODE_KEY = 'tierscope:ui:highMode:v1';
+    const ALL_TIME_SERIES = STORAGE_HISTORY_SERIES.concat(['roomTotal']);
+    var allTimeCache = new Map();
+    var highMode = 'sh';
+    try { if (GM_getValue(HIGH_MODE_KEY, 'sh') === 'ath') highMode = 'ath'; }
+    catch (error) { /* Session highs remain the default. */ }
+
+    function allTimeRoom(room) {
+        return typeof room === 'string' && /^[a-z0-9_-]{1,100}$/i.test(room) && room.toLowerCase() !== 'unknown' ? room.toLowerCase() : null;
+    }
+
+    function emptyAllTimeHighs() {
+        var highs = {};
+        ALL_TIME_SERIES.forEach(function(key) { highs[key] = { value: 0, time: null, source: null }; });
+        return highs;
+    }
+
+    function mergeAllTimeHighs(target, incoming) {
+        var changed = 0;
+        ALL_TIME_SERIES.forEach(function(key) {
+            var old = target[key], next = incoming[key];
+            if (!next || !next.source) return;
+            if (!old.source || next.value > old.value || (next.value === old.value && next.time !== null &&
+                (old.time === null || next.time < old.time))) {
+                target[key] = { value: next.value, time: next.time, source: next.source };
+                changed++;
+            }
+        });
+        return changed;
+    }
+
+    function validateAllTimeRecord(data, room) {
+        if (!isStorageObject(data) || data.schemaVersion !== 1 || data.room !== room ||
+            typeof data.epoch !== 'string' || !isStorageObject(data.highs)) throw new Error('Unsupported all-time record');
+        ALL_TIME_SERIES.forEach(function(key) {
+            var high = data.highs[key];
+            if (!isStorageObject(high) || !Number.isSafeInteger(high.value) || high.value < 0 ||
+                !(high.time === null || isStorageTimestamp(high.time)) ||
+                [null, 'live', 'saved', 'file'].indexOf(high.source) === -1 ||
+                (high.source === null && (high.value !== 0 || high.time !== null))) throw new Error('Invalid all-time high');
+        });
+    }
+
+    function readAllTimeHighs(room) {
+        room = allTimeRoom(room);
+        var previous = allTimeCache.get(room);
+        var state = { room: room, epoch: 'initial', highs: emptyAllTimeHighs(), keys: [], skipped: 0, error: '', pending: false };
+        if (!room) return state;
+        try {
+            state.epoch = GM_getValue(ALL_TIME_EPOCH_PREFIX + room, 'initial');
+            if (typeof state.epoch !== 'string') throw new Error('Invalid all-time records generation');
+            var prefix = ALL_TIME_PREFIX + room + ':';
+            GM_listValues().filter(function(key) { return key.indexOf(prefix) === 0; }).forEach(function(key) {
+                try {
+                    var raw = GM_getValue(key, undefined);
+                    if (raw === undefined) return; // Another tab may have compacted this snapshot.
+                    var data = JSON.parse(raw);
+                    validateAllTimeRecord(data, room);
+                    if (data.epoch !== state.epoch) return;
+                    mergeAllTimeHighs(state.highs, data.highs);
+                    state.keys.push(key);
+                } catch (error) { state.skipped++; }
+            });
+            if (previous && previous.pending && previous.epoch === state.epoch) {
+                mergeAllTimeHighs(state.highs, previous.highs);
+                state.pending = true;
+            }
+        } catch (error) {
+            if (previous) {
+                state = Object.assign({}, previous, { highs: emptyAllTimeHighs() });
+                mergeAllTimeHighs(state.highs, previous.highs);
+            }
+            state.error = 'All-time records could not be read. Showing locally available records.';
+        }
+        allTimeCache.set(room, state);
+        return state;
+    }
+
+    function storeAllTimeHighs(room, incoming) {
+        var state = readAllTimeHighs(room);
+        if (!state.room) return { state: state, changed: 0, saved: false };
+        try {
+            validateAllTimeRecord({ schemaVersion: 1, room: state.room, epoch: state.epoch, highs: incoming }, state.room);
+        } catch (error) {
+            state.error = 'All-time highs were not updated: invalid record values.';
+            return { state: state, changed: 0, saved: false };
+        }
+        var changed = mergeAllTimeHighs(state.highs, incoming);
+        if (!changed && !state.pending && state.keys.length < 2) return { state: state, changed: 0, saved: !state.error };
+        state.pending = true;
+        try {
+            if (state.error) throw new Error(state.error);
+            var data = { schemaVersion: 1, room: state.room, epoch: state.epoch, highs: state.highs };
+            validateAllTimeRecord(data, state.room);
+            // Immutable snapshots prevent simultaneous tabs from overwriting a
+            // higher record. Compact only snapshots included in this merge,
+            // after its replacement is safely stored; unseen writes survive.
+            var key = ALL_TIME_PREFIX + state.room + ':' + state.epoch + ':' + makeStorageId();
+            GM_setValue(key, JSON.stringify(data));
+            if (GM_getValue(ALL_TIME_EPOCH_PREFIX + state.room, 'initial') !== state.epoch) {
+                return { state: readAllTimeHighs(state.room), changed: 0, saved: false };
+            }
+            state.pending = false;
+            state.keys.forEach(function(old) { try { GM_deleteValue(old); } catch (error) { /* Redundant snapshots remain safe. */ } });
+            state.keys = [key];
+        } catch (error) {
+            state.error = 'All-time highs are local only: saving is unavailable. Keep this tab open to retry.';
+        }
+        return { state: state.pending ? state : readAllTimeHighs(state.room), changed: changed, saved: !state.pending };
+    }
+
+    function sessionAllTimeHighs(data, source) {
+        var highs = emptyAllTimeHighs();
+        STORAGE_HISTORY_SERIES.forEach(function(key) {
+            var high = data.sessionHighs[key];
+            highs[key] = { value: high.value, time: high.time, source: source };
+        });
+        highs.roomTotal = { value: data.roomTotalHigh, time: data.roomTotalHighTime, source: source };
+        data.history.timestamps.forEach(function(time, i) {
+            var total = data.history.total[i] + data.history.anonymous[i];
+            if (total > highs.roomTotal.value || (total === highs.roomTotal.value && highs.roomTotal.time === null)) {
+                highs.roomTotal = { value: total, time: time, source: source };
+            }
+        });
+        return highs;
+    }
+
+    function recordAcceptedAllTimeHighs(room) {
+        var index = history.timestamps.length - 1;
+        if (index < 0) return;
+        var incoming = emptyAllTimeHighs(), time = history.timestamps[index];
+        ALL_TIME_SERIES.forEach(function(key) {
+            incoming[key] = { value: key === 'roomTotal' ? history.total[index] + history.anonymous[index] : history[key][index],
+                time: time, source: 'live' };
+        });
+        storeAllTimeHighs(room, incoming);
+    }
+
+    function displayedHighRoom() {
+        return allTimeRoom(isPlaybackCurrent(playback) && playback.archive ? playback.archive.room : getModelName());
+    }
+
+    function displayedAllTimeState() {
+        if (isPlaybackCurrent(playback) && playback.allTimeState) return playback.allTimeState;
+        var room = displayedHighRoom();
+        return allTimeCache.get(room) || readAllTimeHighs(room);
+    }
+
+    function repaintHighMode() {
+        cancelHighPulses();
+        chartLayoutRevision++;
+        if (isPlaybackCurrent(playback)) paintPlayback(playback);
+        else updateDisplay();
+        updateHighControls();
+    }
+
+    function toggleHighMode() {
+        highMode = highMode === 'sh' ? 'ath' : 'sh';
+        var state = readAllTimeHighs(displayedHighRoom());
+        if (isPlaybackCurrent(playback)) playback.allTimeState = state;
+        try { GM_setValue(HIGH_MODE_KEY, highMode); } catch (error) { /* The selected view still works for this tab. */ }
+        repaintHighMode();
+    }
+
+    function setAllTimeActionStatus(message, replayLabel) {
+        var status = document.getElementById('all-time-action-status');
+        if (status) status.textContent = message;
+        var button = document.getElementById('btn-playback-add-all-time');
+        if (button) {
+            button.textContent = replayLabel || 'Add to all-time highs';
+            button.title = message || 'Add this file\'s highs to the room named beside this button';
+            button.setAttribute('aria-label', replayLabel ? replayLabel + '. ' + message : 'Add to all-time highs');
+        }
+    }
+
+    function addFileToAllTimeHighs() {
+        if (!isPlaybackCurrent(playback) || !playback.imported) return;
+        try {
+            var archive = validateSessionFile(playback.archive);
+            var result = storeAllTimeHighs(archive.room, sessionAllTimeHighs(archive.session, 'file'));
+            playback.allTimeState = result.state;
+            repaintHighMode();
+            setAllTimeActionStatus(result.saved ? (result.changed ? 'Records updated for ' : 'No higher records in this file for ') + archive.room + '.' :
+                result.state.error || 'Records changed in another tab. Try adding this file again.',
+                result.saved ? (result.changed ? 'Added to ATH' : 'Already in ATH') : 'Retry adding to ATH');
+        } catch (error) { alert('Could not add all-time highs: ' + error.message); }
+    }
+
+    function clearAllTimeHighs() {
+        var room = displayedHighRoom();
+        if (!room || !confirm('Clear all-time highs for ' + room + '?\n\nSession history and saved files will remain. New accepted samples will start new all-time records.')) return;
+        try {
+            var prefix = ALL_TIME_PREFIX + room + ':';
+            var keys = GM_listValues().filter(function(key) { return key.indexOf(prefix) === 0; });
+            GM_setValue(ALL_TIME_EPOCH_PREFIX + room, makeStorageId());
+            allTimeCache.delete(room);
+            keys.forEach(function(key) { try { GM_deleteValue(key); } catch (error) { /* Old generations are ignored. */ } });
+            var state = readAllTimeHighs(room);
+            if (isPlaybackCurrent(playback)) playback.allTimeState = state;
+            repaintHighMode();
+            setAllTimeActionStatus('All-time highs cleared for ' + room + '.');
+        } catch (error) { alert('Could not clear all-time highs: ' + error.message); }
+    }
+
+    function updateHighControls() {
+        var state = displayedAllTimeState();
+        var warning = state.error || (state.pending ? 'All-time highs are local only: saving is pending. Keep this tab open to retry.' : '');
+        var toggle = document.getElementById('btn-high-mode');
+        if (toggle) {
+            toggle.style.display = isMinimized ? 'none' : '';
+            toggle.textContent = highMode.toUpperCase();
+            toggle.setAttribute('aria-pressed', String(highMode === 'ath'));
+            toggle.setAttribute('aria-label', highMode === 'ath' ? 'All-time highs. Switch to session highs' : 'Session highs. Switch to all-time highs');
+            toggle.title = (highMode === 'ath' ? 'All-time highs recorded for this room in this browser' : 'Session highs') +
+                '. Click to switch. ' + warning;
+        }
+        ['btn-add-all-time', 'btn-playback-add-all-time'].forEach(function(id) {
+            var add = document.getElementById(id);
+            if (add) add.style.display = isPlaybackCurrent(playback) && playback.imported ? 'block' : 'none';
+        });
+        var clear = document.getElementById('btn-clear-all-time');
+        if (clear) { clear.disabled = !state.room; clear.title = state.room ? 'Clear all-time records for ' + state.room + ' only' : 'Open a room or session file first'; }
+        var info = document.getElementById('all-time-info');
+        if (info) info.textContent = warning || (state.skipped ? state.skipped + ' unreadable all-time record(s) were skipped and retained.' :
+            'All-time highs are saved per room in this browser and survive session Reset.');
+    }
 
     // GIF Export State
     var gifExportJob = null;
@@ -142,10 +371,19 @@ const ViewerTracker = (function() {
             }
             PANEL_ROWS.forEach(function(row) {
                 var key = row.key === 'withtokens' ? 'withTokens' : row.key === 'anon' ? 'anonymous' : row.key;
-                if (!newHighTiers[key]) { cancelHighPulse(row.key); return; }
+                var atHigh = newHighTiers[key], wasAtHigh = priorState.newHighTiers[key];
                 var previousHigh = priorState.sessionHighs[key];
                 var raisedHigh = sessionHighs[key].value > (previousHigh ? previousHigh.value : 0);
-                if (priorState.newHighTiers[key] && !raisedHigh) return;
+                if (highMode === 'ath') {
+                    var high = displayedAllTimeState().highs[key], before = priorState.allTimeHighs[key];
+                    var current = history[key][history[key].length - 1];
+                    var oldValue = priorState.history[key][priorState.history[key].length - 1];
+                    atHigh = high.source && current > 0 && current >= high.value;
+                    wasAtHigh = priorState.lastAcceptedAcquisition && before.source && oldValue > 0 && oldValue >= before.value;
+                    raisedHigh = high.value > before.value;
+                }
+                if (!atHigh) { cancelHighPulse(row.key); return; }
+                if (wasAtHigh && !raisedHigh) return;
                 var target = document.getElementById((collapsedRows.has(row.key) ? 'restore-row-' : 'tier-row-') + row.key);
                 if (!target || typeof target.animate !== 'function') return;
                 cancelHighPulse(row.key);
@@ -484,7 +722,7 @@ const ViewerTracker = (function() {
         if (header) {
             header.textContent = (isStopped ? 'STOPPED: ' : frame.isRestored ? 'SAVED: ' : '') + compactNumber(frame.fullRoomTotal);
             header.title = getModelName() + ' — Room total: ' + frame.fullRoomTotal.toLocaleString() +
-                '; session high: ' + frame.roomTotalHigh.toLocaleString() + (roomChange ? '; change: ' + roomChange + ' versus ' + mode : '');
+                '; ' + highDescription(getDisplayHigh(frame, 'roomTotal', frame.fullRoomTotal)) + (roomChange ? '; change: ' + roomChange + ' versus ' + mode : '');
         }
         ['withtokens', 'total'].forEach(function(key) {
             var el = document.getElementById('mini-' + key);
@@ -495,8 +733,12 @@ const ViewerTracker = (function() {
         var names = { room: 'Room total', withTokens: 'With Tokens', total: 'Registered' };
         if (label) { label.textContent = (miniMetric === 'room' ? 'Room total' : miniMetric === 'withTokens' ? '💎' : '📊') + ' ▾'; label.setAttribute('aria-label', names[miniMetric] + ' chart. Activate to change metric.'); label.title = 'Click to cycle Room total, With Tokens, and Registered. Showing the last 15 recorded minutes.'; }
         var high = document.getElementById('mini-high');
-        var peak = miniMetric === 'room' ? frame.roomTotalHigh : getSessionHigh(miniMetric, 0).value;
-        if (high) { high.textContent = 'H:' + compactNumber(peak); high.title = 'Session high: ' + peak.toLocaleString(); }
+        var peak = getDisplayHigh(frame, miniMetric === 'room' ? 'roomTotal' : miniMetric,
+            miniMetric === 'room' ? frame.fullRoomTotal : frame[miniMetric]);
+        if (high) {
+            high.textContent = highLabel(peak, true); high.title = highDescription(peak) + '. Click to switch SH/ATH.';
+            high.setAttribute('aria-label', high.title); high.setAttribute('aria-pressed', String(highMode === 'ath'));
+        }
         var canvas = document.getElementById('mini-chart');
         if (!canvas) return;
         var ctx = canvas.getContext('2d');
@@ -745,10 +987,10 @@ const ViewerTracker = (function() {
             var value = row.key === 'withtokens' ? frame.withTokens : row.key === 'total' ? frame.total :
                 row.key === 'anon' ? frame.anonymousCount : frame.counts[row.key];
             var historyKey = row.key === 'withtokens' ? 'withTokens' : row.key === 'anon' ? 'anonymous' : row.key;
-            var high = getDisplayHigh(frame, historyKey, value).value;
+            var high = getDisplayHigh(frame, historyKey, value);
             var context = frame.isPlayback ? 'Replay' : frame.isRestored ? 'Saved sample' : 'Latest sample';
-            button.title = row.label + ': ' + value.toLocaleString() + ' (High: ' + high.toLocaleString() +
-                '). ' + context + '. Click to restore row.';
+            button.title = row.label + ': ' + value.toLocaleString() + ' (' + highLabel(high) +
+                '). ' + highDescription(high) + '. ' + context + '. Click to restore row.';
             button.setAttribute('aria-label', 'Restore ' + row.label + ' row. ' + context + ': ' + value.toLocaleString());
             button.style.background = highlights && highlights[historyKey] ?
                 'rgba(50, 205, 50, 0.22)' : 'rgba(var(--panel-row-rgb),calc(0.05 * var(--tier-background-scale, 1)))';
@@ -880,6 +1122,7 @@ const ViewerTracker = (function() {
         if (isMinimized) toggleView();
         playback = { url: location.href, key: activeSessionStorageKey, generation: initGuard,
             imported: true, archive: archive, snapshot: createPlaybackSnapshot(archive.session.history),
+            allTimeState: readAllTimeHighs(archive.room),
             positionMs: 0, samplePosition: 0, stepIndex: 0, speed: 1, lastTickAt: Date.now(), playing: false, timer: null };
         cancelHighPulses();
         presentationMode = 'PLAYBACK';
@@ -904,6 +1147,7 @@ const ViewerTracker = (function() {
     }
 
     function updatePanelOptions() {
+        updateHighControls();
         var button = document.getElementById('btn-panel-options');
         if (button) {
             button.style.display = isMinimized ? 'none' : '';
@@ -912,7 +1156,7 @@ const ViewerTracker = (function() {
         }
         var select = document.getElementById('chart-window-select');
         if (select) select.value = chartWindowMode;
-        ['btn-save-session', 'btn-control-save-session'].forEach(function(id) {
+        ['btn-save-session', 'btn-control-save-session', 'btn-playback-save-session'].forEach(function(id) {
             var save = document.getElementById(id);
             if (save) save.disabled = !((isPlaybackCurrent(playback) && playback.archive) || history.timestamps.length);
         });
@@ -940,9 +1184,16 @@ const ViewerTracker = (function() {
         document.getElementById('chart-window-select').onchange = function() { setChartWindow(this.value); };
         document.getElementById('btn-save-session').onclick = function() { downloadSessionFile(); close(true); };
         document.getElementById('btn-control-save-session').onclick = downloadSessionFile;
+        document.getElementById('btn-playback-save-session').onclick = downloadSessionFile;
         function chooseSessionFile() { input.value = ''; input.click(); }
         document.getElementById('btn-open-session').onclick = chooseSessionFile;
         document.getElementById('btn-control-open-session').onclick = chooseSessionFile;
+        document.getElementById('btn-playback-open-session').onclick = chooseSessionFile;
+        document.getElementById('btn-high-mode').onclick = toggleHighMode;
+        document.getElementById('mini-high').onclick = toggleHighMode;
+        document.getElementById('btn-add-all-time').onclick = addFileToAllTimeHighs;
+        document.getElementById('btn-playback-add-all-time').onclick = addFileToAllTimeHighs;
+        document.getElementById('btn-clear-all-time').onclick = clearAllTimeHighs;
         input.onchange = function() { var file = input.files && input.files[0]; if (file) { close(false); readSessionFile(file); } };
         function outside(event) { if (!menu.contains(event.target) && !button.contains(event.target)) close(false); }
         function escape(event) {
@@ -1085,6 +1336,7 @@ const ViewerTracker = (function() {
             var snapshot = createPlaybackSnapshot(archive.session.history);
             playback = { url: location.href, key: activeSessionStorageKey, generation: initGuard,
                 archive: archive, snapshot: snapshot, positionMs: 0, samplePosition: 0, stepIndex: 0,
+                allTimeState: readAllTimeHighs(model),
                 speed: 1, lastTickAt: Date.now(), playing: snapshot.replayDurationMs > 0, timer: null };
             cancelHighPulses();
             presentationMode = 'PLAYBACK';
@@ -1104,6 +1356,7 @@ const ViewerTracker = (function() {
 
     function leavePlayback(renderLive) {
         sessionFileLoadGeneration++;
+        setAllTimeActionStatus('');
         hideChartTooltip();
         cancelHighPulses();
         cancelGifExport();
@@ -1263,6 +1516,8 @@ const ViewerTracker = (function() {
             room.title = sourceRoom ? 'Saved session from ' + sourceRoom : '';
             room.style.display = sourceRoom ? 'block' : 'none';
         }
+        var fileControls = document.getElementById('playback-file-controls');
+        if (fileControls) fileControls.style.display = playback.imported ? 'flex' : 'none';
         // A saved/empty trend is shorter than the live trend grid. The hidden
         // Controls area below it provides room for the file label without
         // changing the panel's dimensions.
@@ -1753,10 +2008,16 @@ const ViewerTracker = (function() {
         activeSessionStorageKey = key;
         activeRoomEpoch = getRoomEpoch(key);
         sessionStorageNotice = '';
+        var allTime = readAllTimeHighs(model);
         var saved = inspectStoredSession(model, true);
         if (saved.protected || !saved.data) return false;
         var age = Date.now() - saved.data.timestamp;
         restoreSessionState(saved.data);
+        // Bootstrap once from available, validated local session highs. A
+        // deliberate ATH clear changes the epoch and disables this bootstrap.
+        if (!allTime.error && allTime.epoch === 'initial' && !allTime.keys.length && saved.data.history.timestamps.length) {
+            storeAllTimeHighs(model, sessionAllTimeHighs(saved.data, 'saved'));
+        }
         log('Session restored for ' + model + ' (' + Math.round(age/60000) + ' min old; ' +
             (saved.legacy ? 'validated legacy schema 1' : 'storage schema ' + STORAGE_SCHEMA_VERSION) +
             '; producer ' + (saved.producerVersion === null ? 'unknown' : saved.producerVersion) + ')');
@@ -2965,6 +3226,7 @@ const ViewerTracker = (function() {
         isScanning = true;
         var context = { epoch: ++scanEpoch, generation: initGuard, url: location.href, room: getModelName(), policyRevision: policy.revision };
         var priorState = null;
+        var sampleCommitted = false;
         var priorAbsence = broadcasterAbsence;
         var checkingReturn = isAbsencePaused();
         var statusEl = document.getElementById('auto-status');
@@ -2996,6 +3258,7 @@ const ViewerTracker = (function() {
                 anonHighTime: anonHighTime, femaleTransHighTime: femaleTransHighTime,
                 sessionStartedAt: sessionStartedAt,
                 sessionHighs: Object.fromEntries(Object.entries(sessionHighs).map(function(entry) { return [entry[0], Object.assign({}, entry[1])]; })),
+                allTimeHighs: readAllTimeHighs(context.room).highs,
                 newHighTiers: Object.fromEntries(Object.entries(newHighTiers))
             };
             var diagnostics = acceptRoomSnapshot(snapshot, context.room);
@@ -3035,8 +3298,8 @@ const ViewerTracker = (function() {
             };
             updateAcquisitionStatus();
             saveSession(context.room);
-            pulseAcceptedHighs(priorState);
             if (diagnostics) console.log('[TierScope ' + TIERSCOPE_VERSION + '] API scan accepted', diagnostics);
+            sampleCommitted = true;
         } catch (err) {
             if (priorState) {
                 users = priorState.users;
@@ -3073,6 +3336,13 @@ const ViewerTracker = (function() {
             pendingHistoryGap = true;
             log('Error during scan; retaining previous valid data: ' + err.message);
         } finally {
+            if (sampleCommitted) {
+                // Persist only after acquisition and presentation accepted the
+                // sample. Storage failure must not undo a valid live sample.
+                try { recordAcceptedAllTimeHighs(context.room); updateDisplay(); }
+                catch (error) { log('Could not update all-time highs: ' + error.message); }
+                pulseAcceptedHighs(priorState);
+            }
             if (isAcquisitionCurrent(context)) {
                 isScanning = false;
                 resetCountdown();
@@ -3596,7 +3866,21 @@ const ViewerTracker = (function() {
     }
 
     function getDisplayHigh(frame, key, current) {
+        if (highMode === 'ath') return displayedAllTimeState().highs[key];
+        if (key === 'roomTotal') return { value: frame.roomTotalHigh, time: frame.isPlayback ? null : roomTotalHighTime };
         return frame.isPlayback ? { value: Math.max(frame.highs[key] || 0, current || 0), isNew: false } : getSessionHigh(key, current);
+    }
+
+    function highLabel(high, compact) {
+        return highMode.toUpperCase() + ':' + (highMode === 'ath' && !high.source ? '—' : compact ? compactNumber(high.value) : high.value.toLocaleString());
+    }
+
+    function highDescription(high) {
+        var label = highMode === 'ath' ? 'All-time high for ' + displayedHighRoom() : 'Session high';
+        if (highMode === 'ath' && !high.source) return label + ': no record yet';
+        return label + ': ' + high.value.toLocaleString() + (high.time != null ? ' · ' + new Date(high.time).toLocaleString() : '') +
+            (highMode === 'ath' ? (high.source === 'file' ? ' · Added from a session file' : high.source === 'saved' ? ' · Restored local session' : ' · Recorded live') +
+                (displayedAllTimeState().pending ? ' · Local only, not saved' : '') : '');
     }
 
     function getHighValue(data, currentValue, timestamp) {
@@ -3949,9 +4233,10 @@ const ViewerTracker = (function() {
                     'display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;' +
                     'border-bottom:1px solid #ff69b4;padding-bottom:3px;cursor:move;' +
                 '">' +
-                    '<span id="header-text" style="font-weight:bold;color:var(--panel-accent);font-size:10px;">USERS: 0 (H:0)</span>' +
+                    '<span id="header-text" style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:bold;color:var(--panel-accent);font-size:10px;">USERS: 0 (SH:0)</span>' +
                     '<span id="mini-room-change" style="font-size:8px;margin:0 3px;display:none;"></span>' +
-                    '<div style="display:flex;align-items:center;gap:5px;">' +
+                    '<div style="display:flex;align-items:center;gap:3px;flex-shrink:0;">' +
+                        '<button type="button" id="btn-high-mode" aria-pressed="false" aria-label="Session highs. Switch to all-time highs" style="display:none;min-width:29px;background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;">SH</button>' +
                         '<button type="button" id="btn-panel-options" aria-label="Chart window and session files" aria-expanded="false" aria-controls="panel-options" style="display:none;background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;white-space:nowrap;">Full ▾</button>' +
                         '<button type="button" id="btn-standard-size" title="Restore standard panel size (100%)" aria-label="Restore standard panel size" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;">100%</button>' +
                         '<button id="btn-toggle" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:9px;padding:1px 4px;flex-shrink:0;">+</button>' +
@@ -3967,11 +4252,17 @@ const ViewerTracker = (function() {
                     '<button type="button" id="btn-open-session" style="display:block;width:100%;margin:4px 0;padding:4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:3px;cursor:pointer;">Open session file…</button>' +
                     '<input type="file" id="session-file-input" accept=".json,application/json" style="display:none;">' +
                     '<div id="session-file-info" style="display:none;margin-top:7px;font-size:10px;line-height:1.4;white-space:pre-line;overflow-wrap:anywhere;color:var(--panel-secondary);"></div>' +
+                    '<div style="border-top:1px solid var(--panel-divider);margin-top:8px;padding-top:6px;"><strong>All-time highs</strong>' +
+                        '<div id="all-time-info" style="font-size:10px;line-height:1.4;margin:4px 0;color:var(--panel-secondary);"></div>' +
+                        '<button type="button" id="btn-add-all-time" style="display:none;width:100%;margin:4px 0;padding:4px;background:#4169E1;color:#fff;border:0;border-radius:3px;cursor:pointer;">Add to all-time highs</button>' +
+                        '<button type="button" id="btn-clear-all-time" style="display:block;width:100%;margin:4px 0;padding:4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:3px;cursor:pointer;">Clear all-time highs…</button>' +
+                        '<div id="all-time-action-status" role="status" style="font-size:10px;line-height:1.4;overflow-wrap:anywhere;color:var(--panel-secondary);"></div>' +
+                    '</div>' +
                 '</div>' +
                 '<div id="minimized-view" style="display:block;position:relative;">' +
                     '<div style="display:flex;align-items:center;justify-content:space-between;gap:3px;">' +
                         '<button type="button" id="mini-metric" style="background:transparent;border:0;color:var(--panel-secondary);font:inherit;cursor:pointer;padding:2px 0;" aria-label="Cycle chart metric">Room total ▾</button>' +
-                        '<span id="mini-high" style="color:var(--panel-subtle);font-size:8px;"></span>' +
+                        '<button type="button" id="mini-high" style="background:transparent;border:0;padding:0;color:var(--panel-subtle);font-size:8px;cursor:pointer;"></button>' +
                     '</div>' +
                     '<canvas id="mini-chart" width="140" height="36" style="display:block;width:100%;height:36px;" role="img" aria-label="Recent audience history"></canvas>' +
                     '<div style="display:flex;justify-content:space-between;gap:4px;margin:3px 0;">' +
@@ -4016,7 +4307,7 @@ const ViewerTracker = (function() {
                     '<canvas id="spark-' + key + '" width="105" height="28" style="flex:1;margin:0 4px;"></canvas>' +
                     '<div style="text-align:right;width:48px;flex-shrink:0;">' +
                         '<span id="count-' + key + '" style="font-weight:bold;color:' + t.color + ';font-size:14px;">0</span>' +
-                        '<div id="high-' + key + '" style="font-size:8px;color:var(--panel-positive);margin-top:1px;">H:0</div>' +
+                        '<div id="high-' + key + '" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div>' +
                     '</div>' +
                 '</div>';
         });
@@ -4031,7 +4322,7 @@ const ViewerTracker = (function() {
                         '<div style="text-align:right;width:48px;flex-shrink:0;">' +
                             '<span id="count-withtokens" style="font-weight:bold;color:#ff69b4;font-size:14px;">0</span>' +
                             '<span id="pct-withtokens" style="font-size:8px;color:#ff69b4;margin-left:2px;">0%</span>' +
-                            '<div id="high-withtokens" style="font-size:8px;color:var(--panel-positive);margin-top:1px;">H:0</div>' +
+                            '<div id="high-withtokens" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div>' +
                         '</div>' +
                     '</div>' +
                     '<div id="tier-row-total" data-tier="total" style="display:flex;align-items:center;padding:2px 3px;background:rgba(var(--panel-row-rgb),0.1);border-radius:3px;">' +
@@ -4041,7 +4332,7 @@ const ViewerTracker = (function() {
                         '<canvas id="spark-total" width="105" height="28" style="flex:1;margin:0 4px;"></canvas>' +
                         '<div style="text-align:right;width:48px;flex-shrink:0;">' +
                             '<span id="count-total" style="font-weight:bold;color:var(--panel-text);font-size:14px;">0</span>' +
-                            '<div id="high-total" style="font-size:8px;color:var(--panel-positive);margin-top:1px;">H:0</div>' +
+                            '<div id="high-total" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div>' +
                         '</div>' +
                     '</div>' +
                 '</div>' +
@@ -4054,7 +4345,7 @@ const ViewerTracker = (function() {
                         '<canvas id="spark-anon" width="105" height="50" style="flex:1;margin:0 4px;"></canvas>' +
                         '<div style="text-align:right;width:48px;flex-shrink:0;">' +
                             '<span id="anon-ratio-full" style="font-size:13px;font-weight:bold;color:#ff69b4;">--</span>' +
-                            '<div id="high-anon" style="font-size:8px;color:var(--panel-positive);margin-top:1px;">H:0</div>' +
+                            '<div id="high-anon" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div>' +
                         '</div>' +
                     '</div>' +
                 '</div>' +
@@ -4084,7 +4375,10 @@ const ViewerTracker = (function() {
                             '<button id="btn-cancel-gif" hidden style="font-size:8px;cursor:pointer;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;">Cancel</button>' +
                         '</div>' +
                         '<div style="display:flex;flex-direction:column;justify-content:center;gap:4px;min-width:0;">' +
-                            '<div id="playback-room" style="display:none;flex-shrink:0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center;font-size:10px;line-height:12px;font-weight:bold;color:var(--panel-text);"></div>' +
+                            '<div id="playback-file-controls" style="display:none;align-items:center;gap:4px;min-width:0;">' +
+                                '<div id="playback-room" style="display:none;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;line-height:12px;font-weight:bold;color:var(--panel-text);"></div>' +
+                                '<button type="button" id="btn-playback-add-all-time" aria-live="polite" title="Add this file\'s highs to the room named beside this button" style="display:none;flex-shrink:0;min-width:88px;font-size:8px;line-height:12px;margin:0;padding:0 4px;white-space:nowrap;background:#4169E1;color:#fff;border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Add to all-time highs</button>' +
+                            '</div>' +
                         '<div style="display:flex;align-items:center;justify-content:space-between;gap:3px;">' +
                             '<strong id="playback-label" style="font-size:9px;color:var(--panel-warning);">PLAYBACK</strong>' +
                             '<button id="playback-play" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#4169E1;color:white;border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Pause</button>' +
@@ -4097,7 +4391,13 @@ const ViewerTracker = (function() {
                         '<button type="button" id="playback-previous" title="Previous recorded sample (pauses Replay)" aria-label="Previous recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">|&#9664;</button>' +
                         '<input id="playback-scrubber" type="range" min="0" max="0" value="0" step="any" aria-label="Playback timeline" style="flex:1;min-width:0;width:100%;height:12px;margin:0;accent-color:var(--panel-warning);cursor:pointer;">' +
                         '<button type="button" id="playback-next" title="Next recorded sample (pauses Replay)" aria-label="Next recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">&#9654;|</button></div>' +
-                        '<div id="playback-position" style="font-size:9px;line-height:12px;text-align:center;color:var(--panel-secondary);font-family:monospace;">00:00:00 / 00:00:00</div>' +
+                        '<div id="playback-file-actions" style="display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:4px;min-width:0;">' +
+                            '<div id="playback-position" style="grid-column:2;font-size:9px;line-height:12px;text-align:center;white-space:nowrap;color:var(--panel-secondary);font-family:monospace;">00:00:00 / 00:00:00</div>' +
+                            '<div style="grid-column:3;justify-self:end;display:flex;gap:2px;">' +
+                                '<button type="button" id="btn-playback-save-session" aria-label="Save replay session file" title="Save the full session being replayed" style="font-size:8px;line-height:10px;height:12px;box-sizing:border-box;margin:0;padding:0 4px;background:#4169E1;color:#fff;border:1px solid #4169E1;border-radius:2px;cursor:pointer;">Save</button>' +
+                                '<button type="button" id="btn-playback-open-session" aria-label="Open session file in replay" title="Open another saved session in FILE REPLAY" style="font-size:8px;line-height:10px;height:12px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Open</button>' +
+                            '</div>' +
+                        '</div>' +
                     '</div>' +
                 '</div>' +
 
@@ -4499,18 +4799,29 @@ const ViewerTracker = (function() {
         var roomTotalHigh = frame.roomTotalHigh;
         var displayHistory = frame.history;
         var highlights = (frame.isPlayback || frame.isRestored) ? frame.playbackNewHighTiers : newHighTiers;
+        if (highMode === 'ath') {
+            highlights = {};
+            STORAGE_HISTORY_SERIES.forEach(function(key) {
+                var value = key === 'withTokens' ? withTokens : key === 'total' ? total : key === 'anonymous' ? anonymousCount : counts[key];
+                var high = getDisplayHigh(frame, key, value);
+                if (high.source && value > 0 && value >= high.value) highlights[key] = true;
+            });
+        }
         updateCollapsedRowStatus(frame, highlights);
         var withTokensPct = total > 0 ? Math.round((withTokens / total) * 100) + '%' : '0%';
         var registeredPct = fullRoomTotal > 0 ? Math.round((total / fullRoomTotal) * 100) + '%' : '0%';
         var headerText = document.getElementById('header-text');
         if (headerText) {
-            headerText.title = frame.isPlayback && playback && playback.archive ? 'Replay: ' + playback.archive.room : '';
+            var roomHigh = getDisplayHigh(frame, 'roomTotal', fullRoomTotal);
+            var displayedRoomHigh = highLabel(roomHigh);
+            headerText.title = (frame.isPlayback && playback && playback.archive ? 'Replay: ' + playback.archive.room + ' · ' : '') +
+                'Room total: ' + fullRoomTotal.toLocaleString() + ' · ' + highDescription(roomHigh);
             if (isStopped && !frame.isPlayback) {
-                headerText.textContent = 'STOPPED: ' + fullRoomTotal.toLocaleString() + ' (H:' + roomTotalHigh.toLocaleString() + ')';
+                headerText.textContent = 'STOPPED: ' + fullRoomTotal.toLocaleString() + ' (' + displayedRoomHigh + ')';
             } else if (isMinimized) {
-                headerText.textContent = (frame.isPlayback ? 'PLAYBACK: ' : (frame.isRestored ? 'SAVED: ' : '')) + fullRoomTotal.toLocaleString() + ' (H:' + roomTotalHigh.toLocaleString() + ')';
+                headerText.textContent = (frame.isPlayback ? 'PLAYBACK: ' : (frame.isRestored ? 'SAVED: ' : '')) + fullRoomTotal.toLocaleString() + ' (' + displayedRoomHigh + ')';
             } else {
-                headerText.textContent = (frame.isPlayback ? (playback && playback.imported ? 'FILE: ' : 'PLAYBACK: ') : (frame.isRestored ? 'SAVED: ' : 'USERS: ')) + fullRoomTotal.toLocaleString() + ' (H:' + roomTotalHigh.toLocaleString() + ')';
+                headerText.textContent = (frame.isPlayback ? (playback && playback.imported ? 'FILE: ' : 'PLAYBACK: ') : (frame.isRestored ? 'SAVED: ' : 'USERS: ')) + fullRoomTotal.toLocaleString() + ' (' + displayedRoomHigh + ')';
             }
         }
         var miniWithTokens = document.getElementById('mini-withtokens');
@@ -4533,9 +4844,8 @@ const ViewerTracker = (function() {
                 var rowEl = document.getElementById('tier-row-' + tier);
                 var currentVal = counts[tier];
                 var highResult = getDisplayHigh(frame, tier, currentVal);
-                var highVal = highResult.value;
                 if (countEl) countEl.textContent = currentVal;
-                if (highEl) highEl.textContent = 'H:' + highVal.toLocaleString();
+                if (highEl) { highEl.textContent = highLabel(highResult, true); highEl.title = highDescription(highResult); }
                 if (rowEl) {
                     if (highlights && highlights[tier]) {
                         rowEl.style.background = 'rgba(50, 205, 50, 0.22)';
@@ -4552,7 +4862,7 @@ const ViewerTracker = (function() {
             var withTokensResult = getDisplayHigh(frame, 'withTokens', withTokens);
             if (withTokensCountEl) withTokensCountEl.textContent = withTokens;
             if (withTokensPctEl) withTokensPctEl.textContent = withTokensPct;
-            if (withTokensHighEl) withTokensHighEl.textContent = 'H:' + withTokensResult.value.toLocaleString();
+            if (withTokensHighEl) { withTokensHighEl.textContent = highLabel(withTokensResult, true); withTokensHighEl.title = highDescription(withTokensResult); }
             if (withTokensRowEl) {
                 if (highlights && highlights['withTokens']) {
                     withTokensRowEl.style.background = 'rgba(50, 205, 50, 0.22)';
@@ -4566,7 +4876,7 @@ const ViewerTracker = (function() {
             var totalRowEl = document.getElementById('tier-row-total');
             var totalResult = getDisplayHigh(frame, 'total', total);
             if (totalEl) totalEl.textContent = total;
-            if (totalHighEl) totalHighEl.textContent = 'H:' + totalResult.value.toLocaleString();
+            if (totalHighEl) { totalHighEl.textContent = highLabel(totalResult, true); totalHighEl.title = highDescription(totalResult); }
             if (totalRowEl) {
                 if (highlights && highlights['total']) {
                     totalRowEl.style.background = 'rgba(50, 205, 50, 0.22)';
@@ -4585,7 +4895,7 @@ const ViewerTracker = (function() {
                 fullAnonText.textContent = anonLabel;
                 fullAnonText.style.fontSize = digits >= 6 ? '9px' : digits === 5 ? '11px' : '13px';
             }
-            if (anonHighEl) anonHighEl.textContent = 'H:' + anonResult.value.toLocaleString();
+            if (anonHighEl) { anonHighEl.textContent = highLabel(anonResult, true); anonHighEl.title = highDescription(anonResult); }
             if (anonRowEl) {
                 if (highlights && highlights['anonymous']) {
                     anonRowEl.style.background = 'rgba(50, 205, 50, 0.22)';
