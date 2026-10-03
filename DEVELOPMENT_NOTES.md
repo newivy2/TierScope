@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **version 3.6.0**. This release adds a model-organized recording library, time-aware summaries, comparison, backup and restore, and visible session-save feedback while preserving the existing panel and tracking features. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For a quick introduction and installation links, see the [README](readme.md).
+Detailed reference for **3.6.1-beta.1**; official main remains on 3.6.0. This maintenance beta makes diagnostics non-throwing and uses one room-route parser for startup and action targets. Reset is disabled on directory pages; file replay can still add or clear ATH for the recording's own room. The 3.6.0 features include a model-organized recording library, time-aware summaries, comparison, backup and restore, and visible session-save feedback while preserving the existing panel and tracking features. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For a quick introduction and installation links, see the [README](readme.md).
 
 ## Contents
 
@@ -456,6 +456,7 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
+| **3.6.1-beta.1** | Prevent console failures from bypassing API access blocks, retry waits, fallback or DOM health handling. Recognize complete room routes consistently; disable non-room Reset and ATH Clear while preserving file replay's own-room actions. |
 | **3.6.0** | Release Session tools with model folders, a 500-recording / 25 MB library, safe updates to growing sessions, direct Library and replay Keep controls, time-weighted audience summaries and thresholds, two-recording comparison, validated ATH/preferences/library backup and restore, and visible session-save failures. |
 | **3.6.0-beta.3** | Add a Library shortcut to the full Session tools window, direct replay Keep in library, automatic model folders with global search, and safe updates for fuller versions of an existing session. Preserve custom names, fuller recordings, playback/live state and ATH; retain prior snapshots through failed updates/restore. |
 | **3.6.0-beta.2** | Raise library capacity to 500 recordings while retaining the 25 MB bound; paginate large lists and search all entries. Add an individual audience overview, explicit token-holder/anonymous proportions, peak-time tooltips and multiple threshold durations/percentages, using real timestamps and excluding gaps. |

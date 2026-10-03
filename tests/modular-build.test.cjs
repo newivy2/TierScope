@@ -12,7 +12,7 @@ const modules = fs.readdirSync(path.join(root, 'src')).filter(file => file.endsW
   return {file, ast: acorn.parse(source, {ecmaVersion: 2022, sourceType: 'module', ranges: true})};
 });
 
-// Deliberate beta.2 fixes have behavioral coverage; keep the original baseline
+// Deliberate fixes and features have behavioral coverage; keep the original baseline
 // untouched so every other function still proves the extraction preserved it.
 const reviewedChanges = new Set([
   'performScanThenReturn', // durable commit boundary: review-regressions.test.cjs
@@ -26,8 +26,15 @@ const reviewedChanges = new Set([
   'bindPanelOptions', // session tools entry and cleanup: session-tools-browser.cjs
   'updatePanelOptions', // save status in options: session-tools-browser.cjs
   'createPanel', // direct replay Keep in library control: session-files-browser.cjs
+  'acquireRoomSnapshot', // non-throwing warnings: maintenance-regressions.test.cjs
+  'validateDOMHealth', // non-throwing diagnostics: maintenance-regressions.test.cjs
+  'getModelNameFromUrl', // complete room routes: maintenance-regressions.test.cjs
+  'isBroadcastRoom', // shared room parser: maintenance-regressions.test.cjs
+  'resetAllTracking', // valid room required before confirmation: maintenance-regressions.test.cjs
+  'resetTrackingData', // valid room required before mutation: maintenance-regressions.test.cjs
+  'updateStopControls', // disabled directory Reset: all-time-highs-browser.cjs
 ]);
-const featureModules = new Set(['backup.js', 'data-io.js', 'session-analysis.js', 'session-health.js', 'session-library.js', 'session-tools.js']);
+const featureModules = new Set(['diagnostics.js', 'room-context.js', 'backup.js', 'data-io.js', 'session-analysis.js', 'session-health.js', 'session-library.js', 'session-tools.js']);
 
 test('unchanged extracted functions preserve 3.4.0; reviewed changes have behavior coverage', () => {
   const actual = {};
@@ -69,4 +76,12 @@ test('module dependencies are explicit and the built script preserves userscript
   assert(!/unsafeWindow|window\.ViewerTracker/.test(script), 'no page control API');
   assert(!/\b(?:import|export)\s+(?:\{|\*|default|function|const|let|var)/.test(script), 'installed script needs no module loader');
   assert(!script.includes('__test:') && !script.includes('__ath:'), 'test hooks do not ship');
+});
+
+test('application diagnostics only access the console through the non-throwing adapter', () => {
+  for (const {file, ast} of modules) {
+    if (file === 'diagnostics.js') continue;
+    const scope = eslintScope.analyze(ast, {ecmaVersion: 2022, sourceType: 'module'});
+    assert(!scope.globalScope.through.some(ref => ref.identifier.name === 'console'), file + ' bypasses safe diagnostics');
+  }
 });

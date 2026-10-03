@@ -8,7 +8,7 @@ import { runtime } from './runtime.js';
 import { getDOMFallbackWaitSeconds, isAcquisitionCurrent, pauseForAccessRestriction, performScanThenReturn, readRequestPolicy, requestPolicyMessage, updateAcquisitionStatus, writeRequestPolicy } from './scanning.js';
 import { deleteSession, getStorageKey, saveSession } from './storage.js';
 import { checkTrendAutoEscalation, updateAutoTrendButton, updateTrendDisplay, updateTrendPresetButtons } from './trends.js';
-import { formatElapsedTime, getModelName, log } from './utils.js';
+import { formatElapsedTime, getModelName, isBroadcastRoom, log } from './utils.js';
 
 export function isAbsencePaused() {
     return runtime.absencePausedAt !== null && runtime.isPaused && runtime.isAutoRefreshOn && !runtime.isStopped;
@@ -73,6 +73,12 @@ export function checkAbsenceStop() {
 }
 
 export function updateStopControls() {
+    var reset = document.getElementById('btn-main-reset');
+    if (reset) {
+        reset.disabled = !isBroadcastRoom();
+        reset.style.opacity = reset.disabled ? '0.5' : '1';
+        reset.title = reset.disabled ? 'Open a room to reset tracking' : 'Reset all tracking data';
+    }
     var stop = document.getElementById('btn-control-stop');
     if (stop) { stop.disabled = runtime.isStopped; stop.style.opacity = runtime.isStopped ? '0.5' : '1'; }
     ['btn-auto', 'btn-control-auto'].forEach(function(id) {
@@ -201,6 +207,7 @@ export function stopTrackingTimer() {
 }
 
 export function resetAllTracking() {
+    if (!isBroadcastRoom()) return;
     if (!confirm('Reset all tracking data?\n\nThis will clear:\n- All session history\n- Trend tracking\n- Elapsed timer\n\nA new scan will start immediately.')) {
         return;
     }
@@ -209,6 +216,7 @@ export function resetAllTracking() {
 
 export function resetTrackingData(deleteSaved) {
     var modelName = getModelName();
+    if (modelName === 'unknown') return;
     leavePlayback(false);
     cancelGifExport();
     log('Performing main reset...');

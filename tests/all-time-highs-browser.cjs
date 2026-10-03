@@ -30,14 +30,17 @@ const source = prepareSource(fs.readFileSync(path.join(__dirname, '../tierscope.
     });
     const page = await context.newPage(), errors = [], dialogs = [];
     page.on('pageerror', error => errors.push(error.message));
-    let count = 6, owner = 'testroom', acceptDialog = true;
+    let count = 6, owner = 'testroom', acceptDialog = true, apiRequests = 0;
     page.on('dialog', dialog => {dialogs.push(dialog.message()); return acceptDialog ? dialog.accept() : dialog.dismiss();});
-    await page.route('https://tierscope.test/**', route => route.fulfill({
+    await page.route('https://tierscope.test/**', route => {
+      if (route.request().url().includes('/api/')) apiRequests++;
+      return route.fulfill({
       contentType: route.request().url().includes('/api/') ? 'text/plain' : 'text/html',
       body: route.request().url().includes('/api/') ? '20,' + owner + '|o|f|0,' +
         Array.from({length: count}, (_, i) => 'mod' + i + '|m|m|0').concat(['purple1|l|m|0', 'purple2|l|m|0']).join(',') :
         '<!doctype html><html><body style="background:#303846"></body></html>',
-    }));
+      });
+    });
     const state = () => page.evaluate(() => ViewerTracker.__ath.state());
     async function load(room = 'testroom') {
       owner = room;
@@ -156,7 +159,48 @@ const source = prepareSource(fs.readFileSync(path.join(__dirname, '../tierscope.
     assert.equal(await high.textContent(), 'ATH:1.2m');
     const controls = await page.locator('#drag-handle button').evaluateAll(buttons => buttons.filter(b => b.getBoundingClientRect().width).map(b => ({x: b.getBoundingClientRect().x, right: b.getBoundingClientRect().right})));
     for (let i = 1; i < controls.length; i++) assert(controls[i].x >= controls[i - 1].right, 'header buttons do not overlap');
+    const storedRecords = () => page.evaluate(() => Object.entries(localStorage).filter(([key]) =>
+      /^(tierscope:tab:|tierscope:epoch:|tierscope:ath:|tierscope:ath-epoch:|tierscope:v1:)/.test(key)).sort());
+    const requestsBeforeDirectory = apiRequests;
+    await page.goto('https://tierscope.test/tags/testroom/');
+    // The old page saves its final timestamp on unload. Freeze the records
+    // after that save and before TierScope starts on the directory.
+    const protectedRecords = await storedRecords();
+    await page.addScriptTag({content: instrument(source)});
+    await page.evaluate(() => ViewerTracker.__ath.init());
+    await page.click('#btn-expand');
+    assert(await page.locator('#btn-main-reset').isDisabled(), 'directory Reset is disabled');
+    await options.click();
+    assert(await page.locator('#btn-clear-all-time').isDisabled(), 'directory ATH Clear has no room target');
+    assert.equal((await state()).room, null);
+    assert.deepEqual(await storedRecords(), protectedRecords, 'directory startup preserves stored room records');
+    assert.equal(apiRequests, requestsBeforeDirectory, 'directory startup cannot scan its last path segment');
+    await page.click('#panel-options-close');
+    await openFile();
+    await page.waitForFunction(() => ViewerTracker.__ath.state().imported);
+    assert.equal((await state()).room, 'archived_room');
+    assert(await page.locator('#btn-main-reset').isDisabled(), 'file replay does not enable directory Reset');
+    await options.click();
+    assert(await page.locator('#btn-clear-all-time').isEnabled(), 'file room is a valid ATH target on a directory');
+    const directoryReplay = await state();
+    acceptDialog = false;
+    await page.click('#btn-clear-all-time');
+    assert.match(dialogs.at(-1), /Clear all-time highs for archived_room/);
+    assert.deepEqual(await storedRecords(), protectedRecords, 'cancel leaves stored records intact');
+    acceptDialog = true;
+    await page.click('#btn-clear-all-time');
+    assert.equal(await page.evaluate(() => ViewerTracker.__ath.records('archived_room').red.value), 0);
+    assert.equal(await page.evaluate(() => ViewerTracker.__ath.records('testroom').red.value), 12);
+    assert.deepEqual(await state(), directoryReplay, 'clearing file ATH preserves replay and live state');
+    await page.click('#panel-options-close');
+    await replayAdd.click();
+    assert.equal(await page.evaluate(() => ViewerTracker.__ath.records('archived_room').red.value), 1234567);
+    await page.click('#playback-return');
+    await options.click();
+    assert(await page.locator('#btn-clear-all-time').isDisabled(), 'closing file removes its ATH target');
+    assert.equal(apiRequests, requestsBeforeDirectory);
     assert.deepEqual(errors, []);
+    console.log('PASS directory Reset/ATH guards and directory file-room Add/Clear with confirmation and room isolation');
     console.log('PASS per-room ATH persistence, SH/ATH header and compact controls, keyboard/theme/layout, mode-specific highlights and pulses, explicit file Add, room isolation, clear confirmation and replay preservation');
   } finally {
     await browser.close();

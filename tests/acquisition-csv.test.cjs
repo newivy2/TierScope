@@ -1,6 +1,6 @@
 const test=require('node:test');
 const assert=require('node:assert/strict');
-const {harness}=require('./helpers/harness.cjs');
+const {harness,source}=require('./helpers/harness.cjs');
 
 test('API parser rejects invalid totals, malformed records, duplicate usernames and unsafe numbers',()=>{
   const h=harness(),parse=h.api.parseGetChatUserListResponse;
@@ -12,9 +12,12 @@ test('API parser rejects invalid totals, malformed records, duplicate usernames 
 });
 
 test('CSV contains retained history in tier order, safe text, UTC times and correct totals',async()=>{
-  const h=harness();h.t.loadSession('testroom');h.t.sample(2);h.advance(60000);h.t.sample(3);
+  const injected=source.replace('downloadTrackingReport: downloadTrackingReport,', '__csvRoom: value => {getModelName = () => value;}, downloadTrackingReport: downloadTrackingReport,');
+  const h=harness(new Map(),injected);h.t.loadSession('testroom');h.t.sample(2);h.advance(60000);h.t.sample(3);
   // An adversarial room label must be escaped as text even outside normal room names.
-  h.context.location={href:'https://chaturbate.com/@SUM(A1)/'};
+  // Room URL validation now rejects this label. Inject it at the export boundary
+  // so the independent CSV formula-escaping guarantee is still exercised.
+  h.api.__csvRoom('@SUM(A1)');
   h.api.downloadTrackingCSV();const csv=await h.blobs.get(h.downloads.at(-1)).text();
   const rows=csv.replace(/^\uFEFF/,'').trim().split('\r\n').map(line=>line.split(',').map(x=>x.slice(1,-1)));
   assert.equal(rows.length,3);
