@@ -83,6 +83,23 @@ test('mode changes affect labels and highlights, preserve session exports, and b
   assert.equal(h.e('high-red').textContent, 'SH:9');
 });
 
+test('ATH pulses ignore lower session highs and fire when the first live sample after reload reaches ATH', async () => {
+  const h = setup(); await scan(h, 6); h.ath.toggle(); h.t.resetAllTracking();
+  let pulses = 0;
+  h.e('restore-row-red').animate = () => {pulses++; return {cancel() {}};};
+  await scan(h, 3);
+  assert.equal(pulses, 0, 'a new SH below ATH must not pulse in ATH mode');
+  await scan(h, 6);
+  assert.equal(pulses, 1, 'reaching the existing ATH pulses');
+  await scan(h, 6);
+  assert.equal(pulses, 1, 'the plateau does not pulse repeatedly');
+  const reload = setup(h.storage);
+  reload.advance(h.context.Date.now() - reload.context.Date.now());
+  reload.e('restore-row-red').animate = () => {pulses++; return {cancel() {}};};
+  await scan(reload, 6);
+  assert.equal(pulses, 2, 'the first accepted sample at ATH after reload should pulse');
+});
+
 test('opening and replaying a file cannot import ATH; explicit Add targets the file room only', async () => {
   const h = setup();
   await scan(h, 3);

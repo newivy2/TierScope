@@ -367,7 +367,7 @@ const ViewerTracker = (function() {
                     var current = history[key][history[key].length - 1];
                     var oldValue = priorState.history[key][priorState.history[key].length - 1];
                     atHigh = high.source && current > 0 && current >= high.value;
-                    wasAtHigh = before.source && oldValue > 0 && oldValue >= before.value;
+                    wasAtHigh = priorState.lastAcceptedAcquisition && before.source && oldValue > 0 && oldValue >= before.value;
                     raisedHigh = high.value > before.value;
                 }
                 if (!atHigh) { cancelHighPulse(row.key); return; }
