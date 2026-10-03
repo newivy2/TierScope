@@ -1,3 +1,4 @@
+import { GifWriter } from 'omggif';
 import { buildChartPlot, getHistoryBreaks } from './charts.js';
 import { isPlaybackCurrent } from './replay.js';
 import { runtime } from './runtime.js';
@@ -168,9 +169,6 @@ export async function generateGifFromHistory() {
             runtime.activeSessionStorageKey !== job.key) throw new Error('GIF export cancelled.');
     }
     try {
-        if (typeof GifWriter !== 'function') {
-            throw new Error('GIF encoder missing. Reinstall the complete script, including its @require header.');
-        }
         // Playback owns a frozen snapshot. Live acquisition can keep appending
         // samples without changing the range or counts of this export.
         if (!isPlaybackCurrent(runtime.playback)) throw new Error('Open Replay before downloading a GIF.');

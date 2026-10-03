@@ -28,7 +28,7 @@ async function downloaded(page,action){const [download]=await Promise.all([page.
   window.GM_setValue=(k,v)=>localStorage.setItem(k,JSON.stringify(v));window.GM_deleteValue=k=>localStorage.removeItem(k);
  });
  await page.goto('https://tierscope.test/testroom/');await page.addScriptTag({content:instrument(source)});await page.evaluate(()=>ViewerTracker.__files.setup());await page.waitForTimeout(350);
- await page.addScriptTag({content:fs.readFileSync(require.resolve('omggif'),'utf8')});
+ assert.equal(await page.evaluate(()=>typeof window.GifWriter),'undefined','GIF export needs no page/global encoder');
  const panel=page.locator('#tracker-container'),bounds=await panel.boundingBox(),canvas=page.locator('#spark-red');
  const before=await page.evaluate(()=>ViewerTracker.__files.state());
  const options=page.getByRole('button',{name:'Chart window and session files'}),menu=page.locator('#panel-options');

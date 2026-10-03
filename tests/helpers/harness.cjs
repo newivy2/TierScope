@@ -35,7 +35,7 @@ function harness(storage = new Map(), sourceText = source) {
   class FakeDate extends Date {constructor(...a){super(...(a.length?a:[now]));}static now(){return now;}}
   const blobs=new Map(); let blobId=0;
   class FakeURL extends URL {static createObjectURL(b){const id='blob:test-'+(++blobId);blobs.set(id,b);return id;}static revokeObjectURL(){}}
-  const context = { GifWriter: require("omggif").GifWriter,
+  const context = {
     crypto:require("crypto").webcrypto, document, location:new URL('https://chaturbate.com/testroom/'), Date:FakeDate,
     console:{log:(...a)=>logs.push(a.join(' ')),warn:(...a)=>logs.push(a.join(' ')),error:(...a)=>logs.push(a.join(' '))},
     URL:FakeURL,Blob,AbortController, confirm:()=>true,alert:(x)=>logs.push('ALERT: '+x),

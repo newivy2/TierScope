@@ -27,11 +27,15 @@ npm run test:performance
 
 `TIERSCOPE_CHROMIUM_PATH` can select an already-installed Chromium executable. `TIERSCOPE_CHROMIUM_ARGS`, if needed, is a JSON array of launch arguments. Normal installations need neither setting. Browser tests remove temporary downloads and screenshots on completion.
 
+## Tier-map evidence
+
+`tests/fixtures/user-list-tiers.json` is synthetic. Its distinct per-tier counts detect accidental mapping swaps, but do not independently prove the current website protocol. A captured, anonymized `getchatuserlist` response paired with independently checked displayed tier totals is still needed for that gate. No real capture was available for this beta. Unknown codes remain unclassified and appear in diagnostics; this update does not invent new mappings.
+
 ## Coverage
 
 | Test | What it verifies |
 | --- | --- |
-| Modular build | The generated userscript matches source and version metadata; all 196 extracted functions and startup initialization match 3.4.0 after state-access normalization; explicit imports, unchanged markup/styles/text and userscript permissions, no runtime module imports or shipped test hooks. |
+| Modular build | The generated userscript matches source and version metadata; 191 unchanged extracted functions and startup initialization match 3.4.0 after state-access normalization; five documented beta.2 fixes have behavioral coverage. Explicit imports, bundled encoder license, only the intended metadata removals, no runtime module imports or shipped page/test API. |
 | Session clock | Session start survives repeated pause/resume and reload; active time excludes pauses; reported high offsets use wall time. |
 | Session highs | Values and matching timestamps survive the 10,000-sample rollover, equal highs, lower samples, and reload. Saved highlights use session highs; Replay uses highs through the selected frame. |
 | All-time highs | Accepted live peaks and timestamps; SH/ATH labels, header placement, keyboard and compact controls, mode-specific highlights and pulses; session Reset, Stop/Start and expiry; room isolation and persisted preference; explicit file Add including retained session peaks, idempotence and Replay isolation; concurrent writes/compaction, late writes after Clear, confirmation, corrupt records, failed acquisition/rendering/storage and retry. |
@@ -41,8 +45,8 @@ npm run test:performance
 | Session lifecycle combinations | Pause → reload → failed acquisition → Stop → file Replay → close; Stop during an in-flight scan while file Replay is open; a frozen ordinary Replay export after new scans. |
 | Stop and absence | Manual Stop confirmation and cancellation; frozen elapsed time, chart pixels, and trends; late-response rejection; stopped reload; separate-session Start; 2m/5m slowdown and 15m auto-pause; minute-by-minute presence checks without recording absent counts; automatic return behind FILE REPLAY; Stop after three hours auto-paused; one-click Resume override, refresh and manual Pause/Resume persistence, cancellation of the old Stop deadline, and re-arming only on a current API owner observation; selected interval and request restrictions; control bounds and retained Replay/CSV. |
 | Startup | Immediate first attempt for a fresh room; countdown measured from completion; visible initial chart point; restored/paused behavior; pause, Reset and navigation during an in-flight request; shared retry/access restrictions; no new directory-page requests; compact scan-settings tooltip. |
-| Acquisition | Bad totals, malformed records and duplicate usernames are rejected. Network failures retain saved data. Processing errors restore history and highs. Late responses after navigation or Reset cannot commit. |
-| DOM fallback | A real browser fixture verifies Users/Chat clicks, accepted counts, fallback cooldown, and independent Replay. |
+| Acquisition | An explicitly synthetic response locks all seven tier codes with distinct totals through saved history. Throwing diagnostics cannot roll back a persisted scan or skip ATH. Session-write failure preserves live data and ATH; a later save catches up. Unsaved-room navigation starts fresh highs and timing. Bad totals, malformed records and duplicate usernames are rejected. Network failures retain saved data. Processing errors restore history and highs. Late responses after navigation or Reset cannot commit. |
+| DOM fallback | Browser fixtures verify accepted counts, cooldown, independent Replay, no clicks for an already selected Users tab, restoration of Chat/private tabs, skipping unknown selection, user tab changes during the wait, stale navigation and restoration after a parsing error. |
 | Presentation | Saved counts stay non-live until acceptance. Sample-age formatting covers unit boundaries. |
 | Layout | All 2,048 collapse combinations are checked at normal and 1.5 inherited line heights, including row overflow and restoration from all-collapsed. |
 | Compact dashboard | Chart pixels and 15-minute range, metric persistence across reload, blank saved deltas, live deltas, source/age, settings controls without height growth, control bounds, a visible close button, Escape after focus leaves the panel, broadcast-room refresh at a non-default scale, and page-based startup across room and directory URLs with obsolete view preferences ignored. |

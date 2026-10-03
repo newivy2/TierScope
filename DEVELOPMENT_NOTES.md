@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **beta version 3.5.0-beta.1**. The official release remains 3.4.0. This beta changes source organization and the build, preserving existing features and design; see [BUILDING.md](BUILDING.md). For a quick introduction and installation links, see the [README](readme.md).
+Detailed reference for **beta version 3.5.0-beta.2**. The official release remains 3.4.0. This beta preserves the panel design and features while reorganizing the sources, bundling the encoder, hardening scan commits and keeping controls private; see [BUILDING.md](BUILDING.md). For a quick introduction and installation links, see the [README](readme.md).
 
 ## Contents
 
@@ -26,11 +26,7 @@ Detailed reference for **beta version 3.5.0-beta.1**. The official release remai
 3. Open [tierscope.user.js](https://raw.githubusercontent.com/newivy2/TierScope/main/tierscope.user.js) and accept the Tampermonkey installation prompt. Alternatively, open the [GitHub source file](https://github.com/newivy2/TierScope/blob/main/tierscope.user.js) and select **Raw**.
 4. Refresh a Chaturbate broadcast room. TierScope appears at its saved position, or near the upper-right corner if no layout has been saved. A new session begins acquiring samples; a restored session keeps its saved pause state.
 
-When updating, install the complete userscript, including its metadata header. The header loads the pinned GIF encoder dependency:
-
-```javascript
-// @require      https://cdn.jsdelivr.net/npm/omggif@1.0.10/omggif.js
-```
+When updating, install the complete userscript, including its metadata header. The beta bundles the pinned GIF encoder into the script; no external `@require` or separate encoder download is needed. Its MIT license is included in the script and [THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.txt).
 
 The script also requests `GM_listValues` to find the separate saved records for each room.
 
@@ -247,7 +243,7 @@ Open **Replay**, then click **GIF**. Progress and **Cancel** appear within the e
 | Summary rows | Total, With Tokens, Registered, Anonymous |
 | Content | Historical lines, counts, and recorded elapsed time |
 | Rendering | Fixed palette, bitmap lettering, two-pixel measured lines, thinner orange dashed gap connectors |
-| Encoder | `omggif` 1.0.10, loaded by the userscript manager |
+| Encoder | `omggif` 1.0.10, bundled into the userscript |
 
 Export uses the **entire frozen Replay range**, regardless of cursor position or playback speed. With more than 60 samples, it selects moments across the recorded time range and includes the first and last samples. Each chart shows history only through its selected sample, uses timestamp spacing and recorded gaps, and scales independently to its visible minimum and maximum. Flat series are centered. Orange dashed connectors appear only once both recorded endpoints are included in the frame; a small legend identifies them as intervals with no samples.
 
@@ -353,13 +349,15 @@ TierScope depends on Chaturbate’s room data and page structure; changes to eit
 
 - **Primary source:** same-origin `/api/getchatuserlist/`, with a 10-second timeout.
 - **Validation:** malformed or duplicate records reject the sample. Additional count-change checks can reject suspicious changes. Rejected samples add no history point.
-- **Fallback:** reads the Users tab if the API is unavailable or rejected, then attempts to return to Chat. Fallback attempts are spaced by at least 60 seconds, or the configured scan interval when longer.
+- **Fallback:** reads Users if it is already selected. Otherwise it temporarily opens Users only when it can identify and restore the previously selected tab, including a private tab. It does not restore or accept the fallback sample if the user changes tabs during the wait, or the room changes. When selected-tab markers are unavailable or ambiguous, it skips fallback and retains the previous valid data. Fallback attempts are spaced by at least 60 seconds, or the configured scan interval when longer.
 - **Freshness:** the last accepted data stays visible through failed attempts. The site’s Users tab and TierScope can refresh at different times.
 - **Storage format:** session schema version 2, with an optional `history.breaks` boolean array aligned to sample timestamps. Optional `isStopped`, `stoppedAt`, `stopReason`, `broadcasterAbsence`, `absencePausedAt`, and boolean `absenceOverrideActive` fields retain session closure, absence timing, and manual override. Builds before 3.3.3 ignore `absencePausedAt` and restore an auto-paused session as an ordinary manual pause. Builds before 3.3.5 ignore the override flag and can restart absence automation. Missing optional fields retain their backward-compatible defaults. Tab records are under `tierscope:tab:v2:<room>:<record-id>` and a Reset generation under `tierscope:epoch:v2:<room>`. Compatible legacy records under `tierscope:v1:<room>` are validated and migrated in memory; new saves use version 2. Releases before 3.1.8 do not read this per-tab format. Builds 3.1.8–3.1.14 can restore aggregate history but ignore the optional gap metadata. Row visibility preferences are stored separately under `tierscope:ui:collapsedRows:v1`, position/scale under `tierscope:ui:geometry:v1`, and the theme under `tierscope:ui:theme:v1`.
 - **Retry state:** `tierscope:requests:v1:<origin>` stores shared retry timing and access-denial status. It contains no viewer usernames and is separate from room Reset.
 - **GIF dependency:** [omggif](https://github.com/deanm/omggif), version 1.0.10, MIT licensed.
 
-The script does not upload TXT reports, CSV files, GIFs, or tracking history to a TierScope server. It makes room-data requests to Chaturbate; the userscript manager loads the encoder from jsDelivr. Usernames returned by acquisition are used transiently in memory to validate and count the current sample. They are no longer collected into session name lists or written in new saved-session records. The room name remains part of storage keys and exported filenames/CSV rows.
+The script does not upload TXT reports, CSV files, GIFs, or tracking history to a TierScope server. It makes room-data requests to Chaturbate; GIF encoding uses the bundled encoder without contacting a CDN. Usernames returned by acquisition are used transiently in memory to validate and count the current sample. They are no longer collected into session name lists or written in new saved-session records. The room name remains part of storage keys and exported filenames/CSV rows.
+
+The beta no longer publishes a `ViewerTracker` API to page scripts. Use the panel controls for Reset and exports; existing panel functionality is unchanged.
 
 ## Troubleshooting
 
@@ -405,7 +403,7 @@ Click **Replay** first. GIF export is deliberately absent from live Controls.
 
 **“GIF encoder missing”**
 
-Reinstall the complete script with its `@require` header and refresh the room. Check whether the userscript manager can load the pinned jsDelivr dependency.
+Reinstall the complete beta script and refresh the room. The encoder is included in the script, so no CDN request is needed. Developers should run `npm ci` and `npm run build` to regenerate the complete artifact.
 
 **A download does not appear**
 
@@ -421,6 +419,7 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
+| **3.5.0-beta.2** | Preserve accepted scans through diagnostic/storage errors; bundle the pinned GIF encoder with its license; remove the page control API and unsafeWindow grant; restore the original tab after fallback; explain SH/ATH retention; add tier, navigation and failure regression tests. |
 | **3.5.0-beta.1** | Extract feature modules with explicit imports and shared runtime state; build one installable script with esbuild, verify generated output in CI, and check preservation of the 3.4.0 logic and UI. |
 | **3.4.0** | Release per-room all-time highs, SH/ATH controls and matching pulses, explicit saved-file Add and confirmed clearing, and direct Save/Open controls in Replay. |
 | **3.4.0-beta.3** | Add direct Save and Open buttons to ordinary Replay and FILE REPLAY beside the time display. |

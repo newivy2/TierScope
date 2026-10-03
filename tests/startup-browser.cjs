@@ -41,5 +41,23 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   await page.keyboard.press('Escape');assert(!(await page.locator('#mini-settings').isVisible()));
   assert.deepEqual(errors,[]);
   console.log('PASS fresh initialization request, scanning status, completion-based countdown, visible first data point and compact time-control tooltip');
+  // Exercise normal startup and a real panel control without any injected API.
+  await page.route('https://tierscope.test/api/**',r=>r.fulfill({body:'5,testroom|o|f|0,viewer|t|m|0'}));
+  await page.goto('https://tierscope.test/freshroom/');
+  await page.addScriptTag({content:fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8')});
+  await page.waitForFunction(()=>document.getElementById('header-text')?.textContent.startsWith('USERS:'));
+  assert.deepEqual(await page.evaluate(()=>[typeof window.ViewerTracker,typeof window.GifWriter]),['undefined','undefined']);
+  await page.click('#btn-replay');
+  assert.match(await page.locator('#header-text').textContent(),/^PLAYBACK:/);
+  await page.click('#playback-return');
+  assert.match(await page.locator('#header-text').textContent(),/^USERS:/);
+  const epoch=()=>page.evaluate(()=>localStorage.getItem('tierscope:epoch:v2:freshroom'));
+  const beforeReset=await epoch();
+  page.once('dialog',dialog=>dialog.dismiss());await page.click('#btn-main-reset');
+  assert.equal(await epoch(),beforeReset,'Cancel preserves the session');
+  page.once('dialog',dialog=>dialog.accept());await page.click('#btn-main-reset');
+  assert.notEqual(await epoch(),beforeReset,'the panel can still Reset the session');
+  assert.deepEqual(errors,[]);
+  console.log('PASS unmodified userscript starts and panel Replay/confirmed Reset work without a page API or global GIF encoder');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1});

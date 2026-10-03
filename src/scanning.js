@@ -190,17 +190,40 @@ export async function acquireDOMSnapshot(context, returnToChat) {
     var usersTab = findTab('users');
     var chatTab = findTab('chat');
     if (!usersTab) throw new Error('USERS tab not found');
+    var tabGroup = usersTab.closest('[role="tablist"]') || usersTab.parentElement;
+    var tabs = Array.from(tabGroup ? tabGroup.querySelectorAll('button, [role="tab"], [data-tab]') : []);
+    [usersTab, chatTab].forEach(function(tab) { if (tab && tabs.indexOf(tab) === -1) tabs.push(tab); });
+    function selectedTab() {
+        var selected = tabs.filter(function(tab) {
+            return tab.getAttribute('aria-selected') === 'true' || tab.getAttribute('data-state') === 'active' ||
+                tab.classList.contains('active') || tab.classList.contains('selected');
+        });
+        return selected.length === 1 ? selected[0] : null;
+    }
+    var originalTab = selectedTab();
+    // Do not guess which view the user was reading. An uncertain tab state is
+    // a skipped fallback, not permission to leave a private chat or other view.
+    if (!originalTab) throw new Error('Cannot safely identify the selected tab');
+    if (originalTab === usersTab) return scanUsers();
+    if (!returnToChat) throw new Error('DOM fallback skipped because tab restoration is disabled');
     var openedUsers = false;
+    var userChangedTab = false;
+    function onTabClick(event) {
+        if (tabs.some(function(tab) { return tab === event.target || tab.contains(event.target); })) userChangedTab = true;
+    }
     try {
         usersTab.click();
         openedUsers = true;
+        if (tabGroup) tabGroup.addEventListener('click', onTabClick, true);
         await new Promise(function(resolve) { setTimeout(resolve, 800); });
-        if (!isAcquisitionCurrent(context)) return null;
+        if (!isAcquisitionCurrent(context) || userChangedTab || selectedTab() !== usersTab) return null;
         return scanUsers();
     } finally {
-        if (openedUsers && isAcquisitionCurrent(context) && returnToChat && chatTab) {
-            try { chatTab.click(); }
-            catch (err) { log('DOM fallback could not return to CHAT: ' + err.message); }
+        if (tabGroup) tabGroup.removeEventListener('click', onTabClick, true);
+        if (openedUsers && !userChangedTab && isAcquisitionCurrent(context) &&
+            selectedTab() === usersTab && originalTab.isConnected) {
+            try { originalTab.click(); }
+            catch (err) { log('DOM fallback could not restore the selected tab: ' + err.message); }
         }
     }
 }
@@ -438,8 +461,8 @@ export async function performScanThenReturn(returnToChat) {
             'anonymous': anonymousCount || 0
         };
         updateAcquisitionStatus();
-        saveSession(context.room);
-        if (diagnostics) console.log('[TierScope ' + runtime.TIERSCOPE_VERSION + '] API scan accepted', diagnostics);
+        // Acquisition and rendering have succeeded. Nothing after this boundary
+        // may roll memory back once the sample can have reached durable storage.
         sampleCommitted = true;
     } catch (err) {
         if (priorState) {
@@ -480,9 +503,14 @@ export async function performScanThenReturn(returnToChat) {
         if (sampleCommitted) {
             // Persist only after acquisition and presentation accepted the
             // sample. Storage failure must not undo a valid live sample.
+            try { saveSession(context.room); }
+            catch (error) { log('Could not save accepted sample: ' + error.message); }
             try { recordAcceptedAllTimeHighs(context.room); updateDisplay(); }
             catch (error) { log('Could not update all-time highs: ' + error.message); }
             pulseAcceptedHighs(priorState);
+            try {
+                if (diagnostics) console.log('[TierScope ' + runtime.TIERSCOPE_VERSION + '] API scan accepted', diagnostics);
+            } catch (error) { /* Logging cannot invalidate an accepted sample. */ }
         }
         if (isAcquisitionCurrent(context)) {
             runtime.isScanning = false;

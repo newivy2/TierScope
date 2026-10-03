@@ -212,7 +212,8 @@ export function updateHighControls() {
         toggle.textContent = runtime.highMode.toUpperCase();
         toggle.setAttribute('aria-pressed', String(runtime.highMode === 'ath'));
         toggle.setAttribute('aria-label', runtime.highMode === 'ath' ? 'All-time highs. Switch to session highs' : 'Session highs. Switch to all-time highs');
-        toggle.title = (runtime.highMode === 'ath' ? 'All-time highs recorded for this room in this browser' : 'Session highs') +
+        toggle.title = (runtime.highMode === 'ath' ? 'All-time highs for this room in this browser; survive session Reset and expiry' :
+            'Session highs; cleared by Reset. Saved sessions expire 3 hours after their last save. Downloaded files do not expire') +
             '. Click to switch. ' + warning;
     }
     ['btn-add-all-time', 'btn-playback-add-all-time'].forEach(function(id) {

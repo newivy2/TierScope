@@ -15,7 +15,11 @@ const cache = new Map();
 function prepareSource(source) {
   const property = /\bdownloadTrackingReport: downloadTrackingReport,|\bdownloadTrackingReport,(?=\s*downloadTrackingCSV)/;
   if (!property.test(source)) throw new Error('Userscript test injection point is missing.');
-  return source.replace(property, 'downloadTrackingReport: downloadTrackingReport,')
+  // The installed script has no page API. Expose its private tracker only in
+  // this test copy, after initialization, for the existing regression hooks.
+  return source.replace(/\b(?:var|const) ViewerTracker = initializeRuntime\(\);/,
+      '$&\n  window.ViewerTracker = ViewerTracker;')
+    .replace(property, 'downloadTrackingReport: downloadTrackingReport,')
     .replaceAll('scheduleInit(2e3);', 'scheduleInit(2000);');
 }
 

@@ -8,7 +8,8 @@ export function getTierMarker(tier) {
 }
 
 export function log(msg) {
-    console.log('[TierScope ' + runtime.TIERSCOPE_VERSION + '] ' + msg);
+    try { console.log('[TierScope ' + runtime.TIERSCOPE_VERSION + '] ' + msg); }
+    catch (error) { /* Diagnostics must not interrupt tracking or persistence. */ }
 }
 
 export function getModelNameFromUrl(url) {
