@@ -3,6 +3,7 @@ const root=path.join(__dirname,'..');
 const {instrument,prepareSource}=require(path.join(root,'tests/helpers/instrument.cjs'));
 const {chromium}=require(path.join(root,'node_modules/playwright'));
 const throttle=Number(process.env.TIERSCOPE_CPU_THROTTLE||1),rounds=Number(process.env.TIERSCOPE_BENCH_ROUNDS||3);
+const historyMode=process.env.TIERSCOPE_BENCH_HISTORY==='1';
 assert(Number.isFinite(throttle)&&throttle>=1);assert(Number.isInteger(rounds)&&rounds>0);
 const sourceFile=process.env.TIERSCOPE_SOURCE||path.join(root,'tierscope.user.js');
 const source=prepareSource(fs.readFileSync(sourceFile,'utf8')).replaceAll('scheduleInit(2000);','').replace('downloadTrackingReport: downloadTrackingReport,',`__libraryBench:{
@@ -18,8 +19,8 @@ const source=prepareSource(fs.readFileSync(sourceFile,'utf8')).replaceAll('sched
  isAutoRefreshOn=false;isMinimized=true;createPanel();toggleView();saveSession(getModelName());
  const base=captureSessionFile();let bytes=0;
  for(let i=0;i<count;i++){
-  const archive=JSON.parse(JSON.stringify(base));archive.room='model'+String(i%100).padStart(3,'0');
-  const offset=Math.floor(i/100)*864000000;
+  const archive=JSON.parse(JSON.stringify(base));archive.room='model'+String(${historyMode}?0:i%100).padStart(3,'0');
+  const offset=(${historyMode}?i:Math.floor(i/100))*864000000;
   archive.session.history.timestamps=archive.session.history.timestamps.map(t=>t-offset);archive.session.timestamp-=offset;archive.session.sessionStartedAt-=offset;
   for(const high of Object.values(archive.session.sessionHighs))if(high.time!==null)high.time-=offset;
   if(archive.session.roomTotalHighTime!==null)archive.session.roomTotalHighTime-=offset;
@@ -35,6 +36,19 @@ const source=prepareSource(fs.readFileSync(sourceFile,'utf8')).replaceAll('sched
  const click=id=>document.getElementById(id).click();const tab=name=>document.querySelector('[data-tools-tab="'+name+'"]').click();
  measure('open',()=>click('btn-control-library'));
  measure('folder',()=>click('tools-folder-model000'));
+ if(${historyMode}){
+  measure('history',()=>click('tools-model-history'));
+  measure('historyMetric',()=>{const select=document.getElementById('tools-history-metric');select.value='withTokens';select.dispatchEvent(new Event('change'));});
+  measure('historyMetricCached',()=>{const select=document.getElementById('tools-history-metric');select.value='room';select.dispatchEvent(new Event('change'));});
+  measure('historyLatest10',()=>{const select=document.getElementById('tools-history-range');select.value='10';select.dispatchEvent(new Event('change'));});
+  measure('historyAll',()=>{const select=document.getElementById('tools-history-range');select.value='Infinity';select.dispatchEvent(new Event('change'));});
+  measure('historyRefresh',()=>click('tools-history-refresh'));
+  measure('historyBack',()=>click('tools-history-back'));
+  measure('historyAgain',()=>click('tools-model-history'));
+  results.historyRecordings=document.getElementById('tools-history-recording').options.length;
+  results.nodes=document.getElementById('tierscope-session-tools').querySelectorAll('*').length;
+  return results;
+ }
  measure('search',()=>{const input=document.getElementById('tools-library-search');input.value='Recording 1';input.dispatchEvent(new Event('input'));});
  measure('summary',()=>tab('summary'));
  measure('compare',()=>tab('compare'));
@@ -50,7 +64,7 @@ const source=prepareSource(fs.readFileSync(sourceFile,'utf8')).replaceAll('sched
 (async()=>{
  const browser=await chromium.launch({headless:true,executablePath:process.env.TIERSCOPE_CHROMIUM_PATH,args:JSON.parse(process.env.TIERSCOPE_CHROMIUM_ARGS||'[]')});
  try{
-  const output={source:path.basename(sourceFile),cpuThrottle:throttle,rounds,cases:[]};
+  const output={source:path.basename(sourceFile),historyMode,cpuThrottle:throttle,rounds,cases:[]};
   for(const [label,count,samples] of [['small',12,300],['many',500,500],['long',36,10000]]){
    const measurements=[];let size;
    for(let i=0;i<rounds;i++){
@@ -61,7 +75,7 @@ const source=prepareSource(fs.readFileSync(sourceFile,'utf8')).replaceAll('sched
     const cdp=await page.context().newCDPSession(page);if(throttle>1)await cdp.send('Emulation.setCPUThrottlingRate',{rate:throttle});
     await cdp.send('HeapProfiler.collectGarbage');const beforeHeap=(await cdp.send('Runtime.getHeapUsage')).usedSize;
     if(process.env.TIERSCOPE_PROFILE_PATH){await cdp.send('Profiler.enable');await cdp.send('Profiler.start');}
-    const result=await page.evaluate(()=>ViewerTracker.__libraryBench.run());assert.equal(result.backupRecordings,count);measurements.push(result);
+    const result=await page.evaluate(()=>ViewerTracker.__libraryBench.run());assert.equal(historyMode?result.historyRecordings:result.backupRecordings,count);measurements.push(result);
     if(process.env.TIERSCOPE_PROFILE_PATH){const {profile}=await cdp.send('Profiler.stop');fs.writeFileSync(process.env.TIERSCOPE_PROFILE_PATH+'-'+label+'-'+i+'.json',JSON.stringify(profile));}
     await cdp.send('HeapProfiler.collectGarbage');const openHeap=(await cdp.send('Runtime.getHeapUsage')).usedSize;
     await page.evaluate(async()=>{document.getElementById('btn-control-library').click();await new Promise(requestAnimationFrame);if(document.getElementById('tierscope-session-tools'))throw Error('Library did not close');});

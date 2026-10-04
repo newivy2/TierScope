@@ -1,0 +1,958 @@
+{
+  "date": "2026-10-04",
+  "note": "Three runs per CPU setting. All recordings belong to one model. GM storage is in-memory; times include synchronous work and forced layout, not paint or native userscript storage.",
+  "runs": [
+    {
+      "source": "tierscope.user.js",
+      "historyMode": true,
+      "cpuThrottle": 1,
+      "rounds": 3,
+      "cases": [
+        {
+          "label": "small",
+          "version": "3.13.0-beta.1",
+          "recordings": 12,
+          "samplesPerRecording": 300,
+          "bytes": 208430,
+          "measurements": [
+            {
+              "open": {
+                "ms": 11.899999998509884,
+                "storageReads": 12
+              },
+              "folder": {
+                "ms": 2.600000001490116,
+                "storageReads": 0
+              },
+              "history": {
+                "ms": 13.300000000745058,
+                "storageReads": 12
+              },
+              "historyMetric": {
+                "ms": 4.599999997764826,
+                "storageReads": 0
+              },
+              "historyMetricCached": {
+                "ms": 3.600000001490116,
+                "storageReads": 0
+              },
+              "historyLatest10": {
+                "ms": 3.300000000745058,
+                "storageReads": 0
+              },
+              "historyAll": {
+                "ms": 3.399999998509884,
+                "storageReads": 0
+              },
+              "historyRefresh": {
+                "ms": 3.199999999254942,
+                "storageReads": 12
+              },
+              "historyBack": {
+                "ms": 2,
+                "storageReads": 12
+              },
+              "historyAgain": {
+                "ms": 3.300000000745058,
+                "storageReads": 12
+              },
+              "historyRecordings": 12,
+              "nodes": 198,
+              "heap": {
+                "before": 2076848,
+                "open": 2419756,
+                "closed": 2126800
+              }
+            },
+            {
+              "open": {
+                "ms": 10.300000000745058,
+                "storageReads": 12
+              },
+              "folder": {
+                "ms": 2.399999998509884,
+                "storageReads": 0
+              },
+              "history": {
+                "ms": 13.5,
+                "storageReads": 12
+              },
+              "historyMetric": {
+                "ms": 4.600000001490116,
+                "storageReads": 0
+              },
+              "historyMetricCached": {
+                "ms": 3.5,
+                "storageReads": 0
+              },
+              "historyLatest10": {
+                "ms": 3.300000000745058,
+                "storageReads": 0
+              },
+              "historyAll": {
+                "ms": 3.2999999970197678,
+                "storageReads": 0
+              },
+              "historyRefresh": {
+                "ms": 3.300000000745058,
+                "storageReads": 12
+              },
+              "historyBack": {
+                "ms": 2,
+                "storageReads": 12
+              },
+              "historyAgain": {
+                "ms": 3.199999999254942,
+                "storageReads": 12
+              },
+              "historyRecordings": 12,
+              "nodes": 198,
+              "heap": {
+                "before": 2076884,
+                "open": 2419768,
+                "closed": 2126836
+              }
+            },
+            {
+              "open": {
+                "ms": 9.599999997764826,
+                "storageReads": 12
+              },
+              "folder": {
+                "ms": 2.199999999254942,
+                "storageReads": 0
+              },
+              "history": {
+                "ms": 9,
+                "storageReads": 12
+              },
+              "historyMetric": {
+                "ms": 4.600000001490116,
+                "storageReads": 0
+              },
+              "historyMetricCached": {
+                "ms": 3.399999998509884,
+                "storageReads": 0
+              },
+              "historyLatest10": {
+                "ms": 3.199999999254942,
+                "storageReads": 0
+              },
+              "historyAll": {
+                "ms": 3.400000002235174,
+                "storageReads": 0
+              },
+              "historyRefresh": {
+                "ms": 3.199999999254942,
+                "storageReads": 12
+              },
+              "historyBack": {
+                "ms": 1.8999999985098839,
+                "storageReads": 12
+              },
+              "historyAgain": {
+                "ms": 3.199999999254942,
+                "storageReads": 12
+              },
+              "historyRecordings": 12,
+              "nodes": 198,
+              "heap": {
+                "before": 2076944,
+                "open": 2419876,
+                "closed": 2126932
+              }
+            }
+          ]
+        },
+        {
+          "label": "many",
+          "version": "3.13.0-beta.1",
+          "recordings": 500,
+          "samplesPerRecording": 500,
+          "bytes": 14102890,
+          "measurements": [
+            {
+              "open": {
+                "ms": 126.30000000074506,
+                "storageReads": 500
+              },
+              "folder": {
+                "ms": 5.5,
+                "storageReads": 0
+              },
+              "history": {
+                "ms": 63.5,
+                "storageReads": 500
+              },
+              "historyMetric": {
+                "ms": 34.400000002235174,
+                "storageReads": 0
+              },
+              "historyMetricCached": {
+                "ms": 18.799999997019768,
+                "storageReads": 0
+              },
+              "historyLatest10": {
+                "ms": 4.300000000745058,
+                "storageReads": 0
+              },
+              "historyAll": {
+                "ms": 17.300000000745058,
+                "storageReads": 0
+              },
+              "historyRefresh": {
+                "ms": 19.399999998509884,
+                "storageReads": 500
+              },
+              "historyBack": {
+                "ms": 6.700000002980232,
+                "storageReads": 500
+              },
+              "historyAgain": {
+                "ms": 19.099999997764826,
+                "storageReads": 500
+              },
+              "historyRecordings": 500,
+              "nodes": 990,
+              "heap": {
+                "before": 16143668,
+                "open": 19439028,
+                "closed": 2320004
+              }
+            },
+            {
+              "open": {
+                "ms": 130.90000000223517,
+                "storageReads": 500
+              },
+              "folder": {
+                "ms": 5.799999997019768,
+                "storageReads": 0
+              },
+              "history": {
+                "ms": 67.30000000074506,
+                "storageReads": 500
+              },
+              "historyMetric": {
+                "ms": 41,
+                "storageReads": 0
+              },
+              "historyMetricCached": {
+                "ms": 20.900000002235174,
+                "storageReads": 0
+              },
+              "historyLatest10": {
+                "ms": 4.399999998509884,
+                "storageReads": 0
+              },
+              "historyAll": {
+                "ms": 16.899999998509884,
+                "storageReads": 0
+              },
+              "historyRefresh": {
+                "ms": 20.100000001490116,
+                "storageReads": 500
+              },
+              "historyBack": {
+                "ms": 7.699999999254942,
+                "storageReads": 500
+              },
+              "historyAgain": {
+                "ms": 20.599999997764826,
+                "storageReads": 500
+              },
+              "historyRecordings": 500,
+              "nodes": 990,
+              "heap": {
+                "before": 16143668,
+                "open": 19439084,
+                "closed": 2320004
+              }
+            },
+            {
+              "open": {
+                "ms": 135.20000000298023,
+                "storageReads": 500
+              },
+              "folder": {
+                "ms": 6.299999997019768,
+                "storageReads": 0
+              },
+              "history": {
+                "ms": 66.10000000149012,
+                "storageReads": 500
+              },
+              "historyMetric": {
+                "ms": 37.80000000074506,
+                "storageReads": 0
+              },
+              "historyMetricCached": {
+                "ms": 19.599999997764826,
+                "storageReads": 0
+              },
+              "historyLatest10": {
+                "ms": 4.699999999254942,
+                "storageReads": 0
+              },
+              "historyAll": {
+                "ms": 17,
+                "storageReads": 0
+              },
+              "historyRefresh": {
+                "ms": 19.5,
+                "storageReads": 500
+              },
+              "historyBack": {
+                "ms": 6.100000001490116,
+                "storageReads": 500
+              },
+              "historyAgain": {
+                "ms": 19.800000000745058,
+                "storageReads": 500
+              },
+              "historyRecordings": 500,
+              "nodes": 990,
+              "heap": {
+                "before": 16143668,
+                "open": 19439028,
+                "closed": 2320004
+              }
+            }
+          ]
+        },
+        {
+          "label": "long",
+          "version": "3.13.0-beta.1",
+          "recordings": 36,
+          "samplesPerRecording": 10000,
+          "bytes": 19543058,
+          "measurements": [
+            {
+              "open": {
+                "ms": 189.39999999850988,
+                "storageReads": 36
+              },
+              "folder": {
+                "ms": 5.100000001490116,
+                "storageReads": 0
+              },
+              "history": {
+                "ms": 63.80000000074506,
+                "storageReads": 36
+              },
+              "historyMetric": {
+                "ms": 31.899999998509884,
+                "storageReads": 0
+              },
+              "historyMetricCached": {
+                "ms": 7.399999998509884,
+                "storageReads": 0
+              },
+              "historyLatest10": {
+                "ms": 3.600000001490116,
+                "storageReads": 0
+              },
+              "historyAll": {
+                "ms": 6.399999998509884,
+                "storageReads": 0
+              },
+              "historyRefresh": {
+                "ms": 7.100000001490116,
+                "storageReads": 36
+              },
+              "historyBack": {
+                "ms": 4.199999999254942,
+                "storageReads": 36
+              },
+              "historyAgain": {
+                "ms": 8,
+                "storageReads": 36
+              },
+              "historyRecordings": 36,
+              "nodes": 414,
+              "heap": {
+                "before": 23615828,
+                "open": 28101612,
+                "closed": 4410576
+              }
+            },
+            {
+              "open": {
+                "ms": 183,
+                "storageReads": 36
+              },
+              "folder": {
+                "ms": 4.900000002235174,
+                "storageReads": 0
+              },
+              "history": {
+                "ms": 81.30000000074506,
+                "storageReads": 36
+              },
+              "historyMetric": {
+                "ms": 32.399999998509884,
+                "storageReads": 0
+              },
+              "historyMetricCached": {
+                "ms": 7.800000000745058,
+                "storageReads": 0
+              },
+              "historyLatest10": {
+                "ms": 5.099999997764826,
+                "storageReads": 0
+              },
+              "historyAll": {
+                "ms": 6.700000002980232,
+                "storageReads": 0
+              },
+              "historyRefresh": {
+                "ms": 6.799999997019768,
+                "storageReads": 36
+              },
+              "historyBack": {
+                "ms": 4.5,
+                "storageReads": 36
+              },
+              "historyAgain": {
+                "ms": 7.600000001490116,
+                "storageReads": 36
+              },
+              "historyRecordings": 36,
+              "nodes": 414,
+              "heap": {
+                "before": 23604024,
+                "open": 28087984,
+                "closed": 4397232
+              }
+            },
+            {
+              "open": {
+                "ms": 191,
+                "storageReads": 36
+              },
+              "folder": {
+                "ms": 4.600000001490116,
+                "storageReads": 0
+              },
+              "history": {
+                "ms": 71.80000000074506,
+                "storageReads": 36
+              },
+              "historyMetric": {
+                "ms": 34.599999997764826,
+                "storageReads": 0
+              },
+              "historyMetricCached": {
+                "ms": 7.700000002980232,
+                "storageReads": 0
+              },
+              "historyLatest10": {
+                "ms": 5.099999997764826,
+                "storageReads": 0
+              },
+              "historyAll": {
+                "ms": 7.100000001490116,
+                "storageReads": 0
+              },
+              "historyRefresh": {
+                "ms": 8.800000000745058,
+                "storageReads": 36
+              },
+              "historyBack": {
+                "ms": 6.099999997764826,
+                "storageReads": 36
+              },
+              "historyAgain": {
+                "ms": 9.5,
+                "storageReads": 36
+              },
+              "historyRecordings": 36,
+              "nodes": 414,
+              "heap": {
+                "before": 23604328,
+                "open": 28089396,
+                "closed": 4398388
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "source": "tierscope.user.js",
+      "historyMode": true,
+      "cpuThrottle": 4,
+      "rounds": 3,
+      "cases": [
+        {
+          "label": "small",
+          "version": "3.13.0-beta.1",
+          "recordings": 12,
+          "samplesPerRecording": 300,
+          "bytes": 208430,
+          "measurements": [
+            {
+              "open": {
+                "ms": 63.900000002235174,
+                "storageReads": 12
+              },
+              "folder": {
+                "ms": 16.5,
+                "storageReads": 0
+              },
+              "history": {
+                "ms": 58.19999999925494,
+                "storageReads": 12
+              },
+              "historyMetric": {
+                "ms": 41.19999999925494,
+                "storageReads": 0
+              },
+              "historyMetricCached": {
+                "ms": 23.399999998509884,
+                "storageReads": 0
+              },
+              "historyLatest10": {
+                "ms": 22.5,
+                "storageReads": 0
+              },
+              "historyAll": {
+                "ms": 22,
+                "storageReads": 0
+              },
+              "historyRefresh": {
+                "ms": 17.100000001490116,
+                "storageReads": 12
+              },
+              "historyBack": {
+                "ms": 12.900000002235174,
+                "storageReads": 12
+              },
+              "historyAgain": {
+                "ms": 24.5,
+                "storageReads": 12
+              },
+              "historyRecordings": 12,
+              "nodes": 198,
+              "heap": {
+                "before": 2076848,
+                "open": 2424772,
+                "closed": 2127576
+              }
+            },
+            {
+              "open": {
+                "ms": 52.69999999925494,
+                "storageReads": 12
+              },
+              "folder": {
+                "ms": 14,
+                "storageReads": 0
+              },
+              "history": {
+                "ms": 54.100000001490116,
+                "storageReads": 12
+              },
+              "historyMetric": {
+                "ms": 28.399999998509884,
+                "storageReads": 0
+              },
+              "historyMetricCached": {
+                "ms": 22.400000002235174,
+                "storageReads": 0
+              },
+              "historyLatest10": {
+                "ms": 19.600000001490116,
+                "storageReads": 0
+              },
+              "historyAll": {
+                "ms": 22.199999999254942,
+                "storageReads": 0
+              },
+              "historyRefresh": {
+                "ms": 21,
+                "storageReads": 12
+              },
+              "historyBack": {
+                "ms": 12.600000001490116,
+                "storageReads": 12
+              },
+              "historyAgain": {
+                "ms": 20.899999998509884,
+                "storageReads": 12
+              },
+              "historyRecordings": 12,
+              "nodes": 198,
+              "heap": {
+                "before": 2076764,
+                "open": 2424184,
+                "closed": 2127024
+              }
+            },
+            {
+              "open": {
+                "ms": 63.899999998509884,
+                "storageReads": 12
+              },
+              "folder": {
+                "ms": 16.800000000745058,
+                "storageReads": 0
+              },
+              "history": {
+                "ms": 66.89999999850988,
+                "storageReads": 12
+              },
+              "historyMetric": {
+                "ms": 27,
+                "storageReads": 0
+              },
+              "historyMetricCached": {
+                "ms": 25.399999998509884,
+                "storageReads": 0
+              },
+              "historyLatest10": {
+                "ms": 18.600000001490116,
+                "storageReads": 0
+              },
+              "historyAll": {
+                "ms": 23.899999998509884,
+                "storageReads": 0
+              },
+              "historyRefresh": {
+                "ms": 19.800000000745058,
+                "storageReads": 12
+              },
+              "historyBack": {
+                "ms": 13.199999999254942,
+                "storageReads": 12
+              },
+              "historyAgain": {
+                "ms": 24.699999999254942,
+                "storageReads": 12
+              },
+              "historyRecordings": 12,
+              "nodes": 198,
+              "heap": {
+                "before": 2076800,
+                "open": 2424176,
+                "closed": 2127576
+              }
+            }
+          ]
+        },
+        {
+          "label": "many",
+          "version": "3.13.0-beta.1",
+          "recordings": 500,
+          "samplesPerRecording": 500,
+          "bytes": 14102890,
+          "measurements": [
+            {
+              "open": {
+                "ms": 623.6999999992549,
+                "storageReads": 500
+              },
+              "folder": {
+                "ms": 31,
+                "storageReads": 0
+              },
+              "history": {
+                "ms": 317.30000000074506,
+                "storageReads": 500
+              },
+              "historyMetric": {
+                "ms": 176.30000000074506,
+                "storageReads": 0
+              },
+              "historyMetricCached": {
+                "ms": 99.29999999701977,
+                "storageReads": 0
+              },
+              "historyLatest10": {
+                "ms": 26.5,
+                "storageReads": 0
+              },
+              "historyAll": {
+                "ms": 91.39999999850988,
+                "storageReads": 0
+              },
+              "historyRefresh": {
+                "ms": 120.5,
+                "storageReads": 500
+              },
+              "historyBack": {
+                "ms": 40.600000001490116,
+                "storageReads": 500
+              },
+              "historyAgain": {
+                "ms": 103.90000000223517,
+                "storageReads": 500
+              },
+              "historyRecordings": 500,
+              "nodes": 990,
+              "heap": {
+                "before": 16143728,
+                "open": 19439716,
+                "closed": 2320636
+              }
+            },
+            {
+              "open": {
+                "ms": 602.5,
+                "storageReads": 500
+              },
+              "folder": {
+                "ms": 32.100000001490116,
+                "storageReads": 0
+              },
+              "history": {
+                "ms": 325.8999999985099,
+                "storageReads": 500
+              },
+              "historyMetric": {
+                "ms": 175.60000000149012,
+                "storageReads": 0
+              },
+              "historyMetricCached": {
+                "ms": 87.19999999925494,
+                "storageReads": 0
+              },
+              "historyLatest10": {
+                "ms": 26.099999997764826,
+                "storageReads": 0
+              },
+              "historyAll": {
+                "ms": 101,
+                "storageReads": 0
+              },
+              "historyRefresh": {
+                "ms": 111.89999999850988,
+                "storageReads": 500
+              },
+              "historyBack": {
+                "ms": 38.099999997764826,
+                "storageReads": 500
+              },
+              "historyAgain": {
+                "ms": 118.39999999850988,
+                "storageReads": 500
+              },
+              "historyRecordings": 500,
+              "nodes": 990,
+              "heap": {
+                "before": 16143728,
+                "open": 19425544,
+                "closed": 2319320
+              }
+            },
+            {
+              "open": {
+                "ms": 680.2000000029802,
+                "storageReads": 500
+              },
+              "folder": {
+                "ms": 32.5,
+                "storageReads": 0
+              },
+              "history": {
+                "ms": 319.19999999925494,
+                "storageReads": 500
+              },
+              "historyMetric": {
+                "ms": 203.80000000074506,
+                "storageReads": 0
+              },
+              "historyMetricCached": {
+                "ms": 109.5,
+                "storageReads": 0
+              },
+              "historyLatest10": {
+                "ms": 27.800000000745058,
+                "storageReads": 0
+              },
+              "historyAll": {
+                "ms": 101,
+                "storageReads": 0
+              },
+              "historyRefresh": {
+                "ms": 111.19999999925494,
+                "storageReads": 500
+              },
+              "historyBack": {
+                "ms": 41.100000001490116,
+                "storageReads": 500
+              },
+              "historyAgain": {
+                "ms": 113.59999999776483,
+                "storageReads": 500
+              },
+              "historyRecordings": 500,
+              "nodes": 990,
+              "heap": {
+                "before": 16143728,
+                "open": 19438860,
+                "closed": 2319896
+              }
+            }
+          ]
+        },
+        {
+          "label": "long",
+          "version": "3.13.0-beta.1",
+          "recordings": 36,
+          "samplesPerRecording": 10000,
+          "bytes": 19543058,
+          "measurements": [
+            {
+              "open": {
+                "ms": 828.9000000022352,
+                "storageReads": 36
+              },
+              "folder": {
+                "ms": 23.199999999254942,
+                "storageReads": 0
+              },
+              "history": {
+                "ms": 278.0999999977648,
+                "storageReads": 36
+              },
+              "historyMetric": {
+                "ms": 172,
+                "storageReads": 0
+              },
+              "historyMetricCached": {
+                "ms": 44.099999997764826,
+                "storageReads": 0
+              },
+              "historyLatest10": {
+                "ms": 20.900000002235174,
+                "storageReads": 0
+              },
+              "historyAll": {
+                "ms": 39.399999998509884,
+                "storageReads": 0
+              },
+              "historyRefresh": {
+                "ms": 44.399999998509884,
+                "storageReads": 36
+              },
+              "historyBack": {
+                "ms": 30.100000001490116,
+                "storageReads": 36
+              },
+              "historyAgain": {
+                "ms": 37.80000000074506,
+                "storageReads": 36
+              },
+              "historyRecordings": 36,
+              "nodes": 414,
+              "heap": {
+                "before": 23604156,
+                "open": 28088964,
+                "closed": 4398008
+              }
+            },
+            {
+              "open": {
+                "ms": 1016.7999999970198,
+                "storageReads": 36
+              },
+              "folder": {
+                "ms": 21.800000000745058,
+                "storageReads": 0
+              },
+              "history": {
+                "ms": 290,
+                "storageReads": 36
+              },
+              "historyMetric": {
+                "ms": 177.69999999925494,
+                "storageReads": 0
+              },
+              "historyMetricCached": {
+                "ms": 43.19999999925494,
+                "storageReads": 0
+              },
+              "historyLatest10": {
+                "ms": 20.300000000745058,
+                "storageReads": 0
+              },
+              "historyAll": {
+                "ms": 38.100000001490116,
+                "storageReads": 0
+              },
+              "historyRefresh": {
+                "ms": 40.599999997764826,
+                "storageReads": 36
+              },
+              "historyBack": {
+                "ms": 20.300000000745058,
+                "storageReads": 36
+              },
+              "historyAgain": {
+                "ms": 44.400000002235174,
+                "storageReads": 36
+              },
+              "historyRecordings": 36,
+              "nodes": 414,
+              "heap": {
+                "before": 23615496,
+                "open": 28100168,
+                "closed": 4409212
+              }
+            },
+            {
+              "open": {
+                "ms": 878.2000000029802,
+                "storageReads": 36
+              },
+              "folder": {
+                "ms": 19.400000002235174,
+                "storageReads": 0
+              },
+              "history": {
+                "ms": 269.69999999925494,
+                "storageReads": 36
+              },
+              "historyMetric": {
+                "ms": 163,
+                "storageReads": 0
+              },
+              "historyMetricCached": {
+                "ms": 42.099999997764826,
+                "storageReads": 0
+              },
+              "historyLatest10": {
+                "ms": 22.5,
+                "storageReads": 0
+              },
+              "historyAll": {
+                "ms": 37.5,
+                "storageReads": 0
+              },
+              "historyRefresh": {
+                "ms": 39.19999999925494,
+                "storageReads": 36
+              },
+              "historyBack": {
+                "ms": 25.699999999254942,
+                "storageReads": 36
+              },
+              "historyAgain": {
+                "ms": 39.69999999925494,
+                "storageReads": 36
+              },
+              "historyRecordings": 36,
+              "nodes": 414,
+              "heap": {
+                "before": 23615708,
+                "open": 28100908,
+                "closed": 4409952
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

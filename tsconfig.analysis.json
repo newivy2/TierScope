@@ -9,6 +9,7 @@
   },
   "include": [
     "src/session-analysis.js",
+    "src/model-history.js",
     "src/analysis-preference-data.js",
     "src/live-session.js",
     "src/playback-state.js",
