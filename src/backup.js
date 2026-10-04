@@ -3,7 +3,8 @@ import { makeStorageId } from './record-validation.js';
 import { runtime } from './runtime.js';
 import { ANALYSIS_PREFERENCE_KEY, validateAnalysisPreferences } from './analysis-preference-data.js';
 import { validateSessionFile } from './session-file-format.js';
-import { LIBRARY_MAX_COUNT, LIBRARY_PREFIX, finalizeLibraryWrites, libraryTitle, planLibraryAdditions, readSessionLibrary, verifyLibraryCapacity } from './session-library.js';
+import { LIBRARY_MAX_COUNT, LIBRARY_PREFIX, finalizeLibraryWrites, libraryTitle, libraryMetadata, planLibraryAdditions, readSessionLibrary, verifyLibraryCapacity } from './session-library.js';
+import { planModelFavoriteWrites, readModelFavorites, validateFavoriteModels } from './library-models.js';
 
 export const BACKUP_MAX_BYTES = 32 * 1024 * 1024;
 const preferenceKeys = Object.freeze({ theme: 'tierscope:ui:theme:v1', highMode: 'tierscope:ui:highMode:v1',
@@ -49,9 +50,10 @@ export function validateTierScopeBackup(input) {
         mergeAllTimeHighs(highs, record.highs);
         return { room, highs };
     });
-    const library = input.library.map(entry => ({ title: libraryTitle(entry.title), archive: validateSessionFile(entry.archive) }));
+    const library = input.library.map(entry => ({ title: libraryTitle(entry.title), ...libraryMetadata(entry), archive: validateSessionFile(entry.archive) }));
     const backup = { format: 'TierScopeBackup', formatVersion: 1, producerVersion: input.producerVersion,
         rooms, preferences: validateBackupPreferences(input.preferences), library };
+    backup.favoriteModels = validateFavoriteModels(input.favoriteModels === undefined ? library.filter(entry => entry.favorite).map(entry => entry.archive.room) : input.favoriteModels);
     if (input.analysisPreferences !== undefined) backup.analysisPreferences = validateAnalysisPreferences(input.analysisPreferences);
     if (input.recovery !== undefined) {
         const keys = input.recovery && input.recovery.omittedLibraryKeys;
@@ -89,8 +91,11 @@ export function createTierScopeBackup(includeLibrary = true, allowPartialLibrary
     const library = includeLibrary ? readSessionLibrary() : { entries: [], damaged: [] };
     if (library.damaged.length && !allowPartialLibrary) throw new Error('The library contains unreadable recordings. Choose the healthy-recordings option to make a partial backup, or export ATH/preferences separately.');
     const rawAnalysis = GM_getValue(ANALYSIS_PREFERENCE_KEY, null);
+    const modelState = includeLibrary ? readModelFavorites(library.entries) : {favorites: new Set(), errors: []};
+    if (modelState.errors.length) throw new Error('Some model favorites could not be read. Refresh the library or back up without Library until they can be read.');
     return validateTierScopeBackup({ format: 'TierScopeBackup', formatVersion: 1, producerVersion: runtime.TIERSCOPE_VERSION,
-        rooms: records, preferences, library: library.entries.map(entry => ({ title: entry.title, archive: entry.archive })),
+        rooms: records, preferences, library: library.entries.map(entry => ({ title: entry.title, notes: entry.notes, archive: entry.archive })),
+        favoriteModels: [...modelState.favorites],
         ...(rawAnalysis === null ? {} : {analysisPreferences: validateAnalysisPreferences(JSON.parse(rawAnalysis))}),
         ...(library.damaged.length ? {recovery: {omittedLibraryKeys: library.damaged}} : {}) });
 }
@@ -125,6 +130,8 @@ export function restoreTierScopeBackup(input, options = { highs: true, preferenc
         }
     }
     writes.push(...newLibrary);
+    const modelWrites = options.library ? planModelFavoriteWrites(backup.favoriteModels) : [];
+    writes.push(...modelWrites);
     if (options.preferences) for (const [name, value] of Object.entries(backup.preferences)) {
         writes.push({ key: preferenceKeys[name], value: name === 'geometry' || name === 'collapsedRows' ? JSON.stringify(value) : value });
     }
@@ -133,6 +140,7 @@ export function restoreTierScopeBackup(input, options = { highs: true, preferenc
     try {
         for (const write of writes) {
             const before = GM_getValue(write.key, undefined);
+            if (Object.prototype.hasOwnProperty.call(write, 'expectedBefore') && before !== write.expectedBefore) throw new Error('Model favorites changed in another tab. Refresh and retry.');
             touched.push({ ...write, before });
             GM_setValue(write.key, write.value);
         }
@@ -157,5 +165,6 @@ export function restoreTierScopeBackup(input, options = { highs: true, preferenc
     backup.rooms.forEach(record => readAllTimeHighs(record.room));
     return { rooms: epochs.length, recordings: newLibrary.filter(write => !write.updated).length,
         updatedRecordings: newLibrary.filter(write => write.updated).length,
+        favoriteModels: modelWrites.length,
         preferences: options.preferences ? Object.keys(backup.preferences).length + (backup.analysisPreferences ? 1 : 0) : 0 };
 }

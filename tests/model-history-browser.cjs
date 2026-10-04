@@ -29,7 +29,7 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
 (async()=>{
  const browser=await require('playwright')[engine].launch({headless:true,executablePath:process.env.TIERSCOPE_CHROMIUM_PATH,args:JSON.parse(process.env.TIERSCOPE_CHROMIUM_ARGS||'[]')});
  try{
-  const context=await browser.newContext({viewport:{width:1100,height:1000}}),page=await context.newPage(),errors=[];
+  const context=await browser.newContext({viewport:{width:1100,height:1000},timezoneId:'America/Sao_Paulo'}),page=await context.newPage(),errors=[];
   page.on('pageerror',e=>errors.push(e.message));
   await context.route('https://tierscope.test/**',r=>r.fulfill({contentType:'text/html',body:'<!doctype html><body style="background:#303846"></body>'}));
   await context.addInitScript(()=>{
@@ -39,7 +39,12 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   await page.goto('https://tierscope.test/live_room/');await page.addScriptTag({content:instrument(source)});
   await page.evaluate(()=>{ViewerTracker.__modelHistory.setup();ViewerTracker.__modelHistory.seed();});await page.waitForTimeout(250);
   const before=await page.evaluate(()=>ViewerTracker.__modelHistory.state()),bounds=await page.locator('#tracker-container').boundingBox();
-  await page.click('#btn-control-library');await page.click('#tools-folder-history_model');
+  await page.click('#btn-control-library');
+  assert.match(await page.locator('#tools-room-history').textContent(),/live_room/);
+  assert.match(await page.locator('#tools-room-shortcuts').textContent(),/0 saved recordings/);
+  assert(await page.evaluate(()=>Boolean(document.getElementById('tools-room-shortcuts').compareDocumentPosition(document.querySelector('.tools-current'))&Node.DOCUMENT_POSITION_FOLLOWING)));
+  await page.click('#tools-room-history');assert.match(await page.locator('#tools-content').textContent(),/No saved recordings for this model/);
+  await page.click('#tools-history-back');await page.click('#tools-folder-history_model');
   await page.locator('#tools-model-history').focus();await page.keyboard.press('Enter');
   assert.equal(await page.evaluate(()=>document.activeElement.id),'tools-history-back');
   const stats=()=>page.locator('#tools-history-stats dd').allTextContents();
@@ -49,6 +54,10 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   assert.match(await page.locator('#tools-history-detail').textContent(),/Average Not enough data/);
   assert.equal(await page.locator('#tools-history-table b').count(),0,'stored titles are text');
   assert.equal(await page.locator('[data-tools-tab=library]').getAttribute('aria-pressed'),'true');
+  assert(await page.evaluate(()=>Boolean(document.getElementById('tools-history-actions').compareDocumentPosition(document.getElementById('tools-history-chart'))&Node.DOCUMENT_POSITION_FOLLOWING)));
+  const primaryAction=await page.locator('#tools-history-compare').boundingBox(),contentBounds=await page.locator('#tools-content').boundingBox();
+  assert(primaryAction.y>=contentBounds.y&&primaryAction.y+primaryAction.height<=contentBounds.y+contentBounds.height,'Compare with previous is visible without scrolling');
+  assert.match(await page.locator('#tools-history-compare-hint').textContent(),/2 earlier recordings.*3 total/);
   assert(await page.evaluate(()=>Boolean(document.getElementById('tools-history-chart').compareDocumentPosition(document.getElementById('tools-history-stats'))&Node.DOCUMENT_POSITION_FOLLOWING)));
   await page.locator('#tools-history-chart').evaluate(canvas=>{
    const box=canvas.getBoundingClientRect(),width=Math.max(240,canvas.clientWidth);
@@ -67,13 +76,17 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   await page.click('#tools-history-summary');
   assert.equal(await page.locator('#tools-source-a').inputValue(),'history_0');assert.equal(await page.locator('#tools-metric').inputValue(),'withTokens');
   await page.click('[data-tools-tab=library]');await page.click('#tools-model-history');await page.selectOption('#tools-history-recording','history_1');
-  await page.click('#tools-history-compare');assert.equal(await page.locator('#tools-source-a').inputValue(),'history_0');assert.equal(await page.locator('#tools-source-b').inputValue(),'history_1');
+  await page.click('#tools-history-compare');assert.equal(await page.locator('#tools-source-a').inputValue(),'history_1');assert.equal(await page.locator('#tools-source-b').inputValue(),'history_0');
+  assert.equal(await page.locator('#tools-recording-picker').getAttribute('open'),null,'automatic comparison opens on its chart');
+  assert.equal(await page.evaluate(()=>document.activeElement.id),'tools-analysis-chart','keyboard inspection is ready after opening comparison');
   await page.click('[data-tools-tab=library]');await page.click('#tools-model-history');
   await page.selectOption('#tools-history-metric','room');
   assert.deepEqual(await page.evaluate(()=>ViewerTracker.__modelHistory.state()),before,'history analysis leaves live state and ATH unchanged');
   await page.click('#tools-history-replay');assert.equal(await page.locator('#tools-history-chart').count(),1,'replay leaves history view open');
   assert.equal((await page.evaluate(()=>ViewerTracker.__modelHistory.replay())).room,'history_model');
   assert.equal(await page.locator('#tools-history-recording').inputValue(),'history_1');
+  await page.click('[data-tools-tab=library]');assert.match(await page.locator('#tools-room-history').textContent(),/live_room/,'the page shortcut does not switch to a different replay model');
+  assert.equal(await page.locator('#tools-current-room').textContent(),'history_model');await page.click('#tools-model-history');
   await page.evaluate(()=>ViewerTracker.__modelHistory.closeReplay());
   assert.deepEqual(await page.evaluate(()=>ViewerTracker.__modelHistory.state()),before);
   assert.deepEqual(await page.locator('#tracker-container').boundingBox(),bounds,'history does not reposition the Scope');
@@ -112,12 +125,27 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   await page.click('#tools-history-more');assert.equal(await page.locator('#tools-history-table tbody tr').count(),55);assert.equal(await page.evaluate(()=>document.activeElement.id),'tools-history-recording');
   await page.selectOption('#tools-history-range','10');assert.equal(await page.locator('#tools-history-recording option').count(),10);assert.equal((await stats())[0],'10 / 55');
   assert.deepEqual(await page.locator('#tools-history-recording option').evaluateAll(options=>options.map(o=>o.value)),Array.from({length:10},(_,i)=>'history_'+(54-i)));
+  await page.selectOption('#tools-history-recording','history_45');await page.click('#tools-history-compare');
+  assert.deepEqual(await page.locator('[id^=tools-source-]').evaluateAll(selects=>selects.map(s=>s.value)),['history_45','history_44','history_43','history_42','history_41','history_40']);
+  assert.equal(await page.locator('#tools-chart-inspection tbody tr').count(),6);assert.equal(await page.locator('#tools-analysis-model').inputValue(),'history_model');
+  await page.click('[data-tools-tab=library]');await page.click('#tools-model-history');
   await page.selectOption('#tools-history-range','30');assert.equal(await page.locator('#tools-history-table tbody tr').count(),30);
   await page.click('#tools-history-back');assert.equal(await page.evaluate(()=>document.activeElement.id),'tools-model-history');
   await page.click('#tools-model-history');await page.keyboard.press('Escape');assert.equal(await page.locator('#tierscope-session-tools').count(),0);assert.equal(await page.evaluate(()=>document.activeElement.id),'btn-control-library');
   await page.click('#btn-control-library');await page.click('#tools-folder-history_model');await page.click('#tools-model-history');
   await page.evaluate(()=>{history.pushState({},'', '/next_room/');ViewerTracker.__modelHistory.checkUrlChange();});
   assert.equal(await page.locator('#tierscope-session-tools').count(),0,'navigation disposes history view');
+  // Opening Library on this model's actual page offers its saved history directly.
+  const roomPage=await context.newPage();roomPage.on('pageerror',e=>errors.push(e.message));await roomPage.goto('https://tierscope.test/history_model/');
+  await roomPage.addScriptTag({content:instrument(source)});await roomPage.evaluate(()=>ViewerTracker.__modelHistory.setup());await roomPage.click('#btn-control-library');
+  assert.match(await roomPage.locator('#tools-room-shortcuts').textContent(),/55 saved recordings/);
+  await roomPage.screenshot({path:'/tmp/tierscope-model-history-shortcut-'+engine+'.png'});
+  await roomPage.locator('#tools-room-history').focus();await roomPage.keyboard.press('Enter');
+  assert.equal(await roomPage.locator('#tools-history-recording').inputValue(),'history_54');await roomPage.click('#tools-history-compare');
+  assert.deepEqual(await roomPage.locator('[id^=tools-source-]').evaluateAll(selects=>selects.map(s=>s.value)),['history_54','history_53','history_52','history_51','history_50','history_49']);
+  await roomPage.evaluate(()=>{history.pushState({},'', '/tags/testroom/');ViewerTracker.__modelHistory.checkUrlChange();});
+  await roomPage.click('#btn-control-library');assert.equal(await roomPage.locator('#tools-room-history').count(),0,'directory pages have no model shortcut');
+  await roomPage.close();
   assert.deepEqual(errors,[]);console.log(engine+': model history statistics, controls, themes, isolation, cross-tab refresh, pagination and cleanup passed');
  } finally {await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

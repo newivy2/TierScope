@@ -7,6 +7,12 @@ import { readAllTimeHighs, sessionAllTimeHighs, storeAllTimeHighs } from './high
 import { repaintHighMode } from './highs.js';
 import { attachLibraryDock } from './library-dock.js';
 import { libraryShell } from './library-shell.js';
+import { migrateRecordingFavorites, readModelFavorites, setModelFavorite } from './library-models.js';
+import { renderLibraryBrowser } from './library-browser-view.js';
+import { filterLibraryEntries } from './library-query.js';
+import { recordingFilters } from './tools-view-helpers.js';
+import { exportLibrarySelection, importLibraryBundle, libraryImportBundle } from './library-transfer.js';
+import { renderAnalysisChart } from './analysis-chart-view.js';
 import { createModelHistoryReader } from './model-history.js';
 import { renderModelHistoryView } from './model-history-view.js';
 import { isPlaybackCurrent } from './playback-data.js';
@@ -15,11 +21,11 @@ import { getStorageKey } from './record-validation.js';
 import { downloadRecording } from './recording-exports.js';
 import { downloadTrackingReport } from './reports.js';
 import { runtime } from './runtime.js';
-import { ANALYSIS_METRICS, analysisSeries, compareSessions, parseAnalysisThresholds, summarizeAudience, summarizeSession, summarizeThresholds } from './session-analysis.js';
+import { ANALYSIS_METRICS, analysisSeries, compareRecordingSet, parseAnalysisThresholds, summarizeAudience, summarizeSession, summarizeThresholds } from './session-analysis.js';
 import { captureSessionFile } from './session-capture.js';
 import { validateSessionFile } from './session-file-format.js';
 import { getSessionSaveState } from './session-health.js';
-import { LIBRARY_MAX_BYTES, LIBRARY_MAX_COUNT, LIBRARY_PREFIX, createLibraryReader, keepSessionInLibrary, removeLibrarySession, renameLibrarySession } from './session-library.js';
+import { LIBRARY_MAX_BYTES, LIBRARY_MAX_COUNT, LIBRARY_PREFIX, createLibraryReader, keepSessionInLibrary, removeLibrarySession, renameLibrarySession, updateLibraryMetadata } from './session-library.js';
 import { openSessionReplay } from './session-replay.js';
 import { formatElapsedTime, getModelName } from './utils.js';
 
@@ -61,7 +67,10 @@ export function openSessionTools(focusTarget) {
     let optionsLibrary = null, optionsArchive = null, options = [];
     const savedAnalysis = readAnalysisPreferences();
     let {metric, threshold, sharedLength, summaryThresholds} = savedAnalysis.preferences;
-    let selectedA = 'current', selectedB = '', pendingBackup = null;
+    let selectedA = 'current', selectedB = '', selectedExtra = [], pendingBackup = null;
+    const libraryFilters = {room: '', query: '', from: '', to: '', sort: 'newest', favorites: false}, librarySelection = new Set();
+    const analysisFilters = {room: '', query: '', from: '', to: ''};
+    let filteredSources = null, chartDispose = null, pickerOpen = true;
     let libraryRoom = null, chartDraw = null, analysisPreferenceError = savedAnalysis.error;
     let observedSource = null, observedSignature = '';
     let detachDock = null;
@@ -91,14 +100,17 @@ export function openSessionTools(focusTarget) {
         const element = document.createElement(tag); if (text !== undefined) element.textContent = text;
         if (className) element.className = className; parent.appendChild(element); return element;
     }
-    function chooseFile(maxBytes, accept) {
-        const input = document.createElement('input'); input.type = 'file'; input.accept = '.json,application/json'; input.hidden = true;
+    function chooseFile(maxBytes, accept, multiple = false) {
+        const input = document.createElement('input'); input.type = 'file'; input.accept = '.json,application/json'; input.hidden = true; input.multiple = multiple;
         const request = ++fileRequest, playbackAtRequest = runtime.playback; dialog.appendChild(input);
         const stillSelected = () => current() && request === fileRequest && runtime.playback === playbackAtRequest;
         input.onchange = async () => {
-            const file = input.files && input.files[0]; if (!file) { input.remove(); return; }
+            const files = Array.from(input.files || []); if (!files.length) { input.remove(); return; }
             try {
-                const value = await readDataFile(file, maxBytes);
+                if (files.length > LIBRARY_MAX_COUNT || files.reduce((total, file) => total + file.size, 0) > maxBytes) throw new Error('Choose up to 500 files totaling at most ' + Math.round(maxBytes / 1024 / 1024) + ' MB.');
+                const values = [];
+                for (const file of files) { values.push(await readDataFile(file, maxBytes)); if (!stillSelected()) return; }
+                const value = multiple ? values : values[0];
                 if (stillSelected()) accept(value);
             } catch (error) { if (stillSelected()) tell(error.message, true); }
             finally { input.remove(); }
@@ -107,20 +119,35 @@ export function openSessionTools(focusTarget) {
     }
     function readLibrary() {
         library = libraryReader.read(); options = []; optionsLibrary = null; optionsArchive = null;
+        let migrationError = '';
+        try { migrateRecordingFavorites(library.entries); } catch (error) { migrationError = 'Previous stars could not yet be saved as model favorites. Refresh to retry.'; }
+        try {
+            const models = readModelFavorites(library.entries);
+            library.favoriteModels = models.favorites;
+            library.favoriteError = migrationError || (models.errors.length ? 'Some model favorites could not be read. Refresh to retry; recordings remain available.' : '');
+        } catch (error) { library.favoriteModels = new Set(); library.favoriteError = 'Model favorites could not be read. Refresh to retry; recordings remain available.'; }
+        library.entries = library.entries.map(entry => ({...entry, modelFavorite: library.favoriteModels.has(entry.archive.room.toLowerCase())}));
         return library;
     }
     function sourceOptions() {
         if (optionsLibrary === library && optionsArchive === currentArchive) return options;
         const items = [];
         if (currentArchive) items.push({ id: 'current', title: 'Current / replayed snapshot — ' + currentArchive.room, archive: currentArchive });
-        for (const entry of library.entries) items.push({ id: entry.id, title: (entry.title || entry.archive.room) + ' — ' + new Date(entry.archive.session.history.timestamps[0]).toLocaleString(), archive: entry.archive });
+        for (const entry of library.entries) {
+            const title = entry.title && entry.title.trim().toLowerCase() !== entry.archive.room.toLowerCase() ? ' — ' + entry.title : '';
+            items.push({...entry, title: entry.archive.room + title + ' — ' + new Date(entry.archive.session.history.timestamps[0]).toLocaleString()});
+        }
         optionsLibrary = library; optionsArchive = currentArchive; options = items;
         return options;
     }
     function selectSource(parent, label, id, selected, changed) {
         const wrapper = node(parent, 'label', label), select = node(wrapper, 'select'); select.id = id;
-        for (const item of sourceOptions()) { const option = node(select, 'option', item.title); option.value = item.id; }
-        if (sourceOptions().some(item => item.id === selected)) select.value = selected;
+        const matches = filteredSources || sourceOptions(), choices = matches.slice();
+        const retained = sourceOptions().find(item => item.id === selected);
+        if (retained && !choices.some(item => item.id === selected)) choices.unshift({...retained, title: retained.title + ' (selected; outside filters)'});
+        if (selected && selected !== 'current' && !retained) choices.unshift({id: selected, title: 'Recording changed or removed — choose another'});
+        for (const item of choices) { const option = node(select, 'option', item.title); option.value = item.id; }
+        if (choices.some(item => item.id === selected)) select.value = selected;
         select.onchange = () => changed(select.value); return select.value;
     }
     function archiveName(archive) {
@@ -155,7 +182,7 @@ export function openSessionTools(focusTarget) {
             button.dataset.currentAvailable = String(!!available);
             button.disabled = !available || button.id === 'btn-export-gif' && !!runtime.gifExportJob;
         });
-        if (replaced && (tab === 'summary' || tab === 'compare')) render(tab);
+        if (replaced && (tab === 'summary' && selectedA === 'current' || tab === 'compare' && [selectedA, selectedB, ...selectedExtra].includes('current'))) render(tab);
     }
     function currentCard() {
         const card = node(content, 'section', undefined, 'tools-current'); card.setAttribute('aria-label', 'Current or replayed recording');
@@ -168,6 +195,7 @@ export function openSessionTools(focusTarget) {
         }
         currentButton(actions, 'Keep in library', archive => {
             const result = keepSessionInLibrary(archive); currentArchive = archive; libraryRoom = archive.room.toLowerCase();
+            Object.assign(libraryFilters, {room: libraryRoom, query: '', from: '', to: '', favorites: false});
             render('library'); tell(result.added ? 'Recording kept in the library.' : result.updated ? 'Library recording updated; its name was preserved.' : 'An equal or fuller recording is already in the library.');
         }, 'tools-keep').className = 'tools-primary';
         currentButton(actions, 'Save file', archive => downloadDataFile(archive, archiveName(archive)), 'tools-save-session');
@@ -181,89 +209,56 @@ export function openSessionTools(focusTarget) {
         const status = node(card, 'div', '', 'tools-muted'); status.id = 'session-save-info'; status.setAttribute('role', 'status');
         observedSignature = ''; refreshCurrent(); updateSessionToolsStatus();
     }
+    function openHistory(room) {
+        libraryRoom = room; render('history'); dialog.querySelector('#tools-history-back').focus();
+    }
     function renderLibrary() {
         const state = readLibrary();
+        const pageRoom = getModelName();
+        if (pageRoom !== 'unknown') {
+            const shortcuts = node(content, 'div', undefined, 'tools-actions'); shortcuts.id = 'tools-room-shortcuts';
+            button(shortcuts, 'History · ' + pageRoom, () => openHistory(pageRoom.toLowerCase()), 'tools-room-history').className = 'tools-primary';
+            const count = state.entries.filter(entry => entry.archive.room.toLowerCase() === pageRoom.toLowerCase()).length;
+            node(shortcuts, 'span', count + ' saved ' + (count === 1 ? 'recording' : 'recordings'), 'tools-muted');
+            shortcuts.setAttribute('aria-label', 'History for the model on this page');
+        }
         currentCard();
         const actions = node(content, 'div', undefined, 'tools-actions');
         button(actions, 'Open saved file…', () => chooseFile(runtime.SESSION_FILE_MAX_BYTES, value => {
             openSessionReplay(validateSessionFile(value)); observedSignature = ''; refreshCurrent();
             tell('File opened in replay. Use Keep in library to store it here.');
         }), 'tools-open-session');
-        button(actions, 'Import to library…', () => chooseFile(runtime.SESSION_FILE_MAX_BYTES, value => {
-            const archive = validateSessionFile(value), result = keepSessionInLibrary(archive);
-            libraryRoom = archive.room.toLowerCase();
-            render('library'); tell(result.added ? 'Recording imported into the library.' : result.updated ? 'Library recording updated from the file.' : 'An equal or fuller recording is already in the library.');
-        }), 'tools-import-session');
+        button(actions, 'Import to library…', () => chooseFile(BACKUP_MAX_BYTES, values => {
+            const bundle = libraryImportBundle(values, runtime.TIERSCOPE_VERSION), result = importLibraryBundle(bundle);
+            const rooms = new Set(bundle.library.map(entry => entry.archive.room.toLowerCase()));
+            libraryRoom = rooms.size === 1 ? [...rooms][0] : '*';
+            Object.assign(libraryFilters, {room: libraryRoom, query: '', from: '', to: '', favorites: false});
+            render('library'); tell('Imported: ' + result.recordings + ' new, ' + result.updatedRecordings + ' updated, ' + result.favoriteModels + ' favorite models added; existing recordings and model choices were preserved.');
+        }, true), 'tools-import-session').title = 'Import one or more session files or library bundles; saving is explicit';
         button(actions, 'Refresh', () => render('library'), 'tools-refresh-library').title = 'Refresh list from this browser';
         node(content, 'p', state.count + ' / ' + LIBRARY_MAX_COUNT + ' recordings · ' + (state.bytes / 1024 / 1024).toFixed(2) + ' / ' + LIBRARY_MAX_BYTES / 1024 / 1024 + ' MB · Kept until you delete them.', 'tools-muted');
-        const folders = new Map();
-        for (const entry of state.entries) {
-            const room = entry.archive.room.toLowerCase();
-            if (!folders.has(room)) folders.set(room, []);
-            folders.get(room).push(entry);
-        }
-        if (libraryRoom && !folders.has(libraryRoom)) libraryRoom = null;
-        const searchLabel = node(content, 'label', 'Find ', 'tools-search'), search = node(searchLabel, 'input');
-        search.type = 'search'; search.id = 'tools-library-search'; search.placeholder = 'Model or recording title';
-        search.title = 'Search all recordings, including other model folders.';
-        const list = node(content, 'div'); list.id = 'tools-library-list';
-        let shown = 50;
-        function rows() {
-            list.replaceChildren();
-            const query = search.value.trim().toLowerCase(), browsingFolders = !query && !libraryRoom;
-            const visible = query ? state.entries.filter(entry => (entry.title + ' ' + entry.archive.room).toLowerCase().includes(query)) :
-                libraryRoom ? folders.get(libraryRoom) : [...folders.keys()].sort((a, b) => a.localeCompare(b));
-            const heading = node(list, 'div', undefined, 'tools-actions');
-            if (!browsingFolders) button(heading, '‹ All models', () => {
-                const previous = libraryRoom; libraryRoom = null; search.value = ''; shown = 50; rows();
-                (document.getElementById('tools-folder-' + previous) || search).focus();
-            }, 'tools-library-all-models');
-            node(heading, 'h3', query ? 'Search results — all models' : libraryRoom ? 'Folder: ' + libraryRoom : 'Model folders');
-            if (libraryRoom && !query) button(heading, 'History overview', () => {
-                render('history'); dialog.querySelector('#tools-history-back').focus();
-            }, 'tools-model-history').className = 'tools-primary';
-            if (!visible.length) node(list, 'p', state.entries.length ? 'No matching recordings.' : 'Your library is empty. Keep a recording above or import a session file.', 'tools-muted');
-            if (browsingFolders) for (const room of visible.slice(0, shown)) {
-                const entries = folders.get(room), row = node(list, 'div', undefined, 'tools-folder');
-                const open = button(row, '', () => {
-                    libraryRoom = room; shown = 50; rows(); document.getElementById('tools-library-all-models').focus();
-                }, 'tools-folder-' + room);
-                open.setAttribute('aria-label', 'Open recordings for ' + room);
-                node(open, 'span', '▱  ' + room, 'tools-folder-name');
-                node(open, 'span', entries.length + (entries.length === 1 ? ' recording' : ' recordings') + ' · Latest ' +
-                    new Date(entries[0].archive.session.history.timestamps[0]).toLocaleDateString(), 'tools-folder-meta');
-            }
-            else for (const entry of visible.slice(0, shown)) {
-                const row = node(list, 'article', undefined, 'tools-row'); row.dataset.libraryId = entry.id;
-                node(row, 'strong', entry.title || entry.archive.room);
-                node(row, 'div', new Date(entry.archive.session.history.timestamps[0]).toLocaleString() + ' · ' + entry.archive.session.history.timestamps.length + ' samples', 'tools-muted');
-                if (query) node(row, 'div', entry.archive.room, 'tools-muted');
-                const actions = node(row, 'div', undefined, 'tools-actions');
-                button(actions, 'Replay', () => { openSessionReplay(entry.archive); observedSignature = ''; refreshCurrent(); tell('Replaying ' + (entry.title || entry.archive.room) + '.'); }).className = 'tools-primary';
-                button(actions, 'Summary', () => { selectedA = entry.id; render('summary'); });
-                const more = node(actions, 'details', undefined, 'tools-more'); node(more, 'summary', 'More…');
-                const extras = node(more, 'div', undefined, 'tools-more-actions');
-                button(extras, 'Save file', () => downloadDataFile(entry.archive, archiveName(entry.archive)));
-                button(extras, 'TXT', () => downloadRecording(entry.archive, 'txt'));
-                button(extras, 'CSV', () => downloadRecording(entry.archive, 'csv'));
-                button(extras, 'GIF', () => generateGifFromHistory(entry.archive));
-                button(extras, 'Add to all-time highs', () => addArchiveHighs(entry.archive));
-                button(extras, 'Rename', () => {
-                    const title = window.prompt('Recording title (up to 80 characters):', entry.title);
-                    if (title !== null) { renameLibrarySession(entry.id, title); render('library'); }
-                });
-                button(extras, 'Delete', () => {
-                    if (!confirm('Delete this library recording: ' + (entry.title || entry.archive.room) + '?\n\nLive tracking, ATH and downloaded files are unchanged.')) return;
-                    removeLibrarySession(entry.id); render('library'); tell('Library recording deleted.');
-                }).className = 'tools-danger';
-            }
-            if (visible.length > 50) node(list, 'p', 'Showing ' + Math.min(shown, visible.length) + ' of ' + visible.length +
-                (browsingFolders ? ' model folders.' : ' matching recordings.'), 'tools-muted');
-            if (shown < visible.length) button(list, 'Show ' + Math.min(50, visible.length - shown) + ' more', () => {
-                shown += 50; rows(); (document.getElementById('tools-library-more') || search).focus();
-            }, 'tools-library-more');
-        }
-        search.oninput = () => { shown = 50; rows(); }; rows();
+        if (state.favoriteError) node(content, 'p', state.favoriteError, 'tools-muted');
+        libraryFilters.room = libraryRoom || '';
+        if (libraryRoom && libraryRoom !== '*' && !state.entries.some(entry => entry.archive.room.toLowerCase() === libraryRoom)) libraryFilters.room = libraryRoom = '';
+        const callbacks = {
+            room: room => { libraryRoom = room; },
+            history: openHistory,
+            compare: ids => { selectedA = ids[0]; selectedB = ids[1]; selectedExtra = ids.slice(2); Object.assign(analysisFilters, {room: '', query: '', from: '', to: ''}); render('compare'); },
+            export: ids => { downloadDataFile(exportLibrarySelection(ids, runtime.TIERSCOPE_VERSION), 'TierScope-library-selection-' + new Date().toISOString().slice(0, 10) + '.json'); tell('Selected recordings exported, including titles, notes and favorite models.'); },
+            favoriteModel: room => {
+                if (state.favoriteError) throw new Error('Model favorites are not fully available. Refresh before changing them.');
+                setModelFavorite(room, !state.favoriteModels.has(room)); render('library'); tell('Model favorite saved.');
+            },
+            replay: entry => { openSessionReplay(entry.archive); observedSignature = ''; refreshCurrent(); tell('Replaying ' + (entry.title || entry.archive.room) + '.'); },
+            summary: entry => { selectedA = entry.id; render('summary'); },
+            save: entry => downloadDataFile(entry.archive, archiveName(entry.archive)),
+            txt: entry => downloadRecording(entry.archive, 'txt'), csv: entry => downloadRecording(entry.archive, 'csv'), gif: entry => generateGifFromHistory(entry.archive),
+            highs: entry => addArchiveHighs(entry.archive),
+            metadata: (entry, patch) => { updateLibraryMetadata(entry.id, patch); render('library'); tell('Recording details saved.'); },
+            rename: entry => { const title = window.prompt('Recording title (up to 80 characters):', entry.title); if (title !== null) { renameLibrarySession(entry.id, title); render('library'); } },
+            delete: entry => { if (confirm('Delete this library recording: ' + (entry.title || entry.archive.room) + '?\n\nLive tracking, ATH and downloaded files are unchanged.')) { removeLibrarySession(entry.id); render('library'); tell('Library recording deleted.'); } }
+        };
+        renderLibraryBrowser(content, state.entries, libraryFilters, librarySelection, Object.fromEntries(Object.entries(callbacks).map(([key, fn]) => [key, action(fn)])));
         if (state.damaged.length) {
             node(content, 'p', state.damaged.length + ' unreadable library record(s) were retained.', 'tools-muted');
             if (state.unavailable.length) node(content, 'p', 'Some records could not be read. The displayed storage size excludes them; saving new recordings waits until they can be read.', 'tools-muted');
@@ -278,13 +273,30 @@ export function openSessionTools(focusTarget) {
     function analysisControls(comparing) {
         if (!library) readLibrary();
         if (!sourceOptions().length) { node(content, 'p', 'Record a session or import one into the library to see analysis.'); return null; }
-        const controls = node(content, 'div', undefined, 'tools-actions');
-        if (currentArchive) button(controls, 'Refresh current / replayed snapshot', () => { currentArchive = captureSessionFile(); render(tab); }, 'tools-refresh-snapshot');
-        selectedA = selectSource(controls, comparing ? 'A ' : 'Recording ', 'tools-source-a', selectedA, value => { selectedA = value; render(tab); });
+        const picker = node(content, 'details'); picker.id = 'tools-recording-picker'; picker.open = pickerOpen;
+        node(picker, 'summary', 'Choose recordings & filters');
+        picker.ontoggle = () => { if (picker.isConnected) pickerOpen = picker.open; };
+        recordingFilters(picker, sourceOptions(), analysisFilters, 'tools-analysis', () => render(tab));
+        try { filteredSources = filterLibraryEntries(sourceOptions(), analysisFilters); }
+        catch (error) { filteredSources = []; tell(error.message, true); }
+        node(picker, 'p', filteredSources.length + ' matching recordings. Existing selections stay available when outside the filters.', 'tools-muted');
+        const sourceControls = node(picker, 'div', undefined, 'tools-actions');
+        if (currentArchive) button(sourceControls, 'Refresh current / replayed snapshot', () => { currentArchive = captureSessionFile(); render(tab); }, 'tools-refresh-snapshot');
+        selectedA = selectSource(sourceControls, comparing ? 'A ' : 'Recording ', 'tools-source-a', selectedA, value => { selectedA = value; render(tab); });
         if (comparing) {
-            if (!sourceOptions().some(item => item.id === selectedB)) selectedB = (sourceOptions().find(item => item.id !== selectedA) || sourceOptions()[0]).id;
-            selectedB = selectSource(controls, 'B ', 'tools-source-b', selectedB, value => { selectedB = value; render(tab); });
+            if (!selectedB) selectedB = (sourceOptions().find(item => item.id !== selectedA) || sourceOptions()[0]).id;
+            selectedB = selectSource(sourceControls, 'B ', 'tools-source-b', selectedB, value => { selectedB = value; render(tab); });
+            selectedExtra.forEach((id, index) => {
+                selectedExtra[index] = selectSource(sourceControls, String.fromCharCode(67 + index) + ' ', 'tools-source-' + String.fromCharCode(99 + index), id, value => { selectedExtra[index] = value; render(tab); });
+                button(sourceControls, 'Remove ' + String.fromCharCode(67 + index), () => { selectedExtra.splice(index, 1); render(tab); });
+            });
+            const used = new Set([selectedA, selectedB, ...selectedExtra]);
+            const next = filteredSources.find(item => !used.has(item.id));
+            button(sourceControls, 'Add recording', () => { if (next && selectedExtra.length < 4) { selectedExtra.push(next.id); render(tab); } }, 'tools-compare-add').disabled = selectedExtra.length >= 4 || !next;
+            node(sourceControls, 'span', (2 + selectedExtra.length) + ' / 6 slots', 'tools-muted');
+
         }
+        const controls = node(content, 'div', undefined, 'tools-actions');
         const label = node(controls, 'label', 'Metric '), metricSelect = node(label, 'select'); metricSelect.id = 'tools-metric';
         for (const [key, name] of Object.entries(ANALYSIS_METRICS)) { const option = node(metricSelect, 'option', name); option.value = key; }
         metricSelect.value = metric; metricSelect.onchange = () => { rememberAnalysis({metric: metricSelect.value}); render(tab); };
@@ -313,8 +325,6 @@ export function openSessionTools(focusTarget) {
             const label = node(controls, 'label'), check = node(label, 'input'); check.type = 'checkbox'; check.checked = sharedLength; check.id = 'tools-shared-length';
             node(label, 'span', 'Match shared length'); check.onchange = () => { rememberAnalysis({sharedLength: check.checked}); render(tab); };
         }
-        node(content, 'p', 'Aligned from the first retained sample, using real elapsed time. Averages and threshold durations hold each sample until the next; recording gaps are excluded. The final sample has no assumed duration.', 'tools-muted');
-        if (comparing) node(content, 'p', 'A: ' + sourceOptions().find(item => item.id === selectedA).title + ' · B: ' + sourceOptions().find(item => item.id === selectedB).title, 'tools-muted');
         return sourceOptions();
     }
     const number = value => value === null ? 'Not enough data' : value.toLocaleString(undefined, { maximumFractionDigits: 1 });
@@ -345,7 +355,12 @@ export function openSessionTools(focusTarget) {
                 const entry = library.entries.find(entry => entry.id === id);
                 openSessionReplay(entry.archive); observedSignature = ''; refreshCurrent(); tell('Replaying ' + (entry.title || entry.archive.room) + '.');
             }),
-            compare: (a, b) => { selectedA = a; selectedB = b; render('compare'); }
+            compare: ids => {
+                [selectedA, selectedB] = ids; selectedExtra = ids.slice(2);
+                Object.assign(analysisFilters, {room: libraryRoom, query: '', from: '', to: ''});
+                pickerOpen = false; render('compare');
+                (dialog.querySelector('#tools-analysis-chart') || dialog.querySelector('#tools-recording-picker > summary'))?.focus();
+            }
         });
         if (view) {
             chartDraw = view.draw;
@@ -410,55 +425,26 @@ export function openSessionTools(focusTarget) {
         node(content, 'p', 'The full-session high can predate retained history and is not limited by “Match shared length.” Token-holder share is weighted by recorded registered-viewer time.', 'tools-muted');
     }
     function chart(archives, labels, endMs) {
-        const legend = node(content, 'p', labels.map((label, i) => (i ? 'B (dashed blue): ' : 'A (pink): ') + label).join(' · '), 'tools-muted');
-        const canvas = node(content, 'canvas'); canvas.id = 'tools-analysis-chart'; canvas.setAttribute('role', 'img');
-        canvas.setAttribute('aria-label', ANALYSIS_METRICS[metric] + ' by minutes since the first retained sample. ' + legend.textContent + '. Statistics are in the table below.');
-        function draw() {
-            const width = Math.max(260, canvas.clientWidth), height = 200, ratio = window.devicePixelRatio || 1;
-            canvas.width = width * ratio; canvas.height = height * ratio;
-            const ctx = canvas.getContext('2d'); ctx.scale(ratio, ratio);
-            const series = archives.map(archive => analysisSeries(archive, metric));
-            let max = 1;
-            series.forEach(s => s.values.forEach((value, i) => { if (s.times[i] <= endMs) max = Math.max(max, value); }));
-            const left = 58, top = 16, right = width - 12, bottom = height - 38, span = endMs || 1;
-            ctx.strokeStyle = runtime.isDarkMode ? '#686875' : '#b6bdca'; ctx.lineWidth = 1;
-            ctx.beginPath(); ctx.moveTo(left, top); ctx.lineTo(left, bottom); ctx.lineTo(right, bottom); ctx.stroke();
-            ctx.fillStyle = runtime.isDarkMode ? '#ddd' : '#41485a'; ctx.font = '11px Arial'; ctx.textAlign = 'left';
-            ctx.fillText(number(max), 2, top + 8); ctx.fillText('0', 30, bottom); ctx.fillText('0m', left, bottom + 19);
-            ctx.textAlign = 'right'; ctx.fillText(number(endMs / 60000) + 'm', right, bottom + 19);
-            series.forEach((s, j) => {
-                ctx.strokeStyle = j ? (runtime.isDarkMode ? '#79baff' : '#175db0') : (runtime.isDarkMode ? '#ff69b4' : '#b42370');
-                ctx.lineWidth = 2; ctx.setLineDash(j ? [6, 4] : []); ctx.beginPath();
-                const isolated = [];
-                let previousX = null, previousY = null;
-                for (let i = 0; i < s.times.length && s.times[i] <= endMs; i++) {
-                    const x = left + s.times[i] / span * (right - left), y = bottom - s.values[i] / max * (bottom - top);
-                    if (previousX === null || s.breaks[i]) ctx.moveTo(x, y);
-                    else { ctx.lineTo(x, previousY); ctx.lineTo(x, y); }
-                    previousX = x; previousY = y;
-                    if ((i === 0 || s.breaks[i]) && (i + 1 === s.times.length || s.breaks[i + 1] || s.times[i + 1] > endMs)) isolated.push([x, y]);
-                    // Carry a recorded value only to the visible boundary, never through a gap.
-                    if (i + 1 < s.times.length && s.times[i + 1] > endMs && !s.breaks[i + 1]) ctx.lineTo(right, y);
-                }
-                ctx.stroke(); ctx.setLineDash([]);
-                ctx.fillStyle = ctx.strokeStyle;
-                isolated.forEach(([x, y]) => { ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2); ctx.fill(); });
-            });
-        }
-        chartDraw = draw; draw();
-        if (window.ResizeObserver) { chartObserver = new window.ResizeObserver(draw); chartObserver.observe(canvas); }
+        const series = archives.map(archive => ({...analysisSeries(archive, metric), timestamps: archive.session.history.timestamps}));
+        const view = renderAnalysisChart(content, series, labels, endMs, ANALYSIS_METRICS[metric]);
+        chartDraw = view.draw; chartDispose = view.dispose;
+        if (window.ResizeObserver) { chartObserver = new window.ResizeObserver(view.draw); chartObserver.observe(view.canvas); }
     }
     function renderAnalysis(comparing) {
         const options = analysisControls(comparing); if (!options) return;
         const a = options.find(item => item.id === selectedA), b = options.find(item => item.id === selectedB);
+        if (!a || comparing && (!b || selectedExtra.some(id => !options.some(item => item.id === id)))) {
+            node(content, 'p', 'Choose available recordings in each slot. A previous selection may have changed or been removed; clear filters to find another recording.'); return;
+        }
         if (comparing) {
-            if (a.id === b.id) node(content, 'p', 'Choose a second recording to make a comparison.', 'tools-muted');
-            const result = compareSessions(a.archive, b.archive, metric, threshold, sharedLength);
-            chart([a.archive, b.archive], [a.archive.room, b.archive.room], result.axisMs);
-            summaryTable([result.a, result.b], ['A', 'B']);
+            if (new Set([selectedA, selectedB, ...selectedExtra]).size !== 2 + selectedExtra.length) { node(content, 'p', 'Choose a different recording in each comparison slot.'); return; }
+            const ids = [...new Set([selectedA, selectedB, ...selectedExtra])], recordings = ids.map(id => options.find(item => item.id === id)).filter(item => !!item);
+            const result = compareRecordingSet(recordings.map(item => item.archive), metric, threshold, sharedLength);
+            chart(recordings.map(item => item.archive), recordings.map(item => item.title), result.axisMs);
+            summaryTable(result.summaries, recordings.map((item, index) => String.fromCharCode(65 + index)));
         } else {
             const summary = summarizeSession(a.archive, metric, threshold);
-            chart([a.archive], [a.archive.room], summary.spanMs);
+            chart([a.archive], [a.title], summary.spanMs);
             audienceOverview(a.archive); thresholdTable(a.archive);
             node(content, 'h3', ANALYSIS_METRICS[metric] + ' — details');
             summaryTable([summary], [a.archive.room], false);
@@ -470,7 +456,7 @@ export function openSessionTools(focusTarget) {
     function renderBackup() {
         node(content, 'h3', 'Back up this browser');
         node(content, 'p', 'Download ATH for every room and your saved preferences: theme, panel size/position, collapsed rows, compact metric, chart window, SH/ATH mode and analysis choices. Keep this file somewhere safe. Session-only controls such as the scan interval are not saved preferences.', 'tools-muted');
-        const include = checkbox(content, 'tools-backup-library', 'Include library recordings');
+        const include = checkbox(content, 'tools-backup-library', 'Include library recordings and favorite models');
         const state = readLibrary();
         let partial = null;
         if (state.damaged.length) {
@@ -497,8 +483,9 @@ export function openSessionTools(focusTarget) {
         if (pendingBackup) {
             if (pendingBackup.recovery) node(content, 'p', 'This is a partial backup. ' + pendingBackup.recovery.omittedLibraryKeys.length + ' unreadable library entries were excluded when it was created; they cannot be restored from this file.', 'tools-muted');
             node(content, 'p', pendingBackup.rooms.length + ' rooms · ' + (Object.keys(pendingBackup.preferences).length + (pendingBackup.analysisPreferences ? 1 : 0)) + ' saved preferences · ' + pendingBackup.library.length + ' recordings', 'tools-muted');
+            node(content, 'p', pendingBackup.favoriteModels.length + ' favorite models. Restoring Library adds these where no local model choice exists.', 'tools-muted');
             const choices = node(content, 'div', undefined, 'tools-actions');
-            const highs = checkbox(choices, 'tools-restore-highs', 'Merge ATH'), preferences = checkbox(choices, 'tools-restore-preferences', 'Restore preferences'), recordings = checkbox(choices, 'tools-restore-library', 'Add library recordings');
+            const highs = checkbox(choices, 'tools-restore-highs', 'Merge ATH'), preferences = checkbox(choices, 'tools-restore-preferences', 'Restore preferences'), recordings = checkbox(choices, 'tools-restore-library', 'Add recordings and favorite models');
             button(content, 'Restore selected data', () => {
                 if (!highs.checked && !preferences.checked && !recordings.checked) throw new Error('Choose at least one kind of data to restore.');
                 if (!confirm('Restore the selected backup data?\n\nATH will be merged, library recordings added or updated with fuller versions, and selected saved preferences replaced. Your live session is not replaced.' +
@@ -507,14 +494,17 @@ export function openSessionTools(focusTarget) {
                 library = null;
                 if (runtime.playback) setPlaybackAllTimeState(runtime.playback, readAllTimeHighs(displayedHighRoom()));
                 repaintHighMode();
-                tell('Restored: ' + result.rooms + ' room ATH updates, ' + result.recordings + ' new recordings, ' + result.updatedRecordings + ' updated recordings, ' + result.preferences + ' preferences.' + (result.preferences ? '\nRefresh your room tabs when convenient to apply preferences.' : ''));
+                tell('Restored: ' + result.rooms + ' room ATH updates, ' + result.recordings + ' new recordings, ' + result.updatedRecordings + ' updated recordings, ' + result.favoriteModels + ' favorite models, ' + result.preferences + ' preferences.' + (result.preferences ? '\nRefresh your room tabs when convenient to apply preferences.' : ''));
             }, 'tools-backup-restore');
         }
     }
     function render(next) {
         const focusedId = dialog.contains(document.activeElement) ? document.activeElement.id : '';
+        const existingPicker = dialog.querySelector('#tools-recording-picker');
+        if (existingPicker) pickerOpen = existingPicker.open;
         if (next !== tab) library = null;
         tab = next; fileRequest++; chartDraw = null;
+        if (chartDispose) { chartDispose(); chartDispose = null; }
         if (chartObserver) { chartObserver.disconnect(); chartObserver = null; }
         content.replaceChildren(); message.textContent = '';
         dialog.querySelectorAll('[data-tools-tab]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.toolsTab === (tab === 'history' ? 'library' : tab))));
@@ -524,11 +514,13 @@ export function openSessionTools(focusTarget) {
         } catch (error) { tell(error.message, true); }
         if (focusedId) {
             const target = document.getElementById(focusedId);
-            if (target && dialog.contains(target)) target.focus();
+            if (target && dialog.contains(target)) { const details = target.closest('details'); if (details) details.open = true; target.focus(); }
+            else if (focusedId.startsWith('tools-model-favorite-')) dialog.querySelector('#tools-library-model')?.focus();
         }
     }
     function close() {
-        fileRequest++; refreshSessionTools = null;
+        fileRequest++; refreshSessionTools = null; chartDraw = null;
+        if (chartDispose) { chartDispose(); chartDispose = null; }
         libraryReader.clear(); modelHistoryReader.clear(); options = []; optionsLibrary = null; optionsArchive = null; library = null; currentArchive = null;
         cancelGifExport();
         if (detachDock) detachDock();

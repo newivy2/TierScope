@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.13.0
+// @version      3.14.0
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -4445,6 +4445,17 @@ underlying system, so should run in the browser, Node, or Plask.
       axisMs: sharedLength ? limitMs : Math.max(spanA, spanB)
     };
   }
+  var MAX_COMPARE_RECORDINGS = 6;
+  function compareRecordingSet(archives, metric = "room", threshold = 100, sharedLength = true) {
+    if (!archives.length || archives.length > MAX_COMPARE_RECORDINGS) throw new Error("Compare up to six recordings.");
+    const spans = archives.map((archive) => analysisSeries(archive, metric).times.at(-1) || 0);
+    const limitMs = sharedLength ? Math.min(...spans) : Infinity;
+    return {
+      summaries: archives.map((archive) => summarizeSession(archive, metric, threshold, limitMs)),
+      axisMs: sharedLength ? limitMs : Math.max(...spans),
+      limitMs
+    };
+  }
 
   // src/analysis-preference-data.js
   var ANALYSIS_PREFERENCE_KEY = "tierscope:ui:analysis:v1";
@@ -4483,6 +4494,13 @@ underlying system, so should run in the browser, Node, or Plask.
   function libraryTitle(title) {
     if (typeof title !== "string" || title.length > 80 || /[\x00-\x1f]/.test(title)) throw new Error("Use a title of up to 80 characters.");
     return title.trim();
+  }
+  function libraryMetadata(value) {
+    const favorite = value.favorite === void 0 ? false : value.favorite, notes = value.notes === void 0 ? "" : value.notes;
+    if (typeof favorite !== "boolean" || typeof notes !== "string" || notes.length > 2e3 || /[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(notes)) {
+      throw new Error("Recording notes must be plain text of up to 2,000 characters; favorite must be true or false.");
+    }
+    return __spreadProps(__spreadValues({}, value.favorite === void 0 ? {} : { favorite }), { notes });
   }
   function libraryIdentity(archive) {
     return JSON.stringify({ room: archive.room.toLowerCase(), session: __spreadProps(__spreadValues({}, archive.session), { timestamp: 0 }) });
@@ -4568,7 +4586,7 @@ underlying system, so should run in the browser, Node, or Plask.
           const record = JSON.parse(raw);
           if (record.schemaVersion !== 1 || !Number.isSafeInteger(record.addedAt) || record.addedAt < 0) throw new Error("Invalid library record.");
           libraryRecordKey(id);
-          data = { title: libraryTitle(record.title), addedAt: record.addedAt, archive: validateSessionFile(record.archive) };
+          data = __spreadProps(__spreadValues({ title: libraryTitle(record.title) }, libraryMetadata(record)), { addedAt: record.addedAt, archive: validateSessionFile(record.archive) });
         }
         if (cache) {
           if (typeof raw === "string" && cachedCount < LIBRARY_MAX_COUNT && cachedBytes + recordBytes <= LIBRARY_MAX_BYTES) {
@@ -4611,12 +4629,13 @@ underlying system, so should run in the browser, Node, or Plask.
       const previous = index >= 0 ? entries[index] : null;
       if (previous && compareLibrarySessions(previous.archive, archive) !== 1) continue;
       const title = previous ? previous.title : libraryTitle(entry.title || archive.room);
+      const metadata = libraryMetadata(previous || entry);
       const id = makeStorageId();
       const addedAt = previous ? previous.addedAt : Date.now();
-      const raw = JSON.stringify({ schemaVersion: 1, addedAt, title, archive }), key = libraryRecordKey(id);
+      const raw = JSON.stringify(__spreadProps(__spreadValues({ schemaVersion: 1, addedAt, title }, metadata), { archive })), key = libraryRecordKey(id);
       bytes += new Blob([raw]).size;
       writes.push({ key, value: raw, id, updated: !!previous, replaces: previous ? previous.records : [] });
-      const next = { id, title, addedAt, archive, records: [{ key, value: raw }] };
+      const next = __spreadProps(__spreadValues({ id, title }, metadata), { addedAt, archive, records: [{ key, value: raw }] });
       if (previous) entries[index] = next;
       else entries.push(next);
     }
@@ -4670,17 +4689,106 @@ underlying system, so should run in the browser, Node, or Plask.
     for (const record of entry.records) if (GM_getValue(record.key, null) === record.value) GM_deleteValue(record.key);
   }
   function renameLibrarySession(id, title) {
+    return updateLibraryMetadata(id, { title });
+  }
+  function updateLibraryMetadata(id, patch) {
+    if (!patch || Object.keys(patch).some((key2) => !["title", "notes"].includes(key2))) throw new Error("Invalid recording metadata.");
     const key = libraryRecordKey(id), state = readSessionLibrary();
-    if (state.unavailable.length) throw new Error("Some library records could not be read. Refresh the list before renaming.");
+    if (state.unavailable.length) throw new Error("Some library records could not be read. Refresh the list before editing.");
     const entry = state.entries.find((entry2) => entry2.records.some((record) => record.key === key));
     if (!entry) throw new Error("This recording changed in another tab. Refresh the list.");
-    const cleanTitle = libraryTitle(title);
-    const writes = entry.records.map((record) => __spreadProps(__spreadValues({}, record), { next: JSON.stringify(__spreadProps(__spreadValues({}, JSON.parse(record.value)), { title: cleanTitle })) }));
+    const clean = __spreadProps(__spreadValues({}, libraryMetadata(__spreadValues(__spreadValues({}, entry), patch))), { title: libraryTitle(patch.title === void 0 ? entry.title : patch.title) });
+    const writes = entry.records.map((record) => __spreadProps(__spreadValues({}, record), { next: JSON.stringify(__spreadValues(__spreadValues({}, JSON.parse(record.value)), clean)) }));
     const bytes = state.bytes + writes.reduce((total, write) => total + new Blob([write.next]).size - new Blob([write.value]).size, 0);
-    if (bytes > LIBRARY_MAX_BYTES) throw new Error("Library full. Use a shorter title or remove a recording.");
-    for (const write of writes) {
-      if (GM_getValue(write.key, null) !== write.value) throw new Error("This recording changed in another tab. Refresh the list.");
-      GM_setValue(write.key, write.next);
+    if (bytes > LIBRARY_MAX_BYTES) throw new Error("Library full. Use shorter notes or a shorter title, or remove a recording.");
+    const touched = [];
+    try {
+      for (const write of writes) {
+        if (GM_getValue(write.key, null) !== write.value) throw new Error("This recording changed in another tab. Refresh the list.");
+        touched.push(write);
+        GM_setValue(write.key, write.next);
+      }
+      verifyLibraryCapacity();
+    } catch (error) {
+      let failed = false;
+      for (const write of touched.reverse()) {
+        try {
+          if (GM_getValue(write.key, null) === write.next) GM_setValue(write.key, write.value);
+        } catch (rollbackError) {
+          failed = true;
+        }
+      }
+      if (failed) throw new Error("Some recording edits could not be undone. Refresh the library before retrying.");
+      throw error;
+    }
+  }
+
+  // src/library-models.js
+  var MODEL_FAVORITE_PREFIX = "tierscope:library-model:v1:";
+  function modelFavoriteKey(room) {
+    const normalized = allTimeRoom(room);
+    if (!normalized) throw new Error("Invalid favorite model.");
+    return MODEL_FAVORITE_PREFIX + normalized;
+  }
+  function validateFavoriteModels(value) {
+    if (!Array.isArray(value) || value.length > 1e4 || value.some((room) => !allTimeRoom(room))) throw new Error("Invalid favorite models.");
+    return [...new Set(value.map(allTimeRoom))].sort();
+  }
+  function readModelFavorites(entries = []) {
+    const favorites = new Set(entries.filter((entry) => entry.favorite).map((entry) => entry.archive.room.toLowerCase()));
+    const errors = [];
+    for (const key of GM_listValues().filter((key2) => key2.startsWith(MODEL_FAVORITE_PREFIX))) {
+      const room = key.slice(MODEL_FAVORITE_PREFIX.length);
+      try {
+        if (modelFavoriteKey(room) !== key) throw new Error("Invalid favorite model key.");
+        const raw = GM_getValue(key, void 0);
+        if (raw === void 0) continue;
+        const record = JSON.parse(raw);
+        if (record.schemaVersion !== 1 || record.room !== room || typeof record.favorite !== "boolean") throw new Error("Invalid favorite model record.");
+        if (record.favorite) favorites.add(room);
+        else favorites.delete(room);
+      } catch (error) {
+        favorites.delete(room);
+        errors.push(room);
+      }
+    }
+    return { favorites, errors };
+  }
+  function planModelFavoriteWrites(rooms) {
+    const writes = [];
+    for (const room of validateFavoriteModels(rooms)) {
+      const key = modelFavoriteKey(room);
+      if (GM_getValue(key, void 0) === void 0) writes.push({
+        key,
+        expectedBefore: void 0,
+        value: JSON.stringify({ schemaVersion: 1, room, favorite: true })
+      });
+    }
+    return writes;
+  }
+  function setModelFavorite(room, favorite) {
+    const key = modelFavoriteKey(room);
+    if (typeof favorite !== "boolean") throw new Error("Invalid favorite model choice.");
+    const before = GM_getValue(key, void 0), value = JSON.stringify({ schemaVersion: 1, room: allTimeRoom(room), favorite });
+    try {
+      GM_setValue(key, value);
+      if (GM_getValue(key, void 0) !== value) throw new Error("Favorite changed in another tab. Refresh the library.");
+    } catch (error) {
+      try {
+        if (GM_getValue(key, void 0) === value) {
+          if (before === void 0) GM_deleteValue(key);
+          else GM_setValue(key, before);
+        }
+      } catch (rollbackError) {
+        throw new Error("The favorite could not be saved or restored. Refresh the library before retrying.");
+      }
+      throw error;
+    }
+  }
+  function migrateRecordingFavorites(entries) {
+    const rooms = entries.filter((entry) => entry.favorite).map((entry) => entry.archive.room);
+    for (const write of planModelFavoriteWrites(rooms)) {
+      if (GM_getValue(write.key, void 0) === void 0) setModelFavorite(write.key.slice(MODEL_FAVORITE_PREFIX.length), true);
     }
   }
 
@@ -4732,7 +4840,7 @@ underlying system, so should run in the browser, Node, or Plask.
       mergeAllTimeHighs(highs, record.highs);
       return { room, highs };
     });
-    const library = input.library.map((entry) => ({ title: libraryTitle(entry.title), archive: validateSessionFile(entry.archive) }));
+    const library = input.library.map((entry) => __spreadProps(__spreadValues({ title: libraryTitle(entry.title) }, libraryMetadata(entry)), { archive: validateSessionFile(entry.archive) }));
     const backup = {
       format: "TierScopeBackup",
       formatVersion: 1,
@@ -4741,6 +4849,7 @@ underlying system, so should run in the browser, Node, or Plask.
       preferences: validateBackupPreferences(input.preferences),
       library
     };
+    backup.favoriteModels = validateFavoriteModels(input.favoriteModels === void 0 ? library.filter((entry) => entry.favorite).map((entry) => entry.archive.room) : input.favoriteModels);
     if (input.analysisPreferences !== void 0) backup.analysisPreferences = validateAnalysisPreferences(input.analysisPreferences);
     if (input.recovery !== void 0) {
       const keys = input.recovery && input.recovery.omittedLibraryKeys;
@@ -4779,13 +4888,16 @@ underlying system, so should run in the browser, Node, or Plask.
     const library = includeLibrary ? readSessionLibrary() : { entries: [], damaged: [] };
     if (library.damaged.length && !allowPartialLibrary) throw new Error("The library contains unreadable recordings. Choose the healthy-recordings option to make a partial backup, or export ATH/preferences separately.");
     const rawAnalysis = GM_getValue(ANALYSIS_PREFERENCE_KEY, null);
+    const modelState = includeLibrary ? readModelFavorites(library.entries) : { favorites: /* @__PURE__ */ new Set(), errors: [] };
+    if (modelState.errors.length) throw new Error("Some model favorites could not be read. Refresh the library or back up without Library until they can be read.");
     return validateTierScopeBackup(__spreadValues(__spreadValues({
       format: "TierScopeBackup",
       formatVersion: 1,
       producerVersion: runtime.TIERSCOPE_VERSION,
       rooms: records,
       preferences,
-      library: library.entries.map((entry) => ({ title: entry.title, archive: entry.archive }))
+      library: library.entries.map((entry) => ({ title: entry.title, notes: entry.notes, archive: entry.archive })),
+      favoriteModels: [...modelState.favorites]
     }, rawAnalysis === null ? {} : { analysisPreferences: validateAnalysisPreferences(JSON.parse(rawAnalysis)) }), library.damaged.length ? { recovery: { omittedLibraryKeys: library.damaged } } : {}));
   }
   function createLibraryRecoveryExport() {
@@ -4817,6 +4929,8 @@ underlying system, so should run in the browser, Node, or Plask.
       }
     }
     writes.push(...newLibrary);
+    const modelWrites = options.library ? planModelFavoriteWrites(backup.favoriteModels) : [];
+    writes.push(...modelWrites);
     if (options.preferences) for (const [name, value] of Object.entries(backup.preferences)) {
       writes.push({ key: preferenceKeys[name], value: name === "geometry" || name === "collapsedRows" ? JSON.stringify(value) : value });
     }
@@ -4825,6 +4939,7 @@ underlying system, so should run in the browser, Node, or Plask.
     try {
       for (const write of writes) {
         const before = GM_getValue(write.key, void 0);
+        if (Object.prototype.hasOwnProperty.call(write, "expectedBefore") && before !== write.expectedBefore) throw new Error("Model favorites changed in another tab. Refresh and retry.");
         touched.push(__spreadProps(__spreadValues({}, write), { before }));
         GM_setValue(write.key, write.value);
       }
@@ -4852,6 +4967,7 @@ underlying system, so should run in the browser, Node, or Plask.
       rooms: epochs.length,
       recordings: newLibrary.filter((write) => !write.updated).length,
       updatedRecordings: newLibrary.filter((write) => write.updated).length,
+      favoriteModels: modelWrites.length,
       preferences: options.preferences ? Object.keys(backup.preferences).length + (backup.analysisPreferences ? 1 : 0) : 0
     };
   }
@@ -4981,7 +5097,7 @@ underlying system, so should run in the browser, Node, or Plask.
 #tierscope-session-tools[data-layout=sheet]{border-radius:7px;box-shadow:0 8px 32px #0007}
 #tierscope-session-tools[data-layout=docked]::after{content:'';position:absolute;pointer-events:none;inset:0 0 0 auto;width:9px;background:linear-gradient(90deg,transparent,#0002);border-right:1px solid #ff69b450}
 #tierscope-session-tools *{box-sizing:border-box}
-#tierscope-session-tools button,#tierscope-session-tools select,#tierscope-session-tools input,#tierscope-session-tools summary{font:inherit;color:var(--panel-text);background:var(--panel-button);border:1px solid var(--panel-divider);border-radius:3px;padding:4px 7px;max-width:100%;min-width:0}
+#tierscope-session-tools button,#tierscope-session-tools select,#tierscope-session-tools input,#tierscope-session-tools textarea,#tierscope-session-tools summary{font:inherit;color:var(--panel-text);background:var(--panel-button);border:1px solid var(--panel-divider);border-radius:3px;padding:4px 7px;max-width:100%;min-width:0}
 #tierscope-session-tools button,#tierscope-session-tools summary{cursor:pointer}
 #tierscope-session-tools button:hover,#tierscope-session-tools summary:hover{border-color:var(--panel-accent)}
 #tierscope-session-tools button:disabled{opacity:.45;cursor:default}
@@ -5005,9 +5121,9 @@ underlying system, so should run in the browser, Node, or Plask.
 #tierscope-session-tools .tools-eyebrow{color:var(--panel-accent);text-transform:uppercase;font-size:.8em;letter-spacing:.08em;margin-bottom:3px}
 #tierscope-session-tools .tools-row{border:1px solid var(--panel-divider);border-left:3px solid #ff69b480;background:rgba(var(--panel-row-rgb),.035);border-radius:4px;padding:8px;margin:6px 0;overflow-wrap:anywhere}
 #tierscope-session-tools .tools-row strong{font-size:1.05em}
-#tierscope-session-tools .tools-folder{margin:5px 0}
-#tierscope-session-tools .tools-folder button{display:flex;flex-direction:column;gap:4px;width:100%;text-align:left;padding:9px;border-left:3px solid #ff69b480;background:rgba(var(--panel-row-rgb),.04)}
-#tierscope-session-tools .tools-folder-name{font-weight:bold;color:var(--panel-text)}
+#tierscope-session-tools .tools-folder{margin:5px 0;display:flex;gap:5px;align-items:stretch}
+#tierscope-session-tools .tools-folder .tools-folder-open{display:flex;flex-direction:column;gap:4px;flex:1;text-align:left;padding:9px;border-left:3px solid #ff69b480;background:rgba(var(--panel-row-rgb),.04)}
+#tierscope-session-tools .tools-folder-name{font-weight:bold;color:var(--panel-text);overflow-wrap:anywhere}
 #tierscope-session-tools .tools-folder-meta{font-size:.9em;color:var(--panel-muted)}
 #tierscope-session-tools .tools-search{display:flex;width:100%;gap:6px;align-items:center;margin:8px 0}
 #tools-library-search{flex:1;width:100%}
@@ -5025,12 +5141,26 @@ underlying system, so should run in the browser, Node, or Plask.
 #tierscope-session-tools .tools-history-stats dt{font-size:.9em;color:var(--panel-muted)}
 #tierscope-session-tools .tools-history-stats dd{margin:3px 0 0;font-weight:bold;color:var(--panel-secondary);overflow-wrap:anywhere}
 #tools-history-recording{width:100%}
+#tools-room-shortcuts button{overflow-wrap:anywhere;text-align:left}
 #tools-history-table button{max-width:155px;text-align:left;overflow-wrap:anywhere}
 #tools-history-table button[aria-pressed=true]{color:var(--panel-accent);border-color:var(--panel-accent)}
 #tools-history-chart{cursor:crosshair}
 #tierscope-session-tools label{display:inline-flex;gap:5px;align-items:center;flex-wrap:wrap;min-width:0;max-width:100%}
 #tierscope-session-tools select{width:auto;max-width:100%}
 #tools-source-a,#tools-source-b{width:100%}
+#tierscope-session-tools .tools-filters{display:flex;flex-wrap:wrap;gap:6px;padding:7px 0;border-bottom:1px solid var(--panel-divider)}
+#tierscope-session-tools .tools-filters input[type=date]{width:130px}
+#tierscope-session-tools .tools-filters select{max-width:205px}
+#tierscope-session-tools .tools-filters .tools-search{margin:0}
+#tierscope-session-tools .tools-search input{flex:1;width:100%}
+#tierscope-session-tools textarea{display:block;width:100%;resize:vertical}
+#tierscope-session-tools .tools-recording-note{white-space:pre-wrap;overflow-wrap:anywhere;max-height:85px;overflow:auto;color:var(--panel-muted)}
+#tierscope-session-tools .tools-chart-legend{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px}
+#tierscope-session-tools .tools-chart-legend label{flex-wrap:nowrap;min-width:0}
+#tierscope-session-tools .tools-chart-legend span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#tierscope-session-tools .tools-chart-legend .tools-series-swatch{width:13px;flex-shrink:0;border-top:2px solid currentColor}
+#tools-analysis-chart{touch-action:pan-y;cursor:crosshair}
+#tools-analysis-chart:focus-visible{outline:2px solid var(--panel-accent);outline-offset:2px}
 #gif-export-controls{padding:8px 12px;gap:6px;align-items:center;flex-shrink:0;border-bottom:1px solid var(--panel-divider)}
 </style>
 <div class="tools-head"><div><h2 id="tools-title">LIBRARY</h2><div class="tools-subtitle">Recordings &amp; session tools</div></div><button id="tools-close" type="button" aria-label="Close library" title="Close library (Escape)">×</button></div>
@@ -5038,6 +5168,630 @@ underlying system, so should run in the browser, Node, or Plask.
 <div id="tools-message" role="status" aria-live="polite"></div>
 <div id="gif-export-controls" style="display:none"><span id="gif-export-status" role="status"></span><button id="btn-cancel-gif" hidden type="button">Cancel</button></div>
 <div id="tools-content"></div>`;
+  }
+
+  // src/library-query.js
+  function libraryDateBoundary(text, after = false) {
+    if (!text) return after ? Infinity : -Infinity;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) throw new Error("Use a valid calendar date.");
+    const [year, month, day] = text.split("-").map(Number);
+    const date = /* @__PURE__ */ new Date(0);
+    date.setFullYear(year, month - 1, day);
+    date.setHours(0, 0, 0, 0);
+    if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) throw new Error("Use a valid calendar date.");
+    if (after) {
+      date.setDate(date.getDate() + 1);
+      date.setHours(0, 0, 0, 0);
+    }
+    return date.getTime();
+  }
+  function filterLibraryEntries(entries, filters = {}) {
+    const start = libraryDateBoundary(filters.from || ""), end = libraryDateBoundary(filters.to || "", true);
+    if (start >= end) throw new Error("The start date must not be after the end date.");
+    const query = (filters.query || "").trim().toLowerCase(), room = (filters.room || "").toLowerCase();
+    const result = entries.filter((entry) => {
+      const time = entry.archive.session.history.timestamps[0];
+      return (!room || room === "*" || entry.archive.room.toLowerCase() === room) && time >= start && time < end && (!filters.favorites || entry.modelFavorite) && (!query || (entry.title + " " + entry.archive.room + " " + (entry.notes || "")).toLowerCase().includes(query));
+    });
+    const byDate = (a, b) => b.archive.session.history.timestamps[0] - a.archive.session.history.timestamps[0] || a.id.localeCompare(b.id);
+    return result.sort((a, b) => filters.sort === "oldest" ? -byDate(a, b) : filters.sort === "title" ? a.title.localeCompare(b.title) || byDate(a, b) : filters.sort === "model" ? a.archive.room.localeCompare(b.archive.room) || byDate(a, b) : filters.sort === "favorites" ? Number(!!b.modelFavorite) - Number(!!a.modelFavorite) || byDate(a, b) : byDate(a, b));
+  }
+
+  // src/tools-view-helpers.js
+  function toolNode(parent, tag, text, className) {
+    const node = document.createElement(tag);
+    if (text !== void 0) node.textContent = text;
+    if (className) node.className = className;
+    parent.appendChild(node);
+    return node;
+  }
+  function toolButton(parent, text, action, id) {
+    const button = toolNode(parent, "button", text);
+    button.type = "button";
+    button.onclick = action;
+    if (id) button.id = id;
+    return button;
+  }
+  function recordingFilters(parent, entries, state, prefix, changed, organization = false) {
+    const controls = toolNode(parent, "div", void 0, "tools-filters");
+    const label = toolNode(controls, "label", "Model "), model = toolNode(label, "select");
+    model.id = prefix + "-model";
+    const rooms = [...new Set(entries.map((entry) => entry.archive.room.toLowerCase()))].sort();
+    for (const [value, name] of [["", organization ? "All models (folders)" : "All models"], ...organization ? [["*", "All recordings"]] : [], ...rooms.map((room) => [room, room])]) {
+      const option = toolNode(model, "option", name);
+      option.value = value;
+    }
+    if (![...model.options].some((option) => option.value === (state.room || ""))) state.room = "";
+    model.value = state.room || "";
+    model.onchange = () => {
+      state.room = model.value;
+      changed();
+    };
+    for (const [key, name] of [["from", "From"], ["to", "Through"]]) {
+      const label2 = toolNode(controls, "label", name + " "), input = toolNode(label2, "input");
+      input.type = "date";
+      input.id = prefix + "-" + key;
+      input.value = state[key] || "";
+      input.onchange = () => {
+        state[key] = input.value;
+        changed();
+      };
+    }
+    const searchLabel = toolNode(controls, "label", "Find ", "tools-search"), search = toolNode(searchLabel, "input");
+    search.type = "search";
+    search.id = prefix + "-search";
+    search.placeholder = "Title, model or notes";
+    search.value = state.query || "";
+    search.oninput = () => {
+      state.query = search.value;
+      changed();
+    };
+    if (organization) {
+      const label2 = toolNode(controls, "label", "Sort "), sort = toolNode(label2, "select");
+      sort.id = prefix + "-sort";
+      for (const [value, name] of [["newest", "Newest first"], ["oldest", "Oldest first"], ["title", "Title"], ["model", "Model"], ["favorites", "Favorite models first"]]) {
+        const option = toolNode(sort, "option", name);
+        option.value = value;
+      }
+      sort.value = state.sort || "newest";
+      sort.onchange = () => {
+        state.sort = sort.value;
+        changed();
+      };
+      const favoriteLabel = toolNode(controls, "label"), favorite = toolNode(favoriteLabel, "input");
+      favorite.type = "checkbox";
+      favorite.id = prefix + "-favorites";
+      favorite.checked = !!state.favorites;
+      toolNode(favoriteLabel, "span", "Favorite models only");
+      favorite.onchange = () => {
+        state.favorites = favorite.checked;
+        changed();
+      };
+    }
+    toolButton(controls, "Clear filters", () => {
+      Object.assign(state, { room: "", from: "", to: "", query: "", favorites: false, sort: "newest" });
+      model.value = "";
+      search.value = "";
+      controls.querySelectorAll("input[type=date]").forEach((input) => {
+        input.value = "";
+      });
+      if (organization) {
+        controls.querySelector("input[type=checkbox]").checked = false;
+        controls.querySelector("#" + prefix + "-sort").value = "newest";
+      }
+      changed();
+    }, prefix + "-clear");
+    toolNode(parent, "p", "Dates use the first retained sample in your browser’s local timezone; “Through” includes that whole day.", "tools-muted");
+    return { model, search };
+  }
+
+  // src/library-browser-view.js
+  function renderLibraryBrowser(parent, entries, filters, selected, actions) {
+    const present = new Set(entries.map((entry) => entry.id));
+    for (const id of selected) if (!present.has(id)) selected.delete(id);
+    let shown = 50;
+    const inputs = recordingFilters(parent, entries, filters, "tools-library", () => {
+      shown = 50;
+      actions.room(filters.room);
+      rows();
+    }, true);
+    const bulk = toolNode(parent, "div", void 0, "tools-actions"), selection = toolNode(bulk, "span");
+    selection.id = "tools-library-selected";
+    let matching = [];
+    toolButton(bulk, "Select matching", () => {
+      matching.forEach((entry) => selected.add(entry.id));
+      rows();
+    }, "tools-select-matching");
+    toolButton(bulk, "Clear selection", () => {
+      selected.clear();
+      rows();
+    }, "tools-clear-selection");
+    const compare = toolButton(bulk, "Compare selected", () => actions.compare([...selected]), "tools-compare-selected");
+    const download = toolButton(bulk, "Export selected", () => actions.export([...selected]), "tools-export-selected");
+    download.title = "Download one library bundle, including titles, notes and favorite models";
+    const list = toolNode(parent, "div");
+    list.id = "tools-library-list";
+    function favoriteButton(parent2, room, compact = false) {
+      const active = entries.some((entry) => entry.archive.room.toLowerCase() === room && entry.modelFavorite);
+      const control = toolButton(parent2, (active ? "★" : "☆") + (compact ? "" : " Favorite model"), () => actions.favoriteModel(room), "tools-model-favorite-" + room);
+      control.setAttribute("aria-pressed", String(active));
+      control.setAttribute("aria-label", (active ? "Unfavorite " : "Favorite ") + room);
+      control.title = (active ? "Unfavorite model " : "Favorite model ") + room;
+      if (active) control.className = "tools-primary";
+    }
+    function rows() {
+      list.replaceChildren();
+      matching = [];
+      try {
+        matching = filterLibraryEntries(entries, filters);
+      } catch (error) {
+        toolNode(list, "p", error.message);
+      }
+      selection.textContent = selected.size + " selected (including hidden recordings)";
+      compare.disabled = selected.size < 2 || selected.size > 6;
+      compare.title = "Select 2–6 recordings to compare";
+      download.disabled = !selected.size;
+      const folders = /* @__PURE__ */ new Map();
+      for (const entry of matching) {
+        const room2 = entry.archive.room.toLowerCase();
+        if (!folders.has(room2)) folders.set(room2, []);
+        folders.get(room2).push(entry);
+      }
+      const browsingFolders = !filters.room && !filters.query;
+      const visible = browsingFolders ? [...folders.keys()] : matching;
+      const heading = toolNode(list, "div", void 0, "tools-actions");
+      if (!browsingFolders) toolButton(heading, "‹ All models", () => {
+        const previous = filters.room;
+        filters.room = "";
+        filters.query = "";
+        inputs.model.value = "";
+        inputs.search.value = "";
+        shown = 50;
+        actions.room(null);
+        rows();
+        (document.getElementById("tools-folder-" + previous) || inputs.search).focus();
+      }, "tools-library-all-models");
+      const room = filters.room && filters.room !== "*" ? filters.room : null;
+      toolNode(heading, "h3", room ? "Folder: " + room : browsingFolders ? "Model folders" : "Search results — all models");
+      if (room) {
+        favoriteButton(heading, room);
+        toolButton(heading, "History overview", () => actions.history(room), "tools-model-history").className = "tools-primary";
+      }
+      if (!matching.length) toolNode(list, "p", entries.length ? "No matching recordings." : "Your library is empty. Keep a recording above or import a session file.", "tools-muted");
+      if (browsingFolders) for (const room2 of visible.slice(0, shown)) {
+        const recordings = folders.get(room2), row = toolNode(list, "div", void 0, "tools-folder");
+        const open = toolButton(row, "", () => {
+          filters.room = room2;
+          inputs.model.value = room2;
+          shown = 50;
+          actions.room(room2);
+          rows();
+          document.getElementById("tools-library-all-models").focus();
+        }, "tools-folder-" + room2);
+        open.className = "tools-folder-open";
+        open.setAttribute("aria-label", "Open recordings for " + room2);
+        toolNode(open, "span", "▱  " + room2, "tools-folder-name");
+        const latest = Math.max(...recordings.map((entry) => entry.archive.session.history.timestamps[0]));
+        toolNode(open, "span", recordings.length + (recordings.length === 1 ? " recording" : " recordings") + " · Latest " + new Date(latest).toLocaleDateString(), "tools-folder-meta");
+        favoriteButton(row, room2, true);
+      }
+      else for (const entry of visible.slice(0, shown)) {
+        const row = toolNode(list, "article", void 0, "tools-row");
+        row.dataset.libraryId = entry.id;
+        const title = toolNode(row, "label"), check = toolNode(title, "input");
+        check.type = "checkbox";
+        check.checked = selected.has(entry.id);
+        check.setAttribute("aria-label", "Select " + (entry.title || entry.archive.room));
+        check.onchange = () => {
+          if (check.checked) selected.add(entry.id);
+          else selected.delete(entry.id);
+          rows();
+          list.querySelector('[data-library-id="' + entry.id + '"] input').focus();
+        };
+        toolNode(title, "strong", entry.title || entry.archive.room);
+        toolNode(row, "div", entry.archive.room + " · " + new Date(entry.archive.session.history.timestamps[0]).toLocaleString() + " · " + entry.archive.session.history.timestamps.length + " samples", "tools-muted");
+        if (entry.notes) toolNode(row, "p", entry.notes, "tools-recording-note");
+        const controls = toolNode(row, "div", void 0, "tools-actions");
+        toolButton(controls, "Replay", () => actions.replay(entry)).className = "tools-primary";
+        toolButton(controls, "Summary", () => actions.summary(entry));
+        const more = toolNode(controls, "details", void 0, "tools-more");
+        toolNode(more, "summary", "More…");
+        const extras = toolNode(more, "div", void 0, "tools-more-actions");
+        for (const [label, key] of [["Save file", "save"], ["TXT", "txt"], ["CSV", "csv"], ["GIF", "gif"], ["Add to all-time highs", "highs"], ["Rename", "rename"], ["Delete", "delete"]]) {
+          const action = toolButton(extras, label, () => actions[key](entry));
+          if (key === "delete") action.className = "tools-danger";
+        }
+        const noteLabel = toolNode(more, "label", "Recording notes "), note = toolNode(noteLabel, "textarea");
+        note.maxLength = 2e3;
+        note.rows = 3;
+        note.value = entry.notes || "";
+        toolButton(more, "Save notes", () => actions.metadata(entry, { notes: note.value }), "tools-notes-save-" + entry.id);
+      }
+      if (visible.length > 50) toolNode(list, "p", "Showing " + Math.min(shown, visible.length) + " of " + visible.length + (browsingFolders ? " model folders." : " matching recordings."), "tools-muted");
+      if (shown < visible.length) toolButton(list, "Show " + Math.min(50, visible.length - shown) + " more", () => {
+        shown += 50;
+        rows();
+        (document.getElementById("tools-library-more") || inputs.search).focus();
+      }, "tools-library-more");
+    }
+    rows();
+  }
+
+  // src/library-transfer.js
+  function libraryImportBundle(values, version) {
+    if (!Array.isArray(values) || !values.length || values.length > LIBRARY_MAX_COUNT) throw new Error("Choose 1–500 recording files or library bundles.");
+    if (new Blob([JSON.stringify(values)]).size > BACKUP_MAX_BYTES) throw new Error("Selected files exceed 32 MB.");
+    const library = [], favoriteModels = /* @__PURE__ */ new Set();
+    for (const value of values) {
+      if (value && value.format === "TierScopeBackup") {
+        const backup = validateTierScopeBackup(value);
+        if (backup.recovery) throw new Error("Use Backup to review and restore a partial backup with missing recordings.");
+        library.push(...backup.library);
+        backup.favoriteModels.forEach((room) => favoriteModels.add(room));
+      } else {
+        const archive = validateSessionFile(value);
+        library.push({ title: archive.room, archive });
+      }
+      if (library.length > LIBRARY_MAX_COUNT) throw new Error("Import up to 500 recordings at once.");
+    }
+    if (!library.length) throw new Error("These files contain no library recordings.");
+    return validateTierScopeBackup({ format: "TierScopeBackup", formatVersion: 1, producerVersion: version, rooms: [], preferences: {}, library, favoriteModels: [...favoriteModels] });
+  }
+  function importLibraryBundle(bundle) {
+    return restoreTierScopeBackup(bundle, { highs: false, preferences: false, library: true });
+  }
+  function exportLibrarySelection(ids, version) {
+    if (!ids.length || new Set(ids).size !== ids.length) throw new Error("Select one or more recordings.");
+    const state = readSessionLibrary();
+    const library = ids.map((id) => {
+      const entry = state.entries.find((entry2) => entry2.id === id);
+      if (!entry) throw new Error("A selected recording changed or could not be read. Refresh and select it again.");
+      return { title: entry.title, notes: libraryMetadata(entry).notes, archive: entry.archive };
+    });
+    const rooms = new Set(library.map((entry) => entry.archive.room.toLowerCase())), models = readModelFavorites(state.entries);
+    if (models.errors.some((room) => rooms.has(room))) throw new Error("A selected model’s favorite could not be read. Refresh and try again.");
+    return validateTierScopeBackup({
+      format: "TierScopeBackup",
+      formatVersion: 1,
+      producerVersion: version,
+      rooms: [],
+      preferences: {},
+      library,
+      favoriteModels: [...models.favorites].filter((room) => rooms.has(room))
+    });
+  }
+
+  // src/analysis-chart-data.js
+  function analysisSampleIndex(times, time) {
+    let left = 0, right = times.length;
+    while (left < right) {
+      const mid = left + right >>> 1;
+      if (times[mid] <= time) left = mid + 1;
+      else right = mid;
+    }
+    return left - 1;
+  }
+  function inspectAnalysisSample(series, time) {
+    const index = analysisSampleIndex(series.times, time);
+    if (index < 0 || time > series.times.at(-1)) return { kind: "outside", index: -1, value: null, timestamp: null };
+    if (series.times[index] !== time && series.breaks[index + 1]) return { kind: "gap", index, value: null, timestamp: null };
+    return { kind: series.times[index] === time ? "sample" : "held", index, value: series.values[index], timestamp: series.timestamps[index] };
+  }
+  function buildAnalysisPlot(series, start, end, width) {
+    const { times, values, breaks } = series;
+    const points = [];
+    let bucket = null, move = true, maximum = 1, last = -1;
+    function flush() {
+      if (!bucket) return;
+      const indices = [bucket.first, bucket.low, bucket.high, bucket.last].sort((a, b) => a - b);
+      indices.forEach((index, i) => {
+        if (i && index === indices[i - 1]) return;
+        points.push({ time: Math.max(start, times[index]), value: values[index], index, move });
+        move = false;
+      });
+      bucket = null;
+    }
+    let first = Math.max(0, analysisSampleIndex(times, start));
+    while (first > 0 && times[first - 1] === start) first--;
+    for (let i = first; i < times.length && times[i] <= end; i++) {
+      if (times[i] < start && (i + 1 === times.length || breaks[i + 1])) continue;
+      const column = end > start ? Math.floor((Math.max(start, times[i]) - start) / (end - start) * width) : 0;
+      if (breaks[i]) {
+        flush();
+        move = true;
+      }
+      if (!bucket || bucket.column !== column) {
+        flush();
+        bucket = { column, first: i, last: i, low: i, high: i };
+      } else {
+        bucket.last = i;
+        if (values[i] < values[bucket.low]) bucket.low = i;
+        if (values[i] > values[bucket.high]) bucket.high = i;
+      }
+      maximum = Math.max(maximum, values[i]);
+      last = i;
+    }
+    flush();
+    if (last >= 0 && last + 1 < times.length && !breaks[last + 1] && times[last + 1] > end && times[last] < end) {
+      points.push({ time: end, value: values[last], index: last, move: false });
+    }
+    return { points, maximum };
+  }
+  function zoomAnalysisWindow(span, start, end, factor, anchor) {
+    if (!Number.isFinite(span) || span < 0 || !Number.isFinite(factor) || factor <= 0) throw new Error("Invalid chart range.");
+    if (!span) return [0, 0];
+    const width = Math.min(span, Math.max(Math.min(1e3, span), (end - start) * factor));
+    const center = Math.max(start, Math.min(end, anchor));
+    const ratio = end > start ? (center - start) / (end - start) : 0.5;
+    const left = Math.max(0, Math.min(span - width, center - width * ratio));
+    return [left, left + width];
+  }
+
+  // src/analysis-chart-view.js
+  function renderAnalysisChart(parent, series, labels, axisMs, metricLabel) {
+    let start = 0, end = axisMs, cursor = 0, pinned = false, drag = null, disposed = false;
+    const hidden = /* @__PURE__ */ new Set(), controls = toolNode(parent, "div", void 0, "tools-actions");
+    const number = (value) => value.toLocaleString(void 0, { maximumFractionDigits: 2 });
+    const elapsed = (ms) => number(ms / 6e4) + "m";
+    const zoomIn = toolButton(controls, "Zoom +", () => zoom(0.5), "tools-chart-zoom-in");
+    const zoomOut = toolButton(controls, "Zoom −", () => zoom(2), "tools-chart-zoom-out");
+    const panLeft = toolButton(controls, "‹", () => pan(-1), "tools-chart-pan-left");
+    panLeft.setAttribute("aria-label", "Pan earlier");
+    const panRight = toolButton(controls, "›", () => pan(1), "tools-chart-pan-right");
+    panRight.setAttribute("aria-label", "Pan later");
+    toolButton(controls, "Full range", () => {
+      start = 0;
+      end = axisMs;
+      draw();
+    }, "tools-chart-reset");
+    const pin = toolButton(controls, "Pin cursor", () => {
+      pinned = !pinned;
+      inspect();
+    }, "tools-chart-pin");
+    const legend = toolNode(parent, "div", void 0, "tools-chart-legend");
+    const dark = ["#ff69b4", "#79baff", "#68d391", "#ffd166", "#c4a3ff", "#ff987d"];
+    const bright = ["#b42370", "#175db0", "#176f36", "#835900", "#7140a6", "#a23c20"];
+    const newestFirst = series.map((s, i) => i).sort((a, b) => series[b].timestamps[0] - series[a].timestamps[0] || a - b);
+    const colorIndices = series.map((s, i) => newestFirst.indexOf(i));
+    const newest = newestFirst[0];
+    const legendLabels = labels.map((label, i) => {
+      const control = toolNode(legend, "label"), check = toolNode(control, "input");
+      check.type = "checkbox";
+      check.checked = true;
+      check.dataset.analysisSeries = String(i);
+      const swatch = toolNode(control, "span", "", "tools-series-swatch");
+      swatch.setAttribute("aria-hidden", "true");
+      swatch.style.borderTopStyle = i === newest ? "solid" : "dashed";
+      toolNode(control, "span", String.fromCharCode(65 + i) + (series.length > 1 && i === newest ? " · Latest" : "") + " · " + label);
+      control.title = (series.length > 1 ? i === newest ? "Latest recording — solid pink: " : "Earlier recording — dashed: " : "") + label;
+      check.onchange = () => {
+        if (!check.checked && hidden.size === series.length - 1) {
+          check.checked = true;
+          return;
+        }
+        if (check.checked) hidden.delete(i);
+        else hidden.add(i);
+        draw();
+      };
+      return control;
+    });
+    const canvas = toolNode(parent, "canvas");
+    canvas.id = "tools-analysis-chart";
+    canvas.tabIndex = 0;
+    canvas.setAttribute("role", "img");
+    parent.insertBefore(canvas, legend);
+    canvas.setAttribute("aria-label", metricLabel + " by real elapsed time. Arrow keys inspect samples; plus and minus zoom; Home and End jump to visible endpoints.");
+    const range = toolNode(parent, "p", "", "tools-muted");
+    range.id = "tools-chart-range";
+    parent.insertBefore(range, legend);
+    toolNode(parent, "p", "Aligned from each recording’s first retained sample, using real elapsed time. Move to inspect; click to pin, drag to zoom, or use the buttons and arrow keys. Gaps have no assumed samples. Hidden lines and zoom do not change summary totals or the shared comparison length.", "tools-muted");
+    const scroll = toolNode(parent, "div", void 0, "tools-scroll"), table = toolNode(scroll, "table");
+    table.id = "tools-chart-inspection";
+    const caption = toolNode(table, "caption");
+    const header = toolNode(toolNode(table, "thead"), "tr");
+    ["Recording", "Count", "Sample timestamp / status"].forEach((text) => {
+      toolNode(header, "th", text).scope = "col";
+    });
+    const body = toolNode(table, "tbody");
+    const rows = series.map((s, i) => {
+      const row = toolNode(body, "tr");
+      toolNode(row, "th", String.fromCharCode(65 + i)).scope = "row";
+      return { row, value: toolNode(row, "td"), detail: toolNode(row, "td") };
+    });
+    const bitmap = document.createElement("canvas");
+    let width = 260, height = 200, ratio = 1, left = 52, right = 248, top = 15, bottom = 164;
+    const timeAt = (event) => {
+      const bounds = canvas.getBoundingClientRect(), x = (event.clientX - bounds.left) * width / bounds.width;
+      return start + Math.max(0, Math.min(1, (x - left) / (right - left))) * (end - start);
+    };
+    function zoom(factor) {
+      [start, end] = zoomAnalysisWindow(axisMs, start, end, factor, cursor);
+      cursor = Math.max(start, Math.min(end, cursor));
+      draw();
+    }
+    function pan(direction) {
+      const span = end - start, next = Math.max(0, Math.min(axisMs - span, start + direction * span / 2));
+      start = next;
+      end = next + span;
+      cursor = Math.max(start, Math.min(end, cursor));
+      draw();
+    }
+    function inspect() {
+      if (disposed) return;
+      caption.textContent = "Cursor " + elapsed(cursor) + (pinned ? " · pinned" : "");
+      pin.textContent = pinned ? "Unpin" : "Pin";
+      pin.setAttribute("aria-label", pinned ? "Unpin inspection cursor" : "Pin inspection cursor");
+      pin.setAttribute("aria-pressed", String(pinned));
+      series.forEach((s, i) => {
+        const sample = inspectAnalysisSample(s, cursor), row = rows[i];
+        row.row.hidden = hidden.has(i);
+        row.value.textContent = sample.value === null ? "—" : number(sample.value);
+        row.detail.textContent = sample.kind === "gap" ? "Recording gap — no sample" : sample.kind === "outside" ? "Outside recording" : new Date(sample.timestamp).toLocaleString() + " · sample " + (sample.index + 1) + (sample.kind === "held" ? " (held until next sample)" : "");
+      });
+      const ctx = canvas.getContext("2d");
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      ctx.clearRect(0, 0, width, height);
+      ctx.drawImage(bitmap, 0, 0, width, height);
+      const style = window.getComputedStyle(parent);
+      const x = left + (cursor - start) / (end - start || 1) * (right - left);
+      ctx.strokeStyle = style.getPropertyValue("--panel-text").trim();
+      ctx.setLineDash([3, 3]);
+      ctx.lineWidth = 1;
+      if (cursor >= start && cursor <= end) {
+        ctx.beginPath();
+        ctx.moveTo(x, top);
+        ctx.lineTo(x, bottom);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      if (drag) {
+        ctx.fillStyle = "#ff69b433";
+        const from = left + (drag.from - start) / (end - start || 1) * (right - left);
+        ctx.fillRect(Math.min(from, x), top, Math.abs(x - from), bottom - top);
+      }
+    }
+    function draw() {
+      var _a;
+      if (disposed) return;
+      width = Math.max(260, canvas.clientWidth);
+      right = width - 14;
+      ratio = window.devicePixelRatio || 1;
+      canvas.width = bitmap.width = width * ratio;
+      canvas.height = bitmap.height = height * ratio;
+      const ctx = bitmap.getContext("2d");
+      ctx.scale(ratio, ratio);
+      const style = window.getComputedStyle(parent), isDark = ((_a = parent.closest("[data-theme]")) == null ? void 0 : _a.dataset.theme) !== "bright";
+      const colors = isDark ? dark : bright;
+      const plots = series.map((s, j) => hidden.has(j) ? null : buildAnalysisPlot(s, start, end, right - left));
+      const maximum = Math.max(1, ...plots.map((plot) => plot ? plot.maximum : 1));
+      ctx.strokeStyle = style.getPropertyValue("--panel-divider").trim();
+      ctx.fillStyle = style.getPropertyValue("--panel-muted").trim();
+      ctx.font = "10px Arial";
+      for (let step = 0; step <= 2; step++) {
+        const y = bottom - step / 2 * (bottom - top);
+        ctx.beginPath();
+        ctx.moveTo(left, y);
+        ctx.lineTo(right, y);
+        ctx.stroke();
+        ctx.textAlign = "right";
+        ctx.fillText(number(maximum * step / 2), left - 5, y + 3);
+      }
+      ctx.textAlign = "left";
+      ctx.fillText(elapsed(start), left, bottom + 20);
+      ctx.textAlign = "right";
+      ctx.fillText(elapsed(end), right, bottom + 20);
+      for (const j of newestFirst.slice().reverse()) {
+        const color = colors[colorIndices[j]];
+        legendLabels[j].style.color = color;
+        legendLabels[j].querySelector("input").disabled = hidden.size === series.length - 1 && !hidden.has(j);
+        if (hidden.has(j)) continue;
+        ctx.strokeStyle = ctx.fillStyle = color;
+        ctx.lineWidth = 1.8;
+        ctx.lineCap = "butt";
+        ctx.setLineDash(j === newest ? [] : [6, 4]);
+        ctx.beginPath();
+        let previousY = 0;
+        const dots = [];
+        const points = plots[j].points;
+        points.forEach((point, i) => {
+          const x = left + (point.time - start) / (end - start || 1) * (right - left), y = bottom - point.value / maximum * (bottom - top);
+          if (point.move) ctx.moveTo(x, y);
+          else {
+            ctx.lineTo(x, previousY);
+            ctx.lineTo(x, y);
+          }
+          if (point.move && (i + 1 === points.length || points[i + 1].move)) dots.push([x, y]);
+          previousY = y;
+        });
+        ctx.stroke();
+        ctx.setLineDash([]);
+        dots.forEach(([x, y]) => {
+          ctx.beginPath();
+          ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+          ctx.fill();
+        });
+      }
+      range.textContent = "Chart window " + elapsed(start) + " – " + elapsed(end) + " · full comparison/recording range " + elapsed(axisMs);
+      zoomIn.disabled = end - start <= Math.min(1e3, axisMs);
+      zoomOut.disabled = end - start >= axisMs;
+      panLeft.disabled = start <= 0;
+      panRight.disabled = end >= axisMs;
+      inspect();
+    }
+    canvas.onpointermove = (event) => {
+      if (!pinned || drag) {
+        cursor = timeAt(event);
+        inspect();
+      }
+    };
+    canvas.onpointerdown = (event) => {
+      if (event.button !== 0) return;
+      canvas.focus();
+      drag = { from: timeAt(event), x: event.clientX, pinned };
+      canvas.setPointerCapture(event.pointerId);
+      cursor = drag.from;
+      inspect();
+    };
+    canvas.onpointerup = (event) => {
+      if (!drag) return;
+      const origin = drag;
+      cursor = timeAt(event);
+      drag = null;
+      if (Math.abs(event.clientX - origin.x) > 5 && Math.abs(cursor - origin.from) >= Math.min(1e3, axisMs)) {
+        start = Math.min(cursor, origin.from);
+        end = Math.max(cursor, origin.from);
+        pinned = origin.pinned;
+        draw();
+      } else {
+        pinned = !origin.pinned;
+        inspect();
+      }
+      if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+    };
+    canvas.onpointercancel = () => {
+      drag = null;
+      inspect();
+    };
+    canvas.onkeydown = (event) => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End", "+", "=", "-", "Escape"].includes(event.key)) return;
+      event.preventDefault();
+      if (event.key === "+" || event.key === "=") {
+        zoom(0.5);
+        return;
+      }
+      if (event.key === "-") {
+        zoom(2);
+        return;
+      }
+      if (event.key === "Escape") {
+        pinned = false;
+        inspect();
+        return;
+      }
+      if (event.key === "Home") cursor = start;
+      else if (event.key === "End") cursor = end;
+      else {
+        let target = event.key === "ArrowRight" ? end : start;
+        for (let j = 0; j < series.length; j++) if (!hidden.has(j)) {
+          const times = series[j].times, index = analysisSampleIndex(times, cursor);
+          if (event.key === "ArrowRight" && index + 1 < times.length) target = Math.min(target, times[index + 1]);
+          if (event.key === "ArrowLeft") {
+            let i = index;
+            while (i >= 0 && times[i] >= cursor) i--;
+            if (i >= 0) target = Math.max(target, times[i]);
+          }
+        }
+        cursor = Math.max(start, Math.min(end, target));
+      }
+      pinned = true;
+      inspect();
+    };
+    draw();
+    return { canvas, draw, dispose() {
+      disposed = true;
+      drag = null;
+      bitmap.width = bitmap.height = 0;
+    } };
   }
 
   // src/model-history.js
@@ -5060,7 +5814,7 @@ underlying system, so should run in the browser, Node, or Plask.
       const selected = limit === Infinity ? matching : matching.slice(-limit);
       let coveredMs = 0, gapMs = 0, weighted = 0, registeredWeight = 0, tokenWeight = 0, latestEnd = -Infinity, overlaps = false;
       let peak = null;
-      const recordings = selected.map((entry) => {
+      const recordings = selected.map((entry, index) => {
         const stats = summary(entry.archive, metric), registered = summary(entry.archive, "total");
         const time = entry.archive.session.history.timestamps[0];
         coveredMs += stats.coveredMs;
@@ -5072,7 +5826,9 @@ underlying system, so should run in the browser, Node, or Plask.
         peak = peak === null ? stats.peak : Math.max(peak, stats.peak);
         if (time < latestEnd) overlaps = true;
         latestEnd = Math.max(latestEnd, time + stats.spanMs);
-        return __spreadValues({ id: entry.id, title: entry.title || entry.archive.room, time }, stats);
+        const position = matching.length - selected.length + index;
+        const comparisonIds = matching.slice(Math.max(0, position - MAX_COMPARE_RECORDINGS + 1), position + 1).reverse().map((record) => record.id);
+        return __spreadValues({ id: entry.id, title: entry.title || entry.archive.room, time, comparisonIds }, stats);
       });
       return {
         room: room.toLowerCase(),
@@ -5116,14 +5872,35 @@ underlying system, so should run in the browser, Node, or Plask.
       node(parent, "p", "No saved recordings for this model. Return to Recordings to keep or import one.", "tools-muted");
       return null;
     }
+    const controls = node(parent, "div", void 0, "tools-actions");
+    const label = node(controls, "label", "Recording "), select = node(label, "select");
+    select.id = "tools-history-recording";
+    for (const record of [...recordings].reverse()) {
+      const option = node(select, "option", date(record.time) + " · " + record.title);
+      option.value = record.id;
+    }
+    if (recordings.some((record) => record.id === actions.selected)) select.value = actions.selected;
+    const buttons = node(parent, "div", void 0, "tools-actions");
+    buttons.id = "tools-history-actions";
+    const selected = () => recordings.find((record) => record.id === select.value);
+    const compare = button(buttons, "Compare with previous", () => {
+      const ids = selected().comparisonIds;
+      if (ids.length > 1) actions.compare(ids);
+    }, "tools-history-compare");
+    compare.className = "tools-primary";
+    button(buttons, "Summary", () => actions.summary(select.value), "tools-history-summary");
+    button(buttons, "Replay", () => actions.replay(select.value), "tools-history-replay");
+    const comparisonHint = node(parent, "p", "", "tools-muted");
+    comparisonHint.id = "tools-history-compare-hint";
+    compare.setAttribute("aria-describedby", comparisonHint.id);
     const legend = node(parent, "p", "● Average · ◆ Peak in recording", "tools-history-legend");
     legend.id = "tools-history-legend";
     const canvas = node(parent, "canvas");
     canvas.id = "tools-history-chart";
     canvas.setAttribute("role", "img");
-    canvas.setAttribute("aria-label", actions.metricLabel + " across saved recordings, positioned by the date of their first retained sample. Select a recording below for the values.");
+    canvas.setAttribute("aria-label", actions.metricLabel + " across saved recordings, positioned by the date of their first retained sample. Use the recording selector above or the table below for the values.");
     canvas.setAttribute("aria-describedby", legend.id);
-    node(parent, "p", "One point per recording, using its first retained sample date. Averages use real covered time; gaps and time after the final sample are excluded. Select a point or use the recording selector below.", "tools-muted");
+    node(parent, "p", "One point per recording, using its first retained sample date. Averages use real covered time; gaps and time after the final sample are excluded. Select a point or use the recording selector above.", "tools-muted");
     node(parent, "h3", "Across these recordings");
     const cards = node(parent, "dl", void 0, "tools-history-stats");
     cards.id = "tools-history-stats";
@@ -5144,28 +5921,12 @@ underlying system, so should run in the browser, Node, or Plask.
       const warning = node(parent, "p", "Some recording time ranges overlap. Totals sum recordings and may count the same period more than once.", "tools-muted");
       warning.id = "tools-history-overlap";
     }
-    const controls = node(parent, "div", void 0, "tools-actions");
-    const label = node(controls, "label", "Recording "), select = node(label, "select");
-    select.id = "tools-history-recording";
-    for (const record of [...recordings].reverse()) {
-      const option = node(select, "option", date(record.time) + " · " + record.title);
-      option.value = record.id;
-    }
-    if (recordings.some((record) => record.id === actions.selected)) select.value = actions.selected;
     const detail = node(parent, "section", void 0, "tools-current");
     detail.id = "tools-history-detail";
     detail.setAttribute("aria-label", "Selected recording");
     const heading = node(detail, "strong"), meta = node(detail, "p", void 0, "tools-muted");
     const values = node(detail, "p");
     values.setAttribute("aria-live", "polite");
-    const buttons = node(detail, "div", void 0, "tools-actions");
-    const selected = () => recordings.find((record) => record.id === select.value);
-    button(buttons, "Summary", () => actions.summary(select.value), "tools-history-summary").className = "tools-primary";
-    button(buttons, "Replay", () => actions.replay(select.value), "tools-history-replay");
-    const compare = button(buttons, "Compare with previous", () => {
-      const index = recordings.indexOf(selected());
-      if (index > 0) actions.compare(recordings[index - 1].id, select.value);
-    }, "tools-history-compare");
     let positions = [], shown = 50;
     function draw() {
       const width = Math.max(240, canvas.clientWidth), height = 200, ratio = window.devicePixelRatio || 1;
@@ -5237,7 +5998,9 @@ underlying system, so should run in the browser, Node, or Plask.
       heading.textContent = record.title;
       meta.textContent = date(record.time) + " · " + record.samples.toLocaleString() + " samples";
       values.textContent = "Average " + number(record.mean) + " · Peak in recording " + number(record.peak) + " · Full-session high " + number(record.sessionPeak) + " · Token holders / registered " + percent(record.tokenShare) + " · Covered " + actions.duration(record.coveredMs) + " · Gaps " + actions.duration(record.gapMs);
-      compare.disabled = recordings.indexOf(record) === 0;
+      const previousCount = record.comparisonIds.length - 1;
+      compare.disabled = previousCount === 0;
+      comparisonHint.textContent = previousCount ? "Compare this recording with " + previousCount + " earlier " + (previousCount === 1 ? "recording" : "recordings") + " from this model (" + (previousCount + 1) + " total)." : "No earlier saved recordings for this model.";
       table.querySelectorAll("button[data-history-id]").forEach((button2) => button2.setAttribute("aria-pressed", String(button2.dataset.historyId === record.id)));
       draw();
     }
@@ -5675,7 +6438,10 @@ underlying system, so should run in the browser, Node, or Plask.
     let optionsLibrary = null, optionsArchive = null, options = [];
     const savedAnalysis = readAnalysisPreferences();
     let { metric, threshold, sharedLength, summaryThresholds } = savedAnalysis.preferences;
-    let selectedA = "current", selectedB = "", pendingBackup = null;
+    let selectedA = "current", selectedB = "", selectedExtra = [], pendingBackup = null;
+    const libraryFilters = { room: "", query: "", from: "", to: "", sort: "newest", favorites: false }, librarySelection = /* @__PURE__ */ new Set();
+    const analysisFilters = { room: "", query: "", from: "", to: "" };
+    let filteredSources = null, chartDispose = null, pickerOpen = true;
     let libraryRoom = null, chartDraw = null, analysisPreferenceError = savedAnalysis.error;
     let observedSource = null, observedSignature = "";
     let detachDock = null;
@@ -5729,22 +6495,29 @@ underlying system, so should run in the browser, Node, or Plask.
       parent.appendChild(element);
       return element;
     }
-    function chooseFile(maxBytes, accept) {
+    function chooseFile(maxBytes, accept, multiple = false) {
       const input = document.createElement("input");
       input.type = "file";
       input.accept = ".json,application/json";
       input.hidden = true;
+      input.multiple = multiple;
       const request = ++fileRequest, playbackAtRequest = runtime.playback;
       dialog.appendChild(input);
       const stillSelected = () => current() && request === fileRequest && runtime.playback === playbackAtRequest;
       input.onchange = async () => {
-        const file = input.files && input.files[0];
-        if (!file) {
+        const files = Array.from(input.files || []);
+        if (!files.length) {
           input.remove();
           return;
         }
         try {
-          const value = await readDataFile(file, maxBytes);
+          if (files.length > LIBRARY_MAX_COUNT || files.reduce((total, file) => total + file.size, 0) > maxBytes) throw new Error("Choose up to 500 files totaling at most " + Math.round(maxBytes / 1024 / 1024) + " MB.");
+          const values = [];
+          for (const file of files) {
+            values.push(await readDataFile(file, maxBytes));
+            if (!stillSelected()) return;
+          }
+          const value = multiple ? values : values[0];
           if (stillSelected()) accept(value);
         } catch (error) {
           if (stillSelected()) tell(error.message, true);
@@ -5760,13 +6533,31 @@ underlying system, so should run in the browser, Node, or Plask.
       options = [];
       optionsLibrary = null;
       optionsArchive = null;
+      let migrationError = "";
+      try {
+        migrateRecordingFavorites(library.entries);
+      } catch (error) {
+        migrationError = "Previous stars could not yet be saved as model favorites. Refresh to retry.";
+      }
+      try {
+        const models = readModelFavorites(library.entries);
+        library.favoriteModels = models.favorites;
+        library.favoriteError = migrationError || (models.errors.length ? "Some model favorites could not be read. Refresh to retry; recordings remain available." : "");
+      } catch (error) {
+        library.favoriteModels = /* @__PURE__ */ new Set();
+        library.favoriteError = "Model favorites could not be read. Refresh to retry; recordings remain available.";
+      }
+      library.entries = library.entries.map((entry) => __spreadProps(__spreadValues({}, entry), { modelFavorite: library.favoriteModels.has(entry.archive.room.toLowerCase()) }));
       return library;
     }
     function sourceOptions() {
       if (optionsLibrary === library && optionsArchive === currentArchive) return options;
       const items = [];
       if (currentArchive) items.push({ id: "current", title: "Current / replayed snapshot — " + currentArchive.room, archive: currentArchive });
-      for (const entry of library.entries) items.push({ id: entry.id, title: (entry.title || entry.archive.room) + " — " + new Date(entry.archive.session.history.timestamps[0]).toLocaleString(), archive: entry.archive });
+      for (const entry of library.entries) {
+        const title = entry.title && entry.title.trim().toLowerCase() !== entry.archive.room.toLowerCase() ? " — " + entry.title : "";
+        items.push(__spreadProps(__spreadValues({}, entry), { title: entry.archive.room + title + " — " + new Date(entry.archive.session.history.timestamps[0]).toLocaleString() }));
+      }
       optionsLibrary = library;
       optionsArchive = currentArchive;
       options = items;
@@ -5775,11 +6566,15 @@ underlying system, so should run in the browser, Node, or Plask.
     function selectSource(parent, label, id, selected, changed) {
       const wrapper = node(parent, "label", label), select = node(wrapper, "select");
       select.id = id;
-      for (const item of sourceOptions()) {
+      const matches = filteredSources || sourceOptions(), choices = matches.slice();
+      const retained = sourceOptions().find((item) => item.id === selected);
+      if (retained && !choices.some((item) => item.id === selected)) choices.unshift(__spreadProps(__spreadValues({}, retained), { title: retained.title + " (selected; outside filters)" }));
+      if (selected && selected !== "current" && !retained) choices.unshift({ id: selected, title: "Recording changed or removed — choose another" });
+      for (const item of choices) {
         const option = node(select, "option", item.title);
         option.value = item.id;
       }
-      if (sourceOptions().some((item) => item.id === selected)) select.value = selected;
+      if (choices.some((item) => item.id === selected)) select.value = selected;
       select.onchange = () => changed(select.value);
       return select.value;
     }
@@ -5820,7 +6615,7 @@ underlying system, so should run in the browser, Node, or Plask.
         button2.dataset.currentAvailable = String(!!available);
         button2.disabled = !available || button2.id === "btn-export-gif" && !!runtime.gifExportJob;
       });
-      if (replaced && (tab === "summary" || tab === "compare")) render(tab);
+      if (replaced && (tab === "summary" && selectedA === "current" || tab === "compare" && [selectedA, selectedB, ...selectedExtra].includes("current"))) render(tab);
     }
     function currentCard() {
       const card = node(content, "section", void 0, "tools-current");
@@ -5838,6 +6633,7 @@ underlying system, so should run in the browser, Node, or Plask.
         const result = keepSessionInLibrary(archive);
         currentArchive = archive;
         libraryRoom = archive.room.toLowerCase();
+        Object.assign(libraryFilters, { room: libraryRoom, query: "", from: "", to: "", favorites: false });
         render("library");
         tell(result.added ? "Recording kept in the library." : result.updated ? "Library recording updated; its name was preserved." : "An equal or fuller recording is already in the library.");
       }, "tools-keep").className = "tools-primary";
@@ -5857,8 +6653,22 @@ underlying system, so should run in the browser, Node, or Plask.
       refreshCurrent();
       updateSessionToolsStatus();
     }
+    function openHistory(room) {
+      libraryRoom = room;
+      render("history");
+      dialog.querySelector("#tools-history-back").focus();
+    }
     function renderLibrary() {
       const state = readLibrary();
+      const pageRoom = getModelName();
+      if (pageRoom !== "unknown") {
+        const shortcuts = node(content, "div", void 0, "tools-actions");
+        shortcuts.id = "tools-room-shortcuts";
+        button(shortcuts, "History · " + pageRoom, () => openHistory(pageRoom.toLowerCase()), "tools-room-history").className = "tools-primary";
+        const count = state.entries.filter((entry) => entry.archive.room.toLowerCase() === pageRoom.toLowerCase()).length;
+        node(shortcuts, "span", count + " saved " + (count === 1 ? "recording" : "recordings"), "tools-muted");
+        shortcuts.setAttribute("aria-label", "History for the model on this page");
+      }
       currentCard();
       const actions = node(content, "div", void 0, "tools-actions");
       button(actions, "Open saved file…", () => chooseFile(runtime.SESSION_FILE_MAX_BYTES, (value) => {
@@ -5867,111 +6677,77 @@ underlying system, so should run in the browser, Node, or Plask.
         refreshCurrent();
         tell("File opened in replay. Use Keep in library to store it here.");
       }), "tools-open-session");
-      button(actions, "Import to library…", () => chooseFile(runtime.SESSION_FILE_MAX_BYTES, (value) => {
-        const archive = validateSessionFile(value), result = keepSessionInLibrary(archive);
-        libraryRoom = archive.room.toLowerCase();
+      button(actions, "Import to library…", () => chooseFile(BACKUP_MAX_BYTES, (values) => {
+        const bundle = libraryImportBundle(values, runtime.TIERSCOPE_VERSION), result = importLibraryBundle(bundle);
+        const rooms = new Set(bundle.library.map((entry) => entry.archive.room.toLowerCase()));
+        libraryRoom = rooms.size === 1 ? [...rooms][0] : "*";
+        Object.assign(libraryFilters, { room: libraryRoom, query: "", from: "", to: "", favorites: false });
         render("library");
-        tell(result.added ? "Recording imported into the library." : result.updated ? "Library recording updated from the file." : "An equal or fuller recording is already in the library.");
-      }), "tools-import-session");
+        tell("Imported: " + result.recordings + " new, " + result.updatedRecordings + " updated, " + result.favoriteModels + " favorite models added; existing recordings and model choices were preserved.");
+      }, true), "tools-import-session").title = "Import one or more session files or library bundles; saving is explicit";
       button(actions, "Refresh", () => render("library"), "tools-refresh-library").title = "Refresh list from this browser";
       node(content, "p", state.count + " / " + LIBRARY_MAX_COUNT + " recordings · " + (state.bytes / 1024 / 1024).toFixed(2) + " / " + LIBRARY_MAX_BYTES / 1024 / 1024 + " MB · Kept until you delete them.", "tools-muted");
-      const folders = /* @__PURE__ */ new Map();
-      for (const entry of state.entries) {
-        const room = entry.archive.room.toLowerCase();
-        if (!folders.has(room)) folders.set(room, []);
-        folders.get(room).push(entry);
-      }
-      if (libraryRoom && !folders.has(libraryRoom)) libraryRoom = null;
-      const searchLabel = node(content, "label", "Find ", "tools-search"), search = node(searchLabel, "input");
-      search.type = "search";
-      search.id = "tools-library-search";
-      search.placeholder = "Model or recording title";
-      search.title = "Search all recordings, including other model folders.";
-      const list = node(content, "div");
-      list.id = "tools-library-list";
-      let shown = 50;
-      function rows() {
-        list.replaceChildren();
-        const query = search.value.trim().toLowerCase(), browsingFolders = !query && !libraryRoom;
-        const visible = query ? state.entries.filter((entry) => (entry.title + " " + entry.archive.room).toLowerCase().includes(query)) : libraryRoom ? folders.get(libraryRoom) : [...folders.keys()].sort((a, b) => a.localeCompare(b));
-        const heading = node(list, "div", void 0, "tools-actions");
-        if (!browsingFolders) button(heading, "‹ All models", () => {
-          const previous = libraryRoom;
-          libraryRoom = null;
-          search.value = "";
-          shown = 50;
-          rows();
-          (document.getElementById("tools-folder-" + previous) || search).focus();
-        }, "tools-library-all-models");
-        node(heading, "h3", query ? "Search results — all models" : libraryRoom ? "Folder: " + libraryRoom : "Model folders");
-        if (libraryRoom && !query) button(heading, "History overview", () => {
-          render("history");
-          dialog.querySelector("#tools-history-back").focus();
-        }, "tools-model-history").className = "tools-primary";
-        if (!visible.length) node(list, "p", state.entries.length ? "No matching recordings." : "Your library is empty. Keep a recording above or import a session file.", "tools-muted");
-        if (browsingFolders) for (const room of visible.slice(0, shown)) {
-          const entries = folders.get(room), row = node(list, "div", void 0, "tools-folder");
-          const open = button(row, "", () => {
-            libraryRoom = room;
-            shown = 50;
-            rows();
-            document.getElementById("tools-library-all-models").focus();
-          }, "tools-folder-" + room);
-          open.setAttribute("aria-label", "Open recordings for " + room);
-          node(open, "span", "▱  " + room, "tools-folder-name");
-          node(open, "span", entries.length + (entries.length === 1 ? " recording" : " recordings") + " · Latest " + new Date(entries[0].archive.session.history.timestamps[0]).toLocaleDateString(), "tools-folder-meta");
-        }
-        else for (const entry of visible.slice(0, shown)) {
-          const row = node(list, "article", void 0, "tools-row");
-          row.dataset.libraryId = entry.id;
-          node(row, "strong", entry.title || entry.archive.room);
-          node(row, "div", new Date(entry.archive.session.history.timestamps[0]).toLocaleString() + " · " + entry.archive.session.history.timestamps.length + " samples", "tools-muted");
-          if (query) node(row, "div", entry.archive.room, "tools-muted");
-          const actions2 = node(row, "div", void 0, "tools-actions");
-          button(actions2, "Replay", () => {
-            openSessionReplay(entry.archive);
-            observedSignature = "";
-            refreshCurrent();
-            tell("Replaying " + (entry.title || entry.archive.room) + ".");
-          }).className = "tools-primary";
-          button(actions2, "Summary", () => {
-            selectedA = entry.id;
-            render("summary");
-          });
-          const more = node(actions2, "details", void 0, "tools-more");
-          node(more, "summary", "More…");
-          const extras = node(more, "div", void 0, "tools-more-actions");
-          button(extras, "Save file", () => downloadDataFile(entry.archive, archiveName(entry.archive)));
-          button(extras, "TXT", () => downloadRecording(entry.archive, "txt"));
-          button(extras, "CSV", () => downloadRecording(entry.archive, "csv"));
-          button(extras, "GIF", () => generateGifFromHistory(entry.archive));
-          button(extras, "Add to all-time highs", () => addArchiveHighs(entry.archive));
-          button(extras, "Rename", () => {
-            const title = window.prompt("Recording title (up to 80 characters):", entry.title);
-            if (title !== null) {
-              renameLibrarySession(entry.id, title);
-              render("library");
-            }
-          });
-          button(extras, "Delete", () => {
-            if (!confirm("Delete this library recording: " + (entry.title || entry.archive.room) + "?\n\nLive tracking, ATH and downloaded files are unchanged.")) return;
+      if (state.favoriteError) node(content, "p", state.favoriteError, "tools-muted");
+      libraryFilters.room = libraryRoom || "";
+      if (libraryRoom && libraryRoom !== "*" && !state.entries.some((entry) => entry.archive.room.toLowerCase() === libraryRoom)) libraryFilters.room = libraryRoom = "";
+      const callbacks = {
+        room: (room) => {
+          libraryRoom = room;
+        },
+        history: openHistory,
+        compare: (ids) => {
+          selectedA = ids[0];
+          selectedB = ids[1];
+          selectedExtra = ids.slice(2);
+          Object.assign(analysisFilters, { room: "", query: "", from: "", to: "" });
+          render("compare");
+        },
+        export: (ids) => {
+          downloadDataFile(exportLibrarySelection(ids, runtime.TIERSCOPE_VERSION), "TierScope-library-selection-" + (/* @__PURE__ */ new Date()).toISOString().slice(0, 10) + ".json");
+          tell("Selected recordings exported, including titles, notes and favorite models.");
+        },
+        favoriteModel: (room) => {
+          if (state.favoriteError) throw new Error("Model favorites are not fully available. Refresh before changing them.");
+          setModelFavorite(room, !state.favoriteModels.has(room));
+          render("library");
+          tell("Model favorite saved.");
+        },
+        replay: (entry) => {
+          openSessionReplay(entry.archive);
+          observedSignature = "";
+          refreshCurrent();
+          tell("Replaying " + (entry.title || entry.archive.room) + ".");
+        },
+        summary: (entry) => {
+          selectedA = entry.id;
+          render("summary");
+        },
+        save: (entry) => downloadDataFile(entry.archive, archiveName(entry.archive)),
+        txt: (entry) => downloadRecording(entry.archive, "txt"),
+        csv: (entry) => downloadRecording(entry.archive, "csv"),
+        gif: (entry) => generateGifFromHistory(entry.archive),
+        highs: (entry) => addArchiveHighs(entry.archive),
+        metadata: (entry, patch) => {
+          updateLibraryMetadata(entry.id, patch);
+          render("library");
+          tell("Recording details saved.");
+        },
+        rename: (entry) => {
+          const title = window.prompt("Recording title (up to 80 characters):", entry.title);
+          if (title !== null) {
+            renameLibrarySession(entry.id, title);
+            render("library");
+          }
+        },
+        delete: (entry) => {
+          if (confirm("Delete this library recording: " + (entry.title || entry.archive.room) + "?\n\nLive tracking, ATH and downloaded files are unchanged.")) {
             removeLibrarySession(entry.id);
             render("library");
             tell("Library recording deleted.");
-          }).className = "tools-danger";
+          }
         }
-        if (visible.length > 50) node(list, "p", "Showing " + Math.min(shown, visible.length) + " of " + visible.length + (browsingFolders ? " model folders." : " matching recordings."), "tools-muted");
-        if (shown < visible.length) button(list, "Show " + Math.min(50, visible.length - shown) + " more", () => {
-          shown += 50;
-          rows();
-          (document.getElementById("tools-library-more") || search).focus();
-        }, "tools-library-more");
-      }
-      search.oninput = () => {
-        shown = 50;
-        rows();
       };
-      rows();
+      renderLibraryBrowser(content, state.entries, libraryFilters, librarySelection, Object.fromEntries(Object.entries(callbacks).map(([key, fn]) => [key, action(fn)])));
       if (state.damaged.length) {
         node(content, "p", state.damaged.length + " unreadable library record(s) were retained.", "tools-muted");
         if (state.unavailable.length) node(content, "p", "Some records could not be read. The displayed storage size excludes them; saving new recordings waits until they can be read.", "tools-muted");
@@ -5989,22 +6765,57 @@ underlying system, so should run in the browser, Node, or Plask.
         node(content, "p", "Record a session or import one into the library to see analysis.");
         return null;
       }
-      const controls = node(content, "div", void 0, "tools-actions");
-      if (currentArchive) button(controls, "Refresh current / replayed snapshot", () => {
+      const picker = node(content, "details");
+      picker.id = "tools-recording-picker";
+      picker.open = pickerOpen;
+      node(picker, "summary", "Choose recordings & filters");
+      picker.ontoggle = () => {
+        if (picker.isConnected) pickerOpen = picker.open;
+      };
+      recordingFilters(picker, sourceOptions(), analysisFilters, "tools-analysis", () => render(tab));
+      try {
+        filteredSources = filterLibraryEntries(sourceOptions(), analysisFilters);
+      } catch (error) {
+        filteredSources = [];
+        tell(error.message, true);
+      }
+      node(picker, "p", filteredSources.length + " matching recordings. Existing selections stay available when outside the filters.", "tools-muted");
+      const sourceControls = node(picker, "div", void 0, "tools-actions");
+      if (currentArchive) button(sourceControls, "Refresh current / replayed snapshot", () => {
         currentArchive = captureSessionFile();
         render(tab);
       }, "tools-refresh-snapshot");
-      selectedA = selectSource(controls, comparing ? "A " : "Recording ", "tools-source-a", selectedA, (value) => {
+      selectedA = selectSource(sourceControls, comparing ? "A " : "Recording ", "tools-source-a", selectedA, (value) => {
         selectedA = value;
         render(tab);
       });
       if (comparing) {
-        if (!sourceOptions().some((item) => item.id === selectedB)) selectedB = (sourceOptions().find((item) => item.id !== selectedA) || sourceOptions()[0]).id;
-        selectedB = selectSource(controls, "B ", "tools-source-b", selectedB, (value) => {
+        if (!selectedB) selectedB = (sourceOptions().find((item) => item.id !== selectedA) || sourceOptions()[0]).id;
+        selectedB = selectSource(sourceControls, "B ", "tools-source-b", selectedB, (value) => {
           selectedB = value;
           render(tab);
         });
+        selectedExtra.forEach((id, index) => {
+          selectedExtra[index] = selectSource(sourceControls, String.fromCharCode(67 + index) + " ", "tools-source-" + String.fromCharCode(99 + index), id, (value) => {
+            selectedExtra[index] = value;
+            render(tab);
+          });
+          button(sourceControls, "Remove " + String.fromCharCode(67 + index), () => {
+            selectedExtra.splice(index, 1);
+            render(tab);
+          });
+        });
+        const used = /* @__PURE__ */ new Set([selectedA, selectedB, ...selectedExtra]);
+        const next = filteredSources.find((item) => !used.has(item.id));
+        button(sourceControls, "Add recording", () => {
+          if (next && selectedExtra.length < 4) {
+            selectedExtra.push(next.id);
+            render(tab);
+          }
+        }, "tools-compare-add").disabled = selectedExtra.length >= 4 || !next;
+        node(sourceControls, "span", 2 + selectedExtra.length + " / 6 slots", "tools-muted");
       }
+      const controls = node(content, "div", void 0, "tools-actions");
       const label = node(controls, "label", "Metric "), metricSelect = node(label, "select");
       metricSelect.id = "tools-metric";
       for (const [key, name] of Object.entries(ANALYSIS_METRICS)) {
@@ -6065,8 +6876,6 @@ underlying system, so should run in the browser, Node, or Plask.
           render(tab);
         };
       }
-      node(content, "p", "Aligned from the first retained sample, using real elapsed time. Averages and threshold durations hold each sample until the next; recording gaps are excluded. The final sample has no assumed duration.", "tools-muted");
-      if (comparing) node(content, "p", "A: " + sourceOptions().find((item) => item.id === selectedA).title + " · B: " + sourceOptions().find((item) => item.id === selectedB).title, "tools-muted");
       return sourceOptions();
     }
     const number = (value) => value === null ? "Not enough data" : value.toLocaleString(void 0, { maximumFractionDigits: 1 });
@@ -6125,10 +6934,14 @@ underlying system, so should run in the browser, Node, or Plask.
           refreshCurrent();
           tell("Replaying " + (entry.title || entry.archive.room) + ".");
         }),
-        compare: (a, b) => {
-          selectedA = a;
-          selectedB = b;
+        compare: (ids) => {
+          var _a;
+          [selectedA, selectedB] = ids;
+          selectedExtra = ids.slice(2);
+          Object.assign(analysisFilters, { room: libraryRoom, query: "", from: "", to: "" });
+          pickerOpen = false;
           render("compare");
+          (_a = dialog.querySelector("#tools-analysis-chart") || dialog.querySelector("#tools-recording-picker > summary")) == null ? void 0 : _a.focus();
         }
       });
       if (view) {
@@ -6215,86 +7028,35 @@ underlying system, so should run in the browser, Node, or Plask.
       node(content, "p", "The full-session high can predate retained history and is not limited by “Match shared length.” Token-holder share is weighted by recorded registered-viewer time.", "tools-muted");
     }
     function chart(archives, labels, endMs) {
-      const legend = node(content, "p", labels.map((label, i) => (i ? "B (dashed blue): " : "A (pink): ") + label).join(" · "), "tools-muted");
-      const canvas = node(content, "canvas");
-      canvas.id = "tools-analysis-chart";
-      canvas.setAttribute("role", "img");
-      canvas.setAttribute("aria-label", ANALYSIS_METRICS[metric] + " by minutes since the first retained sample. " + legend.textContent + ". Statistics are in the table below.");
-      function draw() {
-        const width = Math.max(260, canvas.clientWidth), height = 200, ratio = window.devicePixelRatio || 1;
-        canvas.width = width * ratio;
-        canvas.height = height * ratio;
-        const ctx = canvas.getContext("2d");
-        ctx.scale(ratio, ratio);
-        const series = archives.map((archive) => analysisSeries(archive, metric));
-        let max = 1;
-        series.forEach((s) => s.values.forEach((value, i) => {
-          if (s.times[i] <= endMs) max = Math.max(max, value);
-        }));
-        const left = 58, top = 16, right = width - 12, bottom = height - 38, span = endMs || 1;
-        ctx.strokeStyle = runtime.isDarkMode ? "#686875" : "#b6bdca";
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(left, top);
-        ctx.lineTo(left, bottom);
-        ctx.lineTo(right, bottom);
-        ctx.stroke();
-        ctx.fillStyle = runtime.isDarkMode ? "#ddd" : "#41485a";
-        ctx.font = "11px Arial";
-        ctx.textAlign = "left";
-        ctx.fillText(number(max), 2, top + 8);
-        ctx.fillText("0", 30, bottom);
-        ctx.fillText("0m", left, bottom + 19);
-        ctx.textAlign = "right";
-        ctx.fillText(number(endMs / 6e4) + "m", right, bottom + 19);
-        series.forEach((s, j) => {
-          ctx.strokeStyle = j ? runtime.isDarkMode ? "#79baff" : "#175db0" : runtime.isDarkMode ? "#ff69b4" : "#b42370";
-          ctx.lineWidth = 2;
-          ctx.setLineDash(j ? [6, 4] : []);
-          ctx.beginPath();
-          const isolated = [];
-          let previousX = null, previousY = null;
-          for (let i = 0; i < s.times.length && s.times[i] <= endMs; i++) {
-            const x = left + s.times[i] / span * (right - left), y = bottom - s.values[i] / max * (bottom - top);
-            if (previousX === null || s.breaks[i]) ctx.moveTo(x, y);
-            else {
-              ctx.lineTo(x, previousY);
-              ctx.lineTo(x, y);
-            }
-            previousX = x;
-            previousY = y;
-            if ((i === 0 || s.breaks[i]) && (i + 1 === s.times.length || s.breaks[i + 1] || s.times[i + 1] > endMs)) isolated.push([x, y]);
-            if (i + 1 < s.times.length && s.times[i + 1] > endMs && !s.breaks[i + 1]) ctx.lineTo(right, y);
-          }
-          ctx.stroke();
-          ctx.setLineDash([]);
-          ctx.fillStyle = ctx.strokeStyle;
-          isolated.forEach(([x, y]) => {
-            ctx.beginPath();
-            ctx.arc(x, y, 3, 0, Math.PI * 2);
-            ctx.fill();
-          });
-        });
-      }
-      chartDraw = draw;
-      draw();
+      const series = archives.map((archive) => __spreadProps(__spreadValues({}, analysisSeries(archive, metric)), { timestamps: archive.session.history.timestamps }));
+      const view = renderAnalysisChart(content, series, labels, endMs, ANALYSIS_METRICS[metric]);
+      chartDraw = view.draw;
+      chartDispose = view.dispose;
       if (window.ResizeObserver) {
-        chartObserver = new window.ResizeObserver(draw);
-        chartObserver.observe(canvas);
+        chartObserver = new window.ResizeObserver(view.draw);
+        chartObserver.observe(view.canvas);
       }
     }
     function renderAnalysis(comparing) {
       const options2 = analysisControls(comparing);
       if (!options2) return;
       const a = options2.find((item) => item.id === selectedA), b = options2.find((item) => item.id === selectedB);
+      if (!a || comparing && (!b || selectedExtra.some((id) => !options2.some((item) => item.id === id)))) {
+        node(content, "p", "Choose available recordings in each slot. A previous selection may have changed or been removed; clear filters to find another recording.");
+        return;
+      }
       if (comparing) {
-        if (a.id === b.id) node(content, "p", "Choose a second recording to make a comparison.", "tools-muted");
-        const result = compareSessions(a.archive, b.archive, metric, threshold, sharedLength);
-        chart([a.archive, b.archive], [a.archive.room, b.archive.room], result.axisMs);
-        summaryTable([result.a, result.b], ["A", "B"]);
+        if ((/* @__PURE__ */ new Set([selectedA, selectedB, ...selectedExtra])).size !== 2 + selectedExtra.length) {
+          node(content, "p", "Choose a different recording in each comparison slot.");
+          return;
+        }
+        const ids = [.../* @__PURE__ */ new Set([selectedA, selectedB, ...selectedExtra])], recordings = ids.map((id) => options2.find((item) => item.id === id)).filter((item) => !!item);
+        const result = compareRecordingSet(recordings.map((item) => item.archive), metric, threshold, sharedLength);
+        chart(recordings.map((item) => item.archive), recordings.map((item) => item.title), result.axisMs);
+        summaryTable(result.summaries, recordings.map((item, index) => String.fromCharCode(65 + index)));
       } else {
         const summary = summarizeSession(a.archive, metric, threshold);
-        chart([a.archive], [a.archive.room], summary.spanMs);
+        chart([a.archive], [a.title], summary.spanMs);
         audienceOverview(a.archive);
         thresholdTable(a.archive);
         node(content, "h3", ANALYSIS_METRICS[metric] + " — details");
@@ -6312,7 +7074,7 @@ underlying system, so should run in the browser, Node, or Plask.
     function renderBackup() {
       node(content, "h3", "Back up this browser");
       node(content, "p", "Download ATH for every room and your saved preferences: theme, panel size/position, collapsed rows, compact metric, chart window, SH/ATH mode and analysis choices. Keep this file somewhere safe. Session-only controls such as the scan interval are not saved preferences.", "tools-muted");
-      const include = checkbox(content, "tools-backup-library", "Include library recordings");
+      const include = checkbox(content, "tools-backup-library", "Include library recordings and favorite models");
       const state = readLibrary();
       let partial = null;
       if (state.damaged.length) {
@@ -6341,8 +7103,9 @@ underlying system, so should run in the browser, Node, or Plask.
       if (pendingBackup) {
         if (pendingBackup.recovery) node(content, "p", "This is a partial backup. " + pendingBackup.recovery.omittedLibraryKeys.length + " unreadable library entries were excluded when it was created; they cannot be restored from this file.", "tools-muted");
         node(content, "p", pendingBackup.rooms.length + " rooms · " + (Object.keys(pendingBackup.preferences).length + (pendingBackup.analysisPreferences ? 1 : 0)) + " saved preferences · " + pendingBackup.library.length + " recordings", "tools-muted");
+        node(content, "p", pendingBackup.favoriteModels.length + " favorite models. Restoring Library adds these where no local model choice exists.", "tools-muted");
         const choices = node(content, "div", void 0, "tools-actions");
-        const highs = checkbox(choices, "tools-restore-highs", "Merge ATH"), preferences = checkbox(choices, "tools-restore-preferences", "Restore preferences"), recordings = checkbox(choices, "tools-restore-library", "Add library recordings");
+        const highs = checkbox(choices, "tools-restore-highs", "Merge ATH"), preferences = checkbox(choices, "tools-restore-preferences", "Restore preferences"), recordings = checkbox(choices, "tools-restore-library", "Add recordings and favorite models");
         button(content, "Restore selected data", () => {
           if (!highs.checked && !preferences.checked && !recordings.checked) throw new Error("Choose at least one kind of data to restore.");
           if (!confirm("Restore the selected backup data?\n\nATH will be merged, library recordings added or updated with fuller versions, and selected saved preferences replaced. Your live session is not replaced." + (pendingBackup.recovery ? "\n\nThis partial backup excludes " + pendingBackup.recovery.omittedLibraryKeys.length + " unreadable library entries." : ""))) return;
@@ -6350,16 +7113,23 @@ underlying system, so should run in the browser, Node, or Plask.
           library = null;
           if (runtime.playback) setPlaybackAllTimeState(runtime.playback, readAllTimeHighs(displayedHighRoom()));
           repaintHighMode();
-          tell("Restored: " + result.rooms + " room ATH updates, " + result.recordings + " new recordings, " + result.updatedRecordings + " updated recordings, " + result.preferences + " preferences." + (result.preferences ? "\nRefresh your room tabs when convenient to apply preferences." : ""));
+          tell("Restored: " + result.rooms + " room ATH updates, " + result.recordings + " new recordings, " + result.updatedRecordings + " updated recordings, " + result.favoriteModels + " favorite models, " + result.preferences + " preferences." + (result.preferences ? "\nRefresh your room tabs when convenient to apply preferences." : ""));
         }, "tools-backup-restore");
       }
     }
     function render(next) {
+      var _a;
       const focusedId = dialog.contains(document.activeElement) ? document.activeElement.id : "";
+      const existingPicker = dialog.querySelector("#tools-recording-picker");
+      if (existingPicker) pickerOpen = existingPicker.open;
       if (next !== tab) library = null;
       tab = next;
       fileRequest++;
       chartDraw = null;
+      if (chartDispose) {
+        chartDispose();
+        chartDispose = null;
+      }
       if (chartObserver) {
         chartObserver.disconnect();
         chartObserver = null;
@@ -6378,12 +7148,21 @@ underlying system, so should run in the browser, Node, or Plask.
       }
       if (focusedId) {
         const target = document.getElementById(focusedId);
-        if (target && dialog.contains(target)) target.focus();
+        if (target && dialog.contains(target)) {
+          const details = target.closest("details");
+          if (details) details.open = true;
+          target.focus();
+        } else if (focusedId.startsWith("tools-model-favorite-")) (_a = dialog.querySelector("#tools-library-model")) == null ? void 0 : _a.focus();
       }
     }
     function close() {
       fileRequest++;
       refreshSessionTools = null;
+      chartDraw = null;
+      if (chartDispose) {
+        chartDispose();
+        chartDispose = null;
+      }
       libraryReader.clear();
       modelHistoryReader.clear();
       options = [];
@@ -7960,7 +8739,7 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/bootstrap.js
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.13.0";
+    runtime.TIERSCOPE_VERSION = "3.14.0";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;

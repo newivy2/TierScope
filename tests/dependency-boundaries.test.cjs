@@ -45,8 +45,8 @@ test('all application imports form an acyclic dependency graph', () => {
 });
 
 test('panel views have no dependency on owners, live selectors, controllers or storage', () => {
-  const views = ['panel-view.js', 'compact-view.js', 'trend-view.js', 'status-view.js', 'chart-view.js', 'library-dock.js', 'library-shell.js', 'model-history-view.js', 'recording-export-data.js'];
-  const permitted = new Set([...views, 'display-values.js', 'format.js', 'history-data.js', 'theme-values.js', 'runtime.js']);
+  const views = ['panel-view.js', 'compact-view.js', 'trend-view.js', 'status-view.js', 'chart-view.js', 'library-dock.js', 'library-shell.js', 'model-history-view.js', 'library-browser-view.js', 'tools-view-helpers.js', 'analysis-chart-view.js', 'recording-export-data.js'];
+  const permitted = new Set([...views, 'library-query.js', 'analysis-chart-data.js', 'display-values.js', 'format.js', 'history-data.js', 'theme-values.js', 'runtime.js']);
   for (const view of views) {
     assert.deepEqual([...dependencies(view)].filter(file => !permitted.has(file)), [], view);
   }
@@ -61,7 +61,7 @@ test('panel views have no dependency on owners, live selectors, controllers or s
 });
 
 test('record stores and validation cannot reach session/playback owners, panel code or coordinators', () => {
-  const stores = ['storage.js', 'highs-store.js', 'session-library.js', 'backup.js', 'session-file-format.js'];
+  const stores = ['library-models.js', 'library-transfer.js', 'storage.js', 'highs-store.js', 'session-library.js', 'backup.js', 'session-file-format.js'];
   const permitted = new Set([...stores, 'immutable-data.js', 'analysis-preference-data.js', 'session-analysis.js', 'record-validation.js', 'history-data.js', 'utils.js', 'diagnostics.js', 'room-context.js', 'runtime.js']);
   const metadata = new Set(['activeRoomEpoch', 'activeSessionStorageKey', 'sessionRecordWarnings', 'sessionStorageNotice',
     'sessionStorageStatus', 'tabRecords', 'allTimeCache', 'chartTimeCache',
@@ -78,14 +78,14 @@ test('owners and data/view layers remain outside every import cycle', () => {
   const protectedModules = ['acquisition-state.js', 'panel-preferences.js', 'live-session.js', 'playback-state.js', 'playback-data.js', 'display-model.js', 'presentation-data.js',
     'presentation.js', 'presentation-status.js', 'status-model.js', 'session-selectors.js', 'session-capture.js', 'high-selectors.js',
     'request-policy.js', 'storage.js', 'highs-store.js', 'backup.js', 'session-library.js', 'session-file-format.js',
-    'panel-view.js', 'compact-view.js', 'trend-view.js', 'status-view.js', 'chart-view.js', 'library-dock.js', 'library-shell.js', 'model-history-view.js', 'recording-export-data.js'];
+    'panel-view.js', 'compact-view.js', 'trend-view.js', 'status-view.js', 'chart-view.js', 'library-dock.js', 'library-shell.js', 'model-history-view.js', 'library-browser-view.js', 'tools-view-helpers.js', 'analysis-chart-view.js', 'recording-export-data.js'];
   for (const file of protectedModules) {
     assert(!graph[file].some(dependency => dependencies(dependency).has(file)), file);
   }
 });
 
 test('drawing health and analysis preferences cannot depend on session or presentation controllers', () => {
-  const permitted = new Set(['presentation-health.js', 'analysis-preferences.js', 'analysis-preference-data.js', 'session-analysis.js', 'model-history.js']);
+  const permitted = new Set(['presentation-health.js', 'analysis-preferences.js', 'analysis-preference-data.js', 'session-analysis.js', 'model-history.js', 'library-query.js', 'analysis-chart-data.js']);
   for (const file of permitted) {
     assert.deepEqual([...dependencies(file)].filter(dependency => !permitted.has(dependency)), [], file);
     assert.deepEqual([...runtimeFields(modules[file].ast)], [], file);

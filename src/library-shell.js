@@ -7,7 +7,7 @@ export function libraryShell() {
 #tierscope-session-tools[data-layout=sheet]{border-radius:7px;box-shadow:0 8px 32px #0007}
 #tierscope-session-tools[data-layout=docked]::after{content:'';position:absolute;pointer-events:none;inset:0 0 0 auto;width:9px;background:linear-gradient(90deg,transparent,#0002);border-right:1px solid #ff69b450}
 #tierscope-session-tools *{box-sizing:border-box}
-#tierscope-session-tools button,#tierscope-session-tools select,#tierscope-session-tools input,#tierscope-session-tools summary{font:inherit;color:var(--panel-text);background:var(--panel-button);border:1px solid var(--panel-divider);border-radius:3px;padding:4px 7px;max-width:100%;min-width:0}
+#tierscope-session-tools button,#tierscope-session-tools select,#tierscope-session-tools input,#tierscope-session-tools textarea,#tierscope-session-tools summary{font:inherit;color:var(--panel-text);background:var(--panel-button);border:1px solid var(--panel-divider);border-radius:3px;padding:4px 7px;max-width:100%;min-width:0}
 #tierscope-session-tools button,#tierscope-session-tools summary{cursor:pointer}
 #tierscope-session-tools button:hover,#tierscope-session-tools summary:hover{border-color:var(--panel-accent)}
 #tierscope-session-tools button:disabled{opacity:.45;cursor:default}
@@ -31,9 +31,9 @@ export function libraryShell() {
 #tierscope-session-tools .tools-eyebrow{color:var(--panel-accent);text-transform:uppercase;font-size:.8em;letter-spacing:.08em;margin-bottom:3px}
 #tierscope-session-tools .tools-row{border:1px solid var(--panel-divider);border-left:3px solid #ff69b480;background:rgba(var(--panel-row-rgb),.035);border-radius:4px;padding:8px;margin:6px 0;overflow-wrap:anywhere}
 #tierscope-session-tools .tools-row strong{font-size:1.05em}
-#tierscope-session-tools .tools-folder{margin:5px 0}
-#tierscope-session-tools .tools-folder button{display:flex;flex-direction:column;gap:4px;width:100%;text-align:left;padding:9px;border-left:3px solid #ff69b480;background:rgba(var(--panel-row-rgb),.04)}
-#tierscope-session-tools .tools-folder-name{font-weight:bold;color:var(--panel-text)}
+#tierscope-session-tools .tools-folder{margin:5px 0;display:flex;gap:5px;align-items:stretch}
+#tierscope-session-tools .tools-folder .tools-folder-open{display:flex;flex-direction:column;gap:4px;flex:1;text-align:left;padding:9px;border-left:3px solid #ff69b480;background:rgba(var(--panel-row-rgb),.04)}
+#tierscope-session-tools .tools-folder-name{font-weight:bold;color:var(--panel-text);overflow-wrap:anywhere}
 #tierscope-session-tools .tools-folder-meta{font-size:.9em;color:var(--panel-muted)}
 #tierscope-session-tools .tools-search{display:flex;width:100%;gap:6px;align-items:center;margin:8px 0}
 #tools-library-search{flex:1;width:100%}
@@ -51,12 +51,26 @@ export function libraryShell() {
 #tierscope-session-tools .tools-history-stats dt{font-size:.9em;color:var(--panel-muted)}
 #tierscope-session-tools .tools-history-stats dd{margin:3px 0 0;font-weight:bold;color:var(--panel-secondary);overflow-wrap:anywhere}
 #tools-history-recording{width:100%}
+#tools-room-shortcuts button{overflow-wrap:anywhere;text-align:left}
 #tools-history-table button{max-width:155px;text-align:left;overflow-wrap:anywhere}
 #tools-history-table button[aria-pressed=true]{color:var(--panel-accent);border-color:var(--panel-accent)}
 #tools-history-chart{cursor:crosshair}
 #tierscope-session-tools label{display:inline-flex;gap:5px;align-items:center;flex-wrap:wrap;min-width:0;max-width:100%}
 #tierscope-session-tools select{width:auto;max-width:100%}
 #tools-source-a,#tools-source-b{width:100%}
+#tierscope-session-tools .tools-filters{display:flex;flex-wrap:wrap;gap:6px;padding:7px 0;border-bottom:1px solid var(--panel-divider)}
+#tierscope-session-tools .tools-filters input[type=date]{width:130px}
+#tierscope-session-tools .tools-filters select{max-width:205px}
+#tierscope-session-tools .tools-filters .tools-search{margin:0}
+#tierscope-session-tools .tools-search input{flex:1;width:100%}
+#tierscope-session-tools textarea{display:block;width:100%;resize:vertical}
+#tierscope-session-tools .tools-recording-note{white-space:pre-wrap;overflow-wrap:anywhere;max-height:85px;overflow:auto;color:var(--panel-muted)}
+#tierscope-session-tools .tools-chart-legend{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px}
+#tierscope-session-tools .tools-chart-legend label{flex-wrap:nowrap;min-width:0}
+#tierscope-session-tools .tools-chart-legend span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#tierscope-session-tools .tools-chart-legend .tools-series-swatch{width:13px;flex-shrink:0;border-top:2px solid currentColor}
+#tools-analysis-chart{touch-action:pan-y;cursor:crosshair}
+#tools-analysis-chart:focus-visible{outline:2px solid var(--panel-accent);outline-offset:2px}
 #gif-export-controls{padding:8px 12px;gap:6px;align-items:center;flex-shrink:0;border-bottom:1px solid var(--panel-divider)}
 </style>
 <div class="tools-head"><div><h2 id="tools-title">LIBRARY</h2><div class="tools-subtitle">Recordings &amp; session tools</div></div><button id="tools-close" type="button" aria-label="Close library" title="Close library (Escape)">×</button></div>

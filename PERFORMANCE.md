@@ -112,3 +112,28 @@ Calculations run only when opening a model overview; folder browsing does not co
 Large overviews can still pause the UI briefly, especially on slower devices. Selecting an already calculated metric or reducing the view to the latest 10 avoids most calculation work, but building hundreds of selector entries also has a cost. These measurements include synchronous JavaScript and forced layout, excluding paint, native userscript storage, website workload and user input scheduling. Four-times slowdown is a stress simulation, not a named device. Heap snapshots in the raw data are observations after forced collection, not peak process memory or a leak proof.
 
 Reproduce with `TIERSCOPE_BENCH_HISTORY=1 npm run test:library-performance`, optionally adding `TIERSCOPE_CPU_THROTTLE=4`. Leave history mode unset to retain the existing multi-model Library/backup benchmark.
+
+## 3.14.0-beta.1 interactive comparison costs
+
+Measured on 2026-10-04 in the same pinned Node.js 22/Chromium cloud environment. Three fresh pages per dataset and CPU setting compare six recordings, using the existing small (12 × 300), many (500 × 500) and long (36 × 10,000) datasets. The table reports median action times, or the median of three mean cursor-update times. Each cursor run includes 120 updates after 20 warmups. [Raw results](docs/benchmarks/compare-3.14.0-beta.1.json) include the generated-script hash, every run, storage reads and heap snapshots. These are costs of the new feature, not a comparison with an older release.
+
+| Library / six selected recordings | Action | Normal | 4× CPU slowdown |
+| --- | --- | ---: | ---: |
+| 12 recordings / 300 samples each | Change metric | 13.1 ms | 62.4 ms |
+| 12 recordings / 300 samples each | Zoom in | 2.5 ms | 12.0 ms |
+| 12 recordings / 300 samples each | Cursor update | 0.37 ms | 1.93 ms |
+| 500 recordings / 500 samples each | Change metric | 90.5 ms | 518.9 ms |
+| 500 recordings / 500 samples each | Zoom in | 3.5 ms | 19.8 ms |
+| 500 recordings / 500 samples each | Cursor update | 0.40 ms | 1.73 ms |
+| 36 recordings / 10,000 samples each | Change metric | 72.9 ms | 342.7 ms |
+| 36 recordings / 10,000 samples each | Zoom in | 33.4 ms | 169.1 ms |
+| 36 recordings / 10,000 samples each | Restore full range | 51.9 ms | 244.1 ms |
+| 36 recordings / 10,000 samples each | Cursor update | 0.39 ms | 2.18 ms |
+
+Cursor p95 values were 0.5–0.6 ms normally and 2.4–3.8 ms under slowdown across these runs. Inspection uses binary search against original samples and draws over a cached chart bitmap; moving the cursor does not rescan or redraw every series. Full chart redraws reduce each pixel column to its ordered first/last and extreme samples, flushing at gaps. Exact original values remain available to inspection and statistics. The bitmap is discarded on a view change or Library close.
+
+Remaining costs are visible in large cases. Metric changes rebuild analysis and the source selectors; six unfiltered selectors can contain roughly 3,000 options in a 500-record library. Model/date filters reduce the choices. Zoom and visibility changes rebuild the chart, so long recordings can still pause briefly on slower devices. First Library opening remains separate work: 136.8/678.2 ms for 500 recordings and 188.2/916.9 ms for the long-recording dataset at normal/4× CPU settings. Bulk import/export validation and serialization remain synchronous.
+
+The fixture includes JavaScript, canvas drawing commands and forced layout, but excludes paint/compositing, userscript-manager storage overhead, website activity and input scheduling. CPU slowdown is a stress simulation, not a particular device. Heap snapshots exclude native canvas/DOM memory and are not peak-memory measurements or a leak proof. No machine-dependent timing assertions are added to CI.
+
+Reproduce with `TIERSCOPE_BENCH_COMPARE=1 npm run test:library-performance`, optionally setting `TIERSCOPE_CPU_THROTTLE=4`. Use one benchmark mode at a time.

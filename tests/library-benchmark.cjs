@@ -4,6 +4,8 @@ const {instrument,prepareSource}=require(path.join(root,'tests/helpers/instrumen
 const {chromium}=require(path.join(root,'node_modules/playwright'));
 const throttle=Number(process.env.TIERSCOPE_CPU_THROTTLE||1),rounds=Number(process.env.TIERSCOPE_BENCH_ROUNDS||3);
 const historyMode=process.env.TIERSCOPE_BENCH_HISTORY==='1';
+const compareMode=process.env.TIERSCOPE_BENCH_COMPARE==='1';
+assert(!(historyMode&&compareMode),'Choose one benchmark mode');
 assert(Number.isFinite(throttle)&&throttle>=1);assert(Number.isInteger(rounds)&&rounds>0);
 const sourceFile=process.env.TIERSCOPE_SOURCE||path.join(root,'tierscope.user.js');
 const source=prepareSource(fs.readFileSync(sourceFile,'utf8')).replaceAll('scheduleInit(2000);','').replace('downloadTrackingReport: downloadTrackingReport,',`__libraryBench:{
@@ -36,6 +38,23 @@ const source=prepareSource(fs.readFileSync(sourceFile,'utf8')).replaceAll('sched
  const click=id=>document.getElementById(id).click();const tab=name=>document.querySelector('[data-tools-tab="'+name+'"]').click();
  measure('open',()=>click('btn-control-library'));
  measure('folder',()=>click('tools-folder-model000'));
+ if(${compareMode}){
+  const choose=(id,value)=>{const input=document.getElementById(id);input.value=value;input.dispatchEvent(new Event('change'));};
+  tab('compare');choose('tools-source-a','bench_0');choose('tools-source-b','bench_1');
+  for(let i=2;i<6;i++){click('tools-compare-add');choose('tools-source-'+String.fromCharCode(97+i),'bench_'+i);}
+  measure('sixRecordingMetric',()=>choose('tools-metric','withTokens'));
+  measure('zoomIn',()=>click('tools-chart-zoom-in'));
+  const canvas=document.getElementById('tools-analysis-chart'),bounds=canvas.getBoundingClientRect(),costs=[];
+  for(let i=0;i<140;i++){
+   const started=performance.now();canvas.dispatchEvent(new PointerEvent('pointermove',{clientX:bounds.left+bounds.width*(.2+(i%120)/120*.7),clientY:bounds.top+70,bubbles:true}));
+   document.getElementById('tools-chart-inspection').getBoundingClientRect();if(i>=20)costs.push(performance.now()-started);
+  }
+  const sorted=costs.slice().sort((a,b)=>a-b);results.cursor={meanMs:costs.reduce((a,b)=>a+b,0)/costs.length,p95Ms:sorted[Math.ceil(sorted.length*.95)-1],maxMs:sorted.at(-1)};
+  measure('fullRange',()=>click('tools-chart-reset'));
+  results.compareRecordings=document.querySelectorAll('#tools-chart-inspection tbody tr').length;
+  results.nodes=document.getElementById('tierscope-session-tools').querySelectorAll('*').length;
+  return results;
+ }
  if(${historyMode}){
   measure('history',()=>click('tools-model-history'));
   measure('historyMetric',()=>{const select=document.getElementById('tools-history-metric');select.value='withTokens';select.dispatchEvent(new Event('change'));});
@@ -64,7 +83,7 @@ const source=prepareSource(fs.readFileSync(sourceFile,'utf8')).replaceAll('sched
 (async()=>{
  const browser=await chromium.launch({headless:true,executablePath:process.env.TIERSCOPE_CHROMIUM_PATH,args:JSON.parse(process.env.TIERSCOPE_CHROMIUM_ARGS||'[]')});
  try{
-  const output={source:path.basename(sourceFile),historyMode,cpuThrottle:throttle,rounds,cases:[]};
+  const output={source:path.basename(sourceFile),historyMode,compareMode,cpuThrottle:throttle,rounds,cases:[]};
   for(const [label,count,samples] of [['small',12,300],['many',500,500],['long',36,10000]]){
    const measurements=[];let size;
    for(let i=0;i<rounds;i++){
@@ -75,7 +94,7 @@ const source=prepareSource(fs.readFileSync(sourceFile,'utf8')).replaceAll('sched
     const cdp=await page.context().newCDPSession(page);if(throttle>1)await cdp.send('Emulation.setCPUThrottlingRate',{rate:throttle});
     await cdp.send('HeapProfiler.collectGarbage');const beforeHeap=(await cdp.send('Runtime.getHeapUsage')).usedSize;
     if(process.env.TIERSCOPE_PROFILE_PATH){await cdp.send('Profiler.enable');await cdp.send('Profiler.start');}
-    const result=await page.evaluate(()=>ViewerTracker.__libraryBench.run());assert.equal(historyMode?result.historyRecordings:result.backupRecordings,count);measurements.push(result);
+    const result=await page.evaluate(()=>ViewerTracker.__libraryBench.run());assert.equal(compareMode?result.compareRecordings:historyMode?result.historyRecordings:result.backupRecordings,compareMode?6:count);measurements.push(result);
     if(process.env.TIERSCOPE_PROFILE_PATH){const {profile}=await cdp.send('Profiler.stop');fs.writeFileSync(process.env.TIERSCOPE_PROFILE_PATH+'-'+label+'-'+i+'.json',JSON.stringify(profile));}
     await cdp.send('HeapProfiler.collectGarbage');const openHeap=(await cdp.send('Runtime.getHeapUsage')).usedSize;
     await page.evaluate(async()=>{document.getElementById('btn-control-library').click();await new Promise(requestAnimationFrame);if(document.getElementById('tierscope-session-tools'))throw Error('Library did not close');});

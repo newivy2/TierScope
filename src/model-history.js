@@ -1,4 +1,4 @@
-import { ANALYSIS_METRICS, summarizeSession } from './session-analysis.js';
+import { ANALYSIS_METRICS, MAX_COMPARE_RECORDINGS, summarizeSession } from './session-analysis.js';
 
 /** @typedef {import('./session-analysis.js').AnalysisArchive} HistoryArchive */
 /** @typedef {{id:string, title:string, archive:HistoryArchive}} HistoryEntry */
@@ -26,7 +26,7 @@ export function createModelHistoryReader() {
         let coveredMs = 0, gapMs = 0, weighted = 0, registeredWeight = 0, tokenWeight = 0, latestEnd = -Infinity, overlaps = false;
         /** @type {number|null} */
         let peak = null;
-        const recordings = selected.map(entry => {
+        const recordings = selected.map((entry, index) => {
             const stats = summary(entry.archive, metric), registered = summary(entry.archive, 'total');
             const time = entry.archive.session.history.timestamps[0];
             coveredMs += stats.coveredMs; gapMs += stats.gapMs;
@@ -36,7 +36,9 @@ export function createModelHistoryReader() {
             peak = peak === null ? stats.peak : Math.max(peak, stats.peak);
             if (time < latestEnd) overlaps = true;
             latestEnd = Math.max(latestEnd, time + stats.spanMs);
-            return { id: entry.id, title: entry.title || entry.archive.room, time, ...stats };
+            const position = matching.length - selected.length + index;
+            const comparisonIds = matching.slice(Math.max(0, position - MAX_COMPARE_RECORDINGS + 1), position + 1).reverse().map(record => record.id);
+            return { id: entry.id, title: entry.title || entry.archive.room, time, comparisonIds, ...stats };
         });
         return { room: room.toLowerCase(), metric, totalCount: matching.length, recordings, overlaps,
             coveredMs, gapMs, peak, mean: coveredMs ? weighted / coveredMs : null,

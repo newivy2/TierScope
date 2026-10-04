@@ -3,7 +3,9 @@
 TierScope is a free, open-source userscript that charts how a Chaturbate room’s audience changes over time. 
 
 ---
-**Current stable release: 3.13.0** · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.13.0)
+**Current stable release: 3.14.0** · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.14.0)
+
+[Library preview](docs/previews/library-organization-dark.png) · [Compare preview](docs/previews/interactive-compare-dark.png) · [Bright preview](docs/previews/interactive-compare-bright.png).
 
 ---
 
@@ -39,9 +41,11 @@ Charts use periodic room-data samples. Session history is stored locally through
 
 - **Session library** — Choose **Library → Keep in library** from live Controls or Replay. Recordings are organized into model folders. Keeping a fuller version of the same session updates its entry and preserves your custom name. Search, rename, replay, download or delete recordings; the library holds up to 500 recordings / 25 MB.
 
-- **Summaries and comparison** — See audience averages and peaks together, token-holder proportions, coverage and gaps. Choose several thresholds to see time at or above each count and its percentage of covered time. Statistics use real timestamps and exclude recording gaps. Compare two recordings from their first retained samples, optionally matching their shared duration.
+- **Summaries and comparison** — See audience averages and peaks together, token-holder proportions, coverage and gaps. Choose several thresholds to see time at or above each count and its percentage of covered time. Statistics use real timestamps and exclude recording gaps. Compare up to six recordings from their first retained samples, optionally matching their shared duration, with line visibility controls, shared sample inspection and chart zoom. The latest recording is solid pink; older recordings use dashed lines.
 
-- **Model history** — Review one model’s saved recordings over time, with one point per recording for the selected metric’s average and peak. View all recordings or the latest 10 or 30, then select one to inspect, replay, or compare with the previous recording.
+- **Model history** — Review one model’s saved recordings over time, with one point per recording for the selected metric’s average and peak. View all recordings or the latest 10 or 30. Library offers a direct history shortcut for the model on the page; **Compare with previous** selects that recording and up to five earlier recordings from the same model.
+
+- **Library organization** — Filter by model and inclusive local recording dates, search titles and notes, sort recordings, and star favorite model folders. Select recordings for comparison or export one library bundle with recording notes and favorite models; import multiple files in one explicit action.
 
 - **Backups** — Export ATH for every room and saved preferences, optionally including the library. 
 
