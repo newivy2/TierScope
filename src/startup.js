@@ -1,15 +1,18 @@
+import { isAcquisitionCurrent } from './acquisition-context.js';
+import { beginAcquisitionGeneration, resetAcquisitionForRoom, schedulePresenceAcquisition, startAcquisitionClock, stopAcquisitionClock } from './acquisition-state.js';
 import { drawAllSparklines } from './charts.js';
-import { validateDOMHealth } from './dom.js';
+import { validateDOMHealth } from './dom-health.js';
 import { cleanupDragListeners, restorePanelGeometry } from './layout.js';
 import { startCountdown, startTrackingTimer, stopCountdown, stopTrackingTimer, updateCountdownDisplay, updateStopControls, updateTrackingTimer } from './lifecycle.js';
 import { configureSessionTracking, resetLiveSession } from './live-session.js';
+import { resetTrendPreferences, selectPanelMinimized, selectPanelScale } from './panel-preferences.js';
 import { createPanel } from './panel.js';
 import { updateAcquisitionStatus } from './presentation-status.js';
 import { updateDisplay, updateTrendDisplay } from './presentation.js';
 import { leavePlayback } from './replay.js';
 import { readRequestPolicy } from './request-policy.js';
 import { runtime } from './runtime.js';
-import { isAcquisitionCurrent, performScanThenReturn } from './scanning.js';
+import { performScanThenReturn } from './scanning.js';
 import { loadSession, saveSession } from './session-persistence.js';
 import { isAbsencePaused } from './session-selectors.js';
 import { getModelName, getModelNameFromUrl, isBroadcastRoom, log } from './utils.js';
@@ -24,13 +27,9 @@ export function scheduleInit(delay) {
 
 export function init() {
     leavePlayback(false);
-    var myGeneration = ++runtime.initGuard;
-    runtime.isScanning = false;
+    var myGeneration = beginAcquisitionGeneration();
     log('Initializing... (generation ' + myGeneration + ')');
-    if (runtime.healthCheckInterval) {
-        clearInterval(runtime.healthCheckInterval);
-        runtime.healthCheckInterval = null;
-    }
+    stopAcquisitionClock('healthCheckInterval');
     if (runtime.freshnessInterval) clearInterval(runtime.freshnessInterval);
     runtime.freshnessInterval = setInterval(function() {
         updateAcquisitionStatus();
@@ -43,9 +42,9 @@ export function init() {
         loaded = loadSession(modelName);
     }
     if (!loaded) {
-        runtime.isMinimized = !isRoom;
+        selectPanelMinimized(!isRoom);
     } else {
-        runtime.isMinimized = false;
+        selectPanelMinimized(false);
     }
     configureSessionTracking(loaded, isRoom);
     try {
@@ -76,7 +75,7 @@ export function init() {
     restorePanelGeometry();
     if (runtime.isStopped) { updateStopControls(); updateCountdownDisplay(); updateTrackingTimer(); return; }
     if (isRoom && isAbsencePaused()) {
-        runtime.nextScanAt = Math.max(Date.now(), readRequestPolicy().until);
+        schedulePresenceAcquisition(Date.now(), readRequestPolicy().until);
         startCountdown();
         performScanThenReturn(true);
         updateTrackingTimer();
@@ -149,7 +148,7 @@ export function init() {
             }
         }, 1000);
     }
-    runtime.healthCheckInterval = setInterval(function() {
+    startAcquisitionClock('healthCheckInterval', function() {
         if (myGeneration === runtime.initGuard && !runtime.isStopped && !isAbsencePaused() && runtime.lastAcquisitionAttemptSource === 'DOM' && !runtime.isScanning) {
             validateDOMHealth();
         }
@@ -167,28 +166,18 @@ export function checkUrlChange() {
         }
         runtime.activeSessionStorageKey = null;
         stopCountdown();
-        runtime.nextScanAt = 0;
-        runtime.countdownSeconds = runtime.scanIntervalSeconds;
+        resetAcquisitionForRoom();
         stopTrackingTimer();
         resetLiveSession('navigate');
-        runtime.trendComparisonMode = 'last';
-        runtime.autoTrendEscalation = true;
+        resetTrendPreferences();
         updateTrackingTimer();
         cleanupDragListeners();
         if (runtime.miniSettingsKeyHandler) {
             document.removeEventListener('keydown', runtime.miniSettingsKeyHandler, true);
             runtime.miniSettingsKeyHandler = null;
         }
-        runtime.isScanning = false;
-        if (runtime.healthCheckInterval) {
-            clearInterval(runtime.healthCheckInterval);
-            runtime.healthCheckInterval = null;
-        }
-        runtime.currentScale = runtime.panelGeometry ? runtime.panelGeometry.scale : runtime.currentScale;
-        runtime.lastAcquisitionAttemptSource = 'API';
-        runtime.domHealthStatus.consecutiveFailures = 0;
+        selectPanelScale(runtime.panelGeometry ? runtime.panelGeometry.scale : runtime.currentScale);
         updateAcquisitionStatus();
-        runtime.initGuard++;
         scheduleInit(2002);
     }
 }

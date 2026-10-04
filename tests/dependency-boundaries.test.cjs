@@ -38,11 +38,10 @@ function runtimeFields(ast) {
   return fields;
 }
 
-test('new import cycles are rejected; the reviewed remaining cycles are limited to controllers', () => {
-  const allowed = new Set(require('./fixtures/controller-cycles.json'));
+test('all application imports form an acyclic dependency graph', () => {
   const actual = Object.entries(graph).flatMap(([from, imports]) =>
     imports.filter(to => dependencies(to).has(from)).map(to => from + ' -> ' + to));
-  assert.deepEqual(actual.filter(edge => !allowed.has(edge)), [], 'resolve new cycles rather than expanding the migration allowance');
+  assert.deepEqual(actual, [], 'resolve cycles instead of adding controller exceptions');
 });
 
 test('panel views have no dependency on owners, live selectors, controllers or storage', () => {
@@ -76,7 +75,7 @@ test('record stores and validation cannot reach session/playback owners, panel c
 });
 
 test('owners and data/view layers remain outside every import cycle', () => {
-  const protectedModules = ['live-session.js', 'playback-state.js', 'playback-data.js', 'display-model.js', 'presentation-data.js',
+  const protectedModules = ['acquisition-state.js', 'panel-preferences.js', 'live-session.js', 'playback-state.js', 'playback-data.js', 'display-model.js', 'presentation-data.js',
     'presentation.js', 'presentation-status.js', 'status-model.js', 'session-selectors.js', 'session-capture.js', 'high-selectors.js',
     'request-policy.js', 'storage.js', 'highs-store.js', 'backup.js', 'session-library.js', 'session-file-format.js',
     'panel-view.js', 'compact-view.js', 'trend-view.js', 'status-view.js', 'chart-view.js', 'library-dock.js', 'library-shell.js', 'recording-export-data.js'];

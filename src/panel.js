@@ -1,10 +1,13 @@
+import { selectScanInterval } from './acquisition-state.js';
 import { hideChartTooltip } from './chart-view.js';
 import { bindPanelOptions } from './files.js';
 import { cancelGifExport } from './gif.js';
-import { bindRowControls, cleanupDragListeners, collapseMarkerHtml, collapsedTrayHtml, restoreStandardSize, setupDraggable, setupResizable, setupResizeHandler, toggleView } from './layout.js';
+import { bindRowControls, cleanupDragListeners, restoreStandardSize, setupDraggable, setupResizable, setupResizeHandler, toggleView } from './layout.js';
 import { adjustTimer, resetAllTracking, resetCountdown, startCountdown, stopCountdown, stopTracking, toggleAutoRefresh, updateCountdownDisplay, updateStopControls } from './lifecycle.js';
+import { cycleMiniMetric, selectAutomaticTrends, selectPanelTheme } from './panel-preferences.js';
 import { updateDisplay } from './presentation.js';
 import { bindPlaybackControls, leavePlayback, updateReplayAvailability } from './replay.js';
+import { collapseMarkerHtml, collapsedTrayHtml } from './row-layout.js';
 import { runtime } from './runtime.js';
 import { applyPanelTheme, updateContainerOpacity } from './theme.js';
 import { setTrendComparisonMode, toggleAutoTrendEscalation, updateAutoTrendButton, updateTrendPresetButtons } from './trends.js';
@@ -202,13 +205,13 @@ export function createPanel() {
             '</div>' +
 
             '<div id="control-field" style="margin-top:5px;padding:4px;background:rgba(65,105,225,0.15);border-radius:3px;border:1px solid #4169E1;">' +
-                '<div id="control-session-row" style="display:flex;justify-content:space-between;align-items:center;gap:3px;margin-bottom:4px;white-space:nowrap;">' +
+                '<div id="control-session-row" style="display:grid;grid-template-columns:max-content max-content minmax(0,1fr);align-items:center;gap:3px;margin-bottom:4px;white-space:nowrap;">' +
                     '<span style="font-size:9px;font-weight:bold;color:#4169E1;">🎛️ CONTROLS</span>' +
                     '<div id="control-session-buttons" style="display:flex;gap:2px;align-items:center;">' +
                     '<button id="btn-replay" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-warning);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;" title="Replay recorded history">Replay</button>' +
                     '<button type="button" id="btn-control-library" aria-expanded="false" aria-controls="tierscope-session-tools" aria-label="Open session library" title="Open model folders, session summaries, comparisons and backups" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Library</button>' +
                     '</div>' +
-                    '<span style="font-size:11px;color:var(--panel-positive);font-weight:bold;" id="control-next-scan">Next: 60s</span>' +
+                    '<span style="min-width:0;text-align:right;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums;font-size:11px;color:var(--panel-positive);font-weight:bold;" id="control-next-scan">Next: 60s</span>' +
                 '</div>' +
                 '<div id="control-action-row" style="display:grid;grid-template-columns:minmax(max-content,1fr) auto minmax(0,1fr);align-items:center;gap:3px;">' +
                     '<span style="font-size:12px;color:var(--panel-warning);font-family:monospace;font-weight:bold;flex-shrink:0;" id="control-tracking-timer">00:00:00</span>' +
@@ -252,7 +255,7 @@ export function createPanel() {
     document.body.appendChild(div);
     applyPanelTheme(false);
     document.getElementById('dark-mode-toggle').addEventListener('change', function() {
-        runtime.isDarkMode = this.checked;
+        selectPanelTheme(this.checked);
         try { GM_setValue(runtime.PANEL_THEME_KEY, runtime.isDarkMode ? 'dark' : 'bright'); }
         catch (error) { log('Could not save theme preference'); }
         applyPanelTheme(true);
@@ -297,7 +300,7 @@ export function createPanel() {
 
     var miniMetricButton = document.getElementById('mini-metric');
     if (miniMetricButton) miniMetricButton.onclick = function() {
-        runtime.miniMetric = runtime.MINI_METRICS[(runtime.MINI_METRICS.indexOf(runtime.miniMetric) + 1) % runtime.MINI_METRICS.length];
+        cycleMiniMetric();
         try { GM_setValue(runtime.MINI_METRIC_KEY, runtime.miniMetric); } catch (error) { log('Could not save compact chart preference'); }
         updateDisplay();
     };
@@ -338,7 +341,7 @@ export function createPanel() {
     for (var i = 0; i < presetBtns.length; i++) {
         presetBtns[i].onclick = function() {
             var time = parseInt(this.dataset.time);
-            runtime.scanIntervalSeconds = time;
+            selectScanInterval(time);
             if (runtime.isAutoRefreshOn) {
                 stopCountdown();
                 resetCountdown();
@@ -362,7 +365,7 @@ export function createPanel() {
     var trendPresetBtns = document.querySelectorAll('.trend-preset-btn');
     for (var k = 0; k < trendPresetBtns.length; k++) {
         trendPresetBtns[k].onclick = function() {
-            runtime.autoTrendEscalation = false;
+            selectAutomaticTrends(false);
             updateAutoTrendButton();
             var mode = this.dataset.mode;
             setTrendComparisonMode(mode);

@@ -1,5 +1,6 @@
 import { hideChartTooltip } from './chart-view.js';
 import { redrawPanelCharts } from './layout.js';
+import { selectPanelOpacity } from './panel-preferences.js';
 import { updateDisplay } from './presentation.js';
 import { runtime } from './runtime.js';
 import { setThemeVariables, themeColor } from './theme-values.js';
@@ -25,7 +26,7 @@ export function applyPanelTheme(redraw) {
 export function updateContainerOpacity(value) {
     var numeric = Number(value);
     if (!Number.isFinite(numeric)) return;
-    runtime.panelBackgroundPercent = Math.max(30, Math.min(100, numeric));
+    selectPanelOpacity(numeric);
     var container = document.getElementById('tracker-container');
     if (!container) return;
     container.style.backgroundColor = 'rgba(' + themeColor('rgb') + ',' + runtime.panelBackgroundPercent / 100 + ')';

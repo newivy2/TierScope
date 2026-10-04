@@ -19,3 +19,6 @@ export function updateTrendDisplay() {
     if (runtime.presentationMode === 'PLAYBACK') return;
     renderTrendDisplay(buildTrendDisplayModel());
 }
+
+export function refreshPanelOptions() { presentationEffects.refreshOptions(); }
+export function refreshScanCountdown() { presentationEffects.refreshCountdown(); }

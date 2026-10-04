@@ -15,6 +15,14 @@ const modules = fs.readdirSync(path.join(root, 'src')).filter(file => file.endsW
 // Deliberate fixes and features have behavioral coverage; keep the original baseline
 // untouched so every other function still proves the extraction preserved it.
 const reviewedChanges = new Set([
+  // Acquisition/preference ownership and controller wiring: control-ownership.test.cjs,
+  // request-policy, startup, absence, session, and both browser suites.
+  'buildChartPlot', // cached immutable samples: chart-cache.test.cjs and charts/replay browser fixtures
+  'isAcquisitionCurrent', 'setChartWindow', 'setRowCollapsed', 'savePanelGeometry', 'applyScale', 'toggleView',
+  'resetCountdown', 'updateCountdownDisplay', 'adjustTimer', 'startCountdown', 'stopCountdown',
+  'updatePlaybackControls', 'repaintLivePresentation', 'readRequestPolicy', 'writeRequestPolicy', 'clearRequestFailures',
+  'updateContainerOpacity', 'checkTrendAutoEscalation', 'toggleAutoTrendEscalation', 'setTrendComparisonMode',
+
   // Data-only presentation models and views: presentation-boundaries.test.cjs + browser suites.
   'createPlaybackSnapshot', 'renderDisplayFrame', 'updateCompactDashboard',
   'updateCollapsedRowStatus', 'updateTrendDisplay',
@@ -62,8 +70,8 @@ const reviewedChanges = new Set([
   'pauseAutoRefresh', 'toggleAutoRefresh', 'updateDisplay', 'checkBroadcasterReturn',
   'acceptRoomSnapshot', 'init', 'checkUrlChange', 'restoreSessionState', 'loadSession',
 ]);
-const featureModules = new Set(['library-dock.js', 'library-shell.js', 'recording-export-data.js', 'recording-exports.js', 'display-model.js', 'display-values.js', 'immutable-data.js', 'presentation-data.js', 'status-model.js', 'status-view.js', 'trend-view.js', 'playback-state.js', 'live-session.js', 'diagnostics.js', 'room-context.js', 'backup.js', 'data-io.js', 'session-analysis.js', 'session-health.js', 'session-library.js', 'session-tools.js']);
-const addedFunctions = new Set(['getSessionSamplePolicy', 'initializePresentation', 'paintPanelFrame', 'getSessionWriteStatus', 'writeSessionRecord']); // shared history-gap policy; session/ownership tests
+const featureModules = new Set(['acquisition-state.js', 'panel-preferences.js', 'library-dock.js', 'library-shell.js', 'recording-export-data.js', 'recording-exports.js', 'display-model.js', 'display-values.js', 'immutable-data.js', 'presentation-data.js', 'status-model.js', 'status-view.js', 'trend-view.js', 'playback-state.js', 'live-session.js', 'diagnostics.js', 'room-context.js', 'backup.js', 'data-io.js', 'session-analysis.js', 'session-health.js', 'session-library.js', 'session-tools.js']);
+const addedFunctions = new Set(['initializeLifecycle', 'refreshPanelOptions', 'refreshScanCountdown', 'getSessionSamplePolicy', 'initializePresentation', 'paintPanelFrame', 'getSessionWriteStatus', 'writeSessionRecord']); // shared history-gap policy; session/ownership tests
 
 test('unchanged extracted functions preserve 3.4.0; reviewed changes have behavior coverage', () => {
   const actual = {};
@@ -95,17 +103,27 @@ test('runtime initialization preserves preference loading and startup order', ()
   const playbackBinding = body[index + 1];
   assert.equal(playbackBinding.expression.callee.name, 'initializePlaybackState');
   assert.equal(playbackBinding.expression.arguments[0].name, 'runtime');
-  const presentationBinding = body[index + 2];
+  const acquisitionBinding = body[index + 2];
+  assert.equal(acquisitionBinding.expression.callee.name, 'initializeAcquisitionState');
+  assert.equal(acquisitionBinding.expression.arguments[0].name, 'runtime');
+  const preferenceBinding = body[index + 3];
+  assert.equal(preferenceBinding.expression.callee.name, 'initializePanelPreferences');
+  assert.equal(preferenceBinding.expression.arguments[0].name, 'runtime');
+  const lifecycleBinding = body[index + 4];
+  assert.equal(lifecycleBinding.expression.callee.name, 'initializeLifecycle');
+  assert.deepEqual(lifecycleBinding.expression.arguments[0].properties.map(p => [p.key.name, p.value.name]), [['scan', 'performScanThenReturn']]);
+  const presentationBinding = body[index + 5];
   assert.equal(presentationBinding.expression.callee.name, 'initializePresentation');
   assert.deepEqual(presentationBinding.expression.arguments[0].properties.map(p => [p.key.name, p.value.name]),
-    [['refreshOptions', 'updatePanelOptions'], ['refreshReplayAvailability', 'updateReplayAvailability']]);
-  assert.equal(body[index + 3].expression.left.property.name, 'urlCheckInterval');
+    [['refreshOptions', 'updatePanelOptions'], ['refreshReplayAvailability', 'updateReplayAvailability'], ['refreshCountdown', 'updateCountdownDisplay']]);
+  assert.equal(body[index + 6].expression.left.property.name, 'urlCheckInterval');
   // Preserve every original default, preference read and effect in order.
-  assert.equal(hash(body.filter(n => n !== bindings[0] && n !== playbackBinding && n !== presentationBinding), baseline.stateNames), baseline.initialization);
+  const ownerBindings = new Set([bindings[0], playbackBinding, acquisitionBinding, preferenceBinding, lifecycleBinding, presentationBinding]);
+  assert.equal(hash(body.filter(n => !ownerBindings.has(n)), baseline.stateNames), baseline.initialization);
 });
 
 test('module dependencies are explicit and the built script preserves userscript permissions', () => {
-  const allowed = new Set([...baseline.browserGlobals, '__TIERSCOPE_VERSION__']);
+  const allowed = new Set([...baseline.browserGlobals, '__TIERSCOPE_VERSION__', 'Symbol']);
   for (const {file,ast} of modules) {
     const scope = eslintScope.analyze(ast, {ecmaVersion: 2022, sourceType: 'module'});
     const unresolved = [...new Set(scope.globalScope.through.map(ref => ref.identifier.name))].filter(name => !allowed.has(name));

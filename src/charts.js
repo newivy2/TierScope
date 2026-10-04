@@ -1,6 +1,6 @@
 import { drawSparkline, hideChartTooltip } from './chart-view.js';
 import { getHistoryBreaks } from './history-data.js';
-import { applyRowLayout } from './layout.js';
+import { applyRowLayout } from './row-layout.js';
 import { runtime } from './runtime.js';
 import { themeColor } from './theme-values.js';
 

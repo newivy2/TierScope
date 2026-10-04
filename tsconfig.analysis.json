@@ -7,5 +7,12 @@
     "module": "ESNext",
     "skipLibCheck": true
   },
-  "include": ["src/session-analysis.js", "src/live-session.js", "src/playback-state.js", "src/presentation-data.js"]
+  "include": [
+    "src/session-analysis.js",
+    "src/live-session.js",
+    "src/playback-state.js",
+    "src/presentation-data.js",
+    "src/acquisition-state.js",
+    "src/panel-preferences.js"
+  ]
 }

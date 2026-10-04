@@ -1,3 +1,4 @@
+const checkControlLayout = require('./helpers/control-layout.cjs');
 const {instrument, prepareSource} = require('./helpers/instrument.cjs');
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const engine=process.env.TIERSCOPE_BROWSER||'chromium';
@@ -41,6 +42,7 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   const checkbox=page.getByRole('checkbox',{name:'Dark mode'}),panel=page.locator('#tracker-container');
   assert(await checkbox.isChecked());assert.equal(await panel.getAttribute('data-theme'),'dark');
   const before=await page.evaluate(()=>ViewerTracker.__theme.state()),bounds=await panel.boundingBox();
+  await checkControlLayout(page);
   const dark=await styles();assert.equal(dark.panel,'rgba(20, 20, 30, 0.95)');assert.equal(dark.totalLine,'#ffffff');
   const controls=await page.locator('#control-field').boundingBox(),toggle=await page.locator('#dark-mode-control').boundingBox(),actions=await page.locator('#control-action-buttons').boundingBox();
   assert(toggle.x>=actions.x+actions.width,'toggle does not overlap centered action buttons');
@@ -50,6 +52,7 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   await checkbox.uncheck();assert.equal(await panel.getAttribute('data-theme'),'bright');
   assert.deepEqual(await panel.boundingBox(),bounds,'theme switch preserves panel size and position');
   assert.deepEqual(await page.evaluate(()=>ViewerTracker.__theme.state()),before,'theme switch preserves tracking state');assert.equal(scans,0);
+  await checkControlLayout(page);
   const bright=await styles();assert.equal(bright.panel,'rgba(248, 249, 252, 0.95)');assert.equal(bright.text,'rgb(32, 35, 48)');assert.equal(bright.totalLine,'#202330');
   for(const key of ['purple','blue','purpleLine','blueLine','highlight','collapsedHigh'])assert.equal(bright[key],dark[key],key+' stays unchanged');
   assert.equal(bright.purpleLine,'#804baa');assert.equal(bright.blueLine,'#393993');assert.equal(bright.highText,'rgb(35, 117, 31)');

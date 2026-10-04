@@ -1,5 +1,7 @@
+import { restoreScheduledInterval } from './acquisition-state.js';
 import { readAllTimeHighs, sessionAllTimeHighs, storeAllTimeHighs } from './highs-store.js';
 import { clearRestoredSessionFrame, prepareSessionHighsForSave, restoreLiveSession } from './live-session.js';
+import { restoreTrendPreferences } from './panel-preferences.js';
 import { createPlaybackSnapshot, getPlaybackFrame } from './playback-data.js';
 import { updateAcquisitionStatus } from './presentation-status.js';
 import { getStorageKey } from './record-validation.js';
@@ -13,9 +15,8 @@ import { log } from './utils.js';
 export function restoreSessionState(data) {
     var snapshot = createPlaybackSnapshot(data.history);
     restoreLiveSession(data, getPlaybackFrame(snapshot, snapshot.durationMs));
-    runtime.lastScheduledIntervalSeconds = getEffectiveScanIntervalSeconds();
-    runtime.trendComparisonMode = data.trendComparisonMode;
-    runtime.autoTrendEscalation = data.autoTrendEscalation;
+    restoreScheduledInterval(getEffectiveScanIntervalSeconds());
+    restoreTrendPreferences(data.trendComparisonMode, data.autoTrendEscalation);
 }
 
 export function saveSession(model) {

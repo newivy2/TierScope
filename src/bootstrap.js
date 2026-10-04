@@ -1,16 +1,18 @@
+import { initializeAcquisitionState } from './acquisition-state.js';
 import { updatePanelOptions } from './files.js';
 import { cancelGifExport, generateGifFromHistory } from './gif.js';
-import { cancelHighPulses } from './highs.js';
+import { cancelHighPulses } from './high-pulses.js';
 import { loadCollapsedRows, loadPanelGeometry } from './layout.js';
-import { resetAllTracking } from './lifecycle.js';
+import { initializeLifecycle, resetAllTracking, updateCountdownDisplay } from './lifecycle.js';
 import { initializeLiveSession } from './live-session.js';
+import { initializePanelPreferences } from './panel-preferences.js';
 import { initializePlaybackState } from './playback-state.js';
 import { initializePresentation } from './presentation.js';
 import { hasStorageField } from './record-validation.js';
 import { leavePlayback, updateReplayAvailability } from './replay.js';
 import { downloadTrackingCSV, downloadTrackingReport } from './reports.js';
 import { runtime } from './runtime.js';
-import { parseGetChatUserListResponse } from './scanning.js';
+import { parseGetChatUserListResponse, performScanThenReturn } from './scanning.js';
 import { saveSession } from './session-persistence.js';
 import { checkUrlChange, scheduleInit } from './startup.js';
 import { getModelName, log } from './utils.js';
@@ -302,7 +304,10 @@ export function initializeRuntime() {
     runtime.lastUrl = location.href;
     initializeLiveSession(runtime);
     initializePlaybackState(runtime, {start: tick => setInterval(tick, 50), stop: handle => clearInterval(handle)});
-    initializePresentation({refreshOptions: updatePanelOptions, refreshReplayAvailability: updateReplayAvailability});
+    initializeAcquisitionState(runtime, {start: (tick, delay) => setInterval(tick, delay), stop: handle => clearInterval(handle)});
+    initializePanelPreferences(runtime);
+    initializeLifecycle({scan: performScanThenReturn});
+    initializePresentation({refreshOptions: updatePanelOptions, refreshReplayAvailability: updateReplayAvailability, refreshCountdown: updateCountdownDisplay});
     runtime.urlCheckInterval = setInterval(checkUrlChange, 500);
     window.addEventListener('beforeunload', function() {
         cancelGifExport();

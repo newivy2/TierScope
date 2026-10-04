@@ -27,3 +27,20 @@ A paired run during 3.8.0-beta.1 review used the same fixture on Node.js 22/head
 | 3.8.0-beta.1 code | 5.02 ms | 5.70 ms | 8.90 ms |
 
 The new immutable recording/display boundary adds rendering cost in this fixture. Both runs remained below the existing 50 ms replay tick interval on this host; this is not a guarantee for slower devices. Replay history is frozen once and reused across frames instead of copied per frame. Browser pacing/layout checks still verify the moving gap connector and exact sample values. This benchmark measures frame work only, not opening a recording, live acquisition, memory or library/backup operations. Installed-script performance checks should include a long recording on the user’s normal browser.
+
+## 3.10.0-beta.1 paired replay check
+
+The same 10,000-sample, 120-frame fixture was run three times per build and CPU setting, alternating published 3.9.0 and the beta in one Node.js 22/headless Chromium environment. Five warm-up frames remain excluded. The table reports the median of the three run means and the range of the three 95th-percentile results.
+
+| CPU setting | Build | Median mean frame time | Run means | Run p95 range |
+| --- | --- | ---: | ---: | ---: |
+| Normal | 3.9.0 | 4.81 ms | 4.81–4.88 ms | 5.40–5.50 ms |
+| Normal | 3.10.0-beta.1 | 2.45 ms | 2.34–2.88 ms | 3.40–3.70 ms |
+| 4× CPU slowdown | 3.9.0 | 23.54 ms | 23.02–24.20 ms | 26.80–27.70 ms |
+| 4× CPU slowdown | 3.10.0-beta.1 | 11.36 ms | 10.71–12.37 ms | 13.00–14.40 ms |
+
+The median mean improves by about **49% normally** and **52% with simulated slowdown**. A sampled CPU profile identified chart plot reduction as the largest JavaScript hotspot. The renderer now creates private dense copies of frozen value/gap arrays once and reuses them for reduction. Recording snapshots and display models remain immutable; tooltips, keyboard inspection and exports still use their exact original samples. Tests compare cached and uncached plots across windows, seeks, repeated timestamps and gaps. Mutable live histories bypass the cache.
+
+The tradeoff is one extra array per rendered immutable series, plus its gaps array, retained while that source array remains reachable. WeakMap keys allow the cache to be collected with the recording; it does not keep an archive of old replays. Actual heap cost is engine-dependent and was not measured here. This benchmark measures warm frame work only: it excludes opening/freezing a recording, live acquisition, library loading and backup operations. CPU throttling is a useful stress comparison, not a measurement on a specific slower device. Real-browser testing with long recordings remains useful.
+
+Reproduce with `npm run test:performance`, optionally setting `TIERSCOPE_SOURCE=/path/to/3.9.0.user.js` and `TIERSCOPE_CPU_THROTTLE=4`. The original unthrottled fixture and sample order are unchanged.

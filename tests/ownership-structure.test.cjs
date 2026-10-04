@@ -48,3 +48,21 @@ test('only the playback owner and bootstrap write playback state', () => {
   }
   assert(sessionWrites('function paint(state) {state.playing = false;}', protectedFields, new Set(['state'])).length);
 });
+
+for (const [file, fieldName, privateName] of [
+  ['acquisition-state.js', 'ACQUISITION_FIELDS', 'acquisitionState'],
+  ['panel-preferences.js', 'PANEL_PREFERENCE_FIELDS', 'panelPreferenceState'],
+]) test(file + ' exclusively owns its fields and has no browser/storage/network dependencies', () => {
+  const source = fs.readFileSync(path.join(root, file), 'utf8');
+  const ast = acorn.parse(source, {ecmaVersion: 2022, sourceType: 'module'});
+  const fields = new Set(ast.body.find(n => n.declaration?.declarations?.[0]?.id.name === fieldName)
+    .declaration.declarations[0].init.arguments[0].elements.map(n => n.value));
+  assert(!ast.body.some(node => node.type === 'ImportDeclaration'));
+  assert(!/\b(?:document|window|location|fetch|runtime|GM_\w+|setInterval|clearInterval|Date)\s*[.(]/.test(source));
+  for (const other of fs.readdirSync(root).filter(name => name.endsWith('.js'))) {
+    if ([file, 'bootstrap.js'].includes(other)) continue;
+    const text = fs.readFileSync(path.join(root, other), 'utf8');
+    assert.deepEqual(sessionWrites(text, fields), [], other);
+    assert(!text.includes(privateName), other + ' reaches private state');
+  }
+});

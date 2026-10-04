@@ -1,19 +1,17 @@
-import { readAllTimeHighs } from './highs-store.js';
-import { addFileToAllTimeHighs, cancelHighPulses, clearAllTimeHighs, toggleHighMode, updateHighControls } from './highs.js';
-import { redrawPanelCharts, toggleView } from './layout.js';
-import { createPlaybackSnapshot, isPlaybackCurrent } from './playback-data.js';
-import { nextSessionFileRequest, openOwnedPlayback } from './playback-state.js';
+import { addFileToAllTimeHighs, clearAllTimeHighs, toggleHighMode, updateHighControls } from './highs.js';
+import { redrawPanelCharts } from './layout.js';
+import { selectChartWindow } from './panel-preferences.js';
+import { isPlaybackCurrent } from './playback-data.js';
 import { hasStorageField } from './record-validation.js';
-import { leavePlayback, paintPlayback, setPlaybackLayout } from './replay.js';
 import { runtime } from './runtime.js';
 import { captureSessionFile } from './session-capture.js';
-import { validateSessionFile } from './session-file-format.js';
+import { readSessionFile } from './session-replay.js';
 import { bindSessionTools, updateSessionToolsStatus } from './session-tools.js';
 import { log } from './utils.js';
 
 export function setChartWindow(value) {
     if (!hasStorageField(runtime.CHART_WINDOWS, value)) return;
-    runtime.chartWindowMode = value;
+    selectChartWindow(value);
     try { GM_setValue(runtime.CHART_WINDOW_KEY, value); } catch (error) { log('Could not save chart window preference'); }
     runtime.chartLayoutRevision++;
     updatePanelOptions();
@@ -30,34 +28,6 @@ export function downloadSessionFile() {
         document.body.appendChild(link);
         try { link.click(); } finally { link.remove(); setTimeout(function() { URL.revokeObjectURL(url); }, 60000); }
     } catch (error) { alert('Could not save session file: ' + error.message); }
-}
-
-export function openSessionReplay(file) {
-    var archive = validateSessionFile(file);
-    leavePlayback(false);
-    if (runtime.isMinimized) toggleView();
-    openOwnedPlayback({url: location.href, key: runtime.activeSessionStorageKey, generation: runtime.initGuard,
-        imported: true, archive: archive, snapshot: createPlaybackSnapshot(archive.session.history),
-        allTimeState: readAllTimeHighs(archive.room)}, Date.now(), false);
-    cancelHighPulses();
-    setPlaybackLayout(true);
-    return paintPlayback(runtime.playback);
-}
-
-export async function readSessionFile(file) {
-    if (!file) return false;
-    var request = nextSessionFileRequest(), url = location.href, generation = runtime.initGuard;
-    function current() { return request === runtime.sessionFileLoadGeneration && url === location.href && generation === runtime.initGuard; }
-    try {
-        if (file.size > runtime.SESSION_FILE_MAX_BYTES) throw new Error('Session files must be 8 MB or smaller.');
-        var text = await file.text();
-        if (!current()) return false;
-        if (text.length > runtime.SESSION_FILE_MAX_BYTES) throw new Error('Session file is too large.');
-        return openSessionReplay(JSON.parse(text.replace(/^\uFEFF/, '')));
-    } catch (error) {
-        if (current()) alert('Could not open session file: ' + error.message);
-        return false;
-    }
 }
 
 export function updatePanelOptions() {
