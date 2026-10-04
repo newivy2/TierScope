@@ -1,6 +1,5 @@
 import { diagnostic } from './diagnostics.js';
 import { pauseAutoRefresh } from './lifecycle.js';
-import { sessionAnonymousCount } from './live-session.js';
 import { runtime } from './runtime.js';
 import { log } from './utils.js';
 
@@ -117,9 +116,7 @@ export function getRoomTotal() {
     return 0;
 }
 
-export function getAnonymousCount() {
-    return sessionAnonymousCount();
-}
+
 
 export function extractUsername(text) {
     if (!text) return null;

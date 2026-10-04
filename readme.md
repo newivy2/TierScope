@@ -3,12 +3,16 @@
 TierScope is a free, open-source userscript that charts how a Chaturbate room’s audience changes over time. 
 
 ---
-**Current release: 3.8.0** ·  [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.8.0)
+**Current release: 3.9.0** · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.9.0)
 ---
 
-Open **Session tools** with **Library** beside Replay / Save / Open or from the chart-window menu: a local recording library with model folders, time-aware summaries, two-recording comparison, and ATH/preferences backup and restore. A visible warning reports failed session saves. [Build and source guide](BUILDING.md).
+Open **Library** beside Replay to unfold a matching left-hand page next to the chart. Save or export the current/replayed session, open a saved file, and browse recordings in model folders. Summary, Compare and Backup tabs bring the session tools into the same panel. On small windows, the library becomes a scrollable sheet. A visible warning reports failed session saves. [Build and source guide](BUILDING.md).
 
-The **SH / ATH** switch sits to the left of the chart-window menu. Session highs and all-time highs are tracked separately for each room. All-time records survive session Reset and expiry; hover a high to see the exact value and its recorded time. Opening a saved file does not change these records: use **Add to all-time highs** beside the room name in FILE REPLAY or in the chart-window menu to add that file's highs to its own room.
+The **SH / ATH** switch sits to the left of the chart-window menu. Session highs and all-time highs are tracked separately for each room. All-time records survive session Reset and expiry; hover a high to see the exact value and its recorded time. Opening a saved file does not change these records: use **Add to all-time highs** in Library for the selected recording or in the chart-window menu during FILE REPLAY to add that file's highs to its own room.
+
+![Library unfolding to the left of the TierScope panel](docs/previews/library-book-dark.png)
+
+[Bright-theme preview](docs/previews/library-book-bright.png)
 
 ![TierScope in expanded, totals-focused, collapsed, and compact views](tierscope-hero.png)
 
@@ -32,13 +36,13 @@ Charts use periodic room-data samples. Session history is stored locally through
 
 - **Saved session files** — Save sessions and reopen them later. Use **Add to all-time highs** to include a saved file’s peaks in that room’s records.
 
-- **Session library** — Choose **Keep in library** in Session tools or directly in the replay controls. Recordings are organized into model folders. Keeping a fuller version of the same session updates its entry and preserves your custom name. Search, rename, replay, download or delete recordings; the library holds up to 500 recordings / 25 MB.
+- **Session library** — Choose **Library → Keep in library** from live Controls or Replay. Recordings are organized into model folders. Keeping a fuller version of the same session updates its entry and preserves your custom name. Search, rename, replay, download or delete recordings; the library holds up to 500 recordings / 25 MB.
 
 - **Summaries and comparison** — See audience averages and peaks together, token-holder proportions, coverage and gaps. Choose several thresholds to see time at or above each count and its percentage of covered time. Statistics use real timestamps and exclude recording gaps. Compare two recordings from their first retained samples, optionally matching their shared duration.
 
 - **Backups** — Export ATH for every room and saved preferences, optionally including the library. Restore with a preview and category selection; ATH merges without lowering records.
 
-- **Reports and exports** — Download CSV data, TXT session summaries, and animated GIFs of your replay.
+- **Reports and exports** — Download a session file, CSV data, TXT summary, or animated GIF from Library. Each stored recording has these actions under **More…**, without loading it into replay.
 
 - **Flexible layout** — Choose compact or expanded views, collapse individual rows, resize and reposition the panel, and adjust its theme and transparency.
 

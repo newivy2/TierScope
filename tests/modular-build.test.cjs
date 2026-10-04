@@ -62,7 +62,7 @@ const reviewedChanges = new Set([
   'pauseAutoRefresh', 'toggleAutoRefresh', 'updateDisplay', 'checkBroadcasterReturn',
   'acceptRoomSnapshot', 'init', 'checkUrlChange', 'restoreSessionState', 'loadSession',
 ]);
-const featureModules = new Set(['display-model.js', 'display-values.js', 'immutable-data.js', 'presentation-data.js', 'status-model.js', 'status-view.js', 'trend-view.js', 'playback-state.js', 'live-session.js', 'diagnostics.js', 'room-context.js', 'backup.js', 'data-io.js', 'session-analysis.js', 'session-health.js', 'session-library.js', 'session-tools.js']);
+const featureModules = new Set(['library-dock.js', 'library-shell.js', 'recording-export-data.js', 'recording-exports.js', 'display-model.js', 'display-values.js', 'immutable-data.js', 'presentation-data.js', 'status-model.js', 'status-view.js', 'trend-view.js', 'playback-state.js', 'live-session.js', 'diagnostics.js', 'room-context.js', 'backup.js', 'data-io.js', 'session-analysis.js', 'session-health.js', 'session-library.js', 'session-tools.js']);
 const addedFunctions = new Set(['getSessionSamplePolicy', 'initializePresentation', 'paintPanelFrame', 'getSessionWriteStatus', 'writeSessionRecord']); // shared history-gap policy; session/ownership tests
 
 test('unchanged extracted functions preserve 3.4.0; reviewed changes have behavior coverage', () => {

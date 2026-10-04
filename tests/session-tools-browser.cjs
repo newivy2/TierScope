@@ -31,7 +31,7 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
   assert.equal(await page.locator('#panel-options').isVisible(),false,'direct Library needs no header menu');
   await page.keyboard.press('Escape');assert.equal(await page.evaluate(()=>document.activeElement.id),'btn-control-library');
   assert.deepEqual(await page.locator('#tracker-container').boundingBox(),panelBounds);
-  async function openTools(){await page.click('#btn-panel-options');await page.click('#btn-session-tools');await page.locator('#tierscope-session-tools').waitFor({state:'visible'});}
+  async function openTools(){if(!await page.locator('#tierscope-session-tools').count())await page.locator('#btn-control-library:visible,#btn-playback-library:visible').click();await page.locator('#tierscope-session-tools').waitFor({state:'visible'});}
   const nav=name=>page.locator('[data-tools-tab="'+name+'"]');
   const rowValue=(label,column=0)=>page.locator('#tools-summary-table tbody tr').filter({has:page.getByRole('rowheader',{name:label,exact:true})}).locator('td').nth(column).textContent();
   const thresholdValues=count=>page.locator('#tools-threshold-table tbody tr').filter({has:page.getByRole('rowheader',{name:String(count),exact:true})}).locator('td').allTextContents();
@@ -72,7 +72,7 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
   await page.screenshot({path:'/tmp/tierscope-360-'+engine+'-compare.png'});
   assert.deepEqual(await page.evaluate(()=>ViewerTracker.__tools.state()),before,'analysis and library operations do not change live data');
   await nav('library').click();await page.locator('#tools-library-search').fill('secondroom');assert.equal(await page.locator('.tools-row').count(),1);
-  page.once('dialog',d=>d.accept('<img src=x onerror="window.bad=1">'));await page.getByRole('button',{name:'Rename',exact:true}).click();
+  await page.locator('.tools-row summary').click();page.once('dialog',d=>d.accept('<img src=x onerror="window.bad=1">'));await page.getByRole('button',{name:'Rename',exact:true}).click();
   assert.equal(await page.evaluate(()=>window.bad),undefined);assert.equal(await page.locator('#tools-library-list img').count(),0);
   await nav('backup').click();const download=page.waitForEvent('download');await page.click('#tools-backup-download');
   const backup=JSON.parse(fs.readFileSync(await(await download).path(),'utf8'));assert.equal(backup.library.length,2);assert.equal(backup.rooms[0].highs.red.value,80);
@@ -82,7 +82,7 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
   page.once('dialog',d=>d.dismiss());await page.click('#tools-backup-restore');assert.equal(await page.evaluate(()=>ViewerTracker.__tools.records('testroom').highs.red.value),80);
   page.once('dialog',d=>d.accept());await page.click('#tools-backup-restore');assert.equal(await page.evaluate(()=>ViewerTracker.__tools.records('testroom').highs.red.value),999);
   assert.match(await page.locator('#tools-message').textContent(),/Refresh/);assert.deepEqual(await page.evaluate(()=>ViewerTracker.__tools.state()),before);
-  await page.keyboard.press('Escape');assert.equal(await page.locator('#tierscope-session-tools').count(),0);assert.equal(await page.evaluate(()=>document.activeElement.id),'btn-panel-options');
+  await page.keyboard.press('Escape');assert.equal(await page.locator('#tierscope-session-tools').count(),0);assert.equal(await page.evaluate(()=>document.activeElement.id),'btn-control-library');
   await page.evaluate(()=>{window.realSet=GM_setValue;window.GM_setValue=(k,v)=>{if(k.startsWith('tierscope:tab:'))throw new Error('disk full');realSet(k,v);};ViewerTracker.__tools.save();});
   assert.equal(await page.locator('#acquisition-status').textContent(),'Session not saved');await page.click('#btn-toggle');assert.equal(await page.locator('#mini-freshness').textContent(),'Session not saved');
   await page.evaluate(()=>{window.GM_setValue=window.realSet;ViewerTracker.__tools.save();});assert.notEqual(await page.locator('#mini-freshness').textContent(),'Session not saved');
@@ -98,9 +98,9 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
   await nav('summary').click();assert(await page.locator('#tierscope-session-tools').evaluate(e=>e.scrollWidth-e.clientWidth<=1));
   await page.screenshot({path:'/tmp/tierscope-360-beta2-'+engine+'-narrow-summary.png'});
   await page.setViewportSize({width:1100,height:1000});await nav('library').click();await page.locator('#tools-library-search').fill('secondroom');
-  page.once('dialog',d=>d.dismiss());await page.getByRole('button',{name:'Delete',exact:true}).click();assert.equal(await page.evaluate(()=>ViewerTracker.__tools.library().count),2);
+  await page.locator('.tools-row summary').click();page.once('dialog',d=>d.dismiss());await page.getByRole('button',{name:'Delete',exact:true}).click();assert.equal(await page.evaluate(()=>ViewerTracker.__tools.library().count),2);
   page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'Delete',exact:true}).click();assert.equal(await page.evaluate(()=>ViewerTracker.__tools.library().count),1);
-  await page.locator('.tools-row').getByRole('button',{name:'Replay',exact:true}).click();assert.equal(await page.locator('#tierscope-session-tools').count(),0);assert.match(await page.locator('#header-text').textContent(),/^FILE:/);
+  await page.locator('.tools-row').getByRole('button',{name:'Replay',exact:true}).click();assert.equal(await page.locator('#tierscope-session-tools').count(),1);assert.match(await page.locator('#header-text').textContent(),/^FILE:/);
   await openTools();await nav('backup').click();const badPicker=page.waitForEvent('filechooser');await page.click('#tools-backup-open');await(await badPicker).setFiles(file('future.json',{...backup,formatVersion:999}));
   await page.waitForFunction(()=>document.getElementById('tools-message').textContent.includes('not a supported'));
   assert.equal(await page.locator('#tools-backup-restore').count(),0);
@@ -109,7 +109,7 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
    for(let i=0;i<55;i++)GM_setValue('tierscope:library:v1:paged_'+i,JSON.stringify({schemaVersion:1,addedAt:Date.now()+i,title:'Paged '+i,archive:{...archive,room:'paged'+i}}));
    const later=JSON.parse(JSON.stringify(archive));later.session.history.timestamps=later.session.history.timestamps.map(t=>t+86400000);later.session.sessionStartedAt+=86400000;later.session.timestamp+=86400000;
    GM_setValue('tierscope:library:v1:nested',JSON.stringify({schemaVersion:1,addedAt:Date.now(),title:'Another session for the same model',archive:later}));});
-  await page.getByRole('button',{name:'Refresh list',exact:true}).click();assert.equal(await page.locator('.tools-folder').count(),50);
+  await page.locator('#tools-refresh-library').click();if(await page.locator('#tools-library-all-models').count())await page.click('#tools-library-all-models');assert.equal(await page.locator('.tools-folder').count(),50);
   assert.match(await page.locator('#tools-content').textContent(),/57 \/ 500 recordings/);
   await page.click('#tools-library-more');assert.equal(await page.locator('.tools-folder').count(),56);
   await page.click('#tools-folder-testroom');assert.equal(await page.locator('.tools-row').count(),2);
@@ -118,7 +118,7 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
   await page.locator('#tools-library-search').fill('paged54');assert.equal(await page.locator('.tools-row').count(),1);assert.match(await page.locator('.tools-row').textContent(),/paged54/);
   await page.click('#tools-library-all-models');assert.equal(await page.locator('.tools-folder').count(),50);
   await page.evaluate(()=>{for(let i=0;i<55;i++)GM_deleteValue('tierscope:library:v1:paged_'+i);GM_deleteValue('tierscope:library:v1:nested');});
-  await page.getByRole('button',{name:'Refresh list',exact:true}).click();
+  await page.locator('#tools-refresh-library').click();
   assert.equal(await page.locator('.tools-folder').count(),1);
   await page.evaluate(()=>{const read=File.prototype.text;window.restoreFileRead=()=>{File.prototype.text=read;};File.prototype.text=function(){return read.call(this).then(text=>new Promise(resolve=>{window.finishToolsRead=()=>resolve(text);}));};});
   const pendingPicker=page.waitForEvent('filechooser');await page.click('#tools-import-session');await(await pendingPicker).setFiles(file('pending.json',{...second,room:'pendingroom'}));

@@ -1,56 +1,33 @@
 import { BACKUP_MAX_BYTES, createTierScopeBackup, restoreTierScopeBackup, validateTierScopeBackup } from './backup.js';
 import { downloadDataFile, readDataFile } from './data-io.js';
 import { openSessionReplay } from './files.js';
+import { cancelGifExport, generateGifFromHistory } from './gif.js';
 import { displayedHighRoom } from './high-selectors.js';
-import { readAllTimeHighs } from './highs-store.js';
+import { readAllTimeHighs, sessionAllTimeHighs, storeAllTimeHighs } from './highs-store.js';
 import { repaintHighMode } from './highs.js';
+import { attachLibraryDock } from './library-dock.js';
+import { libraryShell } from './library-shell.js';
 import { isPlaybackCurrent } from './playback-data.js';
 import { setPlaybackAllTimeState } from './playback-state.js';
+import { getStorageKey } from './record-validation.js';
+import { downloadRecording } from './recording-exports.js';
+import { downloadTrackingReport } from './reports.js';
 import { runtime } from './runtime.js';
 import { ANALYSIS_METRICS, analysisSeries, compareSessions, parseAnalysisThresholds, summarizeAudience, summarizeSession, summarizeThresholds } from './session-analysis.js';
 import { captureSessionFile } from './session-capture.js';
 import { validateSessionFile } from './session-file-format.js';
 import { getSessionSaveState } from './session-health.js';
 import { LIBRARY_MAX_BYTES, LIBRARY_MAX_COUNT, LIBRARY_PREFIX, keepSessionInLibrary, readSessionLibrary, removeLibrarySession, renameLibrarySession } from './session-library.js';
-import { setThemeVariables } from './theme-values.js';
 import { formatElapsedTime, getModelName } from './utils.js';
 
 let closeSessionTools = null;
-let replayKeepState = { archive: null, label: 'Keep in library', message: '' };
-
-export function updateReplayLibraryButton() {
-    const button = document.getElementById('btn-playback-keep-library');
-    if (!button) return;
-    const archive = isPlaybackCurrent(runtime.playback) ? runtime.playback.archive : null;
-    if (replayKeepState.archive !== archive) replayKeepState = { archive, label: 'Keep in library', message: '' };
-    button.disabled = !archive;
-    // Playback repaints frequently; announce feedback only when it changes.
-    if (button.textContent !== replayKeepState.label) button.textContent = replayKeepState.label;
-    const title = replayKeepState.message || 'Keep the full replayed recording in this browser\'s library';
-    if (button.title !== title) button.title = title;
-    const label = replayKeepState.label + '. ' + title;
-    if (button.getAttribute('aria-label') !== label) button.setAttribute('aria-label', label);
-}
-
-export function keepReplayInLibrary() {
-    if (!isPlaybackCurrent(runtime.playback) || !runtime.playback.archive) return;
-    const archive = runtime.playback.archive;
-    try {
-        const result = keepSessionInLibrary(archive);
-        replayKeepState = { archive, label: result.added ? 'Kept in library' : result.updated ? 'Updated library' : 'Already kept',
-            message: archive.room + ': ' + (result.added ? 'Full recording kept in the library.' : result.updated ?
-                'Library recording updated; its name was preserved.' : 'An equal or fuller recording is already in the library.') };
-    } catch (error) {
-        replayKeepState = { archive, label: 'Retry keep', message: 'Could not keep this recording: ' + error.message };
-        alert(replayKeepState.message);
-    }
-    updateReplayLibraryButton();
-}
+let refreshSessionTools = null;
 
 export function updateSessionToolsStatus() {
-    updateReplayLibraryButton();
+    if (refreshSessionTools) refreshSessionTools();
     const element = document.getElementById('session-save-info');
     if (!element) return;
+    if (isPlaybackCurrent(runtime.playback)) { element.textContent = 'Replay snapshot — use Keep in library to retain it here.'; element.style.color = 'var(--panel-muted)'; return; }
     const state = getSessionSaveState(getModelName());
     const warning = state.error || runtime.sessionStorageNotice;
     element.textContent = warning ? 'Session saving unavailable. Keep this tab open or download a session file.' :
@@ -58,37 +35,27 @@ export function updateSessionToolsStatus() {
     element.style.color = warning ? 'var(--panel-warning)' : 'var(--panel-muted)';
 }
 
-export function bindSessionTools(menu) {
-    document.getElementById('btn-playback-keep-library').onclick = keepReplayInLibrary;
-    const libraryButton = document.getElementById('btn-control-library');
-    libraryButton.onclick = () => openSessionTools(libraryButton);
-    const button = document.createElement('button');
-    button.id = 'btn-session-tools'; button.type = 'button'; button.textContent = 'Session library, analysis & backup…';
-    button.style.cssText = 'display:block;width:100%;margin:8px 0 4px;padding:5px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:3px;cursor:pointer;';
-    button.onclick = () => { menu.style.display = 'none'; document.getElementById('btn-panel-options').setAttribute('aria-expanded', 'false'); openSessionTools(); };
-    menu.appendChild(button);
-    const status = document.createElement('div'); status.id = 'session-save-info'; status.setAttribute('role', 'status');
-    status.style.cssText = 'font-size:10px;line-height:1.4;margin-top:6px;'; menu.appendChild(status);
-    menu.style.maxHeight = '75vh'; menu.style.overflowY = 'auto';
-    updateSessionToolsStatus();
+export function bindSessionTools() {
+    for (const id of ['btn-control-library', 'btn-playback-library']) {
+        const button = document.getElementById(id);
+        if (button) button.onclick = () => { if (closeSessionTools) closeSessionTools(); else openSessionTools(button); };
+    }
     return () => { if (closeSessionTools) closeSessionTools(); };
 }
 
 export function openSessionTools(focusTarget) {
     if (closeSessionTools) closeSessionTools();
-    const origin = location.href, generation = runtime.initGuard, focusBefore = focusTarget || document.getElementById('btn-panel-options') || document.activeElement;
+    const origin = location.href, generation = runtime.initGuard, focusBefore = focusTarget || document.getElementById('btn-control-library') || document.activeElement;
     const dialog = document.createElement('dialog');
     dialog.id = 'tierscope-session-tools'; dialog.setAttribute('aria-labelledby', 'tools-title');
-    dialog.style.cssText = 'box-sizing:border-box;width:min(780px,94vw);max-height:90vh;padding:20px;border:1px solid #ff69b4;border-radius:10px;background:var(--panel-solid);color:var(--panel-text);font:14px/1.5 Arial,sans-serif;overflow:auto;';
-    setThemeVariables(dialog);
-    dialog.innerHTML = '<style>#tierscope-session-tools::backdrop{background:#0009}#tierscope-session-tools *{box-sizing:border-box}#tierscope-session-tools button,#tierscope-session-tools select,#tierscope-session-tools input{font:inherit;color:var(--panel-text);background:var(--panel-button);border:1px solid var(--panel-divider);border-radius:5px;padding:5px 8px;max-width:100%}#tierscope-session-tools button{cursor:pointer}#tierscope-session-tools button:disabled{opacity:.5;cursor:default}#tierscope-session-tools button:focus-visible,#tierscope-session-tools select:focus-visible,#tierscope-session-tools input:focus-visible{outline:2px solid #ff69b4;outline-offset:2px}#tierscope-session-tools button[aria-pressed=true]{border-color:#ff69b4}#tierscope-session-tools .tools-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:12px 0}#tierscope-session-tools .tools-muted{color:var(--panel-muted);font-size:12px}#tierscope-session-tools .tools-row{border-top:1px solid var(--panel-divider);padding:12px 0;overflow-wrap:anywhere}#tierscope-session-tools table{width:100%;border-collapse:collapse;font-size:13px}#tierscope-session-tools th,#tierscope-session-tools td{text-align:left;padding:7px;border-bottom:1px solid var(--panel-divider)}#tierscope-session-tools caption{text-align:left;font-weight:bold;padding:8px 0}#tierscope-session-tools .tools-scroll{overflow-x:auto}#tierscope-session-tools canvas{display:block;width:100%;height:240px}#tierscope-session-tools label{display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap;min-width:0;max-width:100%}#tierscope-session-tools h3{font-size:16px;margin:12px 0}</style>' +
-        '<div class="tools-actions" style="justify-content:space-between;margin-top:0"><h2 id="tools-title" style="font-size:20px;margin:0">Session tools</h2><button id="tools-close" aria-label="Close session tools">Close</button></div>' +
-        '<nav class="tools-actions" aria-label="Session tools"><button data-tools-tab="library">Library</button><button data-tools-tab="summary">Summary</button><button data-tools-tab="compare">Compare</button><button data-tools-tab="backup">Backup &amp; restore</button></nav>' +
-        '<div id="tools-message" role="status" aria-live="polite" style="white-space:pre-line;overflow-wrap:anywhere"></div><div id="tools-content"></div>';
+    dialog.setAttribute('aria-modal', 'false');
+    dialog.innerHTML = libraryShell();
     document.body.appendChild(dialog);
     let currentArchive = null, library = null, tab = 'library', fileRequest = 0, chartObserver = null;
     let selectedA = 'current', selectedB = '', metric = 'room', threshold = 100, sharedLength = true, pendingBackup = null;
-    let summaryThresholds = [25, 50, 100], libraryRoom = null;
+    let summaryThresholds = [25, 50, 100], libraryRoom = null, chartDraw = null;
+    let observedSource = null, observedSignature = '';
+    let detachDock = null;
     try { currentArchive = captureSessionFile(); } catch (error) { /* Tools also work on directory pages. */ }
     const content = dialog.querySelector('#tools-content'), message = dialog.querySelector('#tools-message');
     const current = () => dialog.isConnected && dialog.open && origin === location.href && generation === runtime.initGuard;
@@ -104,13 +71,14 @@ export function openSessionTools(focusTarget) {
     }
     function chooseFile(maxBytes, accept) {
         const input = document.createElement('input'); input.type = 'file'; input.accept = '.json,application/json'; input.hidden = true;
-        const request = ++fileRequest; dialog.appendChild(input);
+        const request = ++fileRequest, playbackAtRequest = runtime.playback; dialog.appendChild(input);
+        const stillSelected = () => current() && request === fileRequest && runtime.playback === playbackAtRequest;
         input.onchange = async () => {
             const file = input.files && input.files[0]; if (!file) { input.remove(); return; }
             try {
                 const value = await readDataFile(file, maxBytes);
-                if (current() && request === fileRequest) accept(value);
-            } catch (error) { if (current() && request === fileRequest) tell(error.message, true); }
+                if (stillSelected()) accept(value);
+            } catch (error) { if (stillSelected()) tell(error.message, true); }
             finally { input.remove(); }
         };
         input.addEventListener('cancel', () => input.remove(), { once: true }); input.click();
@@ -128,8 +96,79 @@ export function openSessionTools(focusTarget) {
         if (sourceOptions().some(item => item.id === selected)) select.value = selected;
         select.onchange = () => changed(select.value); return select.value;
     }
+    function archiveName(archive) {
+        return archive.room + '-session-' + new Date(archive.session.timestamp).toISOString().replace(/[:.]/g, '-') + '.tierscope.json';
+    }
+    function addArchiveHighs(archive) {
+        const result = storeAllTimeHighs(archive.room, sessionAllTimeHighs(archive.session, 'file'));
+        if (isPlaybackCurrent(runtime.playback) && runtime.playback.archive.room.toLowerCase() === archive.room.toLowerCase()) {
+            setPlaybackAllTimeState(runtime.playback, result.state);
+        }
+        repaintHighMode();
+        tell(result.saved ? (result.changed ? 'All-time highs updated for ' : 'No higher records for ') + archive.room + '.' :
+            result.state.error || 'Records changed in another tab. Try again.', !result.saved);
+    }
+    function refreshCurrent() {
+        const playback = isPlaybackCurrent(runtime.playback) ? runtime.playback : null;
+        const source = playback ? playback.archive : runtime.history;
+        const history = playback ? source.session.history : runtime.history;
+        const room = playback ? source.room : getModelName();
+        const available = history.timestamps.length > 0 && (playback || runtime.activeSessionStorageKey === getStorageKey(room) && runtime.lastUrl === location.href);
+        const signature = [room, !!playback, history.timestamps.length, history.timestamps.at(-1), runtime.isPaused, runtime.isStopped].join(':');
+        if (source === observedSource && signature === observedSignature) return;
+        const replaced = source !== observedSource;
+        observedSource = source; observedSignature = signature;
+        if (replaced || !currentArchive) { try { currentArchive = captureSessionFile(); } catch (error) { currentArchive = null; } }
+        const title = dialog.querySelector('#tools-current-room'), meta = dialog.querySelector('#tools-current-meta'), label = dialog.querySelector('#tools-current-kind');
+        if (title) title.textContent = room === 'unknown' ? 'No room session' : room;
+        if (label) label.textContent = playback ? (playback.imported ? 'File / library replay' : 'Replay snapshot') : runtime.isStopped ? 'Stopped session' : runtime.isPaused ? 'Paused session' : 'Current live session';
+        if (meta) meta.textContent = available ? history.timestamps.length.toLocaleString() + ' samples · ' +
+            new Date(history.timestamps[0]).toLocaleString() : 'Record a sample or open a saved session to get started.';
+        dialog.querySelectorAll('[data-current-action]').forEach(button => {
+            button.dataset.currentAvailable = String(!!available);
+            button.disabled = !available || button.id === 'btn-export-gif' && !!runtime.gifExportJob;
+        });
+        if (replaced && tab !== 'library' && tab !== 'backup') render(tab);
+    }
+    function currentCard() {
+        const card = node(content, 'section', undefined, 'tools-current'); card.setAttribute('aria-label', 'Current or replayed recording');
+        node(card, 'div', '', 'tools-eyebrow').id = 'tools-current-kind';
+        node(card, 'strong', '').id = 'tools-current-room';
+        node(card, 'div', '', 'tools-muted').id = 'tools-current-meta';
+        const actions = node(card, 'div', undefined, 'tools-actions');
+        function currentButton(parent, text, fn, id) {
+            const control = button(parent, text, () => fn(captureSessionFile()), id); control.dataset.currentAction = 'true'; return control;
+        }
+        currentButton(actions, 'Keep in library', archive => {
+            const result = keepSessionInLibrary(archive); currentArchive = archive; libraryRoom = archive.room.toLowerCase();
+            render('library'); tell(result.added ? 'Recording kept in the library.' : result.updated ? 'Library recording updated; its name was preserved.' : 'An equal or fuller recording is already in the library.');
+        }, 'tools-keep').className = 'tools-primary';
+        currentButton(actions, 'Save file', archive => downloadDataFile(archive, archiveName(archive)), 'tools-save-session');
+        const exports = node(card, 'div', undefined, 'tools-actions');
+        currentButton(exports, 'TXT', archive => {
+            if (isPlaybackCurrent(runtime.playback)) downloadRecording(archive, 'txt'); else downloadTrackingReport();
+        }, 'tools-export-txt').title = 'Download a text report for this recording';
+        currentButton(exports, 'CSV', archive => downloadRecording(archive, 'csv'), 'tools-export-csv').title = 'Download every retained sample with its real timestamp';
+        currentButton(exports, 'GIF', archive => generateGifFromHistory(archive), 'btn-export-gif').title = 'Download an animated GIF of the full recording';
+        currentButton(exports, 'Add to all-time highs', addArchiveHighs, 'tools-add-all-time');
+        const status = node(card, 'div', '', 'tools-muted'); status.id = 'session-save-info'; status.setAttribute('role', 'status');
+        observedSignature = ''; refreshCurrent(); updateSessionToolsStatus();
+    }
     function renderLibrary() {
         const state = readLibrary();
+        currentCard();
+        const actions = node(content, 'div', undefined, 'tools-actions');
+        button(actions, 'Open saved file…', () => chooseFile(runtime.SESSION_FILE_MAX_BYTES, value => {
+            openSessionReplay(validateSessionFile(value)); observedSignature = ''; refreshCurrent();
+            tell('File opened in replay. Use Keep in library to store it here.');
+        }), 'tools-open-session');
+        button(actions, 'Import to library…', () => chooseFile(runtime.SESSION_FILE_MAX_BYTES, value => {
+            const archive = validateSessionFile(value), result = keepSessionInLibrary(archive);
+            libraryRoom = archive.room.toLowerCase();
+            render('library'); tell(result.added ? 'Recording imported into the library.' : result.updated ? 'Library recording updated from the file.' : 'An equal or fuller recording is already in the library.');
+        }), 'tools-import-session');
+        button(actions, 'Refresh', () => render('library'), 'tools-refresh-library').title = 'Refresh list from this browser';
+        node(content, 'p', state.count + ' / ' + LIBRARY_MAX_COUNT + ' recordings · ' + (state.bytes / 1024 / 1024).toFixed(2) + ' / ' + LIBRARY_MAX_BYTES / 1024 / 1024 + ' MB · Kept until you delete them.', 'tools-muted');
         const folders = new Map();
         for (const entry of state.entries) {
             const room = entry.archive.room.toLowerCase();
@@ -137,72 +176,61 @@ export function openSessionTools(focusTarget) {
             folders.get(room).push(entry);
         }
         if (libraryRoom && !folders.has(libraryRoom)) libraryRoom = null;
-        node(content, 'p', state.count + ' / ' + LIBRARY_MAX_COUNT + ' recordings · ' + (state.bytes / 1024 / 1024).toFixed(2) + ' / ' + LIBRARY_MAX_BYTES / 1024 / 1024 + ' MB. Kept until you delete them; nothing is removed automatically.', 'tools-muted');
-        const actions = node(content, 'div', undefined, 'tools-actions');
-        button(actions, 'Keep current / replayed session in library', () => {
-            const archive = captureSessionFile();
-            const result = keepSessionInLibrary(archive);
-            currentArchive = archive; libraryRoom = archive.room.toLowerCase();
-            render('library'); tell(result.added ? 'Recording kept in the library.' : result.updated ? 'Library recording updated.' : 'An equal or fuller recording is already in the library.');
-        }, 'tools-keep').disabled = !currentArchive;
-        button(actions, 'Import session file…', () => chooseFile(runtime.SESSION_FILE_MAX_BYTES, value => {
-            const archive = validateSessionFile(value), result = keepSessionInLibrary(archive);
-            libraryRoom = archive.room.toLowerCase();
-            render('library'); tell(result.added ? 'Recording imported into the library.' : result.updated ? 'Library recording updated from the file.' : 'An equal or fuller recording is already in the library.');
-        }), 'tools-import-session');
-        button(actions, 'Refresh list', () => render('library'));
-        const searchLabel = node(content, 'label', 'Find a recording '), search = node(searchLabel, 'input');
-        search.type = 'search'; search.id = 'tools-library-search'; search.placeholder = 'Model or title — all models';
-        search.title = 'Search all recordings, including those in other model folders.';
+        const searchLabel = node(content, 'label', 'Find ', 'tools-search'), search = node(searchLabel, 'input');
+        search.type = 'search'; search.id = 'tools-library-search'; search.placeholder = 'Model or recording title';
+        search.title = 'Search all recordings, including other model folders.';
         const list = node(content, 'div'); list.id = 'tools-library-list';
         let shown = 50;
         function rows() {
             list.replaceChildren();
-            const query = search.value.trim().toLowerCase();
-            const browsingFolders = !query && !libraryRoom;
+            const query = search.value.trim().toLowerCase(), browsingFolders = !query && !libraryRoom;
             const visible = query ? state.entries.filter(entry => (entry.title + ' ' + entry.archive.room).toLowerCase().includes(query)) :
                 libraryRoom ? folders.get(libraryRoom) : [...folders.keys()].sort((a, b) => a.localeCompare(b));
             const heading = node(list, 'div', undefined, 'tools-actions');
-            if (!browsingFolders) button(heading, 'All models', () => {
+            if (!browsingFolders) button(heading, '‹ All models', () => {
                 const previous = libraryRoom; libraryRoom = null; search.value = ''; shown = 50; rows();
                 (document.getElementById('tools-folder-' + previous) || search).focus();
             }, 'tools-library-all-models');
             node(heading, 'h3', query ? 'Search results — all models' : libraryRoom ? 'Folder: ' + libraryRoom : 'Model folders');
-            if (browsingFolders) node(list, 'p', folders.size + ' model folder(s). Open a folder to see its recordings, newest first.', 'tools-muted');
-            if (!visible.length) node(list, 'p', state.entries.length ? 'No matching recordings.' : 'No recordings yet. Keep a session or import a session file.');
+            if (!visible.length) node(list, 'p', state.entries.length ? 'No matching recordings.' : 'Your library is empty. Keep a recording above or import a session file.', 'tools-muted');
             if (browsingFolders) for (const room of visible.slice(0, shown)) {
                 const entries = folders.get(room), row = node(list, 'div', undefined, 'tools-folder');
-                row.style.cssText = 'border-top:1px solid var(--panel-divider);padding:12px 0;overflow-wrap:anywhere;';
-                const open = button(row, '📁 ' + room, () => {
-                    libraryRoom = room; shown = 50; rows();
-                    document.getElementById('tools-library-all-models').focus();
+                const open = button(row, '', () => {
+                    libraryRoom = room; shown = 50; rows(); document.getElementById('tools-library-all-models').focus();
                 }, 'tools-folder-' + room);
                 open.setAttribute('aria-label', 'Open recordings for ' + room);
-                node(row, 'div', entries.length + (entries.length === 1 ? ' recording' : ' recordings') + ' · Latest: ' +
-                    new Date(entries[0].archive.session.history.timestamps[0]).toLocaleString(), 'tools-muted');
+                node(open, 'span', '▱  ' + room, 'tools-folder-name');
+                node(open, 'span', entries.length + (entries.length === 1 ? ' recording' : ' recordings') + ' · Latest ' +
+                    new Date(entries[0].archive.session.history.timestamps[0]).toLocaleDateString(), 'tools-folder-meta');
             }
             else for (const entry of visible.slice(0, shown)) {
-                const row = node(list, 'div', undefined, 'tools-row'); row.dataset.libraryId = entry.id;
+                const row = node(list, 'article', undefined, 'tools-row'); row.dataset.libraryId = entry.id;
                 node(row, 'strong', entry.title || entry.archive.room);
-                node(row, 'div', entry.archive.room + ' · ' + new Date(entry.archive.session.history.timestamps[0]).toLocaleString() + ' · ' + entry.archive.session.history.timestamps.length + ' samples', 'tools-muted');
+                node(row, 'div', new Date(entry.archive.session.history.timestamps[0]).toLocaleString() + ' · ' + entry.archive.session.history.timestamps.length + ' samples', 'tools-muted');
+                if (query) node(row, 'div', entry.archive.room, 'tools-muted');
                 const actions = node(row, 'div', undefined, 'tools-actions');
-                button(actions, 'Replay', () => { openSessionReplay(entry.archive); close(); });
+                button(actions, 'Replay', () => { openSessionReplay(entry.archive); observedSignature = ''; refreshCurrent(); tell('Replaying ' + (entry.title || entry.archive.room) + '.'); }).className = 'tools-primary';
                 button(actions, 'Summary', () => { selectedA = entry.id; render('summary'); });
-                button(actions, 'Download', () => downloadDataFile(entry.archive, entry.archive.room + '-session.tierscope.json'));
-                button(actions, 'Rename', () => {
+                const more = node(actions, 'details', undefined, 'tools-more'); node(more, 'summary', 'More…');
+                const extras = node(more, 'div', undefined, 'tools-more-actions');
+                button(extras, 'Save file', () => downloadDataFile(entry.archive, archiveName(entry.archive)));
+                button(extras, 'TXT', () => downloadRecording(entry.archive, 'txt'));
+                button(extras, 'CSV', () => downloadRecording(entry.archive, 'csv'));
+                button(extras, 'GIF', () => generateGifFromHistory(entry.archive));
+                button(extras, 'Add to all-time highs', () => addArchiveHighs(entry.archive));
+                button(extras, 'Rename', () => {
                     const title = window.prompt('Recording title (up to 80 characters):', entry.title);
                     if (title !== null) { renameLibrarySession(entry.id, title); render('library'); }
                 });
-                button(actions, 'Delete', () => {
+                button(extras, 'Delete', () => {
                     if (!confirm('Delete this library recording: ' + (entry.title || entry.archive.room) + '?\n\nLive tracking, ATH and downloaded files are unchanged.')) return;
                     removeLibrarySession(entry.id); render('library'); tell('Library recording deleted.');
-                });
+                }).className = 'tools-danger';
             }
             if (visible.length > 50) node(list, 'p', 'Showing ' + Math.min(shown, visible.length) + ' of ' + visible.length +
                 (browsingFolders ? ' model folders.' : ' matching recordings.'), 'tools-muted');
             if (shown < visible.length) button(list, 'Show ' + Math.min(50, visible.length - shown) + ' more', () => {
-                shown += 50; rows();
-                (document.getElementById('tools-library-more') || search).focus();
+                shown += 50; rows(); (document.getElementById('tools-library-more') || search).focus();
             }, 'tools-library-more');
         }
         search.oninput = () => { shown = 50; rows(); }; rows();
@@ -320,7 +348,7 @@ export function openSessionTools(focusTarget) {
         const canvas = node(content, 'canvas'); canvas.id = 'tools-analysis-chart'; canvas.setAttribute('role', 'img');
         canvas.setAttribute('aria-label', ANALYSIS_METRICS[metric] + ' by minutes since the first retained sample. ' + legend.textContent + '. Statistics are in the table below.');
         function draw() {
-            const width = Math.max(260, canvas.clientWidth), height = 240, ratio = window.devicePixelRatio || 1;
+            const width = Math.max(260, canvas.clientWidth), height = 200, ratio = window.devicePixelRatio || 1;
             canvas.width = width * ratio; canvas.height = height * ratio;
             const ctx = canvas.getContext('2d'); ctx.scale(ratio, ratio);
             const series = archives.map(archive => analysisSeries(archive, metric));
@@ -351,7 +379,7 @@ export function openSessionTools(focusTarget) {
                 isolated.forEach(([x, y]) => { ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2); ctx.fill(); });
             });
         }
-        draw();
+        chartDraw = draw; draw();
         if (window.ResizeObserver) { chartObserver = new window.ResizeObserver(draw); chartObserver.observe(canvas); }
     }
     function renderAnalysis(comparing) {
@@ -364,9 +392,10 @@ export function openSessionTools(focusTarget) {
             summaryTable([result.a, result.b], ['A', 'B']);
         } else {
             const summary = summarizeSession(a.archive, metric, threshold);
+            chart([a.archive], [a.archive.room], summary.spanMs);
             audienceOverview(a.archive); thresholdTable(a.archive);
-            node(content, 'h3', ANALYSIS_METRICS[metric] + ' — chart and details');
-            chart([a.archive], [a.archive.room], summary.spanMs); summaryTable([summary], [a.archive.room], false);
+            node(content, 'h3', ANALYSIS_METRICS[metric] + ' — details');
+            summaryTable([summary], [a.archive.room], false);
         }
     }
     function checkbox(parent, id, text, checked = true) {
@@ -407,7 +436,7 @@ export function openSessionTools(focusTarget) {
     function render(next) {
         const focusedId = dialog.contains(document.activeElement) ? document.activeElement.id : '';
         if (next !== tab) library = null;
-        tab = next; fileRequest++;
+        tab = next; fileRequest++; chartDraw = null;
         if (chartObserver) { chartObserver.disconnect(); chartObserver = null; }
         content.replaceChildren(); message.textContent = '';
         dialog.querySelectorAll('[data-tools-tab]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.toolsTab === tab)));
@@ -420,16 +449,37 @@ export function openSessionTools(focusTarget) {
         }
     }
     function close() {
-        fileRequest++;
+        fileRequest++; refreshSessionTools = null;
+        cancelGifExport();
+        if (detachDock) detachDock();
+        document.removeEventListener('keydown', escape);
+        for (const id of ['btn-control-library', 'btn-playback-library']) {
+            const button = document.getElementById(id); if (button) button.setAttribute('aria-expanded', 'false');
+        }
         if (chartObserver) chartObserver.disconnect();
         if (dialog.open) dialog.close(); dialog.remove();
         if (closeSessionTools === close) closeSessionTools = null;
-        if (focusBefore && focusBefore.isConnected) focusBefore.focus();
+        let focus = focusBefore;
+        if (!focus || !focus.isConnected || !focus.getClientRects().length || window.getComputedStyle(focus).visibility === 'hidden') {
+            focus = document.getElementById(isPlaybackCurrent(runtime.playback) ? 'btn-playback-library' : 'btn-control-library');
+        }
+        if (focus) focus.focus();
+    }
+    function escape(event) {
+        if (event.key === 'Escape' && !event.defaultPrevented) { event.preventDefault(); close(); }
     }
     closeSessionTools = close;
+    refreshSessionTools = refreshCurrent;
+    document.addEventListener('keydown', escape);
+    dialog.querySelector('#btn-cancel-gif').onclick = cancelGifExport;
+    for (const id of ['btn-control-library', 'btn-playback-library']) {
+        const button = document.getElementById(id); if (button) button.setAttribute('aria-expanded', 'true');
+    }
     dialog.querySelector('#tools-close').onclick = close;
     dialog.addEventListener('cancel', event => { event.preventDefault(); close(); });
     dialog.addEventListener('close', () => { if (dialog.isConnected) close(); });
     dialog.querySelectorAll('[data-tools-tab]').forEach(button => { button.onclick = () => render(button.dataset.toolsTab); });
-    dialog.showModal(); render('library');
+    dialog.show();
+    detachDock = attachLibraryDock(document.getElementById('tracker-container'), dialog, () => { if (chartDraw) chartDraw(); });
+    render('library'); dialog.querySelector('#tools-close').focus();
 }

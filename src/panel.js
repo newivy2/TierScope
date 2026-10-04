@@ -1,11 +1,10 @@
 import { hideChartTooltip } from './chart-view.js';
 import { bindPanelOptions } from './files.js';
-import { cancelGifExport, generateGifFromHistory } from './gif.js';
+import { cancelGifExport } from './gif.js';
 import { bindRowControls, cleanupDragListeners, collapseMarkerHtml, collapsedTrayHtml, restoreStandardSize, setupDraggable, setupResizable, setupResizeHandler, toggleView } from './layout.js';
 import { adjustTimer, resetAllTracking, resetCountdown, startCountdown, stopCountdown, stopTracking, toggleAutoRefresh, updateCountdownDisplay, updateStopControls } from './lifecycle.js';
 import { updateDisplay } from './presentation.js';
 import { bindPlaybackControls, leavePlayback, updateReplayAvailability } from './replay.js';
-import { downloadTrackingCSV, downloadTrackingReport } from './reports.js';
 import { runtime } from './runtime.js';
 import { applyPanelTheme, updateContainerOpacity } from './theme.js';
 import { setTrendComparisonMode, toggleAutoTrendEscalation, updateAutoTrendButton, updateTrendPresetButtons } from './trends.js';
@@ -49,19 +48,17 @@ export function createPanel() {
                 '<span id="mini-room-change" style="font-size:8px;margin:0 3px;display:none;"></span>' +
                 '<div style="display:flex;align-items:center;gap:3px;flex-shrink:0;">' +
                     '<button type="button" id="btn-high-mode" aria-pressed="false" aria-label="Session highs. Switch to all-time highs" style="display:none;min-width:29px;background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;">SH</button>' +
-                    '<button type="button" id="btn-panel-options" aria-label="Chart window and session files" aria-expanded="false" aria-controls="panel-options" style="display:none;background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;white-space:nowrap;">Full ▾</button>' +
+                    '<button type="button" id="btn-panel-options" aria-label="Chart window and highs" aria-expanded="false" aria-controls="panel-options" style="display:none;background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;white-space:nowrap;">Full ▾</button>' +
                     '<button type="button" id="btn-standard-size" title="Restore standard panel size (100%)" aria-label="Restore standard panel size" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;">100%</button>' +
                     '<button id="btn-toggle" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:9px;padding:1px 4px;flex-shrink:0;">+</button>' +
                 '</div>' +
             '</div>' +
 
-            '<div id="panel-options" role="group" aria-label="Chart and session options" style="display:none;position:absolute;right:5px;top:29px;width:190px;max-width:calc(100% - 10px);box-sizing:border-box;z-index:5;padding:8px;background:var(--panel-solid);color:var(--panel-text);border:1px solid #ff69b4;border-radius:4px;font-size:11px;box-shadow:0 3px 12px #0008;">' +
-                '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;"><strong>Charts &amp; sessions</strong><button type="button" id="panel-options-close" aria-label="Close chart and session options" style="background:var(--panel-button);color:var(--panel-text);border:0;border-radius:3px;cursor:pointer;">×</button></div>' +
+            '<div id="panel-options" role="group" aria-label="Chart and high options" style="display:none;position:absolute;right:5px;top:29px;width:190px;max-width:calc(100% - 10px);box-sizing:border-box;z-index:5;padding:8px;background:var(--panel-solid);color:var(--panel-text);border:1px solid #ff69b4;border-radius:4px;font-size:11px;box-shadow:0 3px 12px #0008;">' +
+                '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;"><strong>Charts &amp; highs</strong><button type="button" id="panel-options-close" aria-label="Close chart and high options" style="background:var(--panel-button);color:var(--panel-text);border:0;border-radius:3px;cursor:pointer;">×</button></div>' +
                 '<label for="chart-window-select">Chart window</label>' +
                 '<select id="chart-window-select" style="display:block;width:100%;margin:4px 0 6px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);font-size:11px;"><option value="full">Full history</option><option value="fourHours">Last 4 hours</option><option value="twoHours">Last 2 hours</option><option value="hour">Last hour</option><option value="halfHour">Last 30 minutes</option><option value="quarter">Last 15 minutes</option></select>' +
                 '<div style="font-size:10px;color:var(--panel-muted);line-height:1.4;margin-bottom:8px;">Charts only. Downloads keep the full retained history.</div>' +
-                '<button type="button" id="btn-save-session" style="display:block;width:100%;margin:4px 0;padding:4px;background:#4169E1;color:#fff;border:0;border-radius:3px;cursor:pointer;">Save session file</button>' +
-                '<button type="button" id="btn-open-session" style="display:block;width:100%;margin:4px 0;padding:4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:3px;cursor:pointer;">Open session file…</button>' +
                 '<input type="file" id="session-file-input" accept=".json,application/json" style="display:none;">' +
                 '<div id="session-file-info" style="display:none;margin-top:7px;font-size:10px;line-height:1.4;white-space:pre-line;overflow-wrap:anywhere;color:var(--panel-secondary);"></div>' +
                 '<div style="border-top:1px solid var(--panel-divider);margin-top:8px;padding-top:6px;"><strong>All-time highs</strong>' +
@@ -182,20 +179,15 @@ export function createPanel() {
                 '</div>' +
                 '</div>' +
                 '<div id="playback-controls" style="display:none;position:absolute;top:5px;left:0;right:0;bottom:0;padding:0 2px;box-sizing:border-box;grid-template-rows:minmax(14px,1fr) 14px 12px;gap:2px;" aria-label="Playback controls">' +
-                    '<div id="gif-export-controls" style="display:none;position:absolute;inset:0;z-index:1;align-items:center;justify-content:center;gap:5px;background:var(--panel-solid);border-radius:3px;padding:3px;">' +
-                        '<span id="gif-export-status" role="status" style="font-size:8px;color:var(--panel-secondary);overflow-wrap:anywhere;"></span>' +
-                        '<button id="btn-cancel-gif" hidden style="font-size:8px;cursor:pointer;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;">Cancel</button>' +
-                    '</div>' +
                     '<div style="display:flex;flex-direction:column;justify-content:center;gap:4px;min-width:0;">' +
                         '<div id="playback-file-controls" style="display:none;align-items:center;gap:4px;min-width:0;">' +
                             '<div id="playback-room" style="display:none;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;line-height:12px;font-weight:bold;color:var(--panel-text);"></div>' +
-                            '<button type="button" id="btn-playback-add-all-time" aria-live="polite" title="Add this file\'s highs to the room named beside this button" style="display:none;flex-shrink:0;min-width:88px;font-size:8px;line-height:12px;margin:0;padding:0 4px;white-space:nowrap;background:#4169E1;color:#fff;border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Add to all-time highs</button>' +
                         '</div>' +
                     '<div style="display:flex;align-items:center;justify-content:space-between;gap:3px;">' +
                         '<strong id="playback-label" style="font-size:9px;color:var(--panel-warning);">PLAYBACK</strong>' +
                         '<button id="playback-play" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#4169E1;color:white;border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Pause</button>' +
                         '<select id="playback-speed" aria-label="Playback speed" style="font-size:8px;height:15px;margin:0;padding:0;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select>' +
-                        '<button id="btn-export-gif" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#ff69b4;color:white;border:1px solid #ff69b4;border-radius:2px;cursor:pointer;" title="Download this Replay as a ' + runtime.GIF_WIDTH + ' × ' + runtime.GIF_HEIGHT + ' GIF">GIF</button>' +
+                        '<button type="button" id="btn-playback-library" aria-label="Open session library" aria-expanded="false" aria-controls="tierscope-session-tools" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-accent);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Library</button>' +
                         '<button id="playback-return" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Return to Live</button>' +
                     '</div>' +
                     '</div>' +
@@ -203,13 +195,8 @@ export function createPanel() {
                     '<button type="button" id="playback-previous" title="Previous recorded sample (pauses Replay)" aria-label="Previous recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">|&#9664;</button>' +
                     '<input id="playback-scrubber" type="range" min="0" max="0" value="0" step="any" aria-label="Playback timeline" style="flex:1;min-width:0;width:100%;height:12px;margin:0;accent-color:var(--panel-warning);cursor:pointer;">' +
                     '<button type="button" id="playback-next" title="Next recorded sample (pauses Replay)" aria-label="Next recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">&#9654;|</button></div>' +
-                    '<div id="playback-file-actions" style="display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:4px;min-width:0;">' +
-                        '<button type="button" id="btn-playback-keep-library" aria-live="polite" title="Keep the full replayed recording in this browser\'s library" style="grid-column:1;justify-self:start;white-space:nowrap;font-size:8px;line-height:10px;height:12px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Keep in library</button>' +
-                        '<div id="playback-position" style="grid-column:2;font-size:9px;line-height:12px;text-align:center;white-space:nowrap;color:var(--panel-secondary);font-family:monospace;">00:00:00 / 00:00:00</div>' +
-                        '<div style="grid-column:3;justify-self:end;display:flex;gap:2px;">' +
-                            '<button type="button" id="btn-playback-save-session" aria-label="Save replay session file" title="Save the full session being replayed" style="font-size:8px;line-height:10px;height:12px;box-sizing:border-box;margin:0;padding:0 4px;background:#4169E1;color:#fff;border:1px solid #4169E1;border-radius:2px;cursor:pointer;">Save</button>' +
-                            '<button type="button" id="btn-playback-open-session" aria-label="Open session file in replay" title="Open another saved session in FILE REPLAY" style="font-size:8px;line-height:10px;height:12px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Open</button>' +
-                        '</div>' +
+                    '<div id="playback-file-actions" style="display:flex;justify-content:center;min-width:0;">' +
+                        '<div id="playback-position" style="font-size:9px;line-height:12px;text-align:center;white-space:nowrap;color:var(--panel-secondary);font-family:monospace;">00:00:00 / 00:00:00</div>' +
                     '</div>' +
                 '</div>' +
             '</div>' +
@@ -219,34 +206,16 @@ export function createPanel() {
                     '<span style="font-size:9px;font-weight:bold;color:#4169E1;">🎛️ CONTROLS</span>' +
                     '<div id="control-session-buttons" style="display:flex;gap:2px;align-items:center;">' +
                     '<button id="btn-replay" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-warning);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;" title="Replay recorded history">Replay</button>' +
-                    '<button type="button" id="btn-control-save-session" aria-label="Save session file" title="Save this session as a file to replay later" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:#4169E1;color:white;border:1px solid #4169E1;border-radius:2px;cursor:pointer;">Save</button>' +
-                    '<button type="button" id="btn-control-open-session" aria-label="Open session file" title="Open a saved session in FILE REPLAY" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Open</button>' +
-                    '<button type="button" id="btn-control-library" aria-label="Open session library" title="Open model folders, session summaries, comparisons and backups" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Library</button>' +
+                    '<button type="button" id="btn-control-library" aria-expanded="false" aria-controls="tierscope-session-tools" aria-label="Open session library" title="Open model folders, session summaries, comparisons and backups" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Library</button>' +
                     '</div>' +
                     '<span style="font-size:11px;color:var(--panel-positive);font-weight:bold;" id="control-next-scan">Next: 60s</span>' +
                 '</div>' +
                 '<div id="control-action-row" style="display:grid;grid-template-columns:minmax(max-content,1fr) auto minmax(0,1fr);align-items:center;gap:3px;">' +
                     '<span style="font-size:12px;color:var(--panel-warning);font-family:monospace;font-weight:bold;flex-shrink:0;" id="control-tracking-timer">00:00:00</span>' +
                     '<div id="control-action-buttons" style="display:flex;gap:2px;align-items:center;">' +
-                        '<button id="btn-download-report" style="background:#4169E1;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Download tracking report">' +
-                            '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
-                                '<line x1="12" y1="4" x2="12" y2="16"/>' +
-                                '<polyline points="6 10 12 16 18 10"/>' +
-                                '<line x1="4" y1="20" x2="20" y2="20"/>' +
-                            '</svg>' +
-                            'TXT' +
-                        '</button>' +
-                        '<button id="btn-download-csv" style="background:#4169E1;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Download all retained history as CSV">' +
-                            '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
-                                '<line x1="12" y1="4" x2="12" y2="16"/>' +
-                                '<polyline points="6 10 12 16 18 10"/>' +
-                                '<line x1="4" y1="20" x2="20" y2="20"/>' +
-                            '</svg>' +
-                            'CSV' +
-                        '</button>' +
-                        '<button id="btn-control-auto" style="background:#32CD32;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 4px;min-width:24px;" title="Auto-Refresh ON">⏸</button>' +
-                        '<button type="button" id="btn-control-stop" aria-label="Stop this session" title="Stop this session and freeze its history and elapsed time" style="background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;white-space:nowrap;">■ Stop</button>' +
-                        '<button id="btn-main-reset" style="background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Reset all tracking data">' +
+                        '<button id="btn-control-auto" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#32CD32;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 4px;min-width:24px;" title="Auto-Refresh ON">⏸</button>' +
+                        '<button type="button" id="btn-control-stop" aria-label="Stop this session" title="Stop this session and freeze its history and elapsed time" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;white-space:nowrap;">■ Stop</button>' +
+                        '<button id="btn-main-reset" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Reset all tracking data">' +
                             '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
                                 '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12"/>' +
                                 '<path d="M3 3v9h9"/>' +
@@ -294,15 +263,10 @@ export function createPanel() {
         standardSize.onmousedown = function(event) { event.stopPropagation(); };
         standardSize.onclick = function(event) { event.stopPropagation(); restoreStandardSize(); };
     }
-    var btnCSV = document.getElementById('btn-download-csv');
-    if (btnCSV) btnCSV.onclick = downloadTrackingCSV;
-    var btnDownload = document.getElementById('btn-download-report');
     var btnMainReset = document.getElementById('btn-main-reset');
     var btnControlAuto = document.getElementById('btn-control-auto');
-    var btnExportGif = document.getElementById('btn-export-gif');
     var opacitySlider = document.getElementById('opacity-slider');
 
-    if (btnDownload) btnDownload.addEventListener('click', downloadTrackingReport);
     if (btnMainReset) btnMainReset.addEventListener('click', resetAllTracking);
     if (btnControlAuto) btnControlAuto.addEventListener('click', toggleAutoRefresh);
     document.getElementById('btn-control-stop').onclick = function() {
@@ -310,8 +274,6 @@ export function createPanel() {
         if (!confirm('Stop this session?\n\nHistory will remain available for Replay and downloads, but this session cannot be resumed. Starting again begins a new session.')) return;
         stopTracking('manual');
     };
-    if (btnExportGif) btnExportGif.addEventListener('click', generateGifFromHistory);
-    document.getElementById('btn-cancel-gif').onclick = cancelGifExport;
     updateContainerOpacity(runtime.panelBackgroundPercent);
     if (opacitySlider) {
         opacitySlider.addEventListener('input', function() {

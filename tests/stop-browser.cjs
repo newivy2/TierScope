@@ -30,12 +30,12 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   await page.waitForFunction(()=>ViewerTracker.__stop.state().history.length===1);await page.waitForTimeout(350);
   const panel=page.locator('#tracker-container'),before=await panel.boundingBox();
   const controls=await page.locator('#control-field').boundingBox();
-  for(const id of ['btn-replay','btn-control-save-session','btn-control-open-session','btn-control-stop','control-next-scan']){
+  for(const id of ['btn-replay','btn-control-library','btn-control-stop','control-next-scan']){
    const r=await page.locator('#'+id).boundingBox();assert(r.x>=controls.x&&r.x+r.width<=controls.x+controls.width);
   }
-  for(const row of [['btn-replay','btn-control-save-session','btn-control-open-session'],['btn-control-auto','btn-control-stop','btn-main-reset']]){
+  for(const row of [['btn-replay','btn-control-library'],['btn-control-auto','btn-control-stop','btn-main-reset']]){
    const boxes=await Promise.all(row.map(id=>page.locator('#'+id).boundingBox()));
-   boxes.slice(1).forEach((r,i)=>{assert(r.x>=boxes[i].x+boxes[i].width,'buttons do not overlap');assert(Math.abs(r.y-boxes[i].y)<1,'buttons stay on one row');});
+   boxes.slice(1).forEach((r,i)=>{assert(r.x>=boxes[i].x+boxes[i].width,'buttons do not overlap');assert(Math.abs(r.y-boxes[i].y)<1,'buttons stay on one row: '+JSON.stringify({row,boxes}));});
   }
   const frozen=await page.locator('#spark-light-blue').evaluate(c=>c.toDataURL());
   const running=await page.evaluate(()=>ViewerTracker.__stop.state());
@@ -54,9 +54,9 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   await page.evaluate(()=>ViewerTracker.__stop.tick());await page.evaluate(()=>ViewerTracker.__stop.scan());await page.evaluate(()=>ViewerTracker.__stop.draw());
   assert.equal(requests,n);assert.deepEqual(await page.evaluate(()=>ViewerTracker.__stop.state()),stopped);
   assert.equal(await page.locator('#spark-light-blue').evaluate(c=>c.toDataURL()),frozen,'stopped chart keeps exactly the same pixels');
-  await page.click('#btn-replay');await page.evaluate(()=>ViewerTracker.__stop.pauseReplay());assert(await page.locator('#btn-export-gif').isVisible());await page.click('#playback-return');
+  await page.click('#btn-replay');await page.evaluate(()=>ViewerTracker.__stop.pauseReplay());await page.click('#btn-playback-library');assert(await page.locator('#btn-export-gif').isVisible());await page.click('#playback-return');
   assert.match(await page.locator('#header-text').textContent(),/^STOPPED:/);
-  const downloadPromise=page.waitForEvent('download');await page.click('#btn-download-csv');const download=await downloadPromise;assert(download.suggestedFilename().endsWith('.csv'));
+  const downloadPromise=page.waitForEvent('download');await page.click('#tools-export-csv');const download=await downloadPromise;assert(download.suggestedFilename().endsWith('.csv'));
   await page.reload();await page.addScriptTag({content:instrument(source)});await page.evaluate(()=>ViewerTracker.__stop.init());
   assert.equal(requests,n);assert((await page.evaluate(()=>ViewerTracker.__stop.state())).stopped);
   await page.getByRole('button',{name:'Start a new session'}).click();
@@ -79,7 +79,7 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   assert.deepEqual(await panel.boundingBox(),beforeAbsencePause,'automatic pause adds no panel height');
   if(process.env.TIERSCOPE_STOP_SHOT)await panel.screenshot({path:process.env.TIERSCOPE_STOP_SHOT});
   // Return checks must continue behind FILE REPLAY without changing its frame.
-  const exported=page.waitForEvent('download');await page.getByRole('button',{name:'Save session file',exact:true}).click();
+  await page.click('#btn-control-library');const exported=page.waitForEvent('download');await page.click('#tools-save-session');
   const archive=JSON.parse(fs.readFileSync(await(await exported).path(),'utf8'));archive.room='different_archive';
   await page.locator('#session-file-input').setInputFiles({name:'absence.tierscope.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(archive))});
   await page.waitForFunction(()=>document.getElementById('playback-room').textContent==='Room: different_archive');

@@ -1,3 +1,4 @@
+import { sessionAnonymousCount } from './live-session.js';
 import { runtime } from './runtime.js';
 
 export function getComparisonCounts() {
@@ -115,4 +116,8 @@ export function getEffectiveScanIntervalSeconds() {
 export function stopDescription() {
     return runtime.stopReason === 'absence' ? (runtime.absencePausedAt !== null ?
         'Stopped after 3 hours auto-paused for broadcaster absence' : 'Stopped after 3 hours of broadcaster absence') : 'Session stopped';
+}
+
+export function getAnonymousCount() {
+    return sessionAnonymousCount();
 }

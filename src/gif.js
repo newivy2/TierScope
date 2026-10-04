@@ -1,8 +1,9 @@
 import { GifWriter } from 'omggif';
 import { buildChartPlot } from './chart-view.js';
 import { getHistoryBreaks } from './history-data.js';
-import { isPlaybackCurrent } from './playback-data.js';
+import { createPlaybackSnapshot, isPlaybackCurrent } from './playback-data.js';
 import { runtime } from './runtime.js';
+import { validateSessionFile } from './session-file-format.js';
 import { formatElapsedTime, getModelName, log } from './utils.js';
 
 export function createGifSurface(palette) {
@@ -152,7 +153,7 @@ export function cancelGifExport() {
     if (runtime.gifExportJob) runtime.gifExportJob.cancelled = true;
 }
 
-export async function generateGifFromHistory() {
+export async function generateGifFromHistory(recording) {
     if (runtime.gifExportJob) return;
     var button = document.getElementById('btn-export-gif');
     var status = document.getElementById('gif-export-status');
@@ -172,9 +173,10 @@ export async function generateGifFromHistory() {
     try {
         // Playback owns a frozen snapshot. Live acquisition can keep appending
         // samples without changing the range or counts of this export.
-        if (!isPlaybackCurrent(runtime.playback)) throw new Error('Open Replay before downloading a GIF.');
-        var model = runtime.playback.archive ? runtime.playback.archive.room : getModelName();
-        var snapshot = runtime.playback.snapshot;
+        if (!recording && !isPlaybackCurrent(runtime.playback)) throw new Error('Open Replay before downloading a GIF.');
+        var archive = recording ? validateSessionFile(recording) : runtime.playback.archive;
+        var model = archive ? archive.room : getModelName();
+        var snapshot = recording ? createPlaybackSnapshot(archive.session.history) : runtime.playback.snapshot;
         if (!snapshot.timeline.length) throw new Error('No recorded history to export yet.');
         var tiers = Object.keys(runtime.TIERS);
         var palette = [0x14141e, 0xffffff].concat(tiers.map(function(tier) {
@@ -227,7 +229,7 @@ export async function generateGifFromHistory() {
         log('GIF export: ' + error.message);
         if (!job.cancelled && location.href === job.url && runtime.initGuard === job.generation) alert(error.message);
     } finally {
-        if (button) button.disabled = false;
+        if (button) button.disabled = button.dataset.currentAvailable === 'false';
         if (cancel) cancel.hidden = true;
         if (progress) progress.style.display = 'none';
         if (button && status) button.title = status.textContent;
