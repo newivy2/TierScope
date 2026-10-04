@@ -4,9 +4,16 @@ import { toolNode as node, toolButton as button } from './tools-view-helpers.js'
 // Receives snapshots of analysis values, not live/playback owners or archives.
 // Cache the chart bitmap between cursor moves; long recordings are only drawn
 // again for zoom, visibility, size or theme changes.
-export function renderAnalysisChart(parent, series, labels, axisMs, metricLabel) {
+export function renderAnalysisChart(parent, series, labels, axisMs, metricLabel, savedState = null) {
     let start = 0, end = axisMs, cursor = 0, pinned = false, drag = null, disposed = false;
     const hidden = new Set(), controls = node(parent, 'div', undefined, 'tools-actions');
+    if (savedState) {
+        ({start, end, cursor, pinned} = savedState);
+        savedState.hidden.forEach(index => { if (index >= 0 && index < series.length) hidden.add(index); });
+        if (hidden.size === series.length) hidden.delete(0);
+        fitWindow(savedState.axisMs);
+    }
+    let plotCache = null;
     const number = value => value.toLocaleString(undefined, {maximumFractionDigits: 2});
     const elapsed = ms => number(ms / 60000) + 'm';
     const zoomIn = button(controls, 'Zoom +', () => zoom(0.5), 'tools-chart-zoom-in');
@@ -23,7 +30,7 @@ export function renderAnalysisChart(parent, series, labels, axisMs, metricLabel)
     const colorIndices = series.map((s, i) => newestFirst.indexOf(i));
     const newest = newestFirst[0];
     const legendLabels = labels.map((label, i) => {
-        const control = node(legend, 'label'), check = node(control, 'input'); check.type = 'checkbox'; check.checked = true; check.dataset.analysisSeries = String(i);
+        const control = node(legend, 'label'), check = node(control, 'input'); check.type = 'checkbox'; check.checked = !hidden.has(i); check.dataset.analysisSeries = String(i);
         const swatch = node(control, 'span', '', 'tools-series-swatch'); swatch.setAttribute('aria-hidden', 'true');
         swatch.style.borderTopStyle = i === newest ? 'solid' : 'dashed';
         node(control, 'span', String.fromCharCode(65 + i) + (series.length > 1 && i === newest ? ' · Latest' : '') + ' · ' + label);
@@ -87,7 +94,11 @@ export function renderAnalysisChart(parent, series, labels, axisMs, metricLabel)
         const ctx = bitmap.getContext('2d'); ctx.scale(ratio, ratio);
         const style = window.getComputedStyle(parent), isDark = parent.closest('[data-theme]')?.dataset.theme !== 'bright';
         const colors = isDark ? dark : bright;
-        const plots = series.map((s, j) => hidden.has(j) ? null : buildAnalysisPlot(s, start, end, right - left));
+        if (!plotCache || plotCache.series !== series || plotCache.start !== start || plotCache.end !== end || plotCache.width !== right - left) {
+            plotCache = {series, start, end, width: right - left, plots: new Array(series.length)};
+        }
+        const plots = series.map((s, j) => hidden.has(j) ? null :
+            (plotCache.plots[j] ||= buildAnalysisPlot(s, start, end, right - left)));
         const maximum = Math.max(1, ...plots.map(plot => plot ? plot.maximum : 1));
         ctx.strokeStyle = style.getPropertyValue('--panel-divider').trim(); ctx.fillStyle = style.getPropertyValue('--panel-muted').trim(); ctx.font = '10px Arial';
         for (let step = 0; step <= 2; step++) {
@@ -148,6 +159,24 @@ export function renderAnalysisChart(parent, series, labels, axisMs, metricLabel)
         }
         pinned=true;inspect();
     };
+    function fitWindow(previousAxis) {
+        if (start === 0 && end === previousAxis) { start = 0; end = axisMs; }
+        else {
+            const span = Math.min(Math.max(0, end - start), axisMs);
+            start = Math.max(0, Math.min(start, axisMs - span)); end = start + span;
+        }
+        cursor = Math.max(start, Math.min(end, cursor));
+    }
     draw();
-    return {canvas,draw,dispose(){disposed=true;drag=null;bitmap.width=bitmap.height=0;}};
+    return {canvas, draw,
+        capture: () => ({start, end, cursor, pinned, axisMs, hidden: [...hidden]}),
+        update(nextSeries, nextAxis, nextMetricLabel) {
+            if (disposed) return;
+            const previousAxis = axisMs; series = nextSeries; axisMs = nextAxis; metricLabel = nextMetricLabel;
+            fitWindow(previousAxis); drag = null;
+            canvas.setAttribute('aria-label', metricLabel + ' by real elapsed time. Arrow keys inspect samples; plus and minus zoom; Home and End jump to visible endpoints.');
+            draw();
+        },
+        dispose() { disposed = true; drag = null; plotCache = null; bitmap.width = bitmap.height = 0; }
+    };
 }

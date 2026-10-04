@@ -8,8 +8,8 @@ export function renderLibraryBrowser(parent, entries, filters, selected, actions
     const inputs = recordingFilters(parent, entries, filters, 'tools-library', () => { shown = 50; actions.room(filters.room); rows(); }, true);
     const bulk = node(parent, 'div', undefined, 'tools-actions'), selection = node(bulk, 'span'); selection.id = 'tools-library-selected';
     let matching = [];
-    button(bulk, 'Select matching', () => { matching.forEach(entry => selected.add(entry.id)); rows(); }, 'tools-select-matching');
-    button(bulk, 'Clear selection', () => { selected.clear(); rows(); }, 'tools-clear-selection');
+    button(bulk, 'Select matching', () => { matching.forEach(entry => selected.add(entry.id)); updateSelection(); }, 'tools-select-matching');
+    button(bulk, 'Clear selection', () => { selected.clear(); updateSelection(); }, 'tools-clear-selection');
     const compare = button(bulk, 'Compare selected', () => actions.compare([...selected]), 'tools-compare-selected');
     const download = button(bulk, 'Export selected', () => actions.export([...selected]), 'tools-export-selected');
     download.title = 'Download one library bundle, including titles, notes and favorite models';
@@ -21,11 +21,15 @@ export function renderLibraryBrowser(parent, entries, filters, selected, actions
         control.title = (active ? 'Unfavorite model ' : 'Favorite model ') + room;
         if (active) control.className = 'tools-primary';
     }
+    function updateSelection() {
+        selection.textContent = selected.size + ' selected (including hidden recordings)';
+        compare.disabled = selected.size < 2 || selected.size > 6; compare.title = 'Select 2–6 recordings to compare'; download.disabled = !selected.size;
+        for (const row of list.querySelectorAll('[data-library-id]')) row.querySelector('input[type=checkbox]').checked = selected.has(row.dataset.libraryId);
+    }
     function rows() {
         list.replaceChildren(); matching = [];
         try { matching = filterLibraryEntries(entries, filters); } catch (error) { node(list, 'p', error.message); }
-        selection.textContent = selected.size + ' selected (including hidden recordings)';
-        compare.disabled = selected.size < 2 || selected.size > 6; compare.title = 'Select 2–6 recordings to compare'; download.disabled = !selected.size;
+        updateSelection();
         const folders = new Map();
         for (const entry of matching) {
             const room = entry.archive.room.toLowerCase(); if (!folders.has(room)) folders.set(room, []); folders.get(room).push(entry);
@@ -57,7 +61,7 @@ export function renderLibraryBrowser(parent, entries, filters, selected, actions
             const row = node(list, 'article', undefined, 'tools-row'); row.dataset.libraryId = entry.id;
             const title = node(row, 'label'), check = node(title, 'input'); check.type = 'checkbox'; check.checked = selected.has(entry.id);
             check.setAttribute('aria-label', 'Select ' + (entry.title || entry.archive.room));
-            check.onchange = () => { if (check.checked) selected.add(entry.id); else selected.delete(entry.id); rows(); list.querySelector('[data-library-id="' + entry.id + '"] input').focus(); };
+            check.onchange = () => { if (check.checked) selected.add(entry.id); else selected.delete(entry.id); updateSelection(); };
             node(title, 'strong', entry.title || entry.archive.room);
             node(row, 'div', entry.archive.room + ' · ' + new Date(entry.archive.session.history.timestamps[0]).toLocaleString() + ' · ' + entry.archive.session.history.timestamps.length + ' samples', 'tools-muted');
             if (entry.notes) node(row, 'p', entry.notes, 'tools-recording-note');
@@ -69,8 +73,7 @@ export function renderLibraryBrowser(parent, entries, filters, selected, actions
             for (const [label, key] of [['Save file','save'],['TXT','txt'],['CSV','csv'],['GIF','gif'],['Add to all-time highs','highs'],['Rename','rename'],['Delete','delete']]) {
                 const action = button(extras, label, () => actions[key](entry)); if (key === 'delete') action.className = 'tools-danger';
             }
-            const noteLabel = node(more, 'label', 'Recording notes '), note = node(noteLabel, 'textarea'); note.maxLength = 2000; note.rows = 3; note.value = entry.notes || '';
-            button(more, 'Save notes', () => actions.metadata(entry, {notes: note.value}), 'tools-notes-save-' + entry.id);
+            renderRecordingNotes(more, entry, actions);
         }
         if (visible.length > 50) node(list, 'p', 'Showing ' + Math.min(shown, visible.length) + ' of ' + visible.length + (browsingFolders ? ' model folders.' : ' matching recordings.'), 'tools-muted');
         if (shown < visible.length) button(list, 'Show ' + Math.min(50, visible.length - shown) + ' more', () => {
@@ -78,4 +81,23 @@ export function renderLibraryBrowser(parent, entries, filters, selected, actions
         }, 'tools-library-more');
     }
     rows();
+}
+
+// The coordinator supplies draft values and explicit Save/Discard operations.
+export function renderRecordingNotes(parent, entry, actions, missing = false) {
+    const label = node(parent, 'label', 'Recording notes '), note = node(label, 'textarea');
+    note.maxLength = 2000; note.rows = 3; note.value = actions.note(entry).value;
+    const status = node(parent, 'p', '', 'tools-muted'); status.setAttribute('role', 'status');
+    const controls = node(parent, 'div', undefined, 'tools-actions');
+    const save = button(controls, 'Save notes', () => actions.saveNote(entry), 'tools-notes-save-' + entry.id);
+    const discard = button(controls, 'Discard changes', () => actions.discardNote(entry), 'tools-notes-discard-' + entry.id);
+    function update() {
+        const draft = actions.note(entry);
+        save.disabled = missing || !draft.dirty; discard.disabled = !draft.dirty;
+        status.textContent = missing ? 'Recording changed or unavailable. Copy this draft before discarding it.' :
+            draft.conflict ? 'Saved notes changed elsewhere. Your draft is still here; saving will ask before replacing them.' :
+            draft.dirty ? 'Unsaved note — kept in this tab until you save or discard it.' : 'Notes saved.';
+    }
+    note.oninput = () => { actions.editNote(entry, note.value); update(); };
+    update();
 }

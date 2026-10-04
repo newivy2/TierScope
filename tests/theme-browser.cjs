@@ -53,6 +53,15 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   assert.equal(darkSwitch.moonOpacity,'1');
   const before=await page.evaluate(()=>ViewerTracker.__theme.state()),bounds=await panel.boundingBox();
   await checkControlLayout(page);
+  assert.equal(await page.locator('#tierscope-version').textContent(),require('../package.json').version);
+  const versionLayout=await page.evaluate(()=>{
+    const rect=id=>document.getElementById(id).getBoundingClientRect(),version=rect('tierscope-version'),logo=rect('tierscope-logo'),footer=rect('tracker-footer'),slider=rect('background-slider-controls');
+    const brand=document.querySelector('#tierscope-logo>div').getBoundingClientRect();
+    return {inside:version.left>=logo.left&&version.right<=logo.right&&version.top>=brand.bottom&&version.bottom<=footer.bottom,
+      separate:slider.right<=logo.left,footerHeight:document.getElementById('tracker-footer').clientHeight};
+  });
+  assert(versionLayout.inside&&versionLayout.separate,'version fits below the logo without touching the opacity controls');
+  assert.equal(versionLayout.footerHeight,14,'version fits the existing footer height');
   const dark=await styles();assert.equal(dark.panel,'rgba(20, 20, 30, 0.95)');assert.equal(dark.totalLine,'#ffffff');
   const controls=await page.locator('#control-field').boundingBox(),toggle=await page.locator('#dark-mode-control').boundingBox(),actions=await page.locator('#control-action-buttons').boundingBox();
   assert(toggle.x>=actions.x+actions.width,'toggle does not overlap centered action buttons');
