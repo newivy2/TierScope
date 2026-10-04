@@ -1,14 +1,16 @@
-import { setPlaybackAllTimeState } from './playback-state.js';
-import { createTierScopeBackup, restoreTierScopeBackup, validateTierScopeBackup, BACKUP_MAX_BYTES } from './backup.js';
+import { BACKUP_MAX_BYTES, createTierScopeBackup, restoreTierScopeBackup, validateTierScopeBackup } from './backup.js';
 import { downloadDataFile, readDataFile } from './data-io.js';
 import { captureSessionFile, openSessionReplay, validateSessionFile } from './files.js';
-import { displayedHighRoom, readAllTimeHighs, repaintHighMode } from './highs.js';
+import { displayedHighRoom } from './high-selectors.js';
+import { readAllTimeHighs } from './highs-store.js';
+import { repaintHighMode } from './highs.js';
+import { isPlaybackCurrent } from './playback-data.js';
+import { setPlaybackAllTimeState } from './playback-state.js';
+import { runtime } from './runtime.js';
 import { ANALYSIS_METRICS, analysisSeries, compareSessions, parseAnalysisThresholds, summarizeAudience, summarizeSession, summarizeThresholds } from './session-analysis.js';
 import { getSessionSaveState } from './session-health.js';
-import { keepSessionInLibrary, readSessionLibrary, removeLibrarySession, renameLibrarySession, LIBRARY_PREFIX, LIBRARY_MAX_COUNT, LIBRARY_MAX_BYTES } from './session-library.js';
-import { runtime } from './runtime.js';
-import { isPlaybackCurrent } from './replay.js';
-import { setThemeVariables } from './theme.js';
+import { LIBRARY_MAX_BYTES, LIBRARY_MAX_COUNT, LIBRARY_PREFIX, keepSessionInLibrary, readSessionLibrary, removeLibrarySession, renameLibrarySession } from './session-library.js';
+import { setThemeVariables } from './theme-values.js';
 import { formatElapsedTime, getModelName } from './utils.js';
 
 let closeSessionTools = null;

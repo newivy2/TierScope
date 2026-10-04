@@ -1,5 +1,8 @@
-import { runtime } from './runtime.js';
 import { getHistoryBreaks } from './history-data.js';
+import { freezeRecordingData } from './immutable-data.js';
+import { getStorageKey } from './record-validation.js';
+import { runtime } from './runtime.js';
+import { getModelName } from './utils.js';
 
 export function createPlaybackSnapshot(sourceHistory) {
     var copiedHistory = { timestamps: sourceHistory.timestamps.slice(), breaks: getHistoryBreaks(sourceHistory).slice() };
@@ -19,10 +22,10 @@ export function createPlaybackSnapshot(sourceHistory) {
         highs.roomTotal.push(Math.max(index ? highs.roomTotal[index - 1] : 0, total));
     });
     var durationMs = timeline.length ? timeline[timeline.length - 1] : 0;
-    return { history: copiedHistory, timeline: timeline, highs: highs,
+    return freezeRecordingData({ history: copiedHistory, timeline: timeline, highs: highs,
         // Recording gaps affect the chart's time axis, not how long Replay
         // waits for its next sample. Keep one second per step, capped at 30s.
-        durationMs: durationMs, replayDurationMs: Math.min(30000, Math.max(0, timeline.length - 1) * 1000) };
+        durationMs: durationMs, replayDurationMs: Math.min(30000, Math.max(0, timeline.length - 1) * 1000) });
 }
 
 export function getPlaybackSampleIndex(snapshot, positionMs, exactIndex) {
@@ -62,4 +65,10 @@ export function getPlaybackFrame(snapshot, positionMs, exactIndex) {
         roomTotalHigh: frameHighs.roomTotal, history: frameHistory, historyEndIndex: index, highs: frameHighs,
         index: index, timestamp: snapshot.history.timestamps[index],
         playbackNewHighTiers: playbackNewHighTiers };
+}
+
+export function isPlaybackCurrent(state) {
+    return !!state && state === runtime.playback && runtime.presentationMode === 'PLAYBACK' &&
+        state.url === location.href && runtime.lastUrl === location.href && state.generation === runtime.initGuard &&
+        state.key === runtime.activeSessionStorageKey && (state.imported || state.key === getStorageKey(getModelName()));
 }

@@ -15,6 +15,9 @@ const modules = fs.readdirSync(path.join(root, 'src')).filter(file => file.endsW
 // Deliberate fixes and features have behavioral coverage; keep the original baseline
 // untouched so every other function still proves the extraction preserved it.
 const reviewedChanges = new Set([
+  // Data-only presentation models and views: presentation-boundaries.test.cjs + browser suites.
+  'createPlaybackSnapshot', 'renderDisplayFrame', 'updateCompactDashboard',
+  'updateCollapsedRowStatus', 'updateTrendDisplay',
   // Playback owner operations: playback-ownership.test.cjs and existing replay/files/ATH browser suites.
   'openSessionReplay',
   'readSessionFile',
@@ -59,8 +62,8 @@ const reviewedChanges = new Set([
   'pauseAutoRefresh', 'toggleAutoRefresh', 'updateDisplay', 'checkBroadcasterReturn',
   'acceptRoomSnapshot', 'init', 'checkUrlChange', 'restoreSessionState', 'loadSession',
 ]);
-const featureModules = new Set(['playback-state.js', 'live-session.js', 'diagnostics.js', 'room-context.js', 'backup.js', 'data-io.js', 'session-analysis.js', 'session-health.js', 'session-library.js', 'session-tools.js']);
-const addedFunctions = new Set(['getSessionSamplePolicy']); // shared history-gap policy; session/ownership tests
+const featureModules = new Set(['display-model.js', 'display-values.js', 'immutable-data.js', 'presentation-data.js', 'status-model.js', 'status-view.js', 'trend-view.js', 'playback-state.js', 'live-session.js', 'diagnostics.js', 'room-context.js', 'backup.js', 'data-io.js', 'session-analysis.js', 'session-health.js', 'session-library.js', 'session-tools.js']);
+const addedFunctions = new Set(['getSessionSamplePolicy', 'initializePresentation', 'paintPanelFrame']); // shared history-gap policy; session/ownership tests
 
 test('unchanged extracted functions preserve 3.4.0; reviewed changes have behavior coverage', () => {
   const actual = {};
@@ -92,9 +95,13 @@ test('runtime initialization preserves preference loading and startup order', ()
   const playbackBinding = body[index + 1];
   assert.equal(playbackBinding.expression.callee.name, 'initializePlaybackState');
   assert.equal(playbackBinding.expression.arguments[0].name, 'runtime');
-  assert.equal(body[index + 2].expression.left.property.name, 'urlCheckInterval');
+  const presentationBinding = body[index + 2];
+  assert.equal(presentationBinding.expression.callee.name, 'initializePresentation');
+  assert.deepEqual(presentationBinding.expression.arguments[0].properties.map(p => [p.key.name, p.value.name]),
+    [['refreshOptions', 'updatePanelOptions'], ['refreshReplayAvailability', 'updateReplayAvailability']]);
+  assert.equal(body[index + 3].expression.left.property.name, 'urlCheckInterval');
   // Preserve every original default, preference read and effect in order.
-  assert.equal(hash(body.filter(n => n !== bindings[0] && n !== playbackBinding), baseline.stateNames), baseline.initialization);
+  assert.equal(hash(body.filter(n => n !== bindings[0] && n !== playbackBinding && n !== presentationBinding), baseline.stateNames), baseline.initialization);
 });
 
 test('module dependencies are explicit and the built script preserves userscript permissions', () => {

@@ -1,3 +1,4 @@
+
 /** @typedef {import('./session-types').LiveSessionState} LiveSessionState */
 /** @typedef {import('./session-types').Counts} Counts */
 /** @typedef {import('./session-types').History} History */
@@ -101,6 +102,7 @@ export function noteSessionRoomHigh(value, now) {
 /** @param {number} now @param {import('./session-types').SamplePolicy} policy */
 export function appendCurrentSessionSample(now, policy) {
     const state = liveSessionState, counts = sessionCounts();
+    noteSessionRoomHigh(Math.max(state.roomTotal, counts.total + counts.anonymous), now);
     if (state.sessionStartedAt === null) state.sessionStartedAt = now;
     for (const key of sessionConfig.series) {
         const previous = readSessionHigh(key), value = counts[key];
@@ -151,7 +153,6 @@ export function beginAcceptedSample(snapshot, room, now, policy) {
         }
         state.previousUserCount = state.users.size;
         state.previousRoomTotal = state.roomTotal;
-        noteSessionRoomHigh(state.roomTotal > 0 ? state.roomTotal : state.users.size + sessionAnonymousCount(), now);
         receipt.counts = appendCurrentSessionSample(now, policy);
         state.hasTrendBaseline = true;
         return receipt;

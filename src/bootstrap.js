@@ -1,17 +1,20 @@
-import { initializePlaybackState } from './playback-state.js';
-import { initializeLiveSession } from './live-session.js';
+import { updatePanelOptions } from './files.js';
 import { cancelGifExport, generateGifFromHistory } from './gif.js';
 import { cancelHighPulses } from './highs.js';
 import { loadCollapsedRows, loadPanelGeometry } from './layout.js';
 import { resetAllTracking } from './lifecycle.js';
-import { leavePlayback } from './replay.js';
+import { initializeLiveSession } from './live-session.js';
+import { initializePlaybackState } from './playback-state.js';
+import { initializePresentation } from './presentation.js';
+import { hasStorageField } from './record-validation.js';
+import { leavePlayback, updateReplayAvailability } from './replay.js';
 import { downloadTrackingCSV, downloadTrackingReport } from './reports.js';
+import { runtime } from './runtime.js';
 import { parseGetChatUserListResponse } from './scanning.js';
 import { checkUrlChange, scheduleInit } from './startup.js';
-import { hasStorageField, saveSession } from './storage.js';
+import { saveSession } from './storage.js';
 import { getModelName, log } from './utils.js';
 
-import { runtime } from './runtime.js';
 // Initialize defaults and effects in their original order, after modules load.
 
 export function initializeRuntime() {
@@ -299,6 +302,7 @@ export function initializeRuntime() {
     runtime.lastUrl = location.href;
     initializeLiveSession(runtime);
     initializePlaybackState(runtime, {start: tick => setInterval(tick, 50), stop: handle => clearInterval(handle)});
+    initializePresentation({refreshOptions: updatePanelOptions, refreshReplayAvailability: updateReplayAvailability});
     runtime.urlCheckInterval = setInterval(checkUrlChange, 500);
     window.addEventListener('beforeunload', function() {
         cancelGifExport();

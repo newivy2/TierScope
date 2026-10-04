@@ -1,6 +1,6 @@
-import { appendCurrentSessionSample } from './live-session.js';
 import { drawAllSparklines } from './charts.js';
 import { getHistoryBreaks } from './history-data.js';
+import { appendCurrentSessionSample } from './live-session.js';
 import { runtime } from './runtime.js';
 
 export function getSessionSamplePolicy() {

@@ -1,8 +1,8 @@
-import { allTimeRoom, emptyAllTimeHighs, mergeAllTimeHighs, readAllTimeHighs, validateAllTimeRecord } from './highs.js';
 import { validateSessionFile } from './files.js';
-import { finalizeLibraryWrites, libraryTitle, planLibraryAdditions, readSessionLibrary, verifyLibraryCapacity, LIBRARY_MAX_COUNT } from './session-library.js';
+import { allTimeRoom, emptyAllTimeHighs, mergeAllTimeHighs, readAllTimeHighs, validateAllTimeRecord } from './highs-store.js';
+import { makeStorageId } from './record-validation.js';
 import { runtime } from './runtime.js';
-import { makeStorageId } from './storage.js';
+import { LIBRARY_MAX_COUNT, finalizeLibraryWrites, libraryTitle, planLibraryAdditions, readSessionLibrary, verifyLibraryCapacity } from './session-library.js';
 
 export const BACKUP_MAX_BYTES = 32 * 1024 * 1024;
 const preferenceKeys = Object.freeze({ theme: 'tierscope:ui:theme:v1', highMode: 'tierscope:ui:highMode:v1',

@@ -1,13 +1,16 @@
-import { openOwnedPlayback, nextSessionFileRequest } from './playback-state.js';
+import { getSessionHigh } from './high-selectors.js';
+import { readAllTimeHighs } from './highs-store.js';
+import { addFileToAllTimeHighs, cancelHighPulses, clearAllTimeHighs, toggleHighMode, updateHighControls } from './highs.js';
 import { getHistoryBreaks } from './history-data.js';
-import { addFileToAllTimeHighs, cancelHighPulses, clearAllTimeHighs, getSessionHigh, readAllTimeHighs, toggleHighMode, updateHighControls } from './highs.js';
 import { redrawPanelCharts, toggleView } from './layout.js';
-import { isPlaybackCurrent, leavePlayback, paintPlayback, setPlaybackLayout } from './replay.js';
-import { createPlaybackSnapshot } from './playback-data.js';
+import { createPlaybackSnapshot, isPlaybackCurrent } from './playback-data.js';
+import { nextSessionFileRequest, openOwnedPlayback } from './playback-state.js';
+import { getStorageKey, hasStorageField, isStorageNumber, isStorageObject, isStorageTimestamp } from './record-validation.js';
+import { leavePlayback, paintPlayback, setPlaybackLayout } from './replay.js';
 import { runtime } from './runtime.js';
-import { getStorageKey, hasStorageField, isStorageNumber, isStorageObject, isStorageTimestamp, normalizeStoredSession, validateStoredSession } from './storage.js';
-import { getModelName, log } from './utils.js';
 import { bindSessionTools, updateSessionToolsStatus } from './session-tools.js';
+import { normalizeStoredSession, validateStoredSession } from './storage.js';
+import { getModelName, log } from './utils.js';
 
 export function setChartWindow(value) {
     if (!hasStorageField(runtime.CHART_WINDOWS, value)) return;

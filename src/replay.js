@@ -1,31 +1,20 @@
-import { openOwnedPlayback, closeOwnedPlayback, nextSessionFileRequest, moveOwnedPlayback, advanceOwnedPlayback, pauseOwnedPlayback, resumeOwnedPlayback, seekOwnedPlayback, changeOwnedPlaybackSpeed, markPlaybackPainted, startOwnedPlaybackClock, stopOwnedPlaybackClock } from './playback-state.js';
-import { createPlaybackSnapshot, getPlaybackSampleIndex, getPlaybackFrame } from './playback-data.js';
-import { drawAllSparklines, drawHistorySparklines, hideChartTooltip } from './charts.js';
+import { hideChartTooltip } from './chart-view.js';
+import { drawAllSparklines, drawHistorySparklines } from './charts.js';
 import { captureSessionFile, updatePanelOptions } from './files.js';
 import { cancelGifExport } from './gif.js';
-import { cancelHighPulses, readAllTimeHighs, setAllTimeActionStatus } from './highs.js';
+import { readAllTimeHighs } from './highs-store.js';
+import { cancelHighPulses, setAllTimeActionStatus } from './highs.js';
 import { updateCountdownDisplay } from './lifecycle.js';
-import { renderDisplayFrame, updateDisplay } from './panel.js';
+import { createPlaybackSnapshot, getPlaybackFrame, getPlaybackSampleIndex, isPlaybackCurrent } from './playback-data.js';
+import { advanceOwnedPlayback, changeOwnedPlaybackSpeed, closeOwnedPlayback, markPlaybackPainted, moveOwnedPlayback, nextSessionFileRequest, openOwnedPlayback, pauseOwnedPlayback, resumeOwnedPlayback, seekOwnedPlayback, startOwnedPlaybackClock, stopOwnedPlaybackClock } from './playback-state.js';
+import { updateAcquisitionStatus } from './presentation-status.js';
+import { renderDisplayFrame, updateDisplay, updateTrendDisplay } from './presentation.js';
+import { getStorageKey } from './record-validation.js';
 import { runtime } from './runtime.js';
-import { updateAcquisitionStatus } from './scanning.js';
-import { getStorageKey } from './storage.js';
-import { updateTrendDisplay } from './trends.js';
 import { formatElapsedTime, getModelName, log } from './utils.js';
-
-
 
 export function setPlaybackSamplePosition(state, position) {
     return moveOwnedPlayback(state, position);
-}
-
-
-
-
-
-export function isPlaybackCurrent(state) {
-    return !!state && state === runtime.playback && runtime.presentationMode === 'PLAYBACK' &&
-        state.url === location.href && runtime.lastUrl === location.href && state.generation === runtime.initGuard &&
-        state.key === runtime.activeSessionStorageKey && (state.imported || state.key === getStorageKey(getModelName()));
 }
 
 export function stopPlaybackClock(state) { stopOwnedPlaybackClock(state); }

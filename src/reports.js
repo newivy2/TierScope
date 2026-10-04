@@ -1,7 +1,7 @@
 import { getAnonymousCount } from './dom.js';
-import { getSessionHigh } from './highs.js';
-import { absencePauseDescription, isAbsencePaused, stopDescription } from './lifecycle.js';
+import { getSessionHigh } from './high-selectors.js';
 import { runtime } from './runtime.js';
+import { absencePauseDescription, isAbsencePaused, stopDescription } from './session-selectors.js';
 import { getStorageReportStatus } from './storage.js';
 import { formatDateTime, formatElapsedTime, getModelName } from './utils.js';
 

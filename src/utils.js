@@ -1,6 +1,6 @@
-import { runtime } from './runtime.js';
 import { diagnostic } from './diagnostics.js';
 import { roomFromUrl } from './room-context.js';
+import { runtime } from './runtime.js';
 
 export function getTierMarker(tier) {
     var config = runtime.TIERS[tier];

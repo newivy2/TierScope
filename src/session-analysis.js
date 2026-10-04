@@ -1,3 +1,4 @@
+
 /** @typedef {{timestamps:number[], breaks?:boolean[], [key:string]:number[]|boolean[]|undefined}} AnalysisHistory */
 /** @typedef {{room:string, session:{history:AnalysisHistory, roomTotalHigh:number, sessionHighs:Record<string,{value:number}>}}} AnalysisArchive */
 export const ANALYSIS_METRICS = Object.freeze({ room: 'Room audience', total: 'Registered viewers', withTokens: 'Viewers with tokens',

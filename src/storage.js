@@ -1,38 +1,14 @@
-import { restoreLiveSession, prepareSessionHighsForSave, clearRestoredSessionFrame } from './live-session.js';
+import { readAllTimeHighs, sessionAllTimeHighs, storeAllTimeHighs } from './highs-store.js';
 import { getHistoryBreaks } from './history-data.js';
-import { readAllTimeHighs, sessionAllTimeHighs, storeAllTimeHighs } from './highs.js';
-import { getEffectiveScanIntervalSeconds } from './lifecycle.js';
-import { leavePlayback } from './replay.js';
+import { clearRestoredSessionFrame, prepareSessionHighsForSave, restoreLiveSession } from './live-session.js';
 import { createPlaybackSnapshot, getPlaybackFrame } from './playback-data.js';
+import { updateAcquisitionStatus } from './presentation-status.js';
+import { getStorageKey, hasStorageField, isStorageNumber, isStorageObject, isStorageTimestamp, makeStorageId } from './record-validation.js';
+import { leavePlayback } from './replay.js';
 import { runtime } from './runtime.js';
-import { updateAcquisitionStatus } from './scanning.js';
-import { log } from './utils.js';
 import { noteSessionSave } from './session-health.js';
-
-export function getStorageKey(model) {
-    return runtime.STORAGE_KEY_PREFIX + model.toLowerCase();
-}
-
-export function isStorageObject(value) {
-    return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-export function hasStorageField(data, field) {
-    return Object.prototype.hasOwnProperty.call(data, field);
-}
-
-export function isStorageNumber(value) {
-    return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER;
-}
-
-export function isStorageTimestamp(value) {
-    return Number.isSafeInteger(value) && value >= 0 && value <= 8640000000000000;
-}
-
-export function makeStorageId() {
-    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
-    return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2) + '-' + Math.random().toString(36).slice(2);
-}
+import { getEffectiveScanIntervalSeconds } from './session-selectors.js';
+import { log } from './utils.js';
 
 export function roomEpochKey(key) { return runtime.ROOM_EPOCH_PREFIX + key.slice(runtime.STORAGE_KEY_PREFIX.length); }
 

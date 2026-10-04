@@ -1,3 +1,4 @@
+
 const NON_ROOM_PATHS = new Set(['b', 'followed', 'featured', 'tags', 'accounts', 'login', 'register',
     'supporter', 'settings', 'apps', 'explore', 'trending', 'new',
     'female', 'male', 'couple', 'trans', 'hd', 'north-american',
