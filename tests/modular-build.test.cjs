@@ -33,8 +33,16 @@ const reviewedChanges = new Set([
   'resetAllTracking', // valid room required before confirmation: maintenance-regressions.test.cjs
   'resetTrackingData', // valid room required before mutation: maintenance-regressions.test.cjs
   'updateStopControls', // disabled directory Reset: all-time-highs-browser.cjs
+  // Live-session ownership: state-ownership.test.cjs, session.test.cjs,
+  // stop-absence.test.cjs, startup.test.cjs and review-regressions.test.cjs.
+  'getAnonymousCount', 'getSessionHigh', 'syncHighTimes', 'saveToHistory',
+  'nextBroadcasterAbsence', 'checkAbsenceStop', 'stopTracking', 'startNewSession',
+  'startTrackingTimer', 'pauseTrackingTimer', 'stopTrackingTimer',
+  'pauseAutoRefresh', 'toggleAutoRefresh', 'updateDisplay', 'checkBroadcasterReturn',
+  'acceptRoomSnapshot', 'init', 'checkUrlChange', 'restoreSessionState', 'loadSession',
 ]);
-const featureModules = new Set(['diagnostics.js', 'room-context.js', 'backup.js', 'data-io.js', 'session-analysis.js', 'session-health.js', 'session-library.js', 'session-tools.js']);
+const featureModules = new Set(['live-session.js', 'diagnostics.js', 'room-context.js', 'backup.js', 'data-io.js', 'session-analysis.js', 'session-health.js', 'session-library.js', 'session-tools.js']);
+const addedFunctions = new Set(['getSessionSamplePolicy']); // shared history-gap policy; session/ownership tests
 
 test('unchanged extracted functions preserve 3.4.0; reviewed changes have behavior coverage', () => {
   const actual = {};
@@ -42,7 +50,7 @@ test('unchanged extracted functions preserve 3.4.0; reviewed changes have behavi
     if (featureModules.has(file)) continue;
     for (const node of ast.body) {
       const fn = node.type === 'ExportNamedDeclaration' && node.declaration;
-      if (!fn || fn.type !== 'FunctionDeclaration' || fn.id.name === 'initializeRuntime') continue;
+      if (!fn || fn.type !== 'FunctionDeclaration' || fn.id.name === 'initializeRuntime' || addedFunctions.has(fn.id.name)) continue;
       assert(!(fn.id.name in actual), 'duplicate function: ' + fn.id.name);
       actual[fn.id.name] = hash(fn);
     }
@@ -57,7 +65,15 @@ test('unchanged extracted functions preserve 3.4.0; reviewed changes have behavi
 test('runtime initialization preserves preference loading and startup order', () => {
   const runtime = modules.find(m => m.file === 'runtime.js');
   const fn = runtime.ast.body.find(n => n.declaration?.id?.name === 'initializeRuntime').declaration;
-  assert.equal(hash(fn.body.body, baseline.stateNames), baseline.initialization);
+  const body = fn.body.body;
+  const bindings = body.filter(n => n.expression?.callee?.name === 'initializeLiveSession');
+  assert.equal(bindings.length, 1, 'bind the owner once after its defaults');
+  assert.deepEqual(bindings[0].expression.arguments.map(n => n.name), ['runtime']);
+  const index = body.indexOf(bindings[0]);
+  assert.equal(body[index - 1].expression.left.property.name, 'lastUrl');
+  assert.equal(body[index + 1].expression.left.property.name, 'urlCheckInterval');
+  // Preserve every original default, preference read and effect in order.
+  assert.equal(hash(body.filter(n => n !== bindings[0]), baseline.stateNames), baseline.initialization);
 });
 
 test('module dependencies are explicit and the built script preserves userscript permissions', () => {

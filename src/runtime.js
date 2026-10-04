@@ -1,3 +1,4 @@
+import { initializeLiveSession } from './live-session.js';
 import { cancelGifExport, generateGifFromHistory } from './gif.js';
 import { cancelHighPulses } from './highs.js';
 import { loadCollapsedRows, loadPanelGeometry } from './layout.js';
@@ -295,6 +296,7 @@ export function initializeRuntime() {
     runtime.chartTimeCache = new WeakMap();
     runtime.panelBackgroundPercent = 95;
     runtime.lastUrl = location.href;
+    initializeLiveSession(runtime);
     runtime.urlCheckInterval = setInterval(checkUrlChange, 500);
     window.addEventListener('beforeunload', function() {
         cancelGifExport();

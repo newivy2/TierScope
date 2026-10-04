@@ -1,9 +1,10 @@
+import { getSessionSamplePolicy } from './history.js';
+import { beginAcceptedSample, commitAcceptedSample, abortAcceptedSample, markSessionGap, observeSessionPresence, resumeSessionForOwnerReturn } from './live-session.js';
 import { drawAllSparklines } from './charts.js';
 import { updateMiniFreshness } from './compact.js';
-import { findTab, getAnonymousCount, isScanValid, scanUsers } from './dom.js';
+import { findTab, isScanValid, scanUsers } from './dom.js';
 import { pulseAcceptedHighs, readAllTimeHighs, recordAcceptedAllTimeHighs } from './highs.js';
-import { saveToHistory } from './history.js';
-import { absencePauseDescription, checkAbsenceStop, isAbsencePaused, nextBroadcasterAbsence, pauseAutoRefresh, resetCountdown, startTrackingTimer, stopDescription, updateCountdownDisplay, updateStopControls } from './lifecycle.js';
+import { absencePauseDescription, checkAbsenceStop, isAbsencePaused, pauseAutoRefresh, resetCountdown, startTrackingTimer, stopDescription, updateCountdownDisplay, updateStopControls } from './lifecycle.js';
 import { updateDisplay } from './panel.js';
 import { runtime } from './runtime.js';
 import { isStorageTimestamp, makeStorageId, saveSession } from './storage.js';
@@ -238,9 +239,7 @@ export async function checkBroadcasterReturn(context) {
         if (readRequestPolicy().blocked) { pauseForAccessRestriction(); return null; }
         clearRequestFailures(context.policyRevision);
         if (!snapshot.users.some(function(user) { return user.isOwner === true; })) return null;
-        runtime.broadcasterAbsence = { since: null, missing: 0 };
-        runtime.absencePausedAt = null;
-        runtime.absenceOverrideActive = false;
+        resumeSessionForOwnerReturn(Date.now());
         startTrackingTimer();
         updateStopControls();
         // A presence signal can resume scanning even if the counts fail the
@@ -271,7 +270,7 @@ export async function acquireRoomSnapshot(context, returnToChat) {
         if (checkAbsenceStop() || !isAcquisitionCurrent(context)) return null;
         // Presence comes from a well-formed API response, independently of
         // whether its counts pass the chart's sudden-drop sanity checks.
-        runtime.broadcasterAbsence = nextBroadcasterAbsence(snapshot);
+        observeSessionPresence(snapshot, Date.now());
         if (checkAbsenceStop() || !isAcquisitionCurrent(context)) return null;
         validateRoomSnapshot(snapshot);
         runtime.domHealthStatus.consecutiveFailures = 0;
@@ -313,30 +312,7 @@ export async function acquireRoomSnapshot(context, returnToChat) {
 }
 
 export function acceptRoomSnapshot(snapshot, modelName) {
-    runtime.restoredDisplayFrame = null;
-    runtime.users = new Map(snapshot.users.map(function(user) { return [user.username, user]; }));
-    runtime.roomTotal = snapshot.roomTotal;
-    runtime.lastAcceptedAcquisition = { source: snapshot.source, timestamp: snapshot.timestamp, api: null };
-    if (snapshot.source === 'API') {
-        var owners = snapshot.users.filter(function(user) { return user.isOwner; });
-        var tierSum = snapshot.users.filter(function(user) { return user.tier !== null; }).length;
-        var unknownClasses = snapshot.diagnostics.unknownClasses;
-        var unknownGenders = snapshot.diagnostics.unknownGenders;
-        runtime.lastAcceptedAcquisition.api = { anonymousCount: snapshot.anonymousCount,
-            registeredCount: snapshot.registeredCount, totalUsers: snapshot.totalUsers, ownerCount: owners.length };
-        return {
-            room: modelName, anonymousCount: snapshot.anonymousCount,
-            registeredCount: snapshot.registeredCount, totalUsers: snapshot.totalUsers,
-            ownerCount: owners.length,
-            unknownClasses: Object.values(unknownClasses).reduce(function(a, b) { return a + b; }, 0),
-            unknownGenders: Object.values(unknownGenders).reduce(function(a, b) { return a + b; }, 0),
-            unknownClassCodes: unknownClasses, unknownGenderCodes: unknownGenders,
-            viewerTierSum: tierSum, registeredMinusTierSum: runtime.users.size - tierSum,
-            viewerTierGapExplanation: 'Owner and unknown-class records count toward Registered, outside the seven viewer tiers',
-            timestamp: new Date(snapshot.timestamp).toISOString()
-        };
-    }
-    return null;
+    return beginAcceptedSample(snapshot, modelName, Date.now(), getSessionSamplePolicy());
 }
 
 export function updateAcquisitionStatus() {
@@ -394,6 +370,7 @@ export async function performScanThenReturn(returnToChat) {
     var context = { epoch: ++runtime.scanEpoch, generation: runtime.initGuard, url: location.href, room: getModelName(), policyRevision: policy.revision };
     var priorState = null;
     var sampleCommitted = false;
+    var sampleReceipt = null;
     var priorAbsence = runtime.broadcasterAbsence;
     var checkingReturn = isAbsencePaused();
     var statusEl = document.getElementById('auto-status');
@@ -404,91 +381,31 @@ export async function performScanThenReturn(returnToChat) {
         if (checkAbsenceStop()) return;
         if (checkingReturn && isAbsencePaused()) return;
         if (!snapshot) {
-            runtime.pendingHistoryGap = true;
+            markSessionGap();
             if (statusEl) {
                 statusEl.textContent = 'Scan skipped (unreliable)';
                 statusEl.style.color = 'var(--panel-negative)';
             }
             return;
         }
-        priorState = {
-            users: runtime.users, roomTotal: runtime.roomTotal, previousUserCount: runtime.previousUserCount,
-            previousRoomTotal: runtime.previousRoomTotal, previousCounts: runtime.previousCounts,
-            hasTrendBaseline: runtime.hasTrendBaseline, lastAcceptedAcquisition: runtime.lastAcceptedAcquisition,
-            restoredDisplayFrame: runtime.restoredDisplayFrame, pendingHistoryGap: runtime.pendingHistoryGap,
+        sampleReceipt = acceptRoomSnapshot(snapshot, context.room);
+        priorState = Object.assign({}, sampleReceipt.before, {
             trendHTML: (document.getElementById('trend-container') || {}).innerHTML,
             trendHeaderText: (document.getElementById('trend-header-label') || {}).textContent,
-            history: Object.fromEntries(Object.keys(runtime.history).map(function(key) { return [key, runtime.history[key].slice()]; })),
-            roomTotalHigh: runtime.roomTotalHigh, roomTotalHighTime: runtime.roomTotalHighTime,
-            tierHighTimes: Object.fromEntries(Object.entries(runtime.tierHighTimes)),
-            withTokensHighTime: runtime.withTokensHighTime, totalHighTime: runtime.totalHighTime,
-            anonHighTime: runtime.anonHighTime, femaleTransHighTime: runtime.femaleTransHighTime,
-            sessionStartedAt: runtime.sessionStartedAt,
-            sessionHighs: Object.fromEntries(Object.entries(runtime.sessionHighs).map(function(entry) { return [entry[0], Object.assign({}, entry[1])]; })),
-            allTimeHighs: readAllTimeHighs(context.room).highs,
-            newHighTiers: Object.fromEntries(Object.entries(runtime.newHighTiers))
-        };
-        var diagnostics = acceptRoomSnapshot(snapshot, context.room);
-        var counts = { 'red': 0, 'green': 0, 'purple': 0, 'pink': 0, 'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0 };
-        runtime.users.forEach(function(data) {
-            if (counts[data.tier] !== undefined) counts[data.tier]++;
-            if (data.gender === 'female' || data.gender === 'trans') {
-                counts['female-trans']++;
-            }
+            allTimeHighs: readAllTimeHighs(context.room).highs
         });
-        var total = runtime.users.size;
-        var withTokens = counts['red'] + counts['green'] + counts['purple'] + counts['pink'] + counts['dark-blue'] + counts['light-blue'];
-        var anonymousCount = getAnonymousCount();
-        runtime.previousUserCount = total;
-        runtime.previousRoomTotal = runtime.roomTotal;
-        var currentRoomTotal = runtime.roomTotal > 0 ? runtime.roomTotal : (total + anonymousCount);
-        if (currentRoomTotal > runtime.roomTotalHigh) {
-            runtime.roomTotalHigh = currentRoomTotal;
-            runtime.roomTotalHighTime = Date.now();
-        }
-        saveToHistory();
-        runtime.hasTrendBaseline = true;
+        var diagnostics = sampleReceipt.diagnostics;
+        if (!runtime.isMinimized) drawAllSparklines();
         updateDisplay();
         updateTrendDisplay();
-        runtime.previousCounts = {
-            'red': counts['red'] || 0,
-            'green': counts['green'] || 0,
-            'purple': counts['purple'] || 0,
-            'pink': counts['pink'] || 0,
-            'dark-blue': counts['dark-blue'] || 0,
-            'light-blue': counts['light-blue'] || 0,
-            'gray': counts['gray'] || 0,
-            'female-trans': counts['female-trans'] || 0,
-            'withTokens': withTokens || 0,
-            'total': total || 0,
-            'anonymous': anonymousCount || 0
-        };
         updateAcquisitionStatus();
         // Acquisition and rendering have succeeded. Nothing after this boundary
         // may roll memory back once the sample can have reached durable storage.
-        sampleCommitted = true;
+        sampleCommitted = isAcquisitionCurrent(context) && commitAcceptedSample(sampleReceipt);
+        if (!sampleCommitted) abortAcceptedSample(sampleReceipt);
     } catch (err) {
-        if (priorState) {
-            runtime.users = priorState.users;
-            runtime.roomTotal = priorState.roomTotal;
-            runtime.previousUserCount = priorState.previousUserCount;
-            runtime.previousRoomTotal = priorState.previousRoomTotal;
-            runtime.previousCounts = priorState.previousCounts;
-            runtime.hasTrendBaseline = priorState.hasTrendBaseline;
-            runtime.lastAcceptedAcquisition = priorState.lastAcceptedAcquisition;
-            runtime.restoredDisplayFrame = priorState.restoredDisplayFrame;
-            runtime.history = priorState.history;
-            runtime.pendingHistoryGap = priorState.pendingHistoryGap;
-            runtime.roomTotalHigh = priorState.roomTotalHigh;
-            runtime.roomTotalHighTime = priorState.roomTotalHighTime;
-            runtime.tierHighTimes = priorState.tierHighTimes;
-            runtime.withTokensHighTime = priorState.withTokensHighTime;
-            runtime.totalHighTime = priorState.totalHighTime;
-            runtime.anonHighTime = priorState.anonHighTime;
-            runtime.femaleTransHighTime = priorState.femaleTransHighTime;
-            runtime.sessionStartedAt = priorState.sessionStartedAt;
-            runtime.sessionHighs = priorState.sessionHighs;
-            runtime.newHighTiers = priorState.newHighTiers || {};
+        var rolledBack = sampleReceipt && abortAcceptedSample(sampleReceipt);
+        if (rolledBack && priorState) {
             try {
                 var trendEl = document.getElementById('trend-container');
                 if (trendEl && typeof priorState.trendHTML === 'string') trendEl.innerHTML = priorState.trendHTML;
@@ -500,7 +417,7 @@ export async function performScanThenReturn(returnToChat) {
             }
             catch (displayError) { log('Could not repaint previous data: ' + displayError.message); }
         }
-        runtime.pendingHistoryGap = true;
+        if (isAcquisitionCurrent(context)) markSessionGap();
         log('Error during scan; retaining previous valid data: ' + err.message);
     } finally {
         if (sampleCommitted) {

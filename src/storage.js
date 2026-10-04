@@ -1,5 +1,6 @@
+import { restoreLiveSession, prepareSessionHighsForSave, clearRestoredSessionFrame } from './live-session.js';
 import { getHistoryBreaks } from './charts.js';
-import { getSessionHigh, readAllTimeHighs, sessionAllTimeHighs, storeAllTimeHighs, syncHighTimes } from './highs.js';
+import { readAllTimeHighs, sessionAllTimeHighs, storeAllTimeHighs } from './highs.js';
 import { getEffectiveScanIntervalSeconds } from './lifecycle.js';
 import { createPlaybackSnapshot, getPlaybackFrame, leavePlayback } from './replay.js';
 import { runtime } from './runtime.js';
@@ -281,50 +282,11 @@ export function inspectStoredSession(model, restore) {
 }
 
 export function restoreSessionState(data) {
-    runtime.users = new Map();
-    runtime.roomTotal = 0;
-    runtime.previousUserCount = 0;
-    runtime.previousRoomTotal = 0;
-    runtime.lastAcceptedAcquisition = null;
-    runtime.newHighTiers = {};
-    runtime.history = data.history;
-    runtime.pendingHistoryGap = true;
-    runtime.tierHighTimes = data.tierHighTimes;
-    runtime.withTokensHighTime = data.withTokensHighTime;
-    runtime.totalHighTime = data.totalHighTime;
-    runtime.anonHighTime = data.anonHighTime;
-    runtime.femaleTransHighTime = data.femaleTransHighTime;
-    runtime.roomTotalHigh = data.roomTotalHigh;
-    runtime.roomTotalHighTime = data.roomTotalHighTime;
-    runtime.trackingStartTime = data.trackingStartTime;
-    runtime.sessionStartedAt = data.sessionStartedAt;
-    runtime.sessionStartEstimated = data.sessionStartEstimated;
-    runtime.sessionHighs = data.sessionHighs;
-    syncHighTimes();
-    runtime.isPaused = data.isPaused;
-    runtime.isStopped = data.isStopped;
-    runtime.stoppedAt = data.stoppedAt;
-    runtime.stopReason = data.stopReason;
-    runtime.broadcasterAbsence = data.broadcasterAbsence;
-    runtime.absencePausedAt = data.absencePausedAt;
-    runtime.absenceOverrideActive = data.absenceOverrideActive;
+    var snapshot = createPlaybackSnapshot(data.history);
+    restoreLiveSession(data, getPlaybackFrame(snapshot, snapshot.durationMs));
     runtime.lastScheduledIntervalSeconds = getEffectiveScanIntervalSeconds();
-    runtime.pausedElapsedTime = data.pausedElapsedTime;
-    runtime.previousCounts = data.previousCounts;
-    runtime.hasTrendBaseline = data.hasTrendBaseline;
     runtime.trendComparisonMode = data.trendComparisonMode;
     runtime.autoTrendEscalation = data.autoTrendEscalation;
-    var snapshot = createPlaybackSnapshot(runtime.history);
-    runtime.restoredDisplayFrame = getPlaybackFrame(snapshot, snapshot.durationMs);
-    if (runtime.restoredDisplayFrame) {
-        runtime.restoredDisplayFrame.isRestored = true;
-        runtime.restoredDisplayFrame.playbackNewHighTiers = {};
-        runtime.STORAGE_HISTORY_SERIES.forEach(function(key) {
-            var value = runtime.history[key][runtime.history[key].length - 1];
-            if (value > 0 && value >= getSessionHigh(key, 0).value) runtime.restoredDisplayFrame.playbackNewHighTiers[key] = true;
-        });
-        runtime.restoredDisplayFrame.roomTotalHigh = Math.max(runtime.roomTotalHigh, runtime.restoredDisplayFrame.roomTotalHigh);
-    }
 }
 
 export function getStorageReportStatus(model) {
@@ -350,9 +312,7 @@ export function saveSession(model) {
             updateAcquisitionStatus();
             return;
         }
-        runtime.STORAGE_HISTORY_SERIES.forEach(function(series) {
-            if (!runtime.sessionHighs[series]) runtime.sessionHighs[series] = getSessionHigh(series, 0);
-        });
+        prepareSessionHighsForSave();
         var saveData = {
             schemaVersion: runtime.STORAGE_SCHEMA_VERSION,
             producerVersion: runtime.TIERSCOPE_VERSION,
@@ -404,7 +364,7 @@ export function saveSession(model) {
 }
 
 export function loadSession(model) {
-    runtime.restoredDisplayFrame = null;
+    clearRestoredSessionFrame();
     if (!model || model === 'unknown') return false;
     leavePlayback(false);
     var key = getStorageKey(model);
