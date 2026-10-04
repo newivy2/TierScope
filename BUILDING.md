@@ -68,7 +68,7 @@ The existing tests still execute the generated userscript. `tests/helpers/instru
 
 These fingerprints guard the unchanged parts of the migration. A later feature change must explicitly update or retire the relevant migration checks in its reviewed change, alongside behavior tests; do not regenerate the fingerprints merely to make a failure disappear.
 
-The browser suite covers both engines, all 2,048 row-collapse combinations, themes, playback, files, ATH, pulses, acquisition, and downloads. Follow the actual-room release check in [TESTING.md](TESTING.md) before publishing a release.
+The browser suite covers both engines, all 4,096 row-collapse combinations, themes, playback, files, ATH, pulses, acquisition, and downloads. Follow the actual-room release check in [TESTING.md](TESTING.md) before publishing a release.
 
 ## Session tools development
 
@@ -111,7 +111,7 @@ The tools coordinator clears the reader and source-label choices on close. Sourc
 Analysis controls and result rendering now have separate update paths. Metric changes update the existing chart and statistics; thresholds rebuild only statistics. Source selectors remain attached. The chart view owns zoom/cursor/visibility and exposes a copied interaction snapshot. The coordinator retains one snapshot per Summary/Compare tab for the current Library opening, restoring only when recording IDs and archive identities still match; a new selection or changed archive starts fresh. Shared-length changes clamp the existing window. Reduced plots are cached for one series/window/width combination and reused for visibility/theme redraws, then cleared on disposal. Checkbox and bulk-selection actions update selection controls without recreating recording rows.
 
 
-## Model Library and confirmed automatic keeping (3.16.0 beta)
+## Model Library and confirmed automatic keeping (3.16.0)
 
 `library-models.js` reads an optional `autoKeep` boolean from the existing per-model schema. Missing consent is false, including legacy stars and imports. `favorite-controls.js` coordinates confirmation and persistence; `favorite-view.js` paints supplied star state without storage/controller dependencies. `automatic-library.js` owns one checkpoint identity/signature/phase and one bounded Library reader. `saveSession` requests checkpoints independently of short-lived session persistence; failures cannot roll back a committed live sample. Capture uses `captureLiveSessionFile(room)`, validates the active owner and room epoch, and never selects playback data. Navigation flushes before changing the old room identity. No network access, new permissions or background timer is added for keeping.
 

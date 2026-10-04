@@ -169,11 +169,11 @@ export function createPanel() {
                 '</div>' +
             '</div>' +
 
-            '<div id="tier-row-roomTotal" data-tier="roomTotal" style="display:flex;align-items:center;padding:2px 3px;margin-top:3px;border:1px solid #69BE45;border-radius:3px;background:rgba(105,190,69,.08);">' +
+            '<div id="tier-row-roomTotal" data-tier="roomTotal" style="display:flex;align-items:center;padding:2px 3px;margin-top:3px;border:1px solid var(--panel-warning);border-radius:3px;background:rgba(255,212,59,.08);">' +
                 '<div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml('roomTotal') + '</div>' +
                 '<canvas id="spark-roomTotal" width="105" height="28" style="flex:1;margin:0 4px;"></canvas>' +
                 '<div style="text-align:right;width:48px;flex-shrink:0;">' +
-                    '<span id="count-roomTotal" style="font-weight:bold;color:var(--panel-positive);font-size:14px;">0</span>' +
+                    '<span id="count-roomTotal" style="font-weight:bold;color:var(--panel-warning);font-size:14px;">0</span>' +
                     '<div id="high-roomTotal" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div>' +
                 '</div>' +
             '</div>' +

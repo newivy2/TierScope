@@ -125,7 +125,7 @@ test('runtime initialization preserves preference loading and startup order', ()
   const rows = unchanged.find(n => n.expression?.left?.property?.name === 'PANEL_ROWS').expression.right.arguments[0].elements;
   const roomRow = rows.pop();
   assert.deepEqual(roomRow.properties.map(p => [p.key.name, p.value.value]),
-    [['key','roomTotal'],['label','Room Total'],['icon','👥'],['color','#69BE45'],['height',28],['display','flex']]);
+    [['key','roomTotal'],['label','Room Total'],['icon','👥'],['color','var(--panel-warning)'],['height',28],['display','flex']]);
   const unload = unchanged.find(n => n.expression?.arguments?.[0]?.value === 'beforeunload');
   const flush = unload.expression.arguments[1].body.body.at(-1).consequent.body[0].expression;
   assert.equal(flush.callee.name, 'saveSession'); assert.equal(flush.arguments.length, 2);

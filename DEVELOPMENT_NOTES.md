@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **3.15.0**. This release protects Library note drafts, preserves chart interaction during analysis changes, and reduces unnecessary rendering. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation instructions, see the [README](readme.md).
+Detailed reference for **3.16.0**. This release reorganizes Library around models, adds confirmed automatic keeping for favorites, and gives Room Total its own yellow row. The header shows the model and adjacent star; the version beneath the logo is larger and bold. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation instructions, see the [README](readme.md).
 
 ## Contents
 
@@ -498,6 +498,7 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
+| **3.16.0** | Release the model-focused Library, confirmed automatic keeping for favorites, separate live/replay cards, and streamlined Sessions controls. Add the yellow Room Total row below Anons; default Female/Trans to collapsed while preserving saved layouts. Enlarge the model header and adjacent star and the footer version. Preserve compatible session updates, notes, storage failure recovery and explicit replay imports. |
 | **3.15.0** | Release protected tab-local note drafts, preserved chart settings, faster comparison controls and the small footer version label. Preserve the approved beta behavior and existing recording formats. |
 | **3.15.0-beta.1** | Protect temporary note drafts with Save/Discard and cross-tab conflict handling; preserve chart interaction through metric/threshold changes; reuse comparison controls and reduced plots; fit a small version label beneath the logo without increasing footer height. |
 | **3.14.0** | Release model/date Library filters, favorite models, recording notes and bulk import/export; interactive Summary/Compare charts for up to six recordings; direct page-model history and comparison with up to five earlier recordings. The newest recording is solid pink and older recordings are dashed. Preserve the reviewed beta behavior and explicit saving. |

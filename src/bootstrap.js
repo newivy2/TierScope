@@ -229,7 +229,7 @@ export function initializeRuntime() {
         { key: 'withtokens', label: 'With Tokens', icon: '💎', color: '#ff69b4', height: 28, display: 'flex' },
         { key: 'total', label: 'Registered', icon: '📊', color: '#ffffff', height: 28, display: 'flex' },
         { key: 'anon', label: 'Anonymous', icon: '👻', color: '#888888', height: 50, display: 'block' },
-        { key: 'roomTotal', label: 'Room Total', icon: '👥', color: '#69BE45', height: 28, display: 'flex' }
+        { key: 'roomTotal', label: 'Room Total', icon: '👥', color: 'var(--panel-warning)', height: 28, display: 'flex' }
     ]);
     runtime.collapsedRows = loadCollapsedRows();
     runtime.panelChartHeights = {};

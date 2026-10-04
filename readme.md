@@ -16,9 +16,8 @@ If you used the beta, install from the official link above to follow main releas
 
 ---
 
-**Current stable release: 3.15.0** · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.15.0)
+**Current stable release: 3.16.0** · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.16.0)
 
-**Beta preview: 3.16.0-beta.2** — [Install the model-focused Library beta](https://raw.githubusercontent.com/newivy2/TierScope/beta/model-library/tierscope.user.js). Adds a model-name header, favorite stars with confirmed automatic keeping, a Room Total row, and a streamlined Sessions tab. Existing favorites require confirmation before automatic keeping starts. [Beta behavior and review notes](docs/model-library-beta.md).
 
 ---
 
@@ -26,9 +25,9 @@ Open the **Library** to unfold a matching left-hand page next to the chart. Save
 
 The **Session-High / All-Time-High** switch sits on the main header. Session highs (SH) and all-time highs (ATH) are tracked separately for each room. ATH survive session Reset and expiry; hover a high to see the exact value and its recorded time. Opening a saved file does not change these records: but you can use **Add to all-time highs** in Library to add that file's highs to its own room.
 
-![Library unfolding to the left of the TierScope panel](docs/previews/library-book-dark.png)
+![Library unfolding to the left of the TierScope panel](docs/previews/model-library-beta-dark.png)
 
-[Bright-theme preview](docs/previews/library-book-bright.png)
+[Bright-theme preview](docs/previews/model-library-beta-bright.png)
 
 ![TierScope in expanded, totals-focused, collapsed, and compact views](tierscope-hero.png)
 
@@ -42,7 +41,7 @@ Charts use periodic room-data samples. Session history is stored locally through
 
 ## Main features
 
-- **Live audience tracking** — Follow viewer tiers, registered and anonymous viewers, viewers with tokens, and the room’s total audience.
+- **Live audience tracking** — Follow viewer tiers, registered and anonymous viewers, viewers with tokens, and the room’s total audience in a yellow Room Total row below Anons.
 
 - **Session and all-time highs** — Switch between **SH** and **ATH** to compare the current session with previous records for that room. Green highlights and gentle pulses mark counts reaching or breaking the selected high.
 
@@ -52,7 +51,9 @@ Charts use periodic room-data samples. Session history is stored locally through
 
 - **Saved session files** — Save sessions and reopen them later. Use **Add to all-time highs** to include a saved file’s peaks in that room’s records.
 
-- **Session library** — Choose **Library → Keep in library** from live Controls or Replay. Recordings are organized into model folders. Keeping a fuller version of the same session updates its entry and preserves your custom name. Search, rename, replay, download or delete recordings; the library holds up to 500 recordings / 25 MB.
+- **Session library** — Choose **Library → Keep in library** from live Controls or Replay. The Sessions tab starts with the current live session and a History shortcut. Recordings are organized into model folders. Keeping a fuller version of the same session updates its entry and preserves your custom name. Search, rename, replay, download or delete recordings; the library holds up to 500 recordings / 25 MB.
+
+- **Favorite models** — Star a model in the header or Library and confirm to keep their live sessions automatically. Existing favorites stay manual until confirmed. The same session updates as it grows; names and notes are preserved. Unstarring stops automatic keeping without deleting saved sessions.
 
 - **Summaries and comparison** — See audience averages and peaks together, token-holder proportions, coverage and gaps. Choose several thresholds to see time at or above each count and its percentage of covered time. Statistics use real timestamps and exclude recording gaps. Compare up to six recordings from their first retained samples, optionally matching their shared duration, with line visibility controls, shared sample inspection and chart zoom. The latest recording is solid pink; older recordings use dashed lines.
 
