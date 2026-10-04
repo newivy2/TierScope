@@ -72,13 +72,13 @@ const file=(name,value)=>({name,mimeType:'application/json',buffer:Buffer.from(J
   const firstSlot=await page.locator('#tools-source-a').inputValue(),thirdSlot=await page.locator('#tools-source-c').inputValue();
   await page.selectOption('#tools-source-a',thirdSlot);await page.selectOption('#tools-source-c',firstSlot);
   assert.equal(await page.locator('.tools-chart-legend label').nth(2).locator('.tools-series-swatch').evaluate(e=>e.style.borderTopStyle),'solid');
-  assert.equal(await page.locator('.tools-chart-legend label').nth(0).locator('.tools-series-swatch').evaluate(e=>e.style.borderTopStyle),'dotted');
+  assert.equal(await page.locator('.tools-chart-legend label').nth(0).locator('.tools-series-swatch').evaluate(e=>e.style.borderTopStyle),'dashed');
   assert.match(await page.locator('.tools-chart-legend label').nth(2).getAttribute('title'),/Latest recording — solid pink/);
   await page.evaluate(()=>window.analysisStrokes=[]);await page.click('#tools-chart-reset');
   const darkStrokes=await page.evaluate(()=>window.analysisStrokes.filter(s=>['#ff69b4','#79baff','#68d391','#ffd166','#c4a3ff','#ff987d'].includes(s.color)));
   assert(darkStrokes.some(s=>s.color==='#ff69b4'));assert(darkStrokes.some(s=>s.color!=='#ff69b4'));
-  for(const s of darkStrokes)assert.deepEqual(s.dash,s.color==='#ff69b4'?[]:[1,4]);
-  assert.equal(darkStrokes.at(-1).color,'#ff69b4','latest solid line is painted over earlier dots');
+  for(const s of darkStrokes)assert.deepEqual(s.dash,s.color==='#ff69b4'?[]:[6,4]);
+  assert.equal(darkStrokes.at(-1).color,'#ff69b4','latest solid line is painted over earlier dashes');
   await page.selectOption('#tools-source-a',firstSlot);await page.selectOption('#tools-source-c',thirdSlot);
   await page.selectOption('#tools-analysis-model','beta_model');
   assert.match(await page.locator('#tools-source-a option:checked').textContent(),/outside filters/);assert.equal(await page.locator('#tools-summary-table thead th').count(),7);
@@ -111,7 +111,7 @@ const file=(name,value)=>({name,mimeType:'application/json',buffer:Buffer.from(J
   await page.evaluate(()=>{window.analysisStrokes=[];ViewerTracker.__organized.theme();});await page.waitForTimeout(80);await page.screenshot({path:'/tmp/tierscope-314-'+engine+'-compare-bright.png'});
   const brightStrokes=await page.evaluate(()=>window.analysisStrokes.filter(s=>['#b42370','#175db0','#176f36','#835900','#7140a6','#a23c20'].includes(s.color)));
   assert(brightStrokes.some(s=>s.color==='#b42370'));assert(brightStrokes.some(s=>s.color!=='#b42370'));
-  for(const s of brightStrokes)assert.deepEqual(s.dash,s.color==='#b42370'?[]:[1,4]);
+  for(const s of brightStrokes)assert.deepEqual(s.dash,s.color==='#b42370'?[]:[6,4]);
   assert.deepEqual(await page.locator('#tracker-container').boundingBox(),bounds,'analysis actions preserve Scope position before viewport clamping');
   await page.setViewportSize({width:380,height:740});await page.waitForTimeout(80);
   assert((await page.locator('#tierscope-session-tools').evaluate(e=>e.scrollWidth-e.clientWidth))<=1);

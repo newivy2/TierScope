@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.14.0-beta.3
+// @version      3.14.0-beta.4
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -5561,9 +5561,9 @@ underlying system, so should run in the browser, Node, or Plask.
       check.dataset.analysisSeries = String(i);
       const swatch = toolNode(control, "span", "", "tools-series-swatch");
       swatch.setAttribute("aria-hidden", "true");
-      swatch.style.borderTopStyle = i === newest ? "solid" : "dotted";
+      swatch.style.borderTopStyle = i === newest ? "solid" : "dashed";
       toolNode(control, "span", String.fromCharCode(65 + i) + (series.length > 1 && i === newest ? " · Latest" : "") + " · " + label);
-      control.title = (series.length > 1 ? i === newest ? "Latest recording — solid pink: " : "Earlier recording — dotted: " : "") + label;
+      control.title = (series.length > 1 ? i === newest ? "Latest recording — solid pink: " : "Earlier recording — dashed: " : "") + label;
       check.onchange = () => {
         if (!check.checked && hidden.size === series.length - 1) {
           check.checked = true;
@@ -5687,8 +5687,8 @@ underlying system, so should run in the browser, Node, or Plask.
         if (hidden.has(j)) continue;
         ctx.strokeStyle = ctx.fillStyle = color;
         ctx.lineWidth = 1.8;
-        ctx.lineCap = j === newest ? "butt" : "round";
-        ctx.setLineDash(j === newest ? [] : [1, 4]);
+        ctx.lineCap = "butt";
+        ctx.setLineDash(j === newest ? [] : [6, 4]);
         ctx.beginPath();
         let previousY = 0;
         const dots = [];
@@ -8739,7 +8739,7 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/bootstrap.js
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.14.0-beta.3";
+    runtime.TIERSCOPE_VERSION = "3.14.0-beta.4";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;

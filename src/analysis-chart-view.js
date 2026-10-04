@@ -25,9 +25,9 @@ export function renderAnalysisChart(parent, series, labels, axisMs, metricLabel)
     const legendLabels = labels.map((label, i) => {
         const control = node(legend, 'label'), check = node(control, 'input'); check.type = 'checkbox'; check.checked = true; check.dataset.analysisSeries = String(i);
         const swatch = node(control, 'span', '', 'tools-series-swatch'); swatch.setAttribute('aria-hidden', 'true');
-        swatch.style.borderTopStyle = i === newest ? 'solid' : 'dotted';
+        swatch.style.borderTopStyle = i === newest ? 'solid' : 'dashed';
         node(control, 'span', String.fromCharCode(65 + i) + (series.length > 1 && i === newest ? ' · Latest' : '') + ' · ' + label);
-        control.title = (series.length > 1 ? (i === newest ? 'Latest recording — solid pink: ' : 'Earlier recording — dotted: ') : '') + label;
+        control.title = (series.length > 1 ? (i === newest ? 'Latest recording — solid pink: ' : 'Earlier recording — dashed: ') : '') + label;
         check.onchange = () => {
             if (!check.checked && hidden.size === series.length - 1) { check.checked = true; return; }
             if (check.checked) hidden.delete(i); else hidden.add(i); draw();
@@ -95,14 +95,14 @@ export function renderAnalysisChart(parent, series, labels, axisMs, metricLabel)
             ctx.textAlign = 'right';ctx.fillText(number(maximum * step / 2),left-5,y+3);
         }
         ctx.textAlign = 'left';ctx.fillText(elapsed(start),left,bottom+20);ctx.textAlign = 'right';ctx.fillText(elapsed(end),right,bottom+20);
-        // Paint the newest last so its solid line stays clear over older dots.
+        // Paint the newest last so its solid line stays clear over older dashes.
         for (const j of newestFirst.slice().reverse()) {
             const color = colors[colorIndices[j]];
             legendLabels[j].style.color = color;
             legendLabels[j].querySelector('input').disabled = hidden.size === series.length - 1 && !hidden.has(j);
             if (hidden.has(j)) continue;
-            ctx.strokeStyle = ctx.fillStyle = color;ctx.lineWidth = 1.8;ctx.lineCap = j === newest ? 'butt' : 'round';
-            ctx.setLineDash(j === newest ? [] : [1,4]);ctx.beginPath();
+            ctx.strokeStyle = ctx.fillStyle = color;ctx.lineWidth = 1.8;ctx.lineCap = 'butt';
+            ctx.setLineDash(j === newest ? [] : [6,4]);ctx.beginPath();
             let previousY = 0;
             const dots = [];
             const points = plots[j].points;
