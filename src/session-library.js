@@ -16,6 +16,14 @@ export function libraryTitle(title) {
     return title.trim();
 }
 
+export function libraryMetadata(value) {
+    const favorite = value.favorite === undefined ? false : value.favorite, notes = value.notes === undefined ? '' : value.notes;
+    if (typeof favorite !== 'boolean' || typeof notes !== 'string' || notes.length > 2000 || /[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(notes)) {
+        throw new Error('Recording notes must be plain text of up to 2,000 characters; favorite must be true or false.');
+    }
+    return {favorite, notes};
+}
+
 export function libraryIdentity(archive) {
     // Export time and producer version do not make a new recording.
     return JSON.stringify({ room: archive.room.toLowerCase(), session: { ...archive.session, timestamp: 0 } });
@@ -90,7 +98,7 @@ export function readSessionLibrary(cache = null) {
                 const record = JSON.parse(raw);
                 if (record.schemaVersion !== 1 || !Number.isSafeInteger(record.addedAt) || record.addedAt < 0) throw new Error('Invalid library record.');
                 libraryRecordKey(id);
-                data = {title: libraryTitle(record.title), addedAt: record.addedAt, archive: validateSessionFile(record.archive)};
+                data = {title: libraryTitle(record.title), ...libraryMetadata(record), addedAt: record.addedAt, archive: validateSessionFile(record.archive)};
             }
             if (cache) {
                 if (typeof raw === 'string' && cachedCount < LIBRARY_MAX_COUNT && cachedBytes + recordBytes <= LIBRARY_MAX_BYTES) {
@@ -130,14 +138,15 @@ export function planLibraryAdditions(incoming, library = readSessionLibrary()) {
         const previous = index >= 0 ? entries[index] : null;
         if (previous && compareLibrarySessions(previous.archive, archive) !== 1) continue;
         const title = previous ? previous.title : libraryTitle(entry.title || archive.room);
+        const metadata = libraryMetadata(previous || entry);
         const id = makeStorageId();
         const addedAt = previous ? previous.addedAt : Date.now();
-        const raw = JSON.stringify({ schemaVersion: 1, addedAt, title, archive }), key = libraryRecordKey(id);
+        const raw = JSON.stringify({ schemaVersion: 1, addedAt, title, ...metadata, archive }), key = libraryRecordKey(id);
         // Retain the old copy until every new write has succeeded. Budget for
         // that temporary space too; a failed update must leave it recoverable.
         bytes += new Blob([raw]).size;
         writes.push({ key, value: raw, id, updated: !!previous, replaces: previous ? previous.records : [] });
-        const next = { id, title, addedAt, archive, records: [{ key, value: raw }] };
+        const next = { id, title, ...metadata, addedAt, archive, records: [{ key, value: raw }] };
         if (previous) entries[index] = next; else entries.push(next);
     }
     if (library.count - library.entries.length + entries.length > LIBRARY_MAX_COUNT || bytes > LIBRARY_MAX_BYTES) {
@@ -184,16 +193,33 @@ export function removeLibrarySession(id) {
 }
 
 export function renameLibrarySession(id, title) {
+    return updateLibraryMetadata(id, {title});
+}
+
+export function updateLibraryMetadata(id, patch) {
+    if (!patch || Object.keys(patch).some(key => !['title', 'favorite', 'notes'].includes(key))) throw new Error('Invalid recording metadata.');
     const key = libraryRecordKey(id), state = readSessionLibrary();
-    if (state.unavailable.length) throw new Error('Some library records could not be read. Refresh the list before renaming.');
+    if (state.unavailable.length) throw new Error('Some library records could not be read. Refresh the list before editing.');
     const entry = state.entries.find(entry => entry.records.some(record => record.key === key));
     if (!entry) throw new Error('This recording changed in another tab. Refresh the list.');
-    const cleanTitle = libraryTitle(title);
-    const writes = entry.records.map(record => ({ ...record, next: JSON.stringify({ ...JSON.parse(record.value), title: cleanTitle }) }));
+    const clean = {...libraryMetadata({...entry, ...patch}), title: libraryTitle(patch.title === undefined ? entry.title : patch.title)};
+    const writes = entry.records.map(record => ({ ...record, next: JSON.stringify({ ...JSON.parse(record.value), ...clean }) }));
     const bytes = state.bytes + writes.reduce((total, write) => total + new Blob([write.next]).size - new Blob([write.value]).size, 0);
-    if (bytes > LIBRARY_MAX_BYTES) throw new Error('Library full. Use a shorter title or remove a recording.');
-    for (const write of writes) {
-        if (GM_getValue(write.key, null) !== write.value) throw new Error('This recording changed in another tab. Refresh the list.');
-        GM_setValue(write.key, write.next);
+    if (bytes > LIBRARY_MAX_BYTES) throw new Error('Library full. Use shorter notes or a shorter title, or remove a recording.');
+    const touched = [];
+    try {
+        for (const write of writes) {
+            if (GM_getValue(write.key, null) !== write.value) throw new Error('This recording changed in another tab. Refresh the list.');
+            touched.push(write); GM_setValue(write.key, write.next);
+        }
+        verifyLibraryCapacity();
+    } catch (error) {
+        let failed = false;
+        for (const write of touched.reverse()) {
+            try { if (GM_getValue(write.key, null) === write.next) GM_setValue(write.key, write.value); }
+            catch (rollbackError) { failed = true; }
+        }
+        if (failed) throw new Error('Some recording edits could not be undone. Refresh the library before retrying.');
+        throw error;
     }
 }

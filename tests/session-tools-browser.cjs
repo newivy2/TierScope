@@ -72,7 +72,7 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
   await page.uncheck('#tools-shared-length');assert.equal(await rowValue('Peak in range',0),'85');
   await page.screenshot({path:'/tmp/tierscope-360-'+engine+'-compare.png'});
   assert.deepEqual(await page.evaluate(()=>ViewerTracker.__tools.state()),before,'analysis and library operations do not change live data');
-  await nav('library').click();await page.locator('#tools-library-search').fill('secondroom');assert.equal(await page.locator('.tools-row').count(),1);
+  await nav('library').click();await page.selectOption('#tools-library-model','*');await page.locator('#tools-library-search').fill('secondroom');assert.equal(await page.locator('.tools-row').count(),1);
   await page.locator('.tools-row summary').click();page.once('dialog',d=>d.accept('<img src=x onerror="window.bad=1">'));await page.getByRole('button',{name:'Rename',exact:true}).click();
   assert.equal(await page.evaluate(()=>window.bad),undefined);assert.equal(await page.locator('#tools-library-list img').count(),0);
   await nav('backup').click();const download=page.waitForEvent('download');await page.click('#tools-backup-download');
@@ -106,9 +106,10 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
   await page.setViewportSize({width:380,height:740});await page.waitForTimeout(150);
   assert(await page.locator('#tierscope-session-tools').evaluate(e=>e.scrollWidth-e.clientWidth<=1));
   await page.screenshot({path:'/tmp/tierscope-360-beta2-'+engine+'-narrow-summary.png'});
-  await page.setViewportSize({width:1100,height:1000});await nav('library').click();await page.locator('#tools-library-search').fill('secondroom');
+  await page.setViewportSize({width:1100,height:1000});await nav('library').click();await page.selectOption('#tools-library-model','*');await page.locator('#tools-library-search').fill('secondroom');
   await page.locator('.tools-row summary').click();page.once('dialog',d=>d.dismiss());await page.getByRole('button',{name:'Delete',exact:true}).click();assert.equal(await page.evaluate(()=>ViewerTracker.__tools.library().count),2);
   page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'Delete',exact:true}).click();assert.equal(await page.evaluate(()=>ViewerTracker.__tools.library().count),1);
+  await page.locator('#tools-library-search').fill('');await page.selectOption('#tools-library-model','testroom');
   await page.locator('.tools-row').getByRole('button',{name:'Replay',exact:true}).click();assert.equal(await page.locator('#tierscope-session-tools').count(),1);assert.match(await page.locator('#header-text').textContent(),/^FILE:/);
   await openTools();await nav('backup').click();const badPicker=page.waitForEvent('filechooser');await page.click('#tools-backup-open');await(await badPicker).setFiles(file('future.json',{...backup,formatVersion:999}));
   await page.waitForFunction(()=>document.getElementById('tools-message').textContent.includes('not a supported'));
@@ -124,7 +125,7 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
   await page.click('#tools-folder-testroom');assert.equal(await page.locator('.tools-row').count(),2);
   assert.equal(await page.locator('.tools-row').first().getAttribute('data-library-id'),'nested','model folders show newest recordings first');
   await page.screenshot({path:'/tmp/tierscope-beta3-'+engine+'-model-folder.png'});
-  await page.locator('#tools-library-search').fill('paged54');assert.equal(await page.locator('.tools-row').count(),1);assert.match(await page.locator('.tools-row').textContent(),/paged54/);
+  await page.selectOption('#tools-library-model','*');await page.locator('#tools-library-search').fill('paged54');assert.equal(await page.locator('.tools-row').count(),1);assert.match(await page.locator('.tools-row').textContent(),/paged54/);
   await page.click('#tools-library-all-models');assert.equal(await page.locator('.tools-folder').count(),50);
   await page.evaluate(()=>{for(let i=0;i<55;i++)GM_deleteValue('tierscope:library:v1:paged_'+i);GM_deleteValue('tierscope:library:v1:nested');});
   await page.locator('#tools-refresh-library').click();

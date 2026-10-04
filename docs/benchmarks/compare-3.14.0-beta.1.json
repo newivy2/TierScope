@@ -1,0 +1,692 @@
+{
+  "measuredAt": "2026-10-04",
+  "version": "3.14.0-beta.1",
+  "sourceSha256": "8396587a27e2f91411dd9c5f33d604bfafb9bf706fad73cadeac33edcdabfdf6",
+  "method": "Three fresh Chromium pages per dataset and CPU setting; six recordings; action work includes forced layout; cursor reports 120 updates after 20 warmups; in-memory GM storage; synthetic fixture, not website input latency.",
+  "runs": [
+    {
+      "source": "tierscope.user.js",
+      "historyMode": false,
+      "compareMode": true,
+      "cpuThrottle": 1,
+      "rounds": 3,
+      "cases": [
+        {
+          "label": "small",
+          "version": "3.14.0-beta.1",
+          "recordings": 12,
+          "samplesPerRecording": 300,
+          "bytes": 208430,
+          "measurements": [
+            {
+              "open": {
+                "ms": 20.400000005960464,
+                "storageReads": 12
+              },
+              "folder": {
+                "ms": 6.899999998509884,
+                "storageReads": 0
+              },
+              "sixRecordingMetric": {
+                "ms": 13.099999994039536,
+                "storageReads": 0
+              },
+              "zoomIn": {
+                "ms": 2.5,
+                "storageReads": 0
+              },
+              "cursor": {
+                "meanMs": 0.3691666666418314,
+                "p95Ms": 0.5,
+                "maxMs": 2.0999999940395355
+              },
+              "fullRange": {
+                "ms": 4.700000002980232,
+                "storageReads": 0
+              },
+              "compareRecordings": 6,
+              "nodes": 319,
+              "heap": {
+                "before": 2082652,
+                "open": 2561432,
+                "closed": 2246736
+              }
+            },
+            {
+              "open": {
+                "ms": 16,
+                "storageReads": 12
+              },
+              "folder": {
+                "ms": 2.5,
+                "storageReads": 0
+              },
+              "sixRecordingMetric": {
+                "ms": 15.5,
+                "storageReads": 0
+              },
+              "zoomIn": {
+                "ms": 2.5,
+                "storageReads": 0
+              },
+              "cursor": {
+                "meanMs": 0.4066666666418314,
+                "p95Ms": 0.6000000014901161,
+                "maxMs": 0.7999999970197678
+              },
+              "fullRange": {
+                "ms": 4.0999999940395355,
+                "storageReads": 0
+              },
+              "compareRecordings": 6,
+              "nodes": 319,
+              "heap": {
+                "before": 2082700,
+                "open": 2625972,
+                "closed": 2311400
+              }
+            },
+            {
+              "open": {
+                "ms": 15.399999998509884,
+                "storageReads": 12
+              },
+              "folder": {
+                "ms": 5.700000002980232,
+                "storageReads": 0
+              },
+              "sixRecordingMetric": {
+                "ms": 11.700000002980232,
+                "storageReads": 0
+              },
+              "zoomIn": {
+                "ms": 2.2999999970197678,
+                "storageReads": 0
+              },
+              "cursor": {
+                "meanMs": 0.35083333334575095,
+                "p95Ms": 0.5,
+                "maxMs": 0.6999999955296516
+              },
+              "fullRange": {
+                "ms": 3.8000000044703484,
+                "storageReads": 0
+              },
+              "compareRecordings": 6,
+              "nodes": 319,
+              "heap": {
+                "before": 2082700,
+                "open": 2625964,
+                "closed": 2311400
+              }
+            }
+          ]
+        },
+        {
+          "label": "many",
+          "version": "3.14.0-beta.1",
+          "recordings": 500,
+          "samplesPerRecording": 500,
+          "bytes": 14102890,
+          "measurements": [
+            {
+              "open": {
+                "ms": 150.79999999701977,
+                "storageReads": 500
+              },
+              "folder": {
+                "ms": 4.700000002980232,
+                "storageReads": 0
+              },
+              "sixRecordingMetric": {
+                "ms": 86.80000000447035,
+                "storageReads": 0
+              },
+              "zoomIn": {
+                "ms": 3.5,
+                "storageReads": 0
+              },
+              "cursor": {
+                "meanMs": 0.4099999999627471,
+                "p95Ms": 0.6000000014901161,
+                "maxMs": 1.6000000014901161
+              },
+              "fullRange": {
+                "ms": 12,
+                "storageReads": 0
+              },
+              "compareRecordings": 6,
+              "nodes": 3335,
+              "heap": {
+                "before": 16149620,
+                "open": 19323144,
+                "closed": 2450088
+              }
+            },
+            {
+              "open": {
+                "ms": 136.79999999701977,
+                "storageReads": 500
+              },
+              "folder": {
+                "ms": 3,
+                "storageReads": 0
+              },
+              "sixRecordingMetric": {
+                "ms": 90.5,
+                "storageReads": 0
+              },
+              "zoomIn": {
+                "ms": 3.2000000029802322,
+                "storageReads": 0
+              },
+              "cursor": {
+                "meanMs": 0.40083333334575094,
+                "p95Ms": 0.6000000014901161,
+                "maxMs": 1.3000000044703484
+              },
+              "fullRange": {
+                "ms": 10.899999998509884,
+                "storageReads": 0
+              },
+              "compareRecordings": 6,
+              "nodes": 3335,
+              "heap": {
+                "before": 16149560,
+                "open": 19323104,
+                "closed": 2450028
+              }
+            },
+            {
+              "open": {
+                "ms": 136.10000000149012,
+                "storageReads": 500
+              },
+              "folder": {
+                "ms": 4.100000001490116,
+                "storageReads": 0
+              },
+              "sixRecordingMetric": {
+                "ms": 116.29999999701977,
+                "storageReads": 0
+              },
+              "zoomIn": {
+                "ms": 5.700000002980232,
+                "storageReads": 0
+              },
+              "cursor": {
+                "meanMs": 0.34499999998758235,
+                "p95Ms": 0.5,
+                "maxMs": 0.5
+              },
+              "fullRange": {
+                "ms": 9.300000004470348,
+                "storageReads": 0
+              },
+              "compareRecordings": 6,
+              "nodes": 3335,
+              "heap": {
+                "before": 16149560,
+                "open": 19322916,
+                "closed": 2449828
+              }
+            }
+          ]
+        },
+        {
+          "label": "long",
+          "version": "3.14.0-beta.1",
+          "recordings": 36,
+          "samplesPerRecording": 10000,
+          "bytes": 19543058,
+          "measurements": [
+            {
+              "open": {
+                "ms": 188.20000000298023,
+                "storageReads": 36
+              },
+              "folder": {
+                "ms": 2.2999999970197678,
+                "storageReads": 0
+              },
+              "sixRecordingMetric": {
+                "ms": 72.89999999850988,
+                "storageReads": 0
+              },
+              "zoomIn": {
+                "ms": 33.5,
+                "storageReads": 0
+              },
+              "cursor": {
+                "meanMs": 0.3699999999875824,
+                "p95Ms": 0.5,
+                "maxMs": 1.1000000014901161
+              },
+              "fullRange": {
+                "ms": 51.70000000298023,
+                "storageReads": 0
+              },
+              "compareRecordings": 6,
+              "nodes": 487,
+              "heap": {
+                "before": 23610180,
+                "open": 28694508,
+                "closed": 4528780
+              }
+            },
+            {
+              "open": {
+                "ms": 207.5,
+                "storageReads": 36
+              },
+              "folder": {
+                "ms": 2.2999999970197678,
+                "storageReads": 0
+              },
+              "sixRecordingMetric": {
+                "ms": 84.39999999850988,
+                "storageReads": 0
+              },
+              "zoomIn": {
+                "ms": 32.70000000298023,
+                "storageReads": 0
+              },
+              "cursor": {
+                "meanMs": 0.43250000004967054,
+                "p95Ms": 0.6000000014901161,
+                "maxMs": 5.300000004470348
+              },
+              "fullRange": {
+                "ms": 52.399999998509884,
+                "storageReads": 0
+              },
+              "compareRecordings": 6,
+              "nodes": 487,
+              "heap": {
+                "before": 23610108,
+                "open": 28694252,
+                "closed": 4528516
+              }
+            },
+            {
+              "open": {
+                "ms": 186.90000000596046,
+                "storageReads": 36
+              },
+              "folder": {
+                "ms": 2.2999999970197678,
+                "storageReads": 0
+              },
+              "sixRecordingMetric": {
+                "ms": 72.39999999850988,
+                "storageReads": 0
+              },
+              "zoomIn": {
+                "ms": 33.399999998509884,
+                "storageReads": 0
+              },
+              "cursor": {
+                "meanMs": 0.38583333330849806,
+                "p95Ms": 0.5,
+                "maxMs": 1.5
+              },
+              "fullRange": {
+                "ms": 51.899999998509884,
+                "storageReads": 0
+              },
+              "compareRecordings": 6,
+              "nodes": 487,
+              "heap": {
+                "before": 23610108,
+                "open": 28694940,
+                "closed": 4529176
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "source": "tierscope.user.js",
+      "historyMode": false,
+      "compareMode": true,
+      "cpuThrottle": 4,
+      "rounds": 3,
+      "cases": [
+        {
+          "label": "small",
+          "version": "3.14.0-beta.1",
+          "recordings": 12,
+          "samplesPerRecording": 300,
+          "bytes": 208430,
+          "measurements": [
+            {
+              "open": {
+                "ms": 68,
+                "storageReads": 12
+              },
+              "folder": {
+                "ms": 12.5,
+                "storageReads": 0
+              },
+              "sixRecordingMetric": {
+                "ms": 62.399999998509884,
+                "storageReads": 0
+              },
+              "zoomIn": {
+                "ms": 12,
+                "storageReads": 0
+              },
+              "cursor": {
+                "meanMs": 1.9574999999875824,
+                "p95Ms": 2.7000000029802322,
+                "maxMs": 3.100000001490116
+              },
+              "fullRange": {
+                "ms": 19.100000001490116,
+                "storageReads": 0
+              },
+              "compareRecordings": 6,
+              "nodes": 319,
+              "heap": {
+                "before": 2082652,
+                "open": 2648384,
+                "closed": 2311872
+              }
+            },
+            {
+              "open": {
+                "ms": 85.60000000149012,
+                "storageReads": 12
+              },
+              "folder": {
+                "ms": 16.899999998509884,
+                "storageReads": 0
+              },
+              "sixRecordingMetric": {
+                "ms": 56.600000001490116,
+                "storageReads": 0
+              },
+              "zoomIn": {
+                "ms": 10.799999997019768,
+                "storageReads": 0
+              },
+              "cursor": {
+                "meanMs": 1.7441666666418314,
+                "p95Ms": 2.399999998509884,
+                "maxMs": 2.7999999970197678
+              },
+              "fullRange": {
+                "ms": 17.099999994039536,
+                "storageReads": 0
+              },
+              "compareRecordings": 6,
+              "nodes": 319,
+              "heap": {
+                "before": 2082700,
+                "open": 2648376,
+                "closed": 2312024
+              }
+            },
+            {
+              "open": {
+                "ms": 71.29999999701977,
+                "storageReads": 12
+              },
+              "folder": {
+                "ms": 17.400000005960464,
+                "storageReads": 0
+              },
+              "sixRecordingMetric": {
+                "ms": 65.70000000298023,
+                "storageReads": 0
+              },
+              "zoomIn": {
+                "ms": 12.699999995529652,
+                "storageReads": 0
+              },
+              "cursor": {
+                "meanMs": 1.9275000000372529,
+                "p95Ms": 2.5999999940395355,
+                "maxMs": 3.399999998509884
+              },
+              "fullRange": {
+                "ms": 17.69999999552965,
+                "storageReads": 0
+              },
+              "compareRecordings": 6,
+              "nodes": 319,
+              "heap": {
+                "before": 2082700,
+                "open": 2648536,
+                "closed": 2312024
+              }
+            }
+          ]
+        },
+        {
+          "label": "many",
+          "version": "3.14.0-beta.1",
+          "recordings": 500,
+          "samplesPerRecording": 500,
+          "bytes": 14102890,
+          "measurements": [
+            {
+              "open": {
+                "ms": 678.2000000029802,
+                "storageReads": 500
+              },
+              "folder": {
+                "ms": 16.899999998509884,
+                "storageReads": 0
+              },
+              "sixRecordingMetric": {
+                "ms": 535.7999999970198,
+                "storageReads": 0
+              },
+              "zoomIn": {
+                "ms": 19.80000000447035,
+                "storageReads": 0
+              },
+              "cursor": {
+                "meanMs": 1.7300000000124176,
+                "p95Ms": 2.600000001490116,
+                "maxMs": 3.2000000029802322
+              },
+              "fullRange": {
+                "ms": 29,
+                "storageReads": 0
+              },
+              "compareRecordings": 6,
+              "nodes": 3335,
+              "heap": {
+                "before": 16149620,
+                "open": 19323048,
+                "closed": 2449992
+              }
+            },
+            {
+              "open": {
+                "ms": 699.8000000044703,
+                "storageReads": 500
+              },
+              "folder": {
+                "ms": 19.799999997019768,
+                "storageReads": 0
+              },
+              "sixRecordingMetric": {
+                "ms": 518.9000000059605,
+                "storageReads": 0
+              },
+              "zoomIn": {
+                "ms": 20.799999997019768,
+                "storageReads": 0
+              },
+              "cursor": {
+                "meanMs": 1.7508333332215746,
+                "p95Ms": 2.5,
+                "maxMs": 3
+              },
+              "fullRange": {
+                "ms": 29.899999998509884,
+                "storageReads": 0
+              },
+              "compareRecordings": 6,
+              "nodes": 3335,
+              "heap": {
+                "before": 16149560,
+                "open": 19322732,
+                "closed": 2449804
+              }
+            },
+            {
+              "open": {
+                "ms": 604.2000000029802,
+                "storageReads": 500
+              },
+              "folder": {
+                "ms": 16.19999999552965,
+                "storageReads": 0
+              },
+              "sixRecordingMetric": {
+                "ms": 471.5,
+                "storageReads": 0
+              },
+              "zoomIn": {
+                "ms": 19.399999998509884,
+                "storageReads": 0
+              },
+              "cursor": {
+                "meanMs": 1.7041666666045785,
+                "p95Ms": 2.399999998509884,
+                "maxMs": 2.7000000029802322
+              },
+              "fullRange": {
+                "ms": 29.899999998509884,
+                "storageReads": 0
+              },
+              "compareRecordings": 6,
+              "nodes": 3335,
+              "heap": {
+                "before": 16149560,
+                "open": 19322632,
+                "closed": 2449564
+              }
+            }
+          ]
+        },
+        {
+          "label": "long",
+          "version": "3.14.0-beta.1",
+          "recordings": 36,
+          "samplesPerRecording": 10000,
+          "bytes": 19543058,
+          "measurements": [
+            {
+              "open": {
+                "ms": 957.7000000029802,
+                "storageReads": 36
+              },
+              "folder": {
+                "ms": 14.199999995529652,
+                "storageReads": 0
+              },
+              "sixRecordingMetric": {
+                "ms": 342.70000000298023,
+                "storageReads": 0
+              },
+              "zoomIn": {
+                "ms": 173.29999999701977,
+                "storageReads": 0
+              },
+              "cursor": {
+                "meanMs": 2.17666666675359,
+                "p95Ms": 2.899999998509884,
+                "maxMs": 3.5
+              },
+              "fullRange": {
+                "ms": 240.39999999850988,
+                "storageReads": 0
+              },
+              "compareRecordings": 6,
+              "nodes": 487,
+              "heap": {
+                "before": 23621368,
+                "open": 28733968,
+                "closed": 4540664
+              }
+            },
+            {
+              "open": {
+                "ms": 907.1999999955297,
+                "storageReads": 36
+              },
+              "folder": {
+                "ms": 12,
+                "storageReads": 0
+              },
+              "sixRecordingMetric": {
+                "ms": 360.20000000298023,
+                "storageReads": 0
+              },
+              "zoomIn": {
+                "ms": 169.10000000149012,
+                "storageReads": 0
+              },
+              "cursor": {
+                "meanMs": 2.515000000037253,
+                "p95Ms": 3.7999999970197678,
+                "maxMs": 27.600000001490116
+              },
+              "fullRange": {
+                "ms": 289.70000000298023,
+                "storageReads": 0
+              },
+              "compareRecordings": 6,
+              "nodes": 487,
+              "heap": {
+                "before": 23621304,
+                "open": 28706516,
+                "closed": 4540692
+              }
+            },
+            {
+              "open": {
+                "ms": 916.8999999985099,
+                "storageReads": 36
+              },
+              "folder": {
+                "ms": 10.299999997019768,
+                "storageReads": 0
+              },
+              "sixRecordingMetric": {
+                "ms": 335.20000000298023,
+                "storageReads": 0
+              },
+              "zoomIn": {
+                "ms": 165.39999999850988,
+                "storageReads": 0
+              },
+              "cursor": {
+                "meanMs": 1.898333333308498,
+                "p95Ms": 2.899999998509884,
+                "maxMs": 6.600000001490116
+              },
+              "fullRange": {
+                "ms": 244.10000000149012,
+                "storageReads": 0
+              },
+              "compareRecordings": 6,
+              "nodes": 487,
+              "heap": {
+                "before": 23621368,
+                "open": 28713472,
+                "closed": 4540856
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

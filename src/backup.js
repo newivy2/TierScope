@@ -3,7 +3,7 @@ import { makeStorageId } from './record-validation.js';
 import { runtime } from './runtime.js';
 import { ANALYSIS_PREFERENCE_KEY, validateAnalysisPreferences } from './analysis-preference-data.js';
 import { validateSessionFile } from './session-file-format.js';
-import { LIBRARY_MAX_COUNT, LIBRARY_PREFIX, finalizeLibraryWrites, libraryTitle, planLibraryAdditions, readSessionLibrary, verifyLibraryCapacity } from './session-library.js';
+import { LIBRARY_MAX_COUNT, LIBRARY_PREFIX, finalizeLibraryWrites, libraryTitle, libraryMetadata, planLibraryAdditions, readSessionLibrary, verifyLibraryCapacity } from './session-library.js';
 
 export const BACKUP_MAX_BYTES = 32 * 1024 * 1024;
 const preferenceKeys = Object.freeze({ theme: 'tierscope:ui:theme:v1', highMode: 'tierscope:ui:highMode:v1',
@@ -49,7 +49,7 @@ export function validateTierScopeBackup(input) {
         mergeAllTimeHighs(highs, record.highs);
         return { room, highs };
     });
-    const library = input.library.map(entry => ({ title: libraryTitle(entry.title), archive: validateSessionFile(entry.archive) }));
+    const library = input.library.map(entry => ({ title: libraryTitle(entry.title), ...libraryMetadata(entry), archive: validateSessionFile(entry.archive) }));
     const backup = { format: 'TierScopeBackup', formatVersion: 1, producerVersion: input.producerVersion,
         rooms, preferences: validateBackupPreferences(input.preferences), library };
     if (input.analysisPreferences !== undefined) backup.analysisPreferences = validateAnalysisPreferences(input.analysisPreferences);
@@ -90,7 +90,7 @@ export function createTierScopeBackup(includeLibrary = true, allowPartialLibrary
     if (library.damaged.length && !allowPartialLibrary) throw new Error('The library contains unreadable recordings. Choose the healthy-recordings option to make a partial backup, or export ATH/preferences separately.');
     const rawAnalysis = GM_getValue(ANALYSIS_PREFERENCE_KEY, null);
     return validateTierScopeBackup({ format: 'TierScopeBackup', formatVersion: 1, producerVersion: runtime.TIERSCOPE_VERSION,
-        rooms: records, preferences, library: library.entries.map(entry => ({ title: entry.title, archive: entry.archive })),
+        rooms: records, preferences, library: library.entries.map(entry => ({ title: entry.title, ...libraryMetadata(entry), archive: entry.archive })),
         ...(rawAnalysis === null ? {} : {analysisPreferences: validateAnalysisPreferences(JSON.parse(rawAnalysis))}),
         ...(library.damaged.length ? {recovery: {omittedLibraryKeys: library.damaged}} : {}) });
 }
