@@ -28,12 +28,12 @@ export function recordingFilters(parent, entries, state, prefix, changed, organi
     search.oninput = () => { state.query = search.value; changed(); };
     if (organization) {
         const label = toolNode(controls, 'label', 'Sort '), sort = toolNode(label, 'select'); sort.id = prefix + '-sort';
-        for (const [value, name] of [['newest','Newest first'],['oldest','Oldest first'],['title','Title'],['model','Model'],['favorites','Favorites first']]) {
+        for (const [value, name] of [['newest','Newest first'],['oldest','Oldest first'],['title','Title'],['model','Model'],['favorites','Favorite models first']]) {
             const option = toolNode(sort, 'option', name); option.value = value;
         }
         sort.value = state.sort || 'newest'; sort.onchange = () => { state.sort = sort.value; changed(); };
         const favoriteLabel = toolNode(controls, 'label'), favorite = toolNode(favoriteLabel, 'input'); favorite.type = 'checkbox'; favorite.id = prefix + '-favorites';
-        favorite.checked = !!state.favorites; toolNode(favoriteLabel, 'span', 'Favorites only'); favorite.onchange = () => { state.favorites = favorite.checked; changed(); };
+        favorite.checked = !!state.favorites; toolNode(favoriteLabel, 'span', 'Favorite models only'); favorite.onchange = () => { state.favorites = favorite.checked; changed(); };
     }
     toolButton(controls, 'Clear filters', () => {
         Object.assign(state, {room: '', from: '', to: '', query: '', favorites: false, sort: 'newest'});

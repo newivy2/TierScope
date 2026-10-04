@@ -11,7 +11,7 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   a.session.history.timestamps=[start,start+60000,start+120000,start+180000];a.session.sessionStartedAt=start;a.session.timestamp=start+180000;
   for(const key of STORAGE_HISTORY_SERIES){if(key!=='anonymous')a.session.history[key]=a.session.history[key].map(v=>v+i);a.session.sessionHighs[key]={value:Math.max(...a.session.history[key]),time:start+120000};}
   a.session.roomTotalHigh=45+i;a.session.roomTotalHighTime=start+120000;
-  GM_setValue('tierscope:library:v1:organized_'+i,JSON.stringify({schemaVersion:1,addedAt:now,title:'Recording '+(i+1),favorite:i===0,notes:i===0?'Opening day':'',archive:a}));
+  GM_setValue('tierscope:library:v1:organized_'+i,JSON.stringify({schemaVersion:1,addedAt:now,title:i===0?'alpha_model':'Recording '+(i+1),favorite:i===0,notes:i===0?'Opening day':'',archive:a}));
  }
  },library:readSessionLibrary,archive:captureSessionFile,
  state:()=>({history:JSON.stringify(history),paused:isPaused,mode:presentationMode,ath:JSON.stringify(readAllTimeHighs(getModelName()).highs)}),
@@ -33,23 +33,35 @@ const file=(name,value)=>({name,mimeType:'application/json',buffer:Buffer.from(J
   await page.click('#btn-control-library');await page.click('#tools-folder-alpha_model');assert.equal(await page.locator('.tools-row').count(),6);
   await page.locator('#tools-library-from').fill('2026-10-02');await page.locator('#tools-library-to').fill('2026-10-04');assert.equal(await page.locator('.tools-row').count(),3);
   await page.selectOption('#tools-library-sort','oldest');assert.equal(await page.locator('.tools-row').first().getAttribute('data-library-id'),'organized_1');
-  await page.click('#tools-library-clear');await page.check('#tools-library-favorites');await page.selectOption('#tools-library-model','*');assert.equal(await page.locator('.tools-row').count(),1);
+  await page.click('#tools-library-clear');await page.check('#tools-library-favorites');assert.equal(await page.locator('.tools-folder').count(),1);
+  assert.equal(await page.locator('#tools-model-favorite-alpha_model').getAttribute('aria-pressed'),'true');
+  await page.selectOption('#tools-library-model','*');assert.equal(await page.locator('.tools-row').count(),6,'every recording of a favorite model is included');
   await page.uncheck('#tools-library-favorites');await page.locator('#tools-library-search').fill('Opening day');assert.equal(await page.locator('.tools-row').count(),1);
   const first=page.locator('[data-library-id=organized_0]');await first.locator('summary').click();
   await first.locator('textarea').fill('Remember this\n<b>plain text</b>');await first.getByRole('button',{name:'Save notes',exact:true}).click();
   await page.locator('#tools-library-search').fill('Remember this');assert.equal(await page.locator('.tools-row').count(),1);assert.equal(await page.locator('.tools-recording-note b').count(),0);
   assert.match(await page.locator('.tools-recording-note').textContent(),/\n<b>plain text<\/b>/);
-  await page.click('#tools-favorite-organized_0');assert.equal(await page.locator('#tools-favorite-organized_0').getAttribute('aria-pressed'),'false');
-  assert.equal(await page.evaluate(()=>document.activeElement.id),'tools-favorite-organized_0');
-  await page.click('#tools-favorite-organized_0');
+  assert.equal(await page.locator('[id^=tools-favorite-organized]').count(),0,'favorites are not individual recording actions');
+  await page.selectOption('#tools-library-model','alpha_model');
+  await page.click('#tools-model-favorite-alpha_model');assert.equal(await page.locator('#tools-model-favorite-alpha_model').getAttribute('aria-pressed'),'false');
+  assert.equal(await page.evaluate(()=>document.activeElement.id),'tools-model-favorite-alpha_model');
+  await page.click('#tools-model-favorite-alpha_model');
+  // Another tab changes a different model without replacing this model's choice.
+  const other=await context.newPage();await other.goto('https://tierscope.test/other_room/');
+  await other.evaluate(()=>GM_setValue('tierscope:library-model:v1:beta_model',JSON.stringify({schemaVersion:1,room:'beta_model',favorite:true})));
+  await page.click('#tools-library-clear');await page.check('#tools-library-favorites');await page.click('#tools-refresh-library');assert.equal(await page.locator('.tools-folder').count(),2);
+  await other.evaluate(()=>GM_setValue('tierscope:library-model:v1:beta_model',JSON.stringify({schemaVersion:1,room:'beta_model',favorite:false})));
+  await page.click('#tools-refresh-library');assert.equal(await page.locator('.tools-folder').count(),1);await other.close();
   // Six selected library recordings become six independent comparison slots.
   await page.click('#tools-library-clear');await page.selectOption('#tools-library-model','alpha_model');await page.click('#tools-select-matching');
   assert.match(await page.locator('#tools-library-selected').textContent(),/^6 selected/);
   await page.locator('.tools-filters').evaluate(e=>e.scrollIntoView({block:'start'}));
   await page.screenshot({path:'/tmp/tierscope-314-'+engine+'-library.png'});
   const download=page.waitForEvent('download');await page.click('#tools-export-selected');const bundle=JSON.parse(fs.readFileSync(await(await download).path(),'utf8'));
-  assert.equal(bundle.library.length,6);assert.deepEqual(bundle.rooms,[]);assert.deepEqual(bundle.preferences,{});assert(bundle.library.find(e=>e.favorite).notes.includes('Remember this'));
+  assert.equal(bundle.library.length,6);assert.deepEqual(bundle.rooms,[]);assert.deepEqual(bundle.preferences,{});assert.deepEqual(bundle.favoriteModels,['alpha_model']);assert(bundle.library.some(e=>e.notes.includes('Remember this')));
   await page.click('#tools-compare-selected');assert.equal(await page.locator('[id^=tools-source-]').count(),6);assert(await page.locator('#tools-compare-add').isDisabled());
+  const defaultLabel=await page.locator('#tools-source-a option[value=organized_0]').textContent();assert.equal(defaultLabel.split('alpha_model').length-1,1,'default model title is not duplicated');assert.match(defaultLabel,/10\/1\/2026/);
+  assert.match(await page.locator('#tools-source-a option[value=organized_1]').textContent(),/alpha_model — Recording 2 —/,'custom titles remain visible');
   assert.equal(await page.locator('#tools-summary-table thead th').count(),7);assert.equal(await page.locator('#tools-chart-inspection tbody tr').count(),6);
   await page.selectOption('#tools-analysis-model','beta_model');
   assert.match(await page.locator('#tools-source-a option:checked').textContent(),/outside filters/);assert.equal(await page.locator('#tools-summary-table thead th').count(),7);
@@ -110,7 +122,7 @@ const file=(name,value)=>({name,mimeType:'application/json',buffer:Buffer.from(J
   const finalBounds=await page.locator('#tracker-container').boundingBox();assert.equal(finalBounds.width,bounds.width);assert.equal(finalBounds.height,bounds.height);
   // Closing/reopening keeps metadata while clearing transient selections.
   await page.keyboard.press('Escape');await page.click('#btn-control-library');await page.selectOption('#tools-library-model','alpha_model');await page.check('#tools-library-favorites');
-  assert.equal(await page.locator('.tools-row').count(),1);assert.match(await page.locator('.tools-recording-note').textContent(),/Remember this/);assert.match(await page.locator('#tools-library-selected').textContent(),/^0 selected/);
+  assert.equal(await page.locator('.tools-row').count(),6);assert.match(await page.locator('.tools-recording-note').textContent(),/Remember this/);assert.match(await page.locator('#tools-library-selected').textContent(),/^0 selected/);
   await page.evaluate(()=>{history.pushState({},'', '/next_room/');ViewerTracker.__organized.checkUrlChange();});assert.equal(await page.locator('#tierscope-session-tools').count(),0);
   assert.deepEqual(errors,[]);console.log(engine+': filtered library, metadata, bulk transfer, six-way comparison, cursor/gaps, zoom/pan, themes and isolation passed');
  }finally{await browser.close();}

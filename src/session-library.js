@@ -17,11 +17,12 @@ export function libraryTitle(title) {
 }
 
 export function libraryMetadata(value) {
+    // Keep beta 1's legacy flag readable for migration; new stars belong to models.
     const favorite = value.favorite === undefined ? false : value.favorite, notes = value.notes === undefined ? '' : value.notes;
     if (typeof favorite !== 'boolean' || typeof notes !== 'string' || notes.length > 2000 || /[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(notes)) {
         throw new Error('Recording notes must be plain text of up to 2,000 characters; favorite must be true or false.');
     }
-    return {favorite, notes};
+    return {...(value.favorite === undefined ? {} : {favorite}), notes};
 }
 
 export function libraryIdentity(archive) {
@@ -197,7 +198,7 @@ export function renameLibrarySession(id, title) {
 }
 
 export function updateLibraryMetadata(id, patch) {
-    if (!patch || Object.keys(patch).some(key => !['title', 'favorite', 'notes'].includes(key))) throw new Error('Invalid recording metadata.');
+    if (!patch || Object.keys(patch).some(key => !['title', 'notes'].includes(key))) throw new Error('Invalid recording metadata.');
     const key = libraryRecordKey(id), state = readSessionLibrary();
     if (state.unavailable.length) throw new Error('Some library records could not be read. Refresh the list before editing.');
     const entry = state.entries.find(entry => entry.records.some(record => record.key === key));

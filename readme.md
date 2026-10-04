@@ -5,7 +5,7 @@ TierScope is a free, open-source userscript that charts how a Chaturbate room’
 ---
 **Current stable release: 3.13.0** · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.13.0)
 
-**Beta 3.14.0-beta.1:** [Install the beta](https://raw.githubusercontent.com/newivy2/TierScope/beta/library-analysis/tierscope.user.js) for model/date filters, favorites, recording notes, bulk import/export and interactive comparisons of up to six recordings. Select recordings in Library, choose **Compare selected**, then inspect samples with a shared cursor or zoom the chart. [Library preview](docs/previews/library-organization-dark.png) · [Compare preview](docs/previews/interactive-compare-dark.png) · [Bright preview](docs/previews/interactive-compare-bright.png).
+**Beta 3.14.0-beta.2:** [Install the beta](https://raw.githubusercontent.com/newivy2/TierScope/beta/library-analysis/tierscope.user.js) for model/date filters, favorite models, recording notes, bulk import/export and interactive comparisons of up to six recordings. Select recordings in Library, choose **Compare selected**, then inspect samples with a shared cursor or zoom the chart. [Library preview](docs/previews/library-organization-dark.png) · [Compare preview](docs/previews/interactive-compare-dark.png) · [Bright preview](docs/previews/interactive-compare-bright.png).
 
 ---
 
@@ -45,7 +45,7 @@ Charts use periodic room-data samples. Session history is stored locally through
 
 - **Model history** — Review one model’s saved recordings over time, with one point per recording for the selected metric’s average and peak. View all recordings or the latest 10 or 30, then select one to inspect, replay, or compare with the previous recording.
 
-- **Library organization (beta)** — Filter by model and inclusive local recording dates, search titles and notes, sort recordings, and mark favorites. Select recordings for comparison or export one library bundle with their notes and favorites; import multiple files in one explicit action.
+- **Library organization (beta)** — Filter by model and inclusive local recording dates, search titles and notes, sort recordings, and star favorite model folders. Select recordings for comparison or export one library bundle with recording notes and favorite models; import multiple files in one explicit action.
 
 - **Backups** — Export ATH for every room and saved preferences, optionally including the library. 
 

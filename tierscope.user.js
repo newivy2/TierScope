@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.14.0-beta.1
+// @version      3.14.0-beta.2
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -4500,7 +4500,7 @@ underlying system, so should run in the browser, Node, or Plask.
     if (typeof favorite !== "boolean" || typeof notes !== "string" || notes.length > 2e3 || /[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(notes)) {
       throw new Error("Recording notes must be plain text of up to 2,000 characters; favorite must be true or false.");
     }
-    return { favorite, notes };
+    return __spreadProps(__spreadValues({}, value.favorite === void 0 ? {} : { favorite }), { notes });
   }
   function libraryIdentity(archive) {
     return JSON.stringify({ room: archive.room.toLowerCase(), session: __spreadProps(__spreadValues({}, archive.session), { timestamp: 0 }) });
@@ -4692,7 +4692,7 @@ underlying system, so should run in the browser, Node, or Plask.
     return updateLibraryMetadata(id, { title });
   }
   function updateLibraryMetadata(id, patch) {
-    if (!patch || Object.keys(patch).some((key2) => !["title", "favorite", "notes"].includes(key2))) throw new Error("Invalid recording metadata.");
+    if (!patch || Object.keys(patch).some((key2) => !["title", "notes"].includes(key2))) throw new Error("Invalid recording metadata.");
     const key = libraryRecordKey(id), state = readSessionLibrary();
     if (state.unavailable.length) throw new Error("Some library records could not be read. Refresh the list before editing.");
     const entry = state.entries.find((entry2) => entry2.records.some((record) => record.key === key));
@@ -4720,6 +4720,75 @@ underlying system, so should run in the browser, Node, or Plask.
       }
       if (failed) throw new Error("Some recording edits could not be undone. Refresh the library before retrying.");
       throw error;
+    }
+  }
+
+  // src/library-models.js
+  var MODEL_FAVORITE_PREFIX = "tierscope:library-model:v1:";
+  function modelFavoriteKey(room) {
+    const normalized = allTimeRoom(room);
+    if (!normalized) throw new Error("Invalid favorite model.");
+    return MODEL_FAVORITE_PREFIX + normalized;
+  }
+  function validateFavoriteModels(value) {
+    if (!Array.isArray(value) || value.length > 1e4 || value.some((room) => !allTimeRoom(room))) throw new Error("Invalid favorite models.");
+    return [...new Set(value.map(allTimeRoom))].sort();
+  }
+  function readModelFavorites(entries = []) {
+    const favorites = new Set(entries.filter((entry) => entry.favorite).map((entry) => entry.archive.room.toLowerCase()));
+    const errors = [];
+    for (const key of GM_listValues().filter((key2) => key2.startsWith(MODEL_FAVORITE_PREFIX))) {
+      const room = key.slice(MODEL_FAVORITE_PREFIX.length);
+      try {
+        if (modelFavoriteKey(room) !== key) throw new Error("Invalid favorite model key.");
+        const raw = GM_getValue(key, void 0);
+        if (raw === void 0) continue;
+        const record = JSON.parse(raw);
+        if (record.schemaVersion !== 1 || record.room !== room || typeof record.favorite !== "boolean") throw new Error("Invalid favorite model record.");
+        if (record.favorite) favorites.add(room);
+        else favorites.delete(room);
+      } catch (error) {
+        favorites.delete(room);
+        errors.push(room);
+      }
+    }
+    return { favorites, errors };
+  }
+  function planModelFavoriteWrites(rooms) {
+    const writes = [];
+    for (const room of validateFavoriteModels(rooms)) {
+      const key = modelFavoriteKey(room);
+      if (GM_getValue(key, void 0) === void 0) writes.push({
+        key,
+        expectedBefore: void 0,
+        value: JSON.stringify({ schemaVersion: 1, room, favorite: true })
+      });
+    }
+    return writes;
+  }
+  function setModelFavorite(room, favorite) {
+    const key = modelFavoriteKey(room);
+    if (typeof favorite !== "boolean") throw new Error("Invalid favorite model choice.");
+    const before = GM_getValue(key, void 0), value = JSON.stringify({ schemaVersion: 1, room: allTimeRoom(room), favorite });
+    try {
+      GM_setValue(key, value);
+      if (GM_getValue(key, void 0) !== value) throw new Error("Favorite changed in another tab. Refresh the library.");
+    } catch (error) {
+      try {
+        if (GM_getValue(key, void 0) === value) {
+          if (before === void 0) GM_deleteValue(key);
+          else GM_setValue(key, before);
+        }
+      } catch (rollbackError) {
+        throw new Error("The favorite could not be saved or restored. Refresh the library before retrying.");
+      }
+      throw error;
+    }
+  }
+  function migrateRecordingFavorites(entries) {
+    const rooms = entries.filter((entry) => entry.favorite).map((entry) => entry.archive.room);
+    for (const write of planModelFavoriteWrites(rooms)) {
+      if (GM_getValue(write.key, void 0) === void 0) setModelFavorite(write.key.slice(MODEL_FAVORITE_PREFIX.length), true);
     }
   }
 
@@ -4780,6 +4849,7 @@ underlying system, so should run in the browser, Node, or Plask.
       preferences: validateBackupPreferences(input.preferences),
       library
     };
+    backup.favoriteModels = validateFavoriteModels(input.favoriteModels === void 0 ? library.filter((entry) => entry.favorite).map((entry) => entry.archive.room) : input.favoriteModels);
     if (input.analysisPreferences !== void 0) backup.analysisPreferences = validateAnalysisPreferences(input.analysisPreferences);
     if (input.recovery !== void 0) {
       const keys = input.recovery && input.recovery.omittedLibraryKeys;
@@ -4818,13 +4888,16 @@ underlying system, so should run in the browser, Node, or Plask.
     const library = includeLibrary ? readSessionLibrary() : { entries: [], damaged: [] };
     if (library.damaged.length && !allowPartialLibrary) throw new Error("The library contains unreadable recordings. Choose the healthy-recordings option to make a partial backup, or export ATH/preferences separately.");
     const rawAnalysis = GM_getValue(ANALYSIS_PREFERENCE_KEY, null);
+    const modelState = includeLibrary ? readModelFavorites(library.entries) : { favorites: /* @__PURE__ */ new Set(), errors: [] };
+    if (modelState.errors.length) throw new Error("Some model favorites could not be read. Refresh the library or back up without Library until they can be read.");
     return validateTierScopeBackup(__spreadValues(__spreadValues({
       format: "TierScopeBackup",
       formatVersion: 1,
       producerVersion: runtime.TIERSCOPE_VERSION,
       rooms: records,
       preferences,
-      library: library.entries.map((entry) => __spreadProps(__spreadValues({ title: entry.title }, libraryMetadata(entry)), { archive: entry.archive }))
+      library: library.entries.map((entry) => ({ title: entry.title, notes: entry.notes, archive: entry.archive })),
+      favoriteModels: [...modelState.favorites]
     }, rawAnalysis === null ? {} : { analysisPreferences: validateAnalysisPreferences(JSON.parse(rawAnalysis)) }), library.damaged.length ? { recovery: { omittedLibraryKeys: library.damaged } } : {}));
   }
   function createLibraryRecoveryExport() {
@@ -4856,6 +4929,8 @@ underlying system, so should run in the browser, Node, or Plask.
       }
     }
     writes.push(...newLibrary);
+    const modelWrites = options.library ? planModelFavoriteWrites(backup.favoriteModels) : [];
+    writes.push(...modelWrites);
     if (options.preferences) for (const [name, value] of Object.entries(backup.preferences)) {
       writes.push({ key: preferenceKeys[name], value: name === "geometry" || name === "collapsedRows" ? JSON.stringify(value) : value });
     }
@@ -4864,6 +4939,7 @@ underlying system, so should run in the browser, Node, or Plask.
     try {
       for (const write of writes) {
         const before = GM_getValue(write.key, void 0);
+        if (Object.prototype.hasOwnProperty.call(write, "expectedBefore") && before !== write.expectedBefore) throw new Error("Model favorites changed in another tab. Refresh and retry.");
         touched.push(__spreadProps(__spreadValues({}, write), { before }));
         GM_setValue(write.key, write.value);
       }
@@ -4891,6 +4967,7 @@ underlying system, so should run in the browser, Node, or Plask.
       rooms: epochs.length,
       recordings: newLibrary.filter((write) => !write.updated).length,
       updatedRecordings: newLibrary.filter((write) => write.updated).length,
+      favoriteModels: modelWrites.length,
       preferences: options.preferences ? Object.keys(backup.preferences).length + (backup.analysisPreferences ? 1 : 0) : 0
     };
   }
@@ -5044,9 +5121,9 @@ underlying system, so should run in the browser, Node, or Plask.
 #tierscope-session-tools .tools-eyebrow{color:var(--panel-accent);text-transform:uppercase;font-size:.8em;letter-spacing:.08em;margin-bottom:3px}
 #tierscope-session-tools .tools-row{border:1px solid var(--panel-divider);border-left:3px solid #ff69b480;background:rgba(var(--panel-row-rgb),.035);border-radius:4px;padding:8px;margin:6px 0;overflow-wrap:anywhere}
 #tierscope-session-tools .tools-row strong{font-size:1.05em}
-#tierscope-session-tools .tools-folder{margin:5px 0}
-#tierscope-session-tools .tools-folder button{display:flex;flex-direction:column;gap:4px;width:100%;text-align:left;padding:9px;border-left:3px solid #ff69b480;background:rgba(var(--panel-row-rgb),.04)}
-#tierscope-session-tools .tools-folder-name{font-weight:bold;color:var(--panel-text)}
+#tierscope-session-tools .tools-folder{margin:5px 0;display:flex;gap:5px;align-items:stretch}
+#tierscope-session-tools .tools-folder .tools-folder-open{display:flex;flex-direction:column;gap:4px;flex:1;text-align:left;padding:9px;border-left:3px solid #ff69b480;background:rgba(var(--panel-row-rgb),.04)}
+#tierscope-session-tools .tools-folder-name{font-weight:bold;color:var(--panel-text);overflow-wrap:anywhere}
 #tierscope-session-tools .tools-folder-meta{font-size:.9em;color:var(--panel-muted)}
 #tierscope-session-tools .tools-search{display:flex;width:100%;gap:6px;align-items:center;margin:8px 0}
 #tools-library-search{flex:1;width:100%}
@@ -5112,10 +5189,10 @@ underlying system, so should run in the browser, Node, or Plask.
     const query = (filters.query || "").trim().toLowerCase(), room = (filters.room || "").toLowerCase();
     const result = entries.filter((entry) => {
       const time = entry.archive.session.history.timestamps[0];
-      return (!room || room === "*" || entry.archive.room.toLowerCase() === room) && time >= start && time < end && (!filters.favorites || entry.favorite) && (!query || (entry.title + " " + entry.archive.room + " " + (entry.notes || "")).toLowerCase().includes(query));
+      return (!room || room === "*" || entry.archive.room.toLowerCase() === room) && time >= start && time < end && (!filters.favorites || entry.modelFavorite) && (!query || (entry.title + " " + entry.archive.room + " " + (entry.notes || "")).toLowerCase().includes(query));
     });
     const byDate = (a, b) => b.archive.session.history.timestamps[0] - a.archive.session.history.timestamps[0] || a.id.localeCompare(b.id);
-    return result.sort((a, b) => filters.sort === "oldest" ? -byDate(a, b) : filters.sort === "title" ? a.title.localeCompare(b.title) || byDate(a, b) : filters.sort === "model" ? a.archive.room.localeCompare(b.archive.room) || byDate(a, b) : filters.sort === "favorites" ? Number(!!b.favorite) - Number(!!a.favorite) || byDate(a, b) : byDate(a, b));
+    return result.sort((a, b) => filters.sort === "oldest" ? -byDate(a, b) : filters.sort === "title" ? a.title.localeCompare(b.title) || byDate(a, b) : filters.sort === "model" ? a.archive.room.localeCompare(b.archive.room) || byDate(a, b) : filters.sort === "favorites" ? Number(!!b.modelFavorite) - Number(!!a.modelFavorite) || byDate(a, b) : byDate(a, b));
   }
 
   // src/tools-view-helpers.js
@@ -5170,7 +5247,7 @@ underlying system, so should run in the browser, Node, or Plask.
     if (organization) {
       const label2 = toolNode(controls, "label", "Sort "), sort = toolNode(label2, "select");
       sort.id = prefix + "-sort";
-      for (const [value, name] of [["newest", "Newest first"], ["oldest", "Oldest first"], ["title", "Title"], ["model", "Model"], ["favorites", "Favorites first"]]) {
+      for (const [value, name] of [["newest", "Newest first"], ["oldest", "Oldest first"], ["title", "Title"], ["model", "Model"], ["favorites", "Favorite models first"]]) {
         const option = toolNode(sort, "option", name);
         option.value = value;
       }
@@ -5183,7 +5260,7 @@ underlying system, so should run in the browser, Node, or Plask.
       favorite.type = "checkbox";
       favorite.id = prefix + "-favorites";
       favorite.checked = !!state.favorites;
-      toolNode(favoriteLabel, "span", "Favorites only");
+      toolNode(favoriteLabel, "span", "Favorite models only");
       favorite.onchange = () => {
         state.favorites = favorite.checked;
         changed();
@@ -5229,9 +5306,17 @@ underlying system, so should run in the browser, Node, or Plask.
     }, "tools-clear-selection");
     const compare = toolButton(bulk, "Compare selected", () => actions.compare([...selected]), "tools-compare-selected");
     const download = toolButton(bulk, "Export selected", () => actions.export([...selected]), "tools-export-selected");
-    download.title = "Download one library bundle, including titles, favorites and notes";
+    download.title = "Download one library bundle, including titles, notes and favorite models";
     const list = toolNode(parent, "div");
     list.id = "tools-library-list";
+    function favoriteButton(parent2, room, compact = false) {
+      const active = entries.some((entry) => entry.archive.room.toLowerCase() === room && entry.modelFavorite);
+      const control = toolButton(parent2, (active ? "★" : "☆") + (compact ? "" : " Favorite model"), () => actions.favoriteModel(room), "tools-model-favorite-" + room);
+      control.setAttribute("aria-pressed", String(active));
+      control.setAttribute("aria-label", (active ? "Unfavorite " : "Favorite ") + room);
+      control.title = (active ? "Unfavorite model " : "Favorite model ") + room;
+      if (active) control.className = "tools-primary";
+    }
     function rows() {
       list.replaceChildren();
       matching = [];
@@ -5266,7 +5351,10 @@ underlying system, so should run in the browser, Node, or Plask.
       }, "tools-library-all-models");
       const room = filters.room && filters.room !== "*" ? filters.room : null;
       toolNode(heading, "h3", room ? "Folder: " + room : browsingFolders ? "Model folders" : "Search results — all models");
-      if (room) toolButton(heading, "History overview", () => actions.history(room), "tools-model-history").className = "tools-primary";
+      if (room) {
+        favoriteButton(heading, room);
+        toolButton(heading, "History overview", () => actions.history(room), "tools-model-history").className = "tools-primary";
+      }
       if (!matching.length) toolNode(list, "p", entries.length ? "No matching recordings." : "Your library is empty. Keep a recording above or import a session file.", "tools-muted");
       if (browsingFolders) for (const room2 of visible.slice(0, shown)) {
         const recordings = folders.get(room2), row = toolNode(list, "div", void 0, "tools-folder");
@@ -5278,10 +5366,12 @@ underlying system, so should run in the browser, Node, or Plask.
           rows();
           document.getElementById("tools-library-all-models").focus();
         }, "tools-folder-" + room2);
+        open.className = "tools-folder-open";
         open.setAttribute("aria-label", "Open recordings for " + room2);
         toolNode(open, "span", "▱  " + room2, "tools-folder-name");
         const latest = Math.max(...recordings.map((entry) => entry.archive.session.history.timestamps[0]));
         toolNode(open, "span", recordings.length + (recordings.length === 1 ? " recording" : " recordings") + " · Latest " + new Date(latest).toLocaleDateString(), "tools-folder-meta");
+        favoriteButton(row, room2, true);
       }
       else for (const entry of visible.slice(0, shown)) {
         const row = toolNode(list, "article", void 0, "tools-row");
@@ -5302,8 +5392,6 @@ underlying system, so should run in the browser, Node, or Plask.
         const controls = toolNode(row, "div", void 0, "tools-actions");
         toolButton(controls, "Replay", () => actions.replay(entry)).className = "tools-primary";
         toolButton(controls, "Summary", () => actions.summary(entry));
-        const favorite = toolButton(controls, entry.favorite ? "★ Favorite" : "☆ Favorite", () => actions.metadata(entry, { favorite: !entry.favorite }), "tools-favorite-" + entry.id);
-        favorite.setAttribute("aria-pressed", String(!!entry.favorite));
         const more = toolNode(controls, "details", void 0, "tools-more");
         toolNode(more, "summary", "More…");
         const extras = toolNode(more, "div", void 0, "tools-more-actions");
@@ -5331,12 +5419,13 @@ underlying system, so should run in the browser, Node, or Plask.
   function libraryImportBundle(values, version) {
     if (!Array.isArray(values) || !values.length || values.length > LIBRARY_MAX_COUNT) throw new Error("Choose 1–500 recording files or library bundles.");
     if (new Blob([JSON.stringify(values)]).size > BACKUP_MAX_BYTES) throw new Error("Selected files exceed 32 MB.");
-    const library = [];
+    const library = [], favoriteModels = /* @__PURE__ */ new Set();
     for (const value of values) {
       if (value && value.format === "TierScopeBackup") {
         const backup = validateTierScopeBackup(value);
         if (backup.recovery) throw new Error("Use Backup to review and restore a partial backup with missing recordings.");
         library.push(...backup.library);
+        backup.favoriteModels.forEach((room) => favoriteModels.add(room));
       } else {
         const archive = validateSessionFile(value);
         library.push({ title: archive.room, archive });
@@ -5344,7 +5433,7 @@ underlying system, so should run in the browser, Node, or Plask.
       if (library.length > LIBRARY_MAX_COUNT) throw new Error("Import up to 500 recordings at once.");
     }
     if (!library.length) throw new Error("These files contain no library recordings.");
-    return validateTierScopeBackup({ format: "TierScopeBackup", formatVersion: 1, producerVersion: version, rooms: [], preferences: {}, library });
+    return validateTierScopeBackup({ format: "TierScopeBackup", formatVersion: 1, producerVersion: version, rooms: [], preferences: {}, library, favoriteModels: [...favoriteModels] });
   }
   function importLibraryBundle(bundle) {
     return restoreTierScopeBackup(bundle, { highs: false, preferences: false, library: true });
@@ -5355,9 +5444,19 @@ underlying system, so should run in the browser, Node, or Plask.
     const library = ids.map((id) => {
       const entry = state.entries.find((entry2) => entry2.id === id);
       if (!entry) throw new Error("A selected recording changed or could not be read. Refresh and select it again.");
-      return __spreadProps(__spreadValues({ title: entry.title }, libraryMetadata(entry)), { archive: entry.archive });
+      return { title: entry.title, notes: libraryMetadata(entry).notes, archive: entry.archive };
     });
-    return validateTierScopeBackup({ format: "TierScopeBackup", formatVersion: 1, producerVersion: version, rooms: [], preferences: {}, library });
+    const rooms = new Set(library.map((entry) => entry.archive.room.toLowerCase())), models = readModelFavorites(state.entries);
+    if (models.errors.some((room) => rooms.has(room))) throw new Error("A selected model’s favorite could not be read. Refresh and try again.");
+    return validateTierScopeBackup({
+      format: "TierScopeBackup",
+      formatVersion: 1,
+      producerVersion: version,
+      rooms: [],
+      preferences: {},
+      library,
+      favoriteModels: [...models.favorites].filter((room) => rooms.has(room))
+    });
   }
 
   // src/analysis-chart-data.js
@@ -6416,13 +6515,31 @@ underlying system, so should run in the browser, Node, or Plask.
       options = [];
       optionsLibrary = null;
       optionsArchive = null;
+      let migrationError = "";
+      try {
+        migrateRecordingFavorites(library.entries);
+      } catch (error) {
+        migrationError = "Previous stars could not yet be saved as model favorites. Refresh to retry.";
+      }
+      try {
+        const models = readModelFavorites(library.entries);
+        library.favoriteModels = models.favorites;
+        library.favoriteError = migrationError || (models.errors.length ? "Some model favorites could not be read. Refresh to retry; recordings remain available." : "");
+      } catch (error) {
+        library.favoriteModels = /* @__PURE__ */ new Set();
+        library.favoriteError = "Model favorites could not be read. Refresh to retry; recordings remain available.";
+      }
+      library.entries = library.entries.map((entry) => __spreadProps(__spreadValues({}, entry), { modelFavorite: library.favoriteModels.has(entry.archive.room.toLowerCase()) }));
       return library;
     }
     function sourceOptions() {
       if (optionsLibrary === library && optionsArchive === currentArchive) return options;
       const items = [];
       if (currentArchive) items.push({ id: "current", title: "Current / replayed snapshot — " + currentArchive.room, archive: currentArchive });
-      for (const entry of library.entries) items.push(__spreadProps(__spreadValues({}, entry), { id: entry.id, title: entry.archive.room + " — " + (entry.title || entry.archive.room) + " — " + new Date(entry.archive.session.history.timestamps[0]).toLocaleString(), archive: entry.archive }));
+      for (const entry of library.entries) {
+        const title = entry.title && entry.title.trim().toLowerCase() !== entry.archive.room.toLowerCase() ? " — " + entry.title : "";
+        items.push(__spreadProps(__spreadValues({}, entry), { title: entry.archive.room + title + " — " + new Date(entry.archive.session.history.timestamps[0]).toLocaleString() }));
+      }
       optionsLibrary = library;
       optionsArchive = currentArchive;
       options = items;
@@ -6534,10 +6651,11 @@ underlying system, so should run in the browser, Node, or Plask.
         libraryRoom = rooms.size === 1 ? [...rooms][0] : "*";
         Object.assign(libraryFilters, { room: libraryRoom, query: "", from: "", to: "", favorites: false });
         render("library");
-        tell("Imported: " + result.recordings + " new, " + result.updatedRecordings + " updated; equal or fuller recordings already in Library were kept.");
+        tell("Imported: " + result.recordings + " new, " + result.updatedRecordings + " updated, " + result.favoriteModels + " favorite models added; existing recordings and model choices were preserved.");
       }, true), "tools-import-session").title = "Import one or more session files or library bundles; saving is explicit";
       button(actions, "Refresh", () => render("library"), "tools-refresh-library").title = "Refresh list from this browser";
       node(content, "p", state.count + " / " + LIBRARY_MAX_COUNT + " recordings · " + (state.bytes / 1024 / 1024).toFixed(2) + " / " + LIBRARY_MAX_BYTES / 1024 / 1024 + " MB · Kept until you delete them.", "tools-muted");
+      if (state.favoriteError) node(content, "p", state.favoriteError, "tools-muted");
       libraryFilters.room = libraryRoom || "";
       if (libraryRoom && libraryRoom !== "*" && !state.entries.some((entry) => entry.archive.room.toLowerCase() === libraryRoom)) libraryFilters.room = libraryRoom = "";
       const callbacks = {
@@ -6558,7 +6676,13 @@ underlying system, so should run in the browser, Node, or Plask.
         },
         export: (ids) => {
           downloadDataFile(exportLibrarySelection(ids, runtime.TIERSCOPE_VERSION), "TierScope-library-selection-" + (/* @__PURE__ */ new Date()).toISOString().slice(0, 10) + ".json");
-          tell("Selected recordings exported, including titles, favorites and notes.");
+          tell("Selected recordings exported, including titles, notes and favorite models.");
+        },
+        favoriteModel: (room) => {
+          if (state.favoriteError) throw new Error("Model favorites are not fully available. Refresh before changing them.");
+          setModelFavorite(room, !state.favoriteModels.has(room));
+          render("library");
+          tell("Model favorite saved.");
         },
         replay: (entry) => {
           openSessionReplay(entry.archive);
@@ -6919,7 +7043,7 @@ underlying system, so should run in the browser, Node, or Plask.
     function renderBackup() {
       node(content, "h3", "Back up this browser");
       node(content, "p", "Download ATH for every room and your saved preferences: theme, panel size/position, collapsed rows, compact metric, chart window, SH/ATH mode and analysis choices. Keep this file somewhere safe. Session-only controls such as the scan interval are not saved preferences.", "tools-muted");
-      const include = checkbox(content, "tools-backup-library", "Include library recordings");
+      const include = checkbox(content, "tools-backup-library", "Include library recordings and favorite models");
       const state = readLibrary();
       let partial = null;
       if (state.damaged.length) {
@@ -6948,8 +7072,9 @@ underlying system, so should run in the browser, Node, or Plask.
       if (pendingBackup) {
         if (pendingBackup.recovery) node(content, "p", "This is a partial backup. " + pendingBackup.recovery.omittedLibraryKeys.length + " unreadable library entries were excluded when it was created; they cannot be restored from this file.", "tools-muted");
         node(content, "p", pendingBackup.rooms.length + " rooms · " + (Object.keys(pendingBackup.preferences).length + (pendingBackup.analysisPreferences ? 1 : 0)) + " saved preferences · " + pendingBackup.library.length + " recordings", "tools-muted");
+        node(content, "p", pendingBackup.favoriteModels.length + " favorite models. Restoring Library adds these where no local model choice exists.", "tools-muted");
         const choices = node(content, "div", void 0, "tools-actions");
-        const highs = checkbox(choices, "tools-restore-highs", "Merge ATH"), preferences = checkbox(choices, "tools-restore-preferences", "Restore preferences"), recordings = checkbox(choices, "tools-restore-library", "Add library recordings");
+        const highs = checkbox(choices, "tools-restore-highs", "Merge ATH"), preferences = checkbox(choices, "tools-restore-preferences", "Restore preferences"), recordings = checkbox(choices, "tools-restore-library", "Add recordings and favorite models");
         button(content, "Restore selected data", () => {
           if (!highs.checked && !preferences.checked && !recordings.checked) throw new Error("Choose at least one kind of data to restore.");
           if (!confirm("Restore the selected backup data?\n\nATH will be merged, library recordings added or updated with fuller versions, and selected saved preferences replaced. Your live session is not replaced." + (pendingBackup.recovery ? "\n\nThis partial backup excludes " + pendingBackup.recovery.omittedLibraryKeys.length + " unreadable library entries." : ""))) return;
@@ -6957,11 +7082,12 @@ underlying system, so should run in the browser, Node, or Plask.
           library = null;
           if (runtime.playback) setPlaybackAllTimeState(runtime.playback, readAllTimeHighs(displayedHighRoom()));
           repaintHighMode();
-          tell("Restored: " + result.rooms + " room ATH updates, " + result.recordings + " new recordings, " + result.updatedRecordings + " updated recordings, " + result.preferences + " preferences." + (result.preferences ? "\nRefresh your room tabs when convenient to apply preferences." : ""));
+          tell("Restored: " + result.rooms + " room ATH updates, " + result.recordings + " new recordings, " + result.updatedRecordings + " updated recordings, " + result.favoriteModels + " favorite models, " + result.preferences + " preferences." + (result.preferences ? "\nRefresh your room tabs when convenient to apply preferences." : ""));
         }, "tools-backup-restore");
       }
     }
     function render(next) {
+      var _a;
       const focusedId = dialog.contains(document.activeElement) ? document.activeElement.id : "";
       const existingPicker = dialog.querySelector("#tools-recording-picker");
       if (existingPicker) pickerOpen = existingPicker.open;
@@ -6995,7 +7121,7 @@ underlying system, so should run in the browser, Node, or Plask.
           const details = target.closest("details");
           if (details) details.open = true;
           target.focus();
-        }
+        } else if (focusedId.startsWith("tools-model-favorite-")) (_a = dialog.querySelector("#tools-library-model")) == null ? void 0 : _a.focus();
       }
     }
     function close() {
@@ -8582,7 +8708,7 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/bootstrap.js
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.14.0-beta.1";
+    runtime.TIERSCOPE_VERSION = "3.14.0-beta.2";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;

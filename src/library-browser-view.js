@@ -12,8 +12,15 @@ export function renderLibraryBrowser(parent, entries, filters, selected, actions
     button(bulk, 'Clear selection', () => { selected.clear(); rows(); }, 'tools-clear-selection');
     const compare = button(bulk, 'Compare selected', () => actions.compare([...selected]), 'tools-compare-selected');
     const download = button(bulk, 'Export selected', () => actions.export([...selected]), 'tools-export-selected');
-    download.title = 'Download one library bundle, including titles, favorites and notes';
+    download.title = 'Download one library bundle, including titles, notes and favorite models';
     const list = node(parent, 'div'); list.id = 'tools-library-list';
+    function favoriteButton(parent, room, compact = false) {
+        const active = entries.some(entry => entry.archive.room.toLowerCase() === room && entry.modelFavorite);
+        const control = button(parent, (active ? '★' : '☆') + (compact ? '' : ' Favorite model'), () => actions.favoriteModel(room), 'tools-model-favorite-' + room);
+        control.setAttribute('aria-pressed', String(active)); control.setAttribute('aria-label', (active ? 'Unfavorite ' : 'Favorite ') + room);
+        control.title = (active ? 'Unfavorite model ' : 'Favorite model ') + room;
+        if (active) control.className = 'tools-primary';
+    }
     function rows() {
         list.replaceChildren(); matching = [];
         try { matching = filterLibraryEntries(entries, filters); } catch (error) { node(list, 'p', error.message); }
@@ -32,15 +39,20 @@ export function renderLibraryBrowser(parent, entries, filters, selected, actions
         }, 'tools-library-all-models');
         const room = filters.room && filters.room !== '*' ? filters.room : null;
         node(heading, 'h3', room ? 'Folder: ' + room : browsingFolders ? 'Model folders' : 'Search results — all models');
-        if (room) button(heading, 'History overview', () => actions.history(room), 'tools-model-history').className = 'tools-primary';
+        if (room) {
+            favoriteButton(heading, room);
+            button(heading, 'History overview', () => actions.history(room), 'tools-model-history').className = 'tools-primary';
+        }
         if (!matching.length) node(list, 'p', entries.length ? 'No matching recordings.' : 'Your library is empty. Keep a recording above or import a session file.', 'tools-muted');
         if (browsingFolders) for (const room of visible.slice(0, shown)) {
             const recordings = folders.get(room), row = node(list, 'div', undefined, 'tools-folder');
             const open = button(row, '', () => { filters.room = room; inputs.model.value = room; shown = 50; actions.room(room); rows(); document.getElementById('tools-library-all-models').focus(); }, 'tools-folder-' + room);
+            open.className = 'tools-folder-open';
             open.setAttribute('aria-label', 'Open recordings for ' + room);
             node(open, 'span', '▱  ' + room, 'tools-folder-name');
             const latest = Math.max(...recordings.map(entry => entry.archive.session.history.timestamps[0]));
             node(open, 'span', recordings.length + (recordings.length === 1 ? ' recording' : ' recordings') + ' · Latest ' + new Date(latest).toLocaleDateString(), 'tools-folder-meta');
+            favoriteButton(row, room, true);
         } else for (const entry of visible.slice(0, shown)) {
             const row = node(list, 'article', undefined, 'tools-row'); row.dataset.libraryId = entry.id;
             const title = node(row, 'label'), check = node(title, 'input'); check.type = 'checkbox'; check.checked = selected.has(entry.id);
@@ -52,8 +64,6 @@ export function renderLibraryBrowser(parent, entries, filters, selected, actions
             const controls = node(row, 'div', undefined, 'tools-actions');
             button(controls, 'Replay', () => actions.replay(entry)).className = 'tools-primary';
             button(controls, 'Summary', () => actions.summary(entry));
-            const favorite = button(controls, entry.favorite ? '★ Favorite' : '☆ Favorite', () => actions.metadata(entry, {favorite: !entry.favorite}), 'tools-favorite-' + entry.id);
-            favorite.setAttribute('aria-pressed', String(!!entry.favorite));
             const more = node(controls, 'details', undefined, 'tools-more'); node(more, 'summary', 'More…');
             const extras = node(more, 'div', undefined, 'tools-more-actions');
             for (const [label, key] of [['Save file','save'],['TXT','txt'],['CSV','csv'],['GIF','gif'],['Add to all-time highs','highs'],['Rename','rename'],['Delete','delete']]) {

@@ -7,6 +7,7 @@ import { readAllTimeHighs, sessionAllTimeHighs, storeAllTimeHighs } from './high
 import { repaintHighMode } from './highs.js';
 import { attachLibraryDock } from './library-dock.js';
 import { libraryShell } from './library-shell.js';
+import { migrateRecordingFavorites, readModelFavorites, setModelFavorite } from './library-models.js';
 import { renderLibraryBrowser } from './library-browser-view.js';
 import { filterLibraryEntries } from './library-query.js';
 import { recordingFilters } from './tools-view-helpers.js';
@@ -118,13 +119,24 @@ export function openSessionTools(focusTarget) {
     }
     function readLibrary() {
         library = libraryReader.read(); options = []; optionsLibrary = null; optionsArchive = null;
+        let migrationError = '';
+        try { migrateRecordingFavorites(library.entries); } catch (error) { migrationError = 'Previous stars could not yet be saved as model favorites. Refresh to retry.'; }
+        try {
+            const models = readModelFavorites(library.entries);
+            library.favoriteModels = models.favorites;
+            library.favoriteError = migrationError || (models.errors.length ? 'Some model favorites could not be read. Refresh to retry; recordings remain available.' : '');
+        } catch (error) { library.favoriteModels = new Set(); library.favoriteError = 'Model favorites could not be read. Refresh to retry; recordings remain available.'; }
+        library.entries = library.entries.map(entry => ({...entry, modelFavorite: library.favoriteModels.has(entry.archive.room.toLowerCase())}));
         return library;
     }
     function sourceOptions() {
         if (optionsLibrary === library && optionsArchive === currentArchive) return options;
         const items = [];
         if (currentArchive) items.push({ id: 'current', title: 'Current / replayed snapshot — ' + currentArchive.room, archive: currentArchive });
-        for (const entry of library.entries) items.push({ ...entry, id: entry.id, title: entry.archive.room + ' — ' + (entry.title || entry.archive.room) + ' — ' + new Date(entry.archive.session.history.timestamps[0]).toLocaleString(), archive: entry.archive });
+        for (const entry of library.entries) {
+            const title = entry.title && entry.title.trim().toLowerCase() !== entry.archive.room.toLowerCase() ? ' — ' + entry.title : '';
+            items.push({...entry, title: entry.archive.room + title + ' — ' + new Date(entry.archive.session.history.timestamps[0]).toLocaleString()});
+        }
         optionsLibrary = library; optionsArchive = currentArchive; options = items;
         return options;
     }
@@ -210,17 +222,22 @@ export function openSessionTools(focusTarget) {
             const rooms = new Set(bundle.library.map(entry => entry.archive.room.toLowerCase()));
             libraryRoom = rooms.size === 1 ? [...rooms][0] : '*';
             Object.assign(libraryFilters, {room: libraryRoom, query: '', from: '', to: '', favorites: false});
-            render('library'); tell('Imported: ' + result.recordings + ' new, ' + result.updatedRecordings + ' updated; equal or fuller recordings already in Library were kept.');
+            render('library'); tell('Imported: ' + result.recordings + ' new, ' + result.updatedRecordings + ' updated, ' + result.favoriteModels + ' favorite models added; existing recordings and model choices were preserved.');
         }, true), 'tools-import-session').title = 'Import one or more session files or library bundles; saving is explicit';
         button(actions, 'Refresh', () => render('library'), 'tools-refresh-library').title = 'Refresh list from this browser';
         node(content, 'p', state.count + ' / ' + LIBRARY_MAX_COUNT + ' recordings · ' + (state.bytes / 1024 / 1024).toFixed(2) + ' / ' + LIBRARY_MAX_BYTES / 1024 / 1024 + ' MB · Kept until you delete them.', 'tools-muted');
+        if (state.favoriteError) node(content, 'p', state.favoriteError, 'tools-muted');
         libraryFilters.room = libraryRoom || '';
         if (libraryRoom && libraryRoom !== '*' && !state.entries.some(entry => entry.archive.room.toLowerCase() === libraryRoom)) libraryFilters.room = libraryRoom = '';
         const callbacks = {
             room: room => { libraryRoom = room; },
             history: room => { libraryRoom = room; render('history'); dialog.querySelector('#tools-history-back').focus(); },
             compare: ids => { selectedA = ids[0]; selectedB = ids[1]; selectedExtra = ids.slice(2); Object.assign(analysisFilters, {room: '', query: '', from: '', to: ''}); render('compare'); },
-            export: ids => { downloadDataFile(exportLibrarySelection(ids, runtime.TIERSCOPE_VERSION), 'TierScope-library-selection-' + new Date().toISOString().slice(0, 10) + '.json'); tell('Selected recordings exported, including titles, favorites and notes.'); },
+            export: ids => { downloadDataFile(exportLibrarySelection(ids, runtime.TIERSCOPE_VERSION), 'TierScope-library-selection-' + new Date().toISOString().slice(0, 10) + '.json'); tell('Selected recordings exported, including titles, notes and favorite models.'); },
+            favoriteModel: room => {
+                if (state.favoriteError) throw new Error('Model favorites are not fully available. Refresh before changing them.');
+                setModelFavorite(room, !state.favoriteModels.has(room)); render('library'); tell('Model favorite saved.');
+            },
             replay: entry => { openSessionReplay(entry.archive); observedSignature = ''; refreshCurrent(); tell('Replaying ' + (entry.title || entry.archive.room) + '.'); },
             summary: entry => { selectedA = entry.id; render('summary'); },
             save: entry => downloadDataFile(entry.archive, archiveName(entry.archive)),
@@ -423,7 +440,7 @@ export function openSessionTools(focusTarget) {
     function renderBackup() {
         node(content, 'h3', 'Back up this browser');
         node(content, 'p', 'Download ATH for every room and your saved preferences: theme, panel size/position, collapsed rows, compact metric, chart window, SH/ATH mode and analysis choices. Keep this file somewhere safe. Session-only controls such as the scan interval are not saved preferences.', 'tools-muted');
-        const include = checkbox(content, 'tools-backup-library', 'Include library recordings');
+        const include = checkbox(content, 'tools-backup-library', 'Include library recordings and favorite models');
         const state = readLibrary();
         let partial = null;
         if (state.damaged.length) {
@@ -450,8 +467,9 @@ export function openSessionTools(focusTarget) {
         if (pendingBackup) {
             if (pendingBackup.recovery) node(content, 'p', 'This is a partial backup. ' + pendingBackup.recovery.omittedLibraryKeys.length + ' unreadable library entries were excluded when it was created; they cannot be restored from this file.', 'tools-muted');
             node(content, 'p', pendingBackup.rooms.length + ' rooms · ' + (Object.keys(pendingBackup.preferences).length + (pendingBackup.analysisPreferences ? 1 : 0)) + ' saved preferences · ' + pendingBackup.library.length + ' recordings', 'tools-muted');
+            node(content, 'p', pendingBackup.favoriteModels.length + ' favorite models. Restoring Library adds these where no local model choice exists.', 'tools-muted');
             const choices = node(content, 'div', undefined, 'tools-actions');
-            const highs = checkbox(choices, 'tools-restore-highs', 'Merge ATH'), preferences = checkbox(choices, 'tools-restore-preferences', 'Restore preferences'), recordings = checkbox(choices, 'tools-restore-library', 'Add library recordings');
+            const highs = checkbox(choices, 'tools-restore-highs', 'Merge ATH'), preferences = checkbox(choices, 'tools-restore-preferences', 'Restore preferences'), recordings = checkbox(choices, 'tools-restore-library', 'Add recordings and favorite models');
             button(content, 'Restore selected data', () => {
                 if (!highs.checked && !preferences.checked && !recordings.checked) throw new Error('Choose at least one kind of data to restore.');
                 if (!confirm('Restore the selected backup data?\n\nATH will be merged, library recordings added or updated with fuller versions, and selected saved preferences replaced. Your live session is not replaced.' +
@@ -460,7 +478,7 @@ export function openSessionTools(focusTarget) {
                 library = null;
                 if (runtime.playback) setPlaybackAllTimeState(runtime.playback, readAllTimeHighs(displayedHighRoom()));
                 repaintHighMode();
-                tell('Restored: ' + result.rooms + ' room ATH updates, ' + result.recordings + ' new recordings, ' + result.updatedRecordings + ' updated recordings, ' + result.preferences + ' preferences.' + (result.preferences ? '\nRefresh your room tabs when convenient to apply preferences.' : ''));
+                tell('Restored: ' + result.rooms + ' room ATH updates, ' + result.recordings + ' new recordings, ' + result.updatedRecordings + ' updated recordings, ' + result.favoriteModels + ' favorite models, ' + result.preferences + ' preferences.' + (result.preferences ? '\nRefresh your room tabs when convenient to apply preferences.' : ''));
             }, 'tools-backup-restore');
         }
     }
@@ -481,6 +499,7 @@ export function openSessionTools(focusTarget) {
         if (focusedId) {
             const target = document.getElementById(focusedId);
             if (target && dialog.contains(target)) { const details = target.closest('details'); if (details) details.open = true; target.focus(); }
+            else if (focusedId.startsWith('tools-model-favorite-')) dialog.querySelector('#tools-library-model')?.focus();
         }
     }
     function close() {

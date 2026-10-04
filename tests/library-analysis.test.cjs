@@ -1,6 +1,6 @@
 const test=require('node:test'),assert=require('node:assert/strict');
 const query=import('../src/library-query.js'),chart=import('../src/analysis-chart-data.js'),analysis=import('../src/session-analysis.js');
-function entry(id,room,time,title=id,notes='',favorite=false){return {id,title,notes,favorite,archive:{room,session:{history:{timestamps:[time]}}}};}
+function entry(id,room,time,title=id,notes='',modelFavorite=false){return {id,title,notes,modelFavorite,archive:{room,session:{history:{timestamps:[time]}}}};}
 test('inclusive local day ends remain correct through a midnight daylight-saving transition',()=>{
  const {execFileSync}=require('node:child_process'),{pathToFileURL}=require('node:url');
  const url=pathToFileURL(require('node:path').join(__dirname,'../src/library-query.js')).href;
