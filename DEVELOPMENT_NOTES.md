@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **3.13.0-beta.1**. This beta adds model history to Library folders, preserving the panel, recordings, exports and retention limits. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For stable and beta installation links, see the [README](readme.md).
+Detailed reference for **3.13.0**. This release adds model history to Library folders, preserving the panel, recordings, exports and retention limits. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation links, see the [README](readme.md).
 
 ## Contents
 
@@ -471,6 +471,7 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
+| **3.13.0** | Release model history overviews inside Library folders, with per-recording average/peak charts, covered-time statistics, token-holder proportions and direct Summary/Replay/Compare actions. Preserve the reviewed beta behavior and existing saved data. |
 | **3.13.0-beta.1** | Add model-folder history overviews with per-recording average/peak charts, time-weighted totals, token-holder shares, coverage/gaps, recording windows and Summary/Replay/Compare actions. Preserve live data, ATH, library formats and explicit saving. |
 | **3.12.0** | Speed up repeated Library reads with bounded, per-opening reuse of validated records; preserve refresh and cross-tab changes, avoid repeated source-label formatting, and measure large-library performance and memory. |
 | **3.11.0** | Retain committed samples through drawing failures and retry presentation independently; add explicit healthy-recording partial backups with omission notices and separate raw recovery downloads; remember analysis metric, thresholds and shared-length choices, including in backups. |

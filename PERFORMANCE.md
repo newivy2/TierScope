@@ -88,9 +88,9 @@ The initial CPU profile identified library reading, temporary Blob construction 
 
 Reproduce with `npm run test:library-performance`. Set `TIERSCOPE_SOURCE` for a prior generated script, `TIERSCOPE_CPU_THROTTLE=4` for slowdown, and `TIERSCOPE_BENCH_ROUNDS=1` when alternating individual runs. `TIERSCOPE_PROFILE_PATH=/tmp/library-profile` optionally saves profiles; leave it unset for comparable timing runs. Existing replay, layout, exports and cross-tab correctness checks remain separate regression gates.
 
-## 3.13.0-beta.1 model history costs
+## 3.13.0 model history costs
 
-Measured on 2026-10-04 with the same pinned Node.js/Chromium environment, three fresh pages per dataset and CPU setting. Every recording belongs to one model to exercise the whole dataset in a single overview. The cases remain 12 × 300 samples (0.20 MiB), 500 × 500 (13.45 MiB) and 36 × 10,000 (18.64 MiB). [Raw results](docs/benchmarks/model-history-3.13.0-beta.1.json) include every run, storage reads and heap observations. These are costs of the new feature, not a speedup comparison with an older release.
+Measured during 3.13.0-beta.1 review on 2026-10-04 with the same pinned Node.js/Chromium environment, three fresh pages per dataset and CPU setting. Stable 3.13.0 preserves the measured runtime code. Every recording belongs to one model to exercise the whole dataset in a single overview. The cases remain 12 × 300 samples (0.20 MiB), 500 × 500 (13.45 MiB) and 36 × 10,000 (18.64 MiB). [Raw results](docs/benchmarks/model-history-3.13.0-beta.1.json) include every run, storage reads and heap observations. These are costs of the new feature, not a speedup comparison with an older release.
 
 | Model folder | Action | Median, normal | Median, 4× CPU slowdown |
 | --- | --- | ---: | ---: |
