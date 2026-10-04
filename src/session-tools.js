@@ -1,3 +1,6 @@
+import { automaticLibraryStatus, keepFavoriteSession } from './automatic-library.js';
+import { changeModelFavorite } from './favorite-controls.js';
+import { paintFavoriteButton } from './favorite-view.js';
 import { BACKUP_MAX_BYTES, createLibraryRecoveryExport, createTierScopeBackup, restoreTierScopeBackup, validateTierScopeBackup } from './backup.js';
 import { readAnalysisPreferences, rememberAnalysisPreferences } from './analysis-preferences.js';
 import { downloadDataFile, readDataFile } from './data-io.js';
@@ -7,7 +10,7 @@ import { readAllTimeHighs, sessionAllTimeHighs, storeAllTimeHighs } from './high
 import { repaintHighMode } from './highs.js';
 import { attachLibraryDock } from './library-dock.js';
 import { libraryShell } from './library-shell.js';
-import { migrateRecordingFavorites, readModelFavorites, setModelFavorite } from './library-models.js';
+import { migrateRecordingFavorites, readModelFavorites, readModelFavorite } from './library-models.js';
 import { createLibraryDrafts } from './library-drafts.js';
 import { renderLibraryBrowser, renderRecordingNotes } from './library-browser-view.js';
 import { filterLibraryEntries } from './library-query.js';
@@ -23,7 +26,7 @@ import { downloadRecording } from './recording-exports.js';
 import { downloadTrackingReport } from './reports.js';
 import { runtime } from './runtime.js';
 import { ANALYSIS_METRICS, analysisSeries, compareRecordingSet, parseAnalysisThresholds, summarizeAudience, summarizeSession, summarizeThresholds } from './session-analysis.js';
-import { captureSessionFile } from './session-capture.js';
+import { captureSessionFile, captureLiveSessionFile } from './session-capture.js';
 import { validateSessionFile } from './session-file-format.js';
 import { getSessionSaveState } from './session-health.js';
 import { LIBRARY_MAX_BYTES, LIBRARY_MAX_COUNT, LIBRARY_PREFIX, createLibraryReader, keepSessionInLibrary, removeLibrarySession, renameLibrarySession, updateLibraryMetadata } from './session-library.js';
@@ -41,16 +44,16 @@ function syncDraftWarning() {
 let closeSessionTools = null;
 let refreshSessionTools = null;
 
-export function updateSessionToolsStatus() {
-    if (refreshSessionTools) refreshSessionTools();
+export function updateSessionToolsStatus(reload = false) {
+    if (refreshSessionTools) refreshSessionTools(reload);
     const element = document.getElementById('session-save-info');
     if (!element) return;
-    if (isPlaybackCurrent(runtime.playback)) { element.textContent = 'Replay snapshot — use Keep in library to retain it here.'; element.style.color = 'var(--panel-muted)'; return; }
     const state = getSessionSaveState(getModelName());
     const warning = state.error || runtime.sessionStorageNotice;
     element.textContent = warning ? 'Session saving unavailable. Keep this tab open or download a session file.' :
         state.savedAt ? 'Session saved in this browser at ' + new Date(state.savedAt).toLocaleTimeString() + '.' : 'No session saved in this tab yet.';
     element.style.color = warning ? 'var(--panel-warning)' : 'var(--panel-muted)';
+    element.hidden = !warning;
 }
 
 export function bindSessionTools() {
@@ -134,10 +137,10 @@ export function openSessionTools(focusTarget) {
         try { migrateRecordingFavorites(library.entries); } catch (error) { migrationError = 'Previous stars could not yet be saved as model favorites. Refresh to retry.'; }
         try {
             const models = readModelFavorites(library.entries);
-            library.favoriteModels = models.favorites;
+            library.favoriteModels = models.favorites; library.automaticModels = models.automatic;
             library.favoriteError = migrationError || (models.errors.length ? 'Some model favorites could not be read. Refresh to retry; recordings remain available.' : '');
         } catch (error) { library.favoriteModels = new Set(); library.favoriteError = 'Model favorites could not be read. Refresh to retry; recordings remain available.'; }
-        library.entries = library.entries.map(entry => ({...entry, modelFavorite: library.favoriteModels.has(entry.archive.room.toLowerCase())}));
+        library.entries = library.entries.map(entry => ({...entry, modelFavorite: library.favoriteModels.has(entry.archive.room.toLowerCase()), autoKeep: library.automaticModels?.has(entry.archive.room.toLowerCase()) || false}));
         noteDrafts.reconcile(library.entries); updateDraftNotice();
         return library;
     }
@@ -150,22 +153,22 @@ export function openSessionTools(focusTarget) {
     const noteActions = {
         note: entry => noteDrafts.read(entry),
         editNote: (entry, value) => { noteDrafts.edit(entry, value); updateDraftNotice(); },
-        discardNote: entry => { noteDrafts.discard(entry.id); updateDraftNotice(); render(tab); },
+        discardNote: entry => { noteDrafts.discard(noteDrafts.read(entry).id); updateDraftNotice(); render(tab); },
         saveNote: action(entry => {
             const draft = noteDrafts.read(entry);
             if (!draft.dirty) return;
             const fresh = libraryReader.read();
-            const latest = fresh.entries.find(item => item.id === entry.id || item.records.some(record => record.key === LIBRARY_PREFIX + entry.id));
+            const latest = fresh.entries.find(item => item.id === draft.id || draft.lineage && item.lineage === draft.lineage || item.records.some(record => record.key === LIBRARY_PREFIX + draft.id));
             if (!latest) throw new Error('This recording changed or is unavailable. Your draft is kept in Review unsaved notes.');
             if ((latest.notes || '') !== draft.base && latest.notes !== draft.value &&
                 !confirm('Saved notes for this recording changed in another tab. Replace them with your draft?')) return;
             updateLibraryMetadata(latest.id, {notes: draft.value});
-            noteDrafts.discard(entry.id); updateDraftNotice(); render(tab); tell('Recording notes saved.');
+            noteDrafts.discard(draft.id); updateDraftNotice(); render(tab); tell('Recording notes saved.');
         })
     };
     function renderDrafts() {
         const state = readLibrary();
-        button(content, '‹ Recordings', () => render('library'), 'tools-drafts-back');
+        button(content, '‹ Sessions', () => render('library'), 'tools-drafts-back');
         node(content, 'h3', 'Unsaved notes');
         node(content, 'p', 'Drafts stay in this tab when Library closes. Save them before refreshing or leaving the site.', 'tools-muted');
         if (!noteDrafts.size) node(content, 'p', 'All notes are saved or discarded.', 'tools-muted');
@@ -217,60 +220,109 @@ export function openSessionTools(focusTarget) {
         const room = playback ? source.room : getModelName();
         const available = history.timestamps.length > 0 && (playback || runtime.activeSessionStorageKey === getStorageKey(room) && runtime.lastUrl === location.href);
         const signature = [room, !!playback, history.timestamps.length, history.timestamps.at(-1), runtime.isPaused, runtime.isStopped].join(':');
-        if (source === observedSource && signature === observedSignature) return;
+        if (source === observedSource && signature === observedSignature) { refreshCards(); return; }
         const replaced = source !== observedSource;
         observedSource = source; observedSignature = signature;
         if (replaced || !currentArchive) { try { currentArchive = captureSessionFile(); } catch (error) { currentArchive = null; } }
-        const title = dialog.querySelector('#tools-current-room'), meta = dialog.querySelector('#tools-current-meta'), label = dialog.querySelector('#tools-current-kind');
-        if (title) title.textContent = room === 'unknown' ? 'No room session' : room;
-        if (label) label.textContent = playback ? (playback.imported ? 'File / library replay' : 'Replay snapshot') : runtime.isStopped ? 'Stopped session' : runtime.isPaused ? 'Paused session' : 'Current live session';
-        if (meta) meta.textContent = available ? history.timestamps.length.toLocaleString() + ' samples · ' +
-            new Date(history.timestamps[0]).toLocaleString() : 'Record a sample or open a saved session to get started.';
-        dialog.querySelectorAll('[data-current-action]').forEach(button => {
-            button.dataset.currentAvailable = String(!!available);
-            button.disabled = !available || button.id === 'btn-export-gif' && !!runtime.gifExportJob;
-        });
+        refreshCards();
         if (replaced && (tab === 'summary' && selectedA === 'current' || tab === 'compare' && [selectedA, selectedB, ...selectedExtra].includes('current'))) render(tab);
     }
-    function currentCard() {
-        const card = node(content, 'section', undefined, 'tools-current'); card.setAttribute('aria-label', 'Current or replayed recording');
-        node(card, 'div', '', 'tools-eyebrow').id = 'tools-current-kind';
-        node(card, 'strong', '').id = 'tools-current-room';
-        node(card, 'div', '', 'tools-muted').id = 'tools-current-meta';
+    function favoriteAction(room, enableOnly = false) {
+        if (!changeModelFavorite(room, enableOnly)) return;
+        const state = readModelFavorite(room);
+        document.querySelectorAll('[data-favorite-room]').forEach(button => {
+            if (button.dataset.favoriteRoom === room) paintFavoriteButton(button, room, state);
+        });
+        render('library');
+        const pending = automaticLibraryStatus(room).error;
+        tell(pending ? 'Favorite saved; Library save pending. ' + pending :
+            state.autoKeep ? 'Favorite saved. Automatic keeping is on for ' + room + '.' : 'Favorite removed. Kept sessions remain in Library.', !!pending);
+    }
+    function refreshCards() {
+        for (const replay of [false, true]) {
+            const suffix = replay ? '-replay' : '', card = dialog.querySelector('#tools-current-card' + suffix);
+            if (!card) continue;
+            const playback = isPlaybackCurrent(runtime.playback) ? runtime.playback : null;
+            card.hidden = replay && !playback;
+            if (card.hidden) continue;
+            const room = replay ? playback.archive.room : getModelName();
+            const history = replay ? playback.archive.session.history : runtime.history;
+            const available = !!history.timestamps.length && (replay || runtime.activeSessionStorageKey === getStorageKey(room) && runtime.lastUrl === location.href);
+            card.querySelector('[data-card-kind]').textContent = replay ? (playback.imported ? 'File / Library Replay' : 'Replay Snapshot') : 'Current Live Session';
+            card.querySelector('[data-card-room]').textContent = room === 'unknown' ? 'Open a model’s room' : room;
+            card.querySelector('[data-card-meta]').textContent = (replay ? '' : runtime.isStopped ? 'Stopped · ' : runtime.isPaused ? 'Paused · ' : '') +
+                (available ? history.timestamps.length.toLocaleString() + ' samples · ' + new Date(history.timestamps[0]).toLocaleString() : 'Waiting for the first recorded sample.');
+            card.querySelectorAll('[data-current-action]').forEach(button => {
+                button.dataset.currentAvailable = String(available);
+                button.disabled = !available || button.dataset.gif === 'true' && !!runtime.gifExportJob;
+            });
+            const star = card.querySelector('[data-card-star]'), info = card.querySelector('[data-card-auto]'), enable = card.querySelector('[data-card-enable]');
+            let preference = {favorite: false, autoKeep: false};
+            try { if (room !== 'unknown') preference = readModelFavorite(room); }
+            catch (error) { preference.error = 'Favorites unavailable. Refresh to retry.'; }
+            paintFavoriteButton(star, room, preference);
+            const status = automaticLibraryStatus(room);
+            info.textContent = replay ? 'Replay is a snapshot. Keep it explicitly to add or update it in Library.' :
+                preference.error || (status.error ? 'Automatic keep pending: ' + status.error :
+                preference.autoKeep ? status.savedAt ? 'Automatically kept at ' + new Date(status.savedAt).toLocaleTimeString() + '. Updates as you record.' :
+                    'Automatic keeping on · waiting for a recorded sample.' : preference.favorite ? 'Favorite · automatic keeping is off until you confirm.' : 'Star this model to automatically keep its live sessions.');
+            info.style.color = !replay && status.error ? 'var(--panel-warning)' : 'var(--panel-muted)';
+            enable.hidden = replay || !preference.favorite || preference.autoKeep;
+            enable.disabled = !!preference.error;
+            const retry = card.querySelector('[data-card-retry]'); retry.hidden = replay || !status.error;
+            const historyButton = card.querySelector('[data-card-history]');
+            historyButton.disabled = room === 'unknown'; historyButton.parentElement.hidden = room === 'unknown';
+            const count = library?.entries.filter(entry => entry.archive.room.toLowerCase() === room.toLowerCase()).length || 0;
+            historyButton.textContent = 'History · ' + count;
+            historyButton.title = count + ' saved sessions for ' + room;
+        }
+    }
+    function currentCard(replay = false) {
+        const suffix = replay ? '-replay' : '';
+        const card = node(content, 'section', undefined, 'tools-current'); card.id = 'tools-current-card' + suffix;
+        card.setAttribute('aria-label', replay ? 'Replayed session' : 'Current Live Session');
+        const kind = node(card, 'div', '', 'tools-eyebrow'); kind.id = 'tools-current-kind' + suffix; kind.dataset.cardKind = '';
+        const name = node(card, 'div', undefined, 'tools-model-name');
+        const title = node(name, 'strong', ''); title.id = 'tools-current-room' + suffix; title.dataset.cardRoom = '';
+        const star = button(name, '☆', () => favoriteAction(star.dataset.favoriteRoom), 'tools-current-favorite' + suffix); star.dataset.cardStar = '';
+        const meta = node(card, 'div', '', 'tools-muted'); meta.id = 'tools-current-meta' + suffix; meta.dataset.cardMeta = '';
+        const capture = replay ? () => {
+            if (!isPlaybackCurrent(runtime.playback)) throw new Error('Replay has closed.');
+            return runtime.playback.archive;
+        } : () => captureLiveSessionFile();
         const actions = node(card, 'div', undefined, 'tools-actions');
         function currentButton(parent, text, fn, id) {
-            const control = button(parent, text, () => fn(captureSessionFile()), id); control.dataset.currentAction = 'true'; return control;
+            const control = button(parent, text, () => fn(capture()), id + suffix); control.dataset.currentAction = 'true'; return control;
         }
-        currentButton(actions, 'Keep in library', archive => {
-            const result = keepSessionInLibrary(archive); currentArchive = archive; libraryRoom = archive.room.toLowerCase();
+        currentButton(actions, 'Keep in Library', archive => {
+            const result = keepSessionInLibrary(archive); libraryRoom = archive.room.toLowerCase();
             Object.assign(libraryFilters, {room: libraryRoom, query: '', from: '', to: '', favorites: false});
-            render('library'); tell(result.added ? 'Recording kept in the library.' : result.updated ? 'Library recording updated; its name was preserved.' : 'An equal or fuller recording is already in the library.');
+            render('library'); tell(result.added ? 'Session kept in the library.' : result.updated ? 'Library session updated; its name and notes were preserved.' : 'An equal or fuller session is already in the library.');
         }, 'tools-keep').className = 'tools-primary';
         currentButton(actions, 'Save file', archive => downloadDataFile(archive, archiveName(archive)), 'tools-save-session');
-        const exports = node(card, 'div', undefined, 'tools-actions');
-        currentButton(exports, 'TXT', archive => {
-            if (isPlaybackCurrent(runtime.playback)) downloadRecording(archive, 'txt'); else downloadTrackingReport();
-        }, 'tools-export-txt').title = 'Download a text report for this recording';
+        const shortcuts = node(actions, 'span', undefined, 'tools-history-shortcut'); shortcuts.id = 'tools-room-shortcuts' + suffix;
+        const history = button(shortcuts, 'History · 0', () => openHistory(star.dataset.favoriteRoom.toLowerCase()), 'tools-room-history' + suffix);
+        history.dataset.cardHistory = '';
+        const exports = node(card, 'div', undefined, 'tools-actions tools-exports');
+        node(exports, 'span', 'Download', 'tools-muted');
+        currentButton(exports, 'TXT', archive => downloadRecording(archive, 'txt'), 'tools-export-txt').title = 'Download a text report for this session';
         currentButton(exports, 'CSV', archive => downloadRecording(archive, 'csv'), 'tools-export-csv').title = 'Download every retained sample with its real timestamp';
-        currentButton(exports, 'GIF', archive => generateGifFromHistory(archive), 'btn-export-gif').title = 'Download an animated GIF of the full recording';
-        currentButton(exports, 'Add to all-time highs', addArchiveHighs, 'tools-add-all-time');
-        const status = node(card, 'div', '', 'tools-muted'); status.id = 'session-save-info'; status.setAttribute('role', 'status');
-        observedSignature = ''; refreshCurrent(); updateSessionToolsStatus();
+        const gif = currentButton(exports, 'GIF', archive => generateGifFromHistory(archive), 'btn-export-gif'); gif.dataset.gif = 'true';
+        currentButton(exports, 'Add to ATH', addArchiveHighs, 'tools-add-all-time').title = 'Add this session’s highs to all-time highs';
+        const automatic = node(card, 'div', '', 'tools-muted'); automatic.dataset.cardAuto = ''; automatic.setAttribute('role', 'status');
+        const enable = button(card, 'Enable automatic keeping…', () => favoriteAction(star.dataset.favoriteRoom, true), 'tools-enable-automatic' + suffix); enable.dataset.cardEnable = '';
+        const retry = button(card, 'Retry keeping', () => { keepFavoriteSession(star.dataset.favoriteRoom, true); render('library'); }, 'tools-retry-automatic' + suffix); retry.dataset.cardRetry = '';
+        if (!replay) {
+            const status = node(card, 'div', '', 'tools-muted'); status.id = 'session-save-info'; status.setAttribute('role', 'status');
+        }
     }
     function openHistory(room) {
+        readLibrary();
         libraryRoom = room; render('history'); dialog.querySelector('#tools-history-back').focus();
     }
     function renderLibrary() {
         const state = readLibrary();
-        const pageRoom = getModelName();
-        if (pageRoom !== 'unknown') {
-            const shortcuts = node(content, 'div', undefined, 'tools-actions'); shortcuts.id = 'tools-room-shortcuts';
-            button(shortcuts, 'History · ' + pageRoom, () => openHistory(pageRoom.toLowerCase()), 'tools-room-history').className = 'tools-primary';
-            const count = state.entries.filter(entry => entry.archive.room.toLowerCase() === pageRoom.toLowerCase()).length;
-            node(shortcuts, 'span', count + ' saved ' + (count === 1 ? 'recording' : 'recordings'), 'tools-muted');
-            shortcuts.setAttribute('aria-label', 'History for the model on this page');
-        }
-        currentCard();
+        currentCard(); currentCard(true); observedSignature = ''; refreshCurrent(); updateSessionToolsStatus();
         const actions = node(content, 'div', undefined, 'tools-actions');
         button(actions, 'Open saved file…', () => chooseFile(runtime.SESSION_FILE_MAX_BYTES, value => {
             openSessionReplay(validateSessionFile(value)); observedSignature = ''; refreshCurrent();
@@ -282,9 +334,9 @@ export function openSessionTools(focusTarget) {
             libraryRoom = rooms.size === 1 ? [...rooms][0] : '*';
             Object.assign(libraryFilters, {room: libraryRoom, query: '', from: '', to: '', favorites: false});
             render('library'); tell('Imported: ' + result.recordings + ' new, ' + result.updatedRecordings + ' updated, ' + result.favoriteModels + ' favorite models added; existing recordings and model choices were preserved.');
-        }, true), 'tools-import-session').title = 'Import one or more session files or library bundles; saving is explicit';
+        }, true), 'tools-import-session').title = 'Import session files or Library bundles. Imported favorites need confirmation before automatic keeping.';
         button(actions, 'Refresh', () => render('library'), 'tools-refresh-library').title = 'Refresh list from this browser';
-        node(content, 'p', state.count + ' / ' + LIBRARY_MAX_COUNT + ' recordings · ' + (state.bytes / 1024 / 1024).toFixed(2) + ' / ' + LIBRARY_MAX_BYTES / 1024 / 1024 + ' MB · Kept until you delete them.', 'tools-muted');
+        node(content, 'p', state.count + ' / ' + LIBRARY_MAX_COUNT + ' sessions · ' + (state.bytes / 1024 / 1024).toFixed(2) + ' / ' + LIBRARY_MAX_BYTES / 1024 / 1024 + ' MB · Kept until you delete them.', 'tools-muted');
         if (state.favoriteError) node(content, 'p', state.favoriteError, 'tools-muted');
         libraryFilters.room = libraryRoom || '';
         if (libraryRoom && libraryRoom !== '*' && !state.entries.some(entry => entry.archive.room.toLowerCase() === libraryRoom)) libraryFilters.room = libraryRoom = '';
@@ -295,8 +347,9 @@ export function openSessionTools(focusTarget) {
             export: ids => { downloadDataFile(exportLibrarySelection(ids, runtime.TIERSCOPE_VERSION), 'TierScope-library-selection-' + new Date().toISOString().slice(0, 10) + '.json'); tell('Selected recordings exported, including titles, notes and favorite models.'); },
             favoriteModel: room => {
                 if (state.favoriteError) throw new Error('Model favorites are not fully available. Refresh before changing them.');
-                setModelFavorite(room, !state.favoriteModels.has(room)); render('library'); tell('Model favorite saved.');
+                favoriteAction(room);
             },
+            enableAutomatic: room => favoriteAction(room, true),
             replay: entry => { openSessionReplay(entry.archive); observedSignature = ''; refreshCurrent(); tell('Replaying ' + (entry.title || entry.archive.room) + '.'); },
             summary: entry => { selectedA = entry.id; render('summary'); },
             save: entry => downloadDataFile(entry.archive, archiveName(entry.archive)),
@@ -380,7 +433,7 @@ export function openSessionTools(focusTarget) {
     function renderHistory() {
         if (!library) readLibrary();
         const heading = node(content, 'div', undefined, 'tools-actions');
-        button(heading, '‹ Recordings', () => {
+        button(heading, '‹ Sessions', () => {
             render('library'); (dialog.querySelector('#tools-model-history') || dialog.querySelector('#tools-library-search')).focus();
         }, 'tools-history-back');
         node(heading, 'h3', 'Model history · ' + libraryRoom);
@@ -606,7 +659,7 @@ export function openSessionTools(focusTarget) {
         if (event.key === 'Escape' && !event.defaultPrevented) { event.preventDefault(); close(); }
     }
     closeSessionTools = close;
-    refreshSessionTools = refreshCurrent;
+    refreshSessionTools = reload => { if (reload && tab === 'library') render('library'); else refreshCurrent(); };
     document.addEventListener('keydown', escape);
     dialog.querySelector('#btn-cancel-gif').onclick = cancelGifExport;
     for (const id of ['btn-control-library', 'btn-playback-library']) {

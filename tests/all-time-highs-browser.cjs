@@ -59,7 +59,7 @@ const source = prepareSource(fs.readFileSync(path.join(__dirname, '../tierscope.
     await load();
     const panel = page.locator('#tracker-container'), toggle = page.locator('#btn-high-mode');
     const high = page.locator('#high-red'), options = page.locator('#btn-panel-options');
-    const replayAdd = page.locator('#tools-add-all-time');
+    const replayAdd = page.locator('#tools-add-all-time-replay');
     assert(!(await replayAdd.isVisible()), 'file Add is hidden during live tracking');
     await page.click('#restore-row-red');
     const bounds = await panel.boundingBox();
@@ -146,7 +146,7 @@ const source = prepareSource(fs.readFileSync(path.join(__dirname, '../tierscope.
     assert.equal(await high.textContent(), 'ATH:12');
     assert.equal(await page.locator('#tools-current-room').textContent(),'testroom','Library switches back to the live room');
     await page.click('#btn-replay');
-    assert.equal(await page.locator('#tools-current-kind').textContent(),'Replay snapshot');
+    assert.equal(await page.locator('#tools-current-kind-replay').textContent(),'Replay Snapshot');
     await page.click('#playback-return');
     count = 4;
     await load('archived_room');

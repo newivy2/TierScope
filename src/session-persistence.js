@@ -1,9 +1,11 @@
 import { restoreScheduledInterval } from './acquisition-state.js';
+import { keepFavoriteSession } from './automatic-library.js';
 import { readAllTimeHighs, sessionAllTimeHighs, storeAllTimeHighs } from './highs-store.js';
 import { clearRestoredSessionFrame, prepareSessionHighsForSave, restoreLiveSession } from './live-session.js';
 import { restoreTrendPreferences } from './panel-preferences.js';
 import { createPlaybackSnapshot, getPlaybackFrame } from './playback-data.js';
 import { updateAcquisitionStatus } from './presentation-status.js';
+import { refreshPanelOptions } from './presentation.js';
 import { getStorageKey } from './record-validation.js';
 import { leavePlayback } from './replay.js';
 import { runtime } from './runtime.js';
@@ -19,7 +21,7 @@ export function restoreSessionState(data) {
     restoreTrendPreferences(data.trendComparisonMode, data.autoTrendEscalation);
 }
 
-export function saveSession(model) {
+export function saveSession(model, flushLibrary = false) {
     if (!model || model === 'unknown') return;
     try {
         var result = getSessionWriteStatus(model);
@@ -71,6 +73,10 @@ export function saveSession(model) {
         noteSessionSave(model, e.message || String(e));
         log('Failed to save session: ' + e);
         return {status: 'failed', error: e.message || String(e)};
+    } finally {
+        keepFavoriteSession(model, flushLibrary);
+        try { updateAcquisitionStatus(); refreshPanelOptions(); }
+        catch (error) { log('Save feedback unavailable: ' + error.message); }
     }
 }
 

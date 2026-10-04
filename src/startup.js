@@ -162,10 +162,10 @@ export function checkUrlChange() {
         if (runtime.panelOptionsCleanup) { runtime.panelOptionsCleanup(); runtime.panelOptionsCleanup = null; }
         leavePlayback(false);
         var oldModel = getModelNameFromUrl(runtime.lastUrl);
-        runtime.lastUrl = location.href;
         if (oldModel && oldModel !== 'unknown') {
-            saveSession(oldModel);
+            saveSession(oldModel, true);
         }
+        runtime.lastUrl = location.href;
         runtime.activeSessionStorageKey = null;
         stopCountdown();
         resetAcquisitionForRoom();

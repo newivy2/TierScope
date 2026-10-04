@@ -33,7 +33,7 @@ async function downloaded(page,action){const [download]=await Promise.all([page.
  const before=await page.evaluate(()=>ViewerTracker.__files.state());
  const options=page.getByRole('button',{name:'Chart window and highs'}),menu=page.locator('#panel-options');
  const save=page.locator('#tools-save-session'),open=page.locator('#tools-open-session');
- const replaySave=save,replayOpen=open,replayKeep=page.locator('#tools-keep');
+ const replaySave=page.locator('#tools-save-session-replay'),replayOpen=open,replayKeep=page.locator('#tools-keep-replay');
  const message=page.locator('#tools-message');
  const libraryBounds=await page.locator('#btn-control-library').boundingBox(),replayBounds=await page.locator('#btn-replay').boundingBox();
  assert.equal(libraryBounds.y,replayBounds.y,'Library shares the Replay row');
@@ -87,20 +87,20 @@ async function downloaded(page,action){const [download]=await Promise.all([page.
  const picker=page.waitForEvent('filechooser');await open.click();await(await picker).setFiles(file);
  await page.waitForFunction(()=>ViewerTracker.__files.state().imported);
  const roomLabel=page.locator('#playback-room');assert(await roomLabel.isVisible());assert.equal(await roomLabel.textContent(),'Room: archived_room');
- assert.match(await page.locator('#header-text').textContent(),/^FILE:/);assert.match(await page.locator('#header-text').getAttribute('title'),/archived_room/);
+ assert.match(await page.locator('#header-text').getAttribute('title'),/^Replay:/);assert.match(await page.locator('#header-text').getAttribute('title'),/archived_room/);
  assert.equal(await page.locator('#playback-play').textContent(),'Play','files open paused');assert.equal(await page.locator('#playback-return').textContent(),'Close Replay');
  assert.deepEqual(await panel.boundingBox(),bounds,'import leaves panel geometry unchanged');
  await page.locator('#session-file-input').setInputFiles({name:'bad.json',mimeType:'application/json',buffer:Buffer.from('{broken')});
- await page.waitForFunction(()=>document.getElementById('header-text').textContent.startsWith('FILE:'));
+ await page.waitForFunction(()=>document.getElementById('header-text').title.startsWith('Replay:'));
  await page.waitForTimeout(100);assert.match(dialogs.at(-1),/Could not open session file/);assert.equal((await page.evaluate(()=>ViewerTracker.__files.state())).room,'archived_room');
  await page.evaluate(()=>ViewerTracker.__files.scan());assert.equal((await page.evaluate(()=>ViewerTracker.__files.state())).history.length,122);assert.equal((await page.evaluate(()=>ViewerTracker.__files.state())).room,'archived_room');
  assert.equal(await roomLabel.textContent(),'Room: archived_room','live scans preserve the file source label');
- assert(await replaySave.isVisible());assert(await replayOpen.isVisible());assert(!(await menu.isVisible()));
+ assert(await replaySave.isVisible());assert(await save.isVisible());assert(await replayOpen.isVisible());assert(!(await menu.isVisible()));
  const fileBeforeSave=await page.evaluate(()=>ViewerTracker.__files.state());
  const reexported=await downloaded(page,()=>replaySave.click());
  assert.deepEqual(JSON.parse(reexported.bytes),archive,'file Replay downloads its original full session, not current room data');
  assert.deepEqual(await page.evaluate(()=>ViewerTracker.__files.state()),fileBeforeSave,'file Save preserves playback and the background live session');
- assert.equal(await replayKeep.textContent(),'Keep in library','a different replay clears prior feedback');
+ assert.equal(await replayKeep.textContent(),'Keep in Library','a different replay clears prior feedback');
  const athBeforeKeep=await page.evaluate(()=>JSON.stringify(GM_listValues().filter(k=>k.startsWith('tierscope:ath')).sort().map(k=>[k,GM_getValue(k)])));
  await page.evaluate(()=>{window.restoreLibrarySet=GM_setValue;window.GM_setValue=(k,v)=>{if(k.startsWith('tierscope:library:'))throw new Error('disk full');window.restoreLibrarySet(k,v);};});
  await replayKeep.click();assert.match(await message.textContent(),/disk full/);assert(await replayKeep.isEnabled());
@@ -111,7 +111,7 @@ async function downloaded(page,action){const [download]=await Promise.all([page.
  assert.deepEqual(await page.evaluate(()=>ViewerTracker.__files.library().entries.find(e=>e.archive.room==='archived_room').archive),archive,'file Keep uses the file room and all its samples, not the background live room');
  assert.equal(await page.evaluate(()=>JSON.stringify(GM_listValues().filter(k=>k.startsWith('tierscope:ath')).sort().map(k=>[k,GM_getValue(k)]))),athBeforeKeep,'Keep does not add ATH');
  assert.deepEqual(await page.evaluate(()=>ViewerTracker.__files.state()),fileBeforeSave);
- const gif=await downloaded(page,()=>page.click('#btn-export-gif'));assert(gif.name.startsWith('archived_room-replay-'));
+ const gif=await downloaded(page,()=>page.click('#btn-export-gif-replay'));assert(gif.name.startsWith('archived_room-replay-'));
  const reader=new GifReader(gif.bytes);assert.equal(reader.numFrames(),60);assert.equal(reader.width,480);assert.equal(reader.height,640);
  const rgba=new Uint8Array(480*640*4);reader.decodeAndBlitFrameRGBA(59,rgba);assert(rgba.some((v,i)=>i%4===0&&v>0));
  if(process.env.TIERSCOPE_FILE_SHOTS){await page.click('#playback-next');await panel.screenshot({path:process.env.TIERSCOPE_FILE_SHOTS+'-replay.png'});}
@@ -121,7 +121,7 @@ async function downloaded(page,action){const [download]=await Promise.all([page.
  await page.waitForFunction(room=>ViewerTracker.__files.state().room===room,longArchive.room);
  assert.equal(await roomLabel.textContent(),'Room: '+longArchive.room);assert.equal(await roomLabel.getAttribute('title'),'Saved session from '+longArchive.room);
  assert.deepEqual(await panel.boundingBox(),bounds,'a long room name does not grow the panel');
- assert.equal(await replayKeep.textContent(),'Keep in library');
+ assert.equal(await replayKeep.textContent(),'Keep in Library');
  assert(await roomLabel.evaluate(e=>e.scrollWidth>e.clientWidth && getComputedStyle(e).textOverflow==='ellipsis'),'long names are shortened visually');
  const roomBounds=await roomLabel.boundingBox(),playBounds=await page.locator('#playback-play').boundingBox(),timelineBounds=await page.locator('#playback-scrubber').boundingBox();
  assert(roomBounds.x>=bounds.x&&roomBounds.x+roomBounds.width<=bounds.x+bounds.width);
@@ -133,11 +133,11 @@ async function downloaded(page,action){const [download]=await Promise.all([page.
  if(process.env.TIERSCOPE_FILE_SHOTS)await panel.screenshot({path:process.env.TIERSCOPE_FILE_SHOTS+'-long-name.png'});
  await page.click('#playback-return');assert.equal((await page.evaluate(()=>ViewerTracker.__files.state())).imported,false);
  assert(!(await roomLabel.isVisible()),'file source disappears on return to live');
- assert(await replaySave.isVisible());assert(await replayOpen.isVisible());
- assert.match(await page.locator('#tools-current-kind').textContent(),/Paused session/);assert.equal(await page.locator('#tools-current-room').textContent(),'testroom');
- assert.equal((await page.evaluate(()=>ViewerTracker.__files.state())).paused,true);assert.match(await page.locator('#header-text').textContent(),/^USERS:/);
+ assert(await replaySave.isHidden());assert(await save.isVisible());assert(await replayOpen.isVisible());
+ assert.match(await page.locator('#tools-current-kind').textContent(),/Current Live Session/);assert.equal(await page.locator('#tools-current-room').textContent(),'testroom');
+ assert.equal((await page.evaluate(()=>ViewerTracker.__files.state())).paused,true);assert.match(await page.locator('#header-text').getAttribute('title'),/^Live room:/);
  await page.click('#btn-replay');await page.evaluate(()=>ViewerTracker.__files.pause());assert(!(await roomLabel.isVisible()));assert.equal(await roomLabel.textContent(),'','ordinary Replay clears the file source');
- await replayKeep.click();assert.match(await message.textContent(),/Library recording updated/);
+ await replayKeep.click();assert.match(await message.textContent(),/Library session updated/);
  assert.equal(await page.evaluate(()=>ViewerTracker.__files.library().count),2,'keeping a growing session updates its entry');
  assert.equal(await page.evaluate(()=>ViewerTracker.__files.library().entries.find(e=>e.archive.room==='testroom').archive.session.history.timestamps.length),122);
  const ordinaryPicker=page.waitForEvent('filechooser');await replayOpen.click();await(await ordinaryPicker).setFiles(file);

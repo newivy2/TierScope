@@ -28,7 +28,7 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   assert.equal(requests,1);assert(pending.scanning);assert.equal(pending.countdown,null);
   assert.match(await page.locator('#control-next-scan').textContent(),/scanning/i);
   release();await page.waitForFunction(()=>ViewerTracker.__startup.state().count===1&&ViewerTracker.__startup.state().countdown!==null);
-  assert.equal(requests,1);assert.match(await page.locator('#header-text').textContent(),/^USERS:/);
+  assert.equal(requests,1);assert.match(await page.locator('#header-text').getAttribute('title'),/^Live room:/);
   const finished=await page.evaluate(()=>ViewerTracker.__startup.state());assert(finished.next-finished.now>55000&&finished.next-finished.now<=60000);
   const dot=await page.locator('#spark-light-blue').evaluate(c=>{
    const data=c.getContext('2d').getImageData(0,0,c.width,c.height).data;
@@ -45,12 +45,12 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   await page.route('https://tierscope.test/api/**',r=>r.fulfill({body:'5,testroom|o|f|0,viewer|t|m|0'}));
   await page.goto('https://tierscope.test/freshroom/');
   await page.addScriptTag({content:fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8')});
-  await page.waitForFunction(()=>document.getElementById('header-text')?.textContent.startsWith('USERS:'));
+  await page.waitForFunction(()=>document.getElementById('header-text')?.title.startsWith('Live room:'));
   assert.deepEqual(await page.evaluate(()=>[typeof window.ViewerTracker,typeof window.GifWriter]),['undefined','undefined']);
   await page.click('#btn-replay');
-  assert.match(await page.locator('#header-text').textContent(),/^PLAYBACK:/);
+  assert.match(await page.locator('#header-text').getAttribute('title'),/^Replay:/);
   await page.click('#playback-return');
-  assert.match(await page.locator('#header-text').textContent(),/^USERS:/);
+  assert.match(await page.locator('#header-text').getAttribute('title'),/^Live room:/);
   const epoch=()=>page.evaluate(()=>localStorage.getItem('tierscope:epoch:v2:freshroom'));
   const beforeReset=await epoch();
   page.once('dialog',dialog=>dialog.dismiss());await page.click('#btn-main-reset');

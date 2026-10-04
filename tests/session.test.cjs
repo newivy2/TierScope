@@ -102,7 +102,7 @@ test('expired tab data is not restored and returning writers rotate record IDs',
 
 test('saved display remains non-live until a valid sample; painting failure retains its data and highs',async()=>{
   const h=harness();const data=record(h);h.storage.set(key,JSON.stringify(data));h.t.initPanel();
-  assert.match(h.e('header-text').textContent,/^SAVED:/);assert.equal(h.t.state().users.length,0);
+  assert.match(h.e('header-text').title,/^Saved session:/);assert.equal(h.t.state().users.length,0);
   assert.match(await h.report(),/NOT A LIVE SAMPLE/);
   const before=clean(h.t.highState()),history=clean(h.t.state().history);
   h.setResponse(new Error('network failure'));await h.t.performScanThenReturn();
@@ -117,7 +117,7 @@ test('saved display remains non-live until a valid sample; painting failure reta
   assert.equal(h.t.state().restoredDisplayFrame,null);
   assert.equal(h.e('acquisition-status').textContent,'Display needs refresh');
   await h.t.performScanThenReturn();assert.equal(h.t.state().restoredDisplayFrame,null);
-  assert.match(h.e('header-text').textContent,/^USERS:/);
+  assert.match(h.e('header-text').title,/^Live room:/);
 });
 
 test('a late network response cannot commit after room navigation',async()=>{

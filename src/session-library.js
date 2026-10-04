@@ -99,7 +99,9 @@ export function readSessionLibrary(cache = null) {
                 const record = JSON.parse(raw);
                 if (record.schemaVersion !== 1 || !Number.isSafeInteger(record.addedAt) || record.addedAt < 0) throw new Error('Invalid library record.');
                 libraryRecordKey(id);
-                data = {title: libraryTitle(record.title), ...libraryMetadata(record), addedAt: record.addedAt, archive: validateSessionFile(record.archive)};
+                const lineage = record.lineage === undefined ? id : record.lineage;
+                libraryRecordKey(lineage);
+                data = {title: libraryTitle(record.title), ...libraryMetadata(record), lineage, addedAt: record.addedAt, archive: validateSessionFile(record.archive)};
             }
             if (cache) {
                 if (typeof raw === 'string' && cachedCount < LIBRARY_MAX_COUNT && cachedBytes + recordBytes <= LIBRARY_MAX_BYTES) {
@@ -142,12 +144,16 @@ export function planLibraryAdditions(incoming, library = readSessionLibrary()) {
         const metadata = libraryMetadata(previous || entry);
         const id = makeStorageId();
         const addedAt = previous ? previous.addedAt : Date.now();
-        const raw = JSON.stringify({ schemaVersion: 1, addedAt, title, ...metadata, archive }), key = libraryRecordKey(id);
+        // Internal identity survives proven updates, including automatic keeps.
+        // Imports do not supply it, so a deleted/reimported session cannot claim
+        // an old note draft by matching timestamps or an external identifier.
+        const lineage = previous ? previous.lineage || previous.id : id;
+        const raw = JSON.stringify({ schemaVersion: 1, addedAt, title, ...metadata, lineage, archive }), key = libraryRecordKey(id);
         // Retain the old copy until every new write has succeeded. Budget for
         // that temporary space too; a failed update must leave it recoverable.
         bytes += new Blob([raw]).size;
         writes.push({ key, value: raw, id, updated: !!previous, replaces: previous ? previous.records : [] });
-        const next = { id, title, ...metadata, addedAt, archive, records: [{ key, value: raw }] };
+        const next = { id, title, ...metadata, lineage, addedAt, archive, records: [{ key, value: raw }] };
         if (previous) entries[index] = next; else entries.push(next);
     }
     if (library.count - library.entries.length + entries.length > LIBRARY_MAX_COUNT || bytes > LIBRARY_MAX_BYTES) {
@@ -163,14 +169,22 @@ export function finalizeLibraryWrites(writes) {
     }
 }
 
-export function keepSessionInLibrary(archive, title = '') {
-    const library = readSessionLibrary(), clean = validateSessionFile(archive);
+export function keepSessionInLibrary(archive, title = '', reader = null) {
+    const library = reader ? reader.read() : readSessionLibrary(), clean = validateSessionFile(archive);
     const writes = planLibraryAdditions([{ archive: clean, title }], library);
     if (!writes.length) return { added: false, updated: false,
         id: library.entries.find(entry => compareLibrarySessions(entry.archive, clean) !== null).id };
+    function unchangedSource() {
+        for (const old of writes[0].replaces) if (GM_getValue(old.key, undefined) !== old.value) {
+            throw new Error('This session changed in another tab. Refresh or retry keeping it.');
+        }
+    }
     try {
+        unchangedSource();
         GM_setValue(writes[0].key, writes[0].value);
-        verifyLibraryCapacity();
+        if (GM_getValue(writes[0].key, undefined) !== writes[0].value) throw new Error('The library save could not be verified. Try again.');
+        verifyLibraryCapacity(reader);
+        unchangedSource();
     } catch (error) {
         try { if (GM_getValue(writes[0].key, null) === writes[0].value) GM_deleteValue(writes[0].key); }
         catch (cleanupError) { throw new Error('Library save could not be completed or undone. Refresh the list before retrying.'); }
@@ -180,8 +194,8 @@ export function keepSessionInLibrary(archive, title = '') {
     return { added: !writes[0].updated, updated: writes[0].updated, id: writes[0].id };
 }
 
-export function verifyLibraryCapacity() {
-    const state = readSessionLibrary();
+export function verifyLibraryCapacity(reader = null) {
+    const state = reader ? reader.read() : readSessionLibrary();
     if (state.unavailable.length) throw new Error('Library capacity could not be checked because some records could not be read.');
     if (state.count > LIBRARY_MAX_COUNT || state.bytes > LIBRARY_MAX_BYTES) throw new Error('Library limit reached, possibly by another tab. Refresh the list and remove recordings before retrying.');
 }

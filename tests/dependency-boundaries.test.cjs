@@ -45,7 +45,7 @@ test('all application imports form an acyclic dependency graph', () => {
 });
 
 test('panel views have no dependency on owners, live selectors, controllers or storage', () => {
-  const views = ['panel-view.js', 'compact-view.js', 'trend-view.js', 'status-view.js', 'chart-view.js', 'library-dock.js', 'library-shell.js', 'model-history-view.js', 'library-browser-view.js', 'tools-view-helpers.js', 'analysis-chart-view.js', 'recording-export-data.js'];
+  const views = ['favorite-view.js', 'panel-view.js', 'compact-view.js', 'trend-view.js', 'status-view.js', 'chart-view.js', 'library-dock.js', 'library-shell.js', 'model-history-view.js', 'library-browser-view.js', 'tools-view-helpers.js', 'analysis-chart-view.js', 'recording-export-data.js'];
   const permitted = new Set([...views, 'library-query.js', 'analysis-chart-data.js', 'display-values.js', 'format.js', 'history-data.js', 'theme-values.js', 'runtime.js']);
   for (const view of views) {
     assert.deepEqual([...dependencies(view)].filter(file => !permitted.has(file)), [], view);

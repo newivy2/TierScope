@@ -40,9 +40,9 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   await page.evaluate(()=>{ViewerTracker.__modelHistory.setup();ViewerTracker.__modelHistory.seed();});await page.waitForTimeout(250);
   const before=await page.evaluate(()=>ViewerTracker.__modelHistory.state()),bounds=await page.locator('#tracker-container').boundingBox();
   await page.click('#btn-control-library');
-  assert.match(await page.locator('#tools-room-history').textContent(),/live_room/);
-  assert.match(await page.locator('#tools-room-shortcuts').textContent(),/0 saved recordings/);
-  assert(await page.evaluate(()=>Boolean(document.getElementById('tools-room-shortcuts').compareDocumentPosition(document.querySelector('.tools-current'))&Node.DOCUMENT_POSITION_FOLLOWING)));
+  assert.match(await page.locator('#tools-room-history').getAttribute('title'),/live_room/);
+  assert.match(await page.locator('#tools-room-shortcuts').textContent(),/History · 0/);
+  assert(await page.evaluate(()=>document.querySelector('.tools-current').contains(document.getElementById('tools-room-shortcuts'))));
   await page.click('#tools-room-history');assert.match(await page.locator('#tools-content').textContent(),/No saved recordings for this model/);
   await page.click('#tools-history-back');await page.click('#tools-folder-history_model');
   await page.locator('#tools-model-history').focus();await page.keyboard.press('Enter');
@@ -85,8 +85,8 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   await page.click('#tools-history-replay');assert.equal(await page.locator('#tools-history-chart').count(),1,'replay leaves history view open');
   assert.equal((await page.evaluate(()=>ViewerTracker.__modelHistory.replay())).room,'history_model');
   assert.equal(await page.locator('#tools-history-recording').inputValue(),'history_1');
-  await page.click('[data-tools-tab=library]');assert.match(await page.locator('#tools-room-history').textContent(),/live_room/,'the page shortcut does not switch to a different replay model');
-  assert.equal(await page.locator('#tools-current-room').textContent(),'history_model');await page.click('#tools-model-history');
+  await page.click('[data-tools-tab=library]');assert.match(await page.locator('#tools-room-history').getAttribute('title'),/live_room/,'the page shortcut does not switch to a different replay model');
+  assert.equal(await page.locator('#tools-current-room-replay').textContent(),'history_model');await page.click('#tools-model-history');
   await page.evaluate(()=>ViewerTracker.__modelHistory.closeReplay());
   assert.deepEqual(await page.evaluate(()=>ViewerTracker.__modelHistory.state()),before);
   assert.deepEqual(await page.locator('#tracker-container').boundingBox(),bounds,'history does not reposition the Scope');
@@ -138,13 +138,13 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   // Opening Library on this model's actual page offers its saved history directly.
   const roomPage=await context.newPage();roomPage.on('pageerror',e=>errors.push(e.message));await roomPage.goto('https://tierscope.test/history_model/');
   await roomPage.addScriptTag({content:instrument(source)});await roomPage.evaluate(()=>ViewerTracker.__modelHistory.setup());await roomPage.click('#btn-control-library');
-  assert.match(await roomPage.locator('#tools-room-shortcuts').textContent(),/55 saved recordings/);
+  assert.match(await roomPage.locator('#tools-room-shortcuts').textContent(),/History · 55/);
   await roomPage.screenshot({path:'/tmp/tierscope-model-history-shortcut-'+engine+'.png'});
   await roomPage.locator('#tools-room-history').focus();await roomPage.keyboard.press('Enter');
   assert.equal(await roomPage.locator('#tools-history-recording').inputValue(),'history_54');await roomPage.click('#tools-history-compare');
   assert.deepEqual(await roomPage.locator('[id^=tools-source-]').evaluateAll(selects=>selects.map(s=>s.value)),['history_54','history_53','history_52','history_51','history_50','history_49']);
   await roomPage.evaluate(()=>{history.pushState({},'', '/tags/testroom/');ViewerTracker.__modelHistory.checkUrlChange();});
-  await roomPage.click('#btn-control-library');assert.equal(await roomPage.locator('#tools-room-history').count(),0,'directory pages have no model shortcut');
+  await roomPage.click('#btn-control-library');assert(await roomPage.locator('#tools-room-history').isHidden(),'directory pages have no model shortcut');
   await roomPage.close();
   assert.deepEqual(errors,[]);console.log(engine+': model history statistics, controls, themes, isolation, cross-tab refresh, pagination and cleanup passed');
  } finally {await browser.close();}

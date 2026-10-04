@@ -134,6 +134,8 @@ export function resetAllTracking() {
 export function resetTrackingData(deleteSaved) {
     var modelName = getModelName();
     if (modelName === 'unknown') return;
+    // Keep the departing favorite session before Reset advances its epoch.
+    saveSession(modelName, true);
     leavePlayback(false);
     cancelGifExport();
     log('Performing main reset...');

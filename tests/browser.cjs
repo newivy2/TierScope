@@ -177,7 +177,7 @@ const injected=source.replaceAll('scheduleInit(2000);','/* test controls initial
  assert(Math.abs(alignment.expectedLeft-alignment.left)<1);assert(alignment.right<=alignment.themeLeft);
  console.log('PASS expansion clamping and Controls centered within available space');
 
- const keys=['red','green','purple','pink','dark-blue','light-blue','gray','female-trans','withtokens','total','anon'];
+ const keys=['red','green','purple','pink','dark-blue','light-blue','gray','female-trans','withtokens','total','anon','roomTotal'];
  for(const lineHeight of ['normal','1.5']) {
    await page.setViewportSize({width:1100,height:1100});
    await page.reload();
@@ -188,7 +188,7 @@ const injected=source.replaceAll('scheduleInit(2000);','/* test controls initial
      ViewerTracker.__test.layout([]);
      const box=()=>document.getElementById('tracker-container').getBoundingClientRect();
      const baseline=box().height;let min=Infinity,max=0,overflow=0;
-     for(let mask=0;mask<2047;mask++){
+     for(let mask=0;mask<(1<<keys.length)-1;mask++){
        const hidden=keys.filter((_,i)=>mask&(1<<i));ViewerTracker.__test.layout(hidden);
        min=Math.min(min,box().height);max=Math.max(max,box().height);
        const region=document.getElementById('tier-chart-region').getBoundingClientRect();
@@ -200,7 +200,7 @@ const injected=source.replaceAll('scheduleInit(2000);','/* test controls initial
    },keys);
    assert.equal(result.min,result.baseline);assert.equal(result.max,result.baseline);
    assert.equal(result.restored,result.baseline);assert(result.compact<result.baseline-250);assert(result.overflow<=0.5);
-   console.log('PASS all 2,048 collapse combinations; inherited line-height '+lineHeight, result);
+   console.log('PASS all 4,096 collapse combinations; inherited line-height '+lineHeight, result);
  }
  // API failure uses real DOM fallback, restores the selected tab, and respects cooldown.
  await page.evaluate(()=>{
@@ -221,7 +221,7 @@ const injected=source.replaceAll('scheduleInit(2000);','/* test controls initial
  assert.equal(afterFallback.history.total.at(-1),2);
  assert.equal(afterFallback.history.anonymous.at(-1),4);
  assert.equal(afterFallback.position,replayBefore.position);assert.equal(afterFallback.playing,false);
- assert.match(await page.locator('#header-text').textContent(),/^PLAYBACK:/);
+ assert.match(await page.locator('#header-text').getAttribute('title'),/^Replay:/);
  assert.deepEqual(await page.evaluate(()=>window.tabClicks),{users:1,chat:1});
  await page.evaluate(()=>ViewerTracker.__test.scan());
  assert.equal((await page.evaluate(()=>ViewerTracker.__test.state())).history.timestamps.length,afterFallback.history.timestamps.length);

@@ -58,9 +58,29 @@ export function libraryShell() {
 #tierscope-session-tools label{display:inline-flex;gap:5px;align-items:center;flex-wrap:wrap;min-width:0;max-width:100%}
 #tierscope-session-tools select{width:auto;max-width:100%}
 #tools-source-a,#tools-source-b{width:100%}
-#tierscope-session-tools .tools-filters{display:flex;flex-wrap:wrap;gap:6px;padding:7px 0;border-bottom:1px solid var(--panel-divider)}
-#tierscope-session-tools .tools-filters input[type=date]{width:130px}
-#tierscope-session-tools .tools-filters select{max-width:205px}
+#tierscope-session-tools .tools-filters{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px;padding:9px 0;border-block:1px solid var(--panel-divider);margin-top:8px}
+#tierscope-session-tools .tools-model-filters{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,.8fr);gap:6px 10px;align-items:end}
+#tierscope-session-tools .tools-model-filter,#tierscope-session-tools .tools-sort-filter{display:grid;gap:3px;color:var(--panel-muted)}
+#tierscope-session-tools .tools-favorites-filter{grid-column:1/-1;font-size:.95em}
+#tierscope-session-tools .tools-date-filters{grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+#tierscope-session-tools .tools-date-filters label{display:flex;flex-wrap:nowrap;gap:4px;font-size:.9em}
+#tierscope-session-tools .tools-date-filters input[type=date]{width:100%;min-width:0;flex:1;padding:4px 2px}
+#tierscope-session-tools .tools-current[hidden]{display:none}
+#tierscope-session-tools [data-card-enable][hidden],#tierscope-session-tools [data-card-retry][hidden]{display:none}
+#tierscope-session-tools .tools-model-name{display:flex;align-items:center;gap:5px;margin-bottom:4px}
+#tierscope-session-tools .tools-model-name strong{min-width:0}
+#tierscope-session-tools [data-card-star]{font-size:1.5em;padding:0 3px;border:0;background:transparent;line-height:1.2}
+#tierscope-session-tools .tools-exports{gap:4px;margin:5px 0 8px}
+#tierscope-session-tools .tools-exports button{padding:2px 5px;font-size:.9em}
+#tierscope-session-tools .tools-history-shortcut button{color:var(--panel-accent)}
+#tierscope-session-tools #session-save-info{font-size:.85em;margin-top:4px}
+#tierscope-session-tools .tools-library-bulk{gap:4px;font-size:.9em}
+#tierscope-session-tools .tools-library-bulk button{padding:3px 5px}
+#tools-library-selected{flex-basis:100%}
+#tools-library-selection{margin-top:8px}
+#tools-library-selection>summary{font-size:.9em;background:transparent;color:var(--panel-muted)}
+
+#tierscope-session-tools .tools-filters select{width:100%}
 #tierscope-session-tools .tools-filters .tools-search{margin:0}
 #tierscope-session-tools .tools-search input{flex:1;width:100%}
 #tierscope-session-tools textarea{display:block;width:100%;resize:vertical}
@@ -75,8 +95,8 @@ export function libraryShell() {
 #tools-review-notes[hidden]{display:none}
 #gif-export-controls{padding:8px 12px;gap:6px;align-items:center;flex-shrink:0;border-bottom:1px solid var(--panel-divider)}
 </style>
-<div class="tools-head"><div><h2 id="tools-title">LIBRARY</h2><div class="tools-subtitle">Recordings &amp; session tools</div></div><button id="tools-close" type="button" aria-label="Close library" title="Close library (Escape)">×</button></div>
-<nav aria-label="Session tools"><button data-tools-tab="library">Recordings</button><button data-tools-tab="summary">Summary</button><button data-tools-tab="compare">Compare</button><button data-tools-tab="backup">Backup</button></nav>
+<div class="tools-head"><div><h2 id="tools-title">Library</h2><div class="tools-subtitle">Session Storage and Analysis</div></div><button id="tools-close" type="button" aria-label="Close library" title="Close library (Escape)">×</button></div>
+<nav aria-label="Session tools"><button data-tools-tab="library">Sessions</button><button data-tools-tab="summary">Summary</button><button data-tools-tab="compare">Compare</button><button data-tools-tab="backup">Backup</button></nav>
 <button id="tools-review-notes" type="button" hidden></button>
 <div id="tools-message" role="status" aria-live="polite"></div>
 <div id="gif-export-controls" style="display:none"><span id="gif-export-status" role="status"></span><button id="btn-cancel-gif" hidden type="button">Cancel</button></div>

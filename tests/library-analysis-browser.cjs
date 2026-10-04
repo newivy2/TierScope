@@ -88,7 +88,7 @@ const file=(name,value)=>({name,mimeType:'application/json',buffer:Buffer.from(J
   await page.selectOption('#tools-library-model','alpha_model');
   await page.click('#tools-model-favorite-alpha_model');assert.equal(await page.locator('#tools-model-favorite-alpha_model').getAttribute('aria-pressed'),'false');
   assert.equal(await page.evaluate(()=>document.activeElement.id),'tools-model-favorite-alpha_model');
-  await page.click('#tools-model-favorite-alpha_model');
+  page.once('dialog',dialog=>dialog.accept());await page.click('#tools-model-favorite-alpha_model');
   // Another tab changes a different model without replacing this model's choice.
   const other=await context.newPage();await other.goto('https://tierscope.test/other_room/');
   await other.evaluate(()=>GM_setValue('tierscope:library-model:v1:beta_model',JSON.stringify({schemaVersion:1,room:'beta_model',favorite:true})));
@@ -96,7 +96,7 @@ const file=(name,value)=>({name,mimeType:'application/json',buffer:Buffer.from(J
   await other.evaluate(()=>GM_setValue('tierscope:library-model:v1:beta_model',JSON.stringify({schemaVersion:1,room:'beta_model',favorite:false})));
   await page.click('#tools-refresh-library');assert.equal(await page.locator('.tools-folder').count(),1);await other.close();
   // Six selected library recordings become six independent comparison slots.
-  await page.click('#tools-library-clear');await page.selectOption('#tools-library-model','alpha_model');await page.click('#tools-select-matching');
+  await page.click('#tools-library-clear');await page.selectOption('#tools-library-model','alpha_model');await page.locator('#tools-library-selection').evaluate(e=>e.open=true);await page.click('#tools-select-matching');
   assert.match(await page.locator('#tools-library-selected').textContent(),/^6 selected/);
   await page.locator('.tools-filters').evaluate(e=>e.scrollIntoView({block:'start'}));
   await page.screenshot({path:'/tmp/tierscope-314-'+engine+'-library.png'});

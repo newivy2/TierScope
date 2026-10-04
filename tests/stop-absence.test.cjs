@@ -14,7 +14,7 @@ test('Stop freezes elapsed time and history, rejects pending samples, and surviv
  assert.match(await h.report(),/STOPPED SESSION STATS \(NOT A LIVE SAMPLE\)/);
  const reload=harness(h.storage);reload.advance(3615000);reload.t.init();await reload.drain();
  assert.equal(reload.t.state().isStopped,true);assert.equal(reload.fetchCount(),0);assert.equal(reload.t.state().pausedElapsedTime,15000);
- assert.deepEqual(JSON.parse(JSON.stringify(reload.t.state().history)),JSON.parse(before));assert.match(reload.e('header-text').textContent,/^STOPPED:/);
+ assert.deepEqual(JSON.parse(JSON.stringify(reload.t.state().history)),JSON.parse(before));assert.match(reload.e('header-text').title,/^Stopped session:/);
 });
 
 test('Start begins separate history and preserves the stopped source record until cleanup',async()=>{

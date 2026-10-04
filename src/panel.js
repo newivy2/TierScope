@@ -1,6 +1,9 @@
 import { selectScanInterval } from './acquisition-state.js';
 import { hideChartTooltip } from './chart-view.js';
 import { bindPanelOptions } from './files.js';
+import { changeModelFavorite } from './favorite-controls.js';
+import { paintFavoriteButton } from './favorite-view.js';
+import { readModelFavorite } from './library-models.js';
 import { cancelGifExport } from './gif.js';
 import { bindRowControls, cleanupDragListeners, restoreStandardSize, setupDraggable, setupResizable, setupResizeHandler, toggleView } from './layout.js';
 import { adjustTimer, resetAllTracking, resetCountdown, startCountdown, stopCountdown, stopTracking, toggleAutoRefresh, updateCountdownDisplay, updateStopControls } from './lifecycle.js';
@@ -9,6 +12,7 @@ import { updateDisplay } from './presentation.js';
 import { bindPlaybackControls, leavePlayback, updateReplayAvailability } from './replay.js';
 import { collapseMarkerHtml, collapsedTrayHtml } from './row-layout.js';
 import { runtime } from './runtime.js';
+import { updateSessionToolsStatus } from './session-tools.js';
 import { applyPanelTheme, updateContainerOpacity } from './theme.js';
 import { setTrendComparisonMode, toggleAutoTrendEscalation, updateAutoTrendButton, updateTrendPresetButtons } from './trends.js';
 import { log } from './utils.js';
@@ -47,8 +51,8 @@ export function createPanel() {
                 'display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;' +
                 'border-bottom:1px solid #ff69b4;padding-bottom:3px;cursor:move;' +
             '">' +
-                '<span id="header-text" style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:bold;color:var(--panel-accent);font-size:10px;">USERS: 0 (SH:0)</span>' +
-                '<span id="mini-room-change" style="font-size:8px;margin:0 3px;display:none;"></span>' +
+                '<span id="header-text" style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:bold;color:var(--panel-accent);font-size:10px;">TierScope</span>' +
+                '<button type="button" id="btn-model-favorite" aria-label="Favorite model" style="flex:0 0 18px;padding:0;margin-right:3px;border:0;background:transparent;color:var(--panel-muted);font-size:14px;line-height:18px;cursor:pointer;">☆</button>' +
                 '<div style="display:flex;align-items:center;gap:3px;flex-shrink:0;">' +
                     '<button type="button" id="btn-high-mode" aria-pressed="false" aria-label="Session highs. Switch to all-time highs" style="display:none;min-width:29px;background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;">SH</button>' +
                     '<button type="button" id="btn-panel-options" aria-label="Chart window and highs" aria-expanded="false" aria-controls="panel-options" style="display:none;background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;white-space:nowrap;">Full ▾</button>' +
@@ -72,6 +76,7 @@ export function createPanel() {
                 '</div>' +
             '</div>' +
             '<div id="minimized-view" style="display:block;position:relative;">' +
+                '<div style="display:flex;gap:4px;align-items:center;margin-bottom:3px;"><strong id="mini-room-count" style="color:var(--panel-accent);font-size:13px;">0</strong><span style="color:var(--panel-muted);font-size:8px;">in room</span><span id="mini-room-change" style="margin-left:auto;font-size:8px;"></span></div>' +
                 '<div style="display:flex;align-items:center;justify-content:space-between;gap:3px;">' +
                     '<button type="button" id="mini-metric" style="background:transparent;border:0;color:var(--panel-secondary);font:inherit;cursor:pointer;padding:2px 0;" aria-label="Cycle chart metric">Room total ▾</button>' +
                     '<button type="button" id="mini-high" style="background:transparent;border:0;padding:0;color:var(--panel-subtle);font-size:8px;cursor:pointer;"></button>' +
@@ -159,6 +164,15 @@ export function createPanel() {
                         '<span id="anon-ratio-full" style="font-size:13px;font-weight:bold;color:#ff69b4;">--</span>' +
                         '<div id="high-anon" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div>' +
                     '</div>' +
+                '</div>' +
+            '</div>' +
+
+            '<div id="tier-row-roomTotal" data-tier="roomTotal" style="display:flex;align-items:center;padding:2px 3px;margin-top:3px;border:1px solid #69BE45;border-radius:3px;background:rgba(105,190,69,.08);">' +
+                '<div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml('roomTotal') + '</div>' +
+                '<canvas id="spark-roomTotal" width="105" height="28" style="flex:1;margin:0 4px;"></canvas>' +
+                '<div style="text-align:right;width:48px;flex-shrink:0;">' +
+                    '<span id="count-roomTotal" style="font-weight:bold;color:var(--panel-positive);font-size:14px;">0</span>' +
+                    '<div id="high-roomTotal" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div>' +
                 '</div>' +
             '</div>' +
 
@@ -300,6 +314,21 @@ export function createPanel() {
         });
     }
 
+    const modelFavorite = document.getElementById('btn-model-favorite');
+    modelFavorite.onmousedown = event => event.stopPropagation();
+    modelFavorite.onclick = event => {
+        event.stopPropagation();
+        const room = modelFavorite.dataset.favoriteRoom;
+        try {
+            if (room && room !== 'unknown' && changeModelFavorite(room)) {
+                // Also refresh any current-session star already visible in Library.
+                document.querySelectorAll('[data-favorite-room]').forEach(button => {
+                    if (button.dataset.favoriteRoom === room) paintFavoriteButton(button, room, readModelFavorite(room));
+                });
+                updateSessionToolsStatus(true);
+            }
+        } catch (error) { alert('Favorite could not be changed: ' + error.message); }
+    };
     bindPanelOptions();
     bindPlaybackControls();
     bindRowControls();

@@ -157,3 +157,18 @@ The main improvement comes from keeping the recording selectors and chart contro
 This does not remove first-open storage validation or every expensive redraw. For 500 recordings, first opening measured 151.1 → 143.9 ms normally and 614.4 → 653.6 ms under slowdown; for long recordings, 189.8 → 204.7 ms normally and 942.0 → 959.7 ms under slowdown. No consistent first-open improvement is claimed. Long metric changes and line redraws still take hundreds of milliseconds under slowdown. Bulk import/export validation and serialization are unchanged. Draft retention adds only note text and small identity/display metadata, not recording arrays; chart interaction and plot caches are released on Library close.
 
 These are synthetic timings with in-memory storage, excluding userscript-manager storage overhead, actual site activity, paint/compositing and input scheduling. CPU slowdown is not a device guarantee. GC-assisted heap snapshots are not peak process memory or a leak proof. Reproduce using `TIERSCOPE_BENCH_COMPARE=1`, `TIERSCOPE_BENCH_ROUNDS=1` and `TIERSCOPE_SOURCE` with the same fixture for each build, alternating order three times at normal and `TIERSCOPE_CPU_THROTTLE=4` settings. There is no machine-dependent timing gate.
+
+
+## Automatic favorite checkpoints — 3.16.0-beta.1
+
+Three Chromium runs per case, without a Library view open; median milliseconds below. The automatic keeper reuses bounded validation results while rereading actual stored values. “Cold” is the first checkpoint in this tab, “cached” includes one additional live sample and a replacement write, and “unchanged” is a coalesced save with no new sample. Each case begins with the live model already represented, including the 500-session capacity case.
+
+| Library | Cold, 1× | Cached, 1× | Unchanged, 1× | Cold, 4× | Cached, 4× | Unchanged, 4× |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 12 sessions × 300 samples | 4.8 | 3.1 | 0.0 | 24.9 | 14.2 | 0.1 |
+| 500 sessions × 500 samples | 124.3 | 7.4 | 0.1 | 553.3 | 32.0 | 0.1 |
+| 36 sessions × 10,000 samples | 192.6 | 63.2 | 0.0 | 914.8 | 295.1 | 0.2 |
+
+The first save in a large Library remains synchronous and can briefly pause a slower device; long-recording updates also have a measurable cost. Routine growth is coalesced to one minute; lifecycle flushes and explicit retries are immediate. The automatic reader can retain validated recordings up to the existing 25-MB/500-entry cache budget while enabled; opening Library uses its own cache. These results use synthetic aggregate data and in-memory GM adapters, not real Tampermonkey storage, network traffic, or a live room. They exclude acquisition and chart painting and are not a timing gate.
+
+Reproduce with `TIERSCOPE_BENCH_AUTOMATIC=1 TIERSCOPE_BENCH_ROUNDS=3 npm run test:library-performance`; add `TIERSCOPE_CPU_THROTTLE=4` for the slowed run. [Raw measurements, heap observations and exact userscript hash](docs/benchmarks/model-library-3.16.0-beta.1.json).
