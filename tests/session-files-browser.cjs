@@ -37,7 +37,7 @@ async function downloaded(page,action){const [download]=await Promise.all([page.
  const message=page.locator('#tools-message');
  const libraryBounds=await page.locator('#btn-control-library').boundingBox(),replayBounds=await page.locator('#btn-replay').boundingBox();
  assert.equal(libraryBounds.y,replayBounds.y,'Library shares the Replay row');
- assert(libraryBounds.x>=replayBounds.x+replayBounds.width);assert(libraryBounds.x+libraryBounds.width<=bounds.x+bounds.width);
+ assert(replayBounds.x>=libraryBounds.x+libraryBounds.width);assert(libraryBounds.x>=bounds.x);assert(replayBounds.x+replayBounds.width<=bounds.x+bounds.width);
  assert.equal(await page.locator('#btn-control-save-session,#btn-control-open-session,#btn-playback-keep-library').count(),0);
  const windowSelect=page.getByLabel('Chart window',{exact:true});
  await options.click();assert(await menu.isVisible());assert.deepEqual(await panel.boundingBox(),bounds,'options do not drag or grow panel');
