@@ -71,7 +71,14 @@ async function download(page,action){const [d]=await Promise.all([page.waitForEv
  await page.click('#tools-close');assert.deepEqual(await panel.boundingBox(),moved,'closing keeps deliberate moves');
  await page.click('#btn-control-library');await page.setViewportSize({width:380,height:740});await page.waitForTimeout(200);
  assert.equal(await library.getAttribute('data-layout'),'sheet');const small=await library.boundingBox();assert(small.x>=0&&small.x+small.width<=380&&small.y+small.height<=740);
- assert(await library.evaluate(e=>e.scrollWidth<=e.clientWidth+1));assert(await page.locator('#tools-close').isVisible());
+ assert(await library.evaluate(e=>e.scrollWidth<=e.clientWidth+1));
+ assert(await panel.evaluate(panel=>{
+  const p=panel.getBoundingClientRect(),l=document.getElementById('tierscope-session-tools').getBoundingClientRect();
+  const left=Math.max(p.left,l.left,0),right=Math.min(p.right,l.right,innerWidth);
+  const top=Math.max(p.top,l.top,0),bottom=Math.min(p.bottom,l.bottom,innerHeight);
+  return right>left&&bottom>top&&panel.contains(document.elementFromPoint((left+right)/2,(top+bottom)/2));
+ }),'Scope receives pointer input above the overlapping narrow-window Library');
+ await page.click('#btn-standard-size');assert.equal(await panel.getAttribute('data-scale'),'1','Scope controls remain clickable over Library');
  await page.keyboard.press('Escape');assert.equal(await library.count(),0);
  await page.setViewportSize({width:1100,height:850});await page.waitForTimeout(150);assert.equal(await panel.getAttribute('data-library-open'),null,'observers do not redock after closing');
  assert.deepEqual(errors,[]);

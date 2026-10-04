@@ -95,7 +95,10 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
   const overflow=await page.locator('#tierscope-session-tools').evaluate(e=>({width:e.getBoundingClientRect().width,overflow:e.scrollWidth-e.clientWidth}));
   assert(overflow.width<=380);assert(overflow.overflow<=1,JSON.stringify(overflow));
   await page.screenshot({path:'/tmp/tierscope-360-'+engine+'-narrow.png'});
-  await nav('summary').click();assert(await page.locator('#tierscope-session-tools').evaluate(e=>e.scrollWidth-e.clientWidth<=1));
+  // Select the next view with room for both panels; Scope covers Library controls when narrow.
+  await page.setViewportSize({width:1100,height:1000});await page.waitForTimeout(150);await nav('summary').click();
+  await page.setViewportSize({width:380,height:740});await page.waitForTimeout(150);
+  assert(await page.locator('#tierscope-session-tools').evaluate(e=>e.scrollWidth-e.clientWidth<=1));
   await page.screenshot({path:'/tmp/tierscope-360-beta2-'+engine+'-narrow-summary.png'});
   await page.setViewportSize({width:1100,height:1000});await nav('library').click();await page.locator('#tools-library-search').fill('secondroom');
   await page.locator('.tools-row summary').click();page.once('dialog',d=>d.dismiss());await page.getByRole('button',{name:'Delete',exact:true}).click();assert.equal(await page.evaluate(()=>ViewerTracker.__tools.library().count),2);
