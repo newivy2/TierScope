@@ -91,12 +91,17 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
   assert.equal(await page.locator('.tools-folder').count(),2,'recordings are organized by model on opening');
   await page.locator('#tools-folder-testroom').focus();await page.keyboard.press('Enter');assert.equal(await page.locator('.tools-row').count(),1);
   assert.match(await page.locator('#tools-library-list').textContent(),/Folder: testroom/);
-  await nav('compare').click();await page.setViewportSize({width:380,height:740});await page.waitForTimeout(100);
+  await nav('compare').click();
+  assert.equal(await page.locator('#tools-metric').inputValue(),'room');
+  assert.equal(await page.locator('#tools-threshold').inputValue(),'25');
+  assert.equal(await page.locator('#tools-shared-length').isChecked(),false,'comparison choice survives reload');
+  await page.setViewportSize({width:380,height:740});await page.waitForTimeout(100);
   const overflow=await page.locator('#tierscope-session-tools').evaluate(e=>({width:e.getBoundingClientRect().width,overflow:e.scrollWidth-e.clientWidth}));
   assert(overflow.width<=380);assert(overflow.overflow<=1,JSON.stringify(overflow));
   await page.screenshot({path:'/tmp/tierscope-360-'+engine+'-narrow.png'});
   // Select the next view with room for both panels; Scope covers Library controls when narrow.
   await page.setViewportSize({width:1100,height:1000});await page.waitForTimeout(150);await nav('summary').click();
+  assert.equal(await page.locator('#tools-threshold').inputValue(),'0, 25, 35','summary thresholds survive reload');
   await page.setViewportSize({width:380,height:740});await page.waitForTimeout(150);
   assert(await page.locator('#tierscope-session-tools').evaluate(e=>e.scrollWidth-e.clientWidth<=1));
   await page.screenshot({path:'/tmp/tierscope-360-beta2-'+engine+'-narrow-summary.png'});
@@ -123,6 +128,44 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
   await page.evaluate(()=>{for(let i=0;i<55;i++)GM_deleteValue('tierscope:library:v1:paged_'+i);GM_deleteValue('tierscope:library:v1:nested');});
   await page.locator('#tools-refresh-library').click();
   assert.equal(await page.locator('.tools-folder').count(),1);
+  // A damaged entry must not trap healthy recordings or disappear from storage.
+  const damagedKey='tierscope:library:v1:damaged';
+  await page.evaluate(key=>GM_setValue(key,'{"broken'),damagedKey);
+  await page.click('#tools-refresh-library');
+  assert.match(await page.locator('#tools-content').textContent(),/1 unreadable library record/);
+  const rawDownload=page.waitForEvent('download');await page.click('#tools-recovery-download');
+  const raw=JSON.parse(fs.readFileSync(await(await rawDownload).path(),'utf8'));
+  assert.equal(raw.format,'TierScopeLibraryRecovery');assert.deepEqual(raw.records,[{key:damagedKey,value:'{"broken'}]);
+  assert.match(await page.locator('#tools-message').textContent(),/manual recovery, not normal backup restore/);
+  await nav('backup').click();assert.equal(await page.locator('#tools-backup-partial').isChecked(),false);
+  await page.click('#tools-backup-download');assert.match(await page.locator('#tools-message').textContent(),/unreadable/);
+  await page.check('#tools-backup-partial');
+  const partialDownload=page.waitForEvent('download');await page.click('#tools-backup-download');const partialFile=await partialDownload;
+  assert.match(partialFile.suggestedFilename(),/^TierScope-partial-backup-/);
+  const partial=JSON.parse(fs.readFileSync(await partialFile.path(),'utf8'));
+  assert.equal(partial.library.length,1);assert.deepEqual(partial.recovery.omittedLibraryKeys,[damagedKey]);
+  assert.match(await page.locator('#tools-message').textContent(),/1 unreadable entries omitted and left untouched/);
+  assert.equal(await page.evaluate(key=>GM_getValue(key),damagedKey),'{"broken');
+  const partialPicker=page.waitForEvent('filechooser');await page.click('#tools-backup-open');await(await partialPicker).setFiles(file('partial.json',partial));
+  await page.locator('#tools-backup-restore').waitFor();
+  assert.match(await page.locator('#tools-content').textContent(),/partial backup.*1 unreadable library entries were excluded/);
+  page.once('dialog',d=>{assert.match(d.message(),/partial backup excludes 1/);d.dismiss();});await page.click('#tools-backup-restore');
+  await page.screenshot({path:'/tmp/tierscope-311-'+engine+'-recovery.png'});
+  const rawPicker=page.waitForEvent('filechooser');await page.click('#tools-backup-open');await(await rawPicker).setFiles(file('raw-recovery.json',raw));
+  await page.waitForFunction(()=>document.getElementById('tools-message').textContent.includes('not a supported'));
+  assert.equal(await page.locator('#tools-backup-restore').count(),0);
+  await page.evaluate(key=>GM_deleteValue(key),damagedKey);
+  // Failed preference persistence keeps working choices with explicit feedback.
+  await page.evaluate(()=>{window.realSet=GM_setValue;window.GM_setValue=(key,value)=>{if(key==='tierscope:ui:analysis:v1')throw new Error('disk full');realSet(key,value);};});
+  await nav('summary').click();await page.selectOption('#tools-metric','red');
+  assert.match(await page.locator('#tools-message').textContent(),/this tab only/);
+  await page.keyboard.press('Escape');await openTools();await nav('summary').click();
+  assert.equal(await page.locator('#tools-metric').inputValue(),'red');assert.match(await page.locator('#tools-message').textContent(),/this tab only/);
+  await page.evaluate(()=>{window.GM_setValue=window.realSet;});
+  await page.locator('#tools-threshold').fill('30, 60');await page.click('#tools-apply-threshold');
+  assert.equal(await page.locator('#tools-message').textContent(),'');
+  assert.equal(await page.evaluate(()=>JSON.parse(GM_getValue('tierscope:ui:analysis:v1')).metric),'red');
+  await nav('library').click();
   await page.evaluate(()=>{const read=File.prototype.text;window.restoreFileRead=()=>{File.prototype.text=read;};File.prototype.text=function(){return read.call(this).then(text=>new Promise(resolve=>{window.finishToolsRead=()=>resolve(text);}));};});
   const pendingPicker=page.waitForEvent('filechooser');await page.click('#tools-import-session');await(await pendingPicker).setFiles(file('pending.json',{...second,room:'pendingroom'}));
   await page.waitForFunction(()=>typeof window.finishToolsRead==='function');
@@ -130,6 +173,6 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
   await page.evaluate(async()=>{window.restoreFileRead();window.finishToolsRead();await new Promise(resolve=>setTimeout(resolve,0));});
   assert.equal(await page.evaluate(()=>ViewerTracker.__tools.library().count),1,'a file read completed after navigation cannot write to the library');
   assert.deepEqual(errors,[]);
-  console.log('PASS library keep/import/model folders/global search/paging/rename/delete/reload/replay; audience overview, proportions, multiple thresholds, real-time gaps and comparison; backup download/preview/restore; saved preferences; save failure feedback; keyboard/themes/narrow layout; unchanged panel/live data; navigation cleanup');
+  console.log('PASS library keep/import/model folders/global search/paging/rename/delete/reload/replay; audience overview, proportions, multiple thresholds, real-time gaps and comparison; backup download/preview/restore, explicit partial backup and raw recovery; remembered analysis preferences and write failure; save failure feedback; keyboard/themes/narrow layout; unchanged panel/live data; navigation cleanup');
  }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

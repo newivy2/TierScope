@@ -3,7 +3,7 @@
 TierScope is a free, open-source userscript that charts how a Chaturbate room’s audience changes over time. 
 
 ---
-**Current stable release: 3.10.1** · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.10.1)
+**Current stable release: 3.11.0** · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.11.0)
 ---
 
 Open **Library** beside Replay to unfold a matching left-hand page next to the chart. Save or export the current/replayed session, open a saved file, and browse recordings in model folders. Summary, Compare and Backup tabs bring the session tools into the same panel. On small windows, the library becomes a scrollable sheet. TierScope stays above Library wherever they overlap, keeping the main panel visible and clickable. A visible warning reports failed session saves. [Build and source guide](BUILDING.md).
@@ -38,9 +38,9 @@ Charts use periodic room-data samples. Session history is stored locally through
 
 - **Session library** — Choose **Library → Keep in library** from live Controls or Replay. Recordings are organized into model folders. Keeping a fuller version of the same session updates its entry and preserves your custom name. Search, rename, replay, download or delete recordings; the library holds up to 500 recordings / 25 MB.
 
-- **Summaries and comparison** — See audience averages and peaks together, token-holder proportions, coverage and gaps. Choose several thresholds to see time at or above each count and its percentage of covered time. Statistics use real timestamps and exclude recording gaps. Compare two recordings from their first retained samples, optionally matching their shared duration.
+- **Summaries and comparison** — See audience averages and peaks together, token-holder proportions, coverage and gaps. Choose several thresholds to see time at or above each count and its percentage of covered time. Statistics use real timestamps and exclude recording gaps. Compare two recordings from their first retained samples, optionally matching their shared duration. Metric, threshold and shared-length choices are remembered across rooms and refreshes.
 
-- **Backups** — Export ATH for every room and saved preferences, optionally including the library. Restore with a preview and category selection; ATH merges without lowering records.
+- **Backups** — Export ATH for every room and saved preferences, optionally including the library. Restore with a preview and category selection; ATH merges without lowering records. If library entries are unreadable, explicitly choose a partial backup of healthy recordings and download the damaged values separately for manual recovery; originals are retained.
 
 - **Reports and exports** — Download a session file, CSV data, TXT summary, or animated GIF from Library. Each stored recording has these actions under **More…**, without loading it into replay.
 

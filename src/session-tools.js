@@ -1,4 +1,5 @@
-import { BACKUP_MAX_BYTES, createTierScopeBackup, restoreTierScopeBackup, validateTierScopeBackup } from './backup.js';
+import { BACKUP_MAX_BYTES, createLibraryRecoveryExport, createTierScopeBackup, restoreTierScopeBackup, validateTierScopeBackup } from './backup.js';
+import { readAnalysisPreferences, rememberAnalysisPreferences } from './analysis-preferences.js';
 import { downloadDataFile, readDataFile } from './data-io.js';
 import { cancelGifExport, generateGifFromHistory } from './gif.js';
 import { displayedHighRoom } from './high-selectors.js';
@@ -52,14 +53,29 @@ export function openSessionTools(focusTarget) {
     dialog.innerHTML = libraryShell();
     document.body.appendChild(dialog);
     let currentArchive = null, library = null, tab = 'library', fileRequest = 0, chartObserver = null;
-    let selectedA = 'current', selectedB = '', metric = 'room', threshold = 100, sharedLength = true, pendingBackup = null;
-    let summaryThresholds = [25, 50, 100], libraryRoom = null, chartDraw = null;
+    const savedAnalysis = readAnalysisPreferences();
+    let {metric, threshold, sharedLength, summaryThresholds} = savedAnalysis.preferences;
+    let selectedA = 'current', selectedB = '', pendingBackup = null;
+    let libraryRoom = null, chartDraw = null, analysisPreferenceError = savedAnalysis.error;
     let observedSource = null, observedSignature = '';
     let detachDock = null;
     try { currentArchive = captureSessionFile(); } catch (error) { /* Tools also work on directory pages. */ }
     const content = dialog.querySelector('#tools-content'), message = dialog.querySelector('#tools-message');
     const current = () => dialog.isConnected && dialog.open && origin === location.href && generation === runtime.initGuard;
     function tell(text, error = false) { message.textContent = text; message.style.color = error ? 'var(--panel-negative)' : 'var(--panel-positive)'; }
+    function rememberAnalysis(patch) {
+        const result = rememberAnalysisPreferences(patch);
+        ({metric, threshold, sharedLength, summaryThresholds} = result.preferences);
+        analysisPreferenceError = result.error;
+    }
+    function downloadUnreadableRecords() {
+        const recovery = createLibraryRecoveryExport();
+        if (!recovery.records.length) { tell('No unreadable library records remain. Refresh the list.'); return; }
+        downloadDataFile(recovery, 'TierScope-library-recovery-' + new Date().toISOString().slice(0, 10) + '.json');
+        const missing = recovery.records.filter(record => record.error).length;
+        tell('Recovery download requested. Originals were kept. This file is for manual recovery, not normal backup restore.' +
+            (missing ? ' ' + missing + ' record(s) could not be exported; the file lists those errors.' : ''), !!missing);
+    }
     function action(fn) { return () => { try { fn(); } catch (error) { tell(error.message, true); } }; }
     function button(parent, text, fn, id) {
         const element = document.createElement('button'); element.type = 'button'; element.textContent = text;
@@ -236,6 +252,8 @@ export function openSessionTools(focusTarget) {
         search.oninput = () => { shown = 50; rows(); }; rows();
         if (state.damaged.length) {
             node(content, 'p', state.damaged.length + ' unreadable library record(s) were retained.', 'tools-muted');
+            if (state.unavailable.length) node(content, 'p', 'Some records could not be read. The displayed storage size excludes them; saving new recordings waits until they can be read.', 'tools-muted');
+            button(content, 'Download unreadable records', downloadUnreadableRecords, 'tools-recovery-download');
             button(content, 'Remove unreadable library records…', () => {
                 if (!confirm('Delete the ' + state.damaged.length + ' unreadable library record(s)? This cannot be undone.')) return;
                 for (const key of state.damaged) removeLibrarySession(key.slice(LIBRARY_PREFIX.length));
@@ -255,7 +273,7 @@ export function openSessionTools(focusTarget) {
         }
         const label = node(controls, 'label', 'Metric '), metricSelect = node(label, 'select'); metricSelect.id = 'tools-metric';
         for (const [key, name] of Object.entries(ANALYSIS_METRICS)) { const option = node(metricSelect, 'option', name); option.value = key; }
-        metricSelect.value = metric; metricSelect.onchange = () => { metric = metricSelect.value; render(tab); };
+        metricSelect.value = metric; metricSelect.onchange = () => { rememberAnalysis({metric: metricSelect.value}); render(tab); };
         const thresholdLabel = node(controls, 'label', comparing ? 'Threshold ' : 'Thresholds '), input = node(thresholdLabel, 'input');
         input.id = 'tools-threshold'; input.style.width = comparing ? '105px' : '200px';
         if (comparing) {
@@ -269,8 +287,8 @@ export function openSessionTools(focusTarget) {
             try {
                 if (comparing) {
                     if (!Number.isSafeInteger(input.valueAsNumber) || input.valueAsNumber < 0) throw new Error('Enter a non-negative whole number.');
-                    threshold = input.valueAsNumber;
-                } else summaryThresholds = parseAnalysisThresholds(input.value);
+                    rememberAnalysis({threshold: input.valueAsNumber});
+                } else rememberAnalysis({summaryThresholds: parseAnalysisThresholds(input.value)});
             } catch (error) { input.setCustomValidity(error.message); input.reportValidity(); return; }
             input.setCustomValidity('');
             render(tab);
@@ -279,7 +297,7 @@ export function openSessionTools(focusTarget) {
         button(controls, comparing ? 'Apply threshold' : 'Apply thresholds', applyThreshold, 'tools-apply-threshold');
         if (comparing) {
             const label = node(controls, 'label'), check = node(label, 'input'); check.type = 'checkbox'; check.checked = sharedLength; check.id = 'tools-shared-length';
-            node(label, 'span', 'Match shared length'); check.onchange = () => { sharedLength = check.checked; render(tab); };
+            node(label, 'span', 'Match shared length'); check.onchange = () => { rememberAnalysis({sharedLength: check.checked}); render(tab); };
         }
         node(content, 'p', 'Aligned from the first retained sample, using real elapsed time. Averages and threshold durations hold each sample until the next; recording gaps are excluded. The final sample has no assumed duration.', 'tools-muted');
         if (comparing) node(content, 'p', 'A: ' + sourceOptions().find(item => item.id === selectedA).title + ' · B: ' + sourceOptions().find(item => item.id === selectedB).title, 'tools-muted');
@@ -403,12 +421,22 @@ export function openSessionTools(focusTarget) {
     }
     function renderBackup() {
         node(content, 'h3', 'Back up this browser');
-        node(content, 'p', 'Download ATH for every room and your saved preferences: theme, panel size/position, collapsed rows, compact metric, chart window and SH/ATH mode. Keep this file somewhere safe. Session-only controls such as the scan interval are not saved preferences.', 'tools-muted');
+        node(content, 'p', 'Download ATH for every room and your saved preferences: theme, panel size/position, collapsed rows, compact metric, chart window, SH/ATH mode and analysis choices. Keep this file somewhere safe. Session-only controls such as the scan interval are not saved preferences.', 'tools-muted');
         const include = checkbox(content, 'tools-backup-library', 'Include library recordings');
+        const state = readSessionLibrary();
+        let partial = null;
+        if (state.damaged.length) {
+            node(content, 'p', state.damaged.length + ' unreadable library record(s) are retained. You can back up healthy recordings and download the unreadable values separately for recovery.', 'tools-muted');
+            partial = checkbox(content, 'tools-backup-partial', 'Back up healthy recordings; omit unreadable entries', false);
+            button(content, 'Download unreadable records', downloadUnreadableRecords, 'tools-backup-recovery');
+        }
         const actions = node(content, 'div', undefined, 'tools-actions');
         button(actions, 'Download backup', () => {
-            downloadDataFile(createTierScopeBackup(include.checked), 'TierScope-backup-' + new Date().toISOString().slice(0, 10) + '.json');
-            tell('Backup download requested. Check your browser downloads.');
+            const backup = createTierScopeBackup(include.checked, !!(partial && partial.checked));
+            const omitted = backup.recovery ? backup.recovery.omittedLibraryKeys.length : 0;
+            downloadDataFile(backup, 'TierScope-' + (omitted ? 'partial-backup-' : 'backup-') + new Date().toISOString().slice(0, 10) + '.json');
+            tell(omitted ? 'Partial backup download requested: ' + backup.library.length + ' healthy recordings included; ' + omitted + ' unreadable entries omitted and left untouched. Download unreadable records separately for recovery.' :
+                'Backup download requested. Check your browser downloads.', !!omitted);
         }, 'tools-backup-download');
         node(content, 'h3', 'Restore a backup');
         node(content, 'p', 'ATH is merged without lowering existing records. New library sessions are added; fuller versions of the same session update its entry and keep its name. Saved preferences take effect after refreshing your room tabs.', 'tools-muted');
@@ -419,12 +447,14 @@ export function openSessionTools(focusTarget) {
             });
         }, 'tools-backup-open');
         if (pendingBackup) {
-            node(content, 'p', pendingBackup.rooms.length + ' rooms · ' + Object.keys(pendingBackup.preferences).length + ' saved preferences · ' + pendingBackup.library.length + ' recordings', 'tools-muted');
+            if (pendingBackup.recovery) node(content, 'p', 'This is a partial backup. ' + pendingBackup.recovery.omittedLibraryKeys.length + ' unreadable library entries were excluded when it was created; they cannot be restored from this file.', 'tools-muted');
+            node(content, 'p', pendingBackup.rooms.length + ' rooms · ' + (Object.keys(pendingBackup.preferences).length + (pendingBackup.analysisPreferences ? 1 : 0)) + ' saved preferences · ' + pendingBackup.library.length + ' recordings', 'tools-muted');
             const choices = node(content, 'div', undefined, 'tools-actions');
             const highs = checkbox(choices, 'tools-restore-highs', 'Merge ATH'), preferences = checkbox(choices, 'tools-restore-preferences', 'Restore preferences'), recordings = checkbox(choices, 'tools-restore-library', 'Add library recordings');
             button(content, 'Restore selected data', () => {
                 if (!highs.checked && !preferences.checked && !recordings.checked) throw new Error('Choose at least one kind of data to restore.');
-                if (!confirm('Restore the selected backup data?\n\nATH will be merged, library recordings added or updated with fuller versions, and selected saved preferences replaced. Your live session is not replaced.')) return;
+                if (!confirm('Restore the selected backup data?\n\nATH will be merged, library recordings added or updated with fuller versions, and selected saved preferences replaced. Your live session is not replaced.' +
+                    (pendingBackup.recovery ? '\n\nThis partial backup excludes ' + pendingBackup.recovery.omittedLibraryKeys.length + ' unreadable library entries.' : ''))) return;
                 const result = restoreTierScopeBackup(pendingBackup, { highs: highs.checked, preferences: preferences.checked, library: recordings.checked });
                 library = null;
                 if (runtime.playback) setPlaybackAllTimeState(runtime.playback, readAllTimeHighs(displayedHighRoom()));
@@ -442,6 +472,7 @@ export function openSessionTools(focusTarget) {
         dialog.querySelectorAll('[data-tools-tab]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.toolsTab === tab)));
         try {
             if (tab === 'library') renderLibrary(); else if (tab === 'backup') renderBackup(); else renderAnalysis(tab === 'compare');
+            if ((tab === 'summary' || tab === 'compare') && analysisPreferenceError) tell(analysisPreferenceError, true);
         } catch (error) { tell(error.message, true); }
         if (focusedId) {
             const target = document.getElementById(focusedId);

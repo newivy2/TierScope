@@ -1,6 +1,5 @@
 import { isAcquisitionCurrent } from './acquisition-context.js';
 import { beginAcquisition, clearDOMFailures, deferDOMFallback, finishAcquisition, noteAcquisitionSource } from './acquisition-state.js';
-import { drawAllSparklines } from './charts.js';
 import { diagnostic } from './diagnostics.js';
 import { findTab, isScanValid, scanUsers } from './dom.js';
 import { pulseAcceptedHighs } from './high-pulses.js';
@@ -10,7 +9,7 @@ import { getSessionSamplePolicy } from './history.js';
 import { checkAbsenceStop, pauseForAccessRestriction, resetCountdown, startTrackingTimer, updateCountdownDisplay, updateStopControls } from './lifecycle.js';
 import { abortAcceptedSample, beginAcceptedSample, commitAcceptedSample, markSessionGap, observeSessionPresence, resumeSessionForOwnerReturn } from './live-session.js';
 import { updateAcquisitionStatus } from './presentation-status.js';
-import { updateDisplay, updateTrendDisplay } from './presentation.js';
+import { presentAcceptedSample } from './sample-presentation.js';
 import { clearRequestFailures, getDOMFallbackWaitSeconds, readRequestPolicy, recordRequestFailure, retryAfterTime } from './request-policy.js';
 import { runtime } from './runtime.js';
 import { saveSession } from './session-persistence.js';
@@ -246,7 +245,7 @@ export async function performScanThenReturn(returnToChat) {
     var priorAbsence = runtime.broadcasterAbsence;
     var checkingReturn = isAbsencePaused();
     var statusEl = document.getElementById('auto-status');
-    updateCountdownDisplay();
+    try { updateCountdownDisplay(); } catch (error) { log('Countdown display unavailable: ' + error.message); }
     try {
         var snapshot = checkingReturn ? await checkBroadcasterReturn(context) : await acquireRoomSnapshot(context, returnToChat);
         if (!isAcquisitionCurrent(context)) return;
@@ -261,51 +260,32 @@ export async function performScanThenReturn(returnToChat) {
             return;
         }
         sampleReceipt = acceptRoomSnapshot(snapshot, context.room);
-        priorState = Object.assign({}, sampleReceipt.before, {
-            trendHTML: (document.getElementById('trend-container') || {}).innerHTML,
-            trendHeaderText: (document.getElementById('trend-header-label') || {}).textContent,
-            allTimeHighs: readAllTimeHighs(context.room).highs
-        });
-        var diagnostics = sampleReceipt.diagnostics;
-        if (!runtime.isMinimized) drawAllSparklines();
-        updateDisplay();
-        updateTrendDisplay();
-        updateAcquisitionStatus();
-        // Acquisition and rendering have succeeded. Nothing after this boundary
-        // may roll memory back once the sample can have reached durable storage.
+        // Valid data commits before any optional DOM, storage or logging effect.
         sampleCommitted = isAcquisitionCurrent(context) && commitAcceptedSample(sampleReceipt);
-        if (!sampleCommitted) abortAcceptedSample(sampleReceipt);
+        if (!sampleCommitted) { abortAcceptedSample(sampleReceipt); return; }
+        priorState = sampleReceipt.before;
+        try { priorState = Object.assign({}, priorState, {allTimeHighs: readAllTimeHighs(context.room).highs}); }
+        catch (error) { log('Could not read prior all-time highs: ' + error.message); }
+        if (!isAcquisitionCurrent(context)) return;
+        try { saveSession(context.room); }
+        catch (error) { log('Could not save accepted sample: ' + error.message); }
+        if (!isAcquisitionCurrent(context)) return;
+        try { recordAcceptedAllTimeHighs(context.room); }
+        catch (error) { log('Could not update all-time highs: ' + error.message); }
+        if (!isAcquisitionCurrent(context)) return;
+        if (presentAcceptedSample() && isAcquisitionCurrent(context)) pulseAcceptedHighs(priorState);
+        if (sampleReceipt.diagnostics) diagnostic('log', 'API scan accepted', sampleReceipt.diagnostics);
     } catch (err) {
-        var rolledBack = sampleReceipt && abortAcceptedSample(sampleReceipt);
-        if (rolledBack && priorState) {
-            try {
-                var trendEl = document.getElementById('trend-container');
-                if (trendEl && typeof priorState.trendHTML === 'string') trendEl.innerHTML = priorState.trendHTML;
-                var trendHeader = document.getElementById('trend-header-label');
-                if (trendHeader && typeof priorState.trendHeaderText === 'string') trendHeader.textContent = priorState.trendHeaderText;
-                updateDisplay();
-                updateAcquisitionStatus();
-                if (!runtime.isMinimized) drawAllSparklines();
-            }
-            catch (displayError) { log('Could not repaint previous data: ' + displayError.message); }
+        if (!sampleCommitted) {
+            if (sampleReceipt) abortAcceptedSample(sampleReceipt);
+            if (isAcquisitionCurrent(context)) markSessionGap();
         }
-        if (isAcquisitionCurrent(context)) markSessionGap();
-        log('Error during scan; retaining previous valid data: ' + err.message);
+        log((sampleCommitted ? 'Accepted sample retained despite an effect failure: ' : 'Error during scan; retaining previous valid data: ') + err.message);
     } finally {
-        if (sampleCommitted) {
-            // Persist only after acquisition and presentation accepted the
-            // sample. Storage failure must not undo a valid live sample.
-            try { saveSession(context.room); }
-            catch (error) { log('Could not save accepted sample: ' + error.message); }
-            try { recordAcceptedAllTimeHighs(context.room); updateDisplay(); }
-            catch (error) { log('Could not update all-time highs: ' + error.message); }
-            pulseAcceptedHighs(priorState);
-            if (diagnostics) diagnostic('log', 'API scan accepted', diagnostics);
-        }
         if (finishAcquisition(context, location.href)) {
-            resetCountdown();
-            updateAcquisitionStatus();
-            if (checkingReturn || (!priorState && priorAbsence !== runtime.broadcasterAbsence)) saveSession(context.room);
+            try { resetCountdown(); } catch (error) { log('Countdown refresh unavailable: ' + error.message); }
+            try { updateAcquisitionStatus(); } catch (error) { log('Status display unavailable: ' + error.message); }
+            if (checkingReturn || (!sampleReceipt && priorAbsence !== runtime.broadcasterAbsence)) saveSession(context.room);
         }
     }
 }

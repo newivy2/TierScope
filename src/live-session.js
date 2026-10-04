@@ -40,8 +40,7 @@ export function initializeLiveSession(target) {
 }
 
 function invalidateSample() {
-    // Lifecycle transitions retain only committed data. A synchronous renderer
-    // can trigger a transition while a candidate is being presented.
+    // Lifecycle transitions retain only committed data and invalidate candidates.
     if (pendingSample) liveSessionState = pendingSample.before;
     pendingSample = null;
     sessionRevision++;
@@ -125,8 +124,8 @@ export function appendCurrentSessionSample(now, policy) {
     return counts;
 }
 
-// A receipt covers the candidate sample until presentation succeeds. Persistence
-// happens only after commit. Reset/Stop/navigation invalidate outstanding receipts.
+// A receipt covers the candidate until the acquisition context is checked and
+// committed, before persistence or presentation. Lifecycle changes invalidate it.
 /** @param {Snapshot} snapshot @param {string} room @param {number} now @param {import('./session-types').SamplePolicy} policy */
 export function beginAcceptedSample(snapshot, room, now, policy) {
     if (pendingSample) throw new Error('A sample is already pending.');

@@ -62,7 +62,7 @@ test('panel views have no dependency on owners, live selectors, controllers or s
 
 test('record stores and validation cannot reach session/playback owners, panel code or coordinators', () => {
   const stores = ['storage.js', 'highs-store.js', 'session-library.js', 'backup.js', 'session-file-format.js'];
-  const permitted = new Set([...stores, 'record-validation.js', 'history-data.js', 'utils.js', 'diagnostics.js', 'room-context.js', 'runtime.js']);
+  const permitted = new Set([...stores, 'analysis-preference-data.js', 'session-analysis.js', 'record-validation.js', 'history-data.js', 'utils.js', 'diagnostics.js', 'room-context.js', 'runtime.js']);
   const metadata = new Set(['activeRoomEpoch', 'activeSessionStorageKey', 'sessionRecordWarnings', 'sessionStorageNotice',
     'sessionStorageStatus', 'tabRecords', 'allTimeCache', 'chartTimeCache',
     // Backup captures preferences as data; applying them belongs to session tools.
@@ -81,5 +81,15 @@ test('owners and data/view layers remain outside every import cycle', () => {
     'panel-view.js', 'compact-view.js', 'trend-view.js', 'status-view.js', 'chart-view.js', 'library-dock.js', 'library-shell.js', 'recording-export-data.js'];
   for (const file of protectedModules) {
     assert(!graph[file].some(dependency => dependencies(dependency).has(file)), file);
+  }
+});
+
+test('drawing health and analysis preferences cannot depend on session or presentation controllers', () => {
+  const permitted = new Set(['presentation-health.js', 'analysis-preferences.js', 'analysis-preference-data.js', 'session-analysis.js']);
+  for (const file of permitted) {
+    assert.deepEqual([...dependencies(file)].filter(dependency => !permitted.has(dependency)), [], file);
+    assert.deepEqual([...runtimeFields(modules[file].ast)], [], file);
+    assert(!/\b(?:document|location|alert|confirm|setInterval|clearInterval)\b/.test(modules[file].source), file + ' directs presentation');
+    if (file !== 'analysis-preferences.js') assert(!/\bGM_\w+\b/.test(modules[file].source), file + ' accesses storage');
   }
 });

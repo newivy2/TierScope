@@ -143,7 +143,7 @@ test('a renderer-triggered Reset followed by an error cannot resurrect the old s
   assert.deepEqual(clean(h.o.runtime.history.red), []);
   assert.equal(h.o.runtime.pendingHistoryGap, false, 'old scan does not mark the new session');
   assert.equal(h.o.runtime.sessionHighs.red?.value ?? 0, 0);
-  assert.equal(h.o.readAllTimeHighs('testroom').highs.red.value, 2);
+  assert.equal(h.o.readAllTimeHighs('testroom').highs.red.value, 99, 'valid sample committed before the renderer requested Reset');
   invariant(h);
 });
 

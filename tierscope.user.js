@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.10.1
+// @version      3.11.0
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -2090,6 +2090,29 @@ underlying system, so should run in the browser, Node, or Plask.
     return Math.max(0, Math.ceil((readyAt - Date.now()) / 1e3));
   }
 
+  // src/presentation-health.js
+  var presentationFailure = null;
+  function notePresentationFailure(history, generation, url, error) {
+    presentationFailure = { history, generation, url, error: String(error && error.message || error) };
+  }
+  function getPresentationFailure(history, generation, url) {
+    if (presentationFailure && (presentationFailure.history !== history || presentationFailure.generation !== generation || presentationFailure.url !== url)) presentationFailure = null;
+    return presentationFailure ? presentationFailure.error : "";
+  }
+  function clearPresentationFailure(history, generation, url) {
+    getPresentationFailure(history, generation, url);
+    presentationFailure = null;
+  }
+  function presentationWarningModel(history, generation, url) {
+    const error = getPresentationFailure(history, generation, url);
+    return error ? {
+      saveWarning: true,
+      text: "Display needs refresh",
+      color: "var(--panel-warning)",
+      title: "Recorded data is retained in this tab. Drawing will retry automatically; saving is handled separately. " + error
+    } : null;
+  }
+
   // src/session-health.js
   var sessionSaveStates = /* @__PURE__ */ new Map();
   function noteSessionSave(room, error = "") {
@@ -2111,7 +2134,7 @@ underlying system, so should run in the browser, Node, or Plask.
   // src/status-model.js
   function buildAcquisitionStatusModel() {
     var model = { text: "", title: "", color: null, saveWarning: false };
-    var warning = sessionSaveWarningModel(getSessionSaveState(getModelName()));
+    var warning = sessionSaveWarningModel(getSessionSaveState(getModelName())) || presentationWarningModel(runtime.history, runtime.initGuard, location.href);
     if (warning) return warning;
     if (runtime.isStopped) {
       model.text = "Stopped";
@@ -2151,7 +2174,7 @@ underlying system, so should run in the browser, Node, or Plask.
   }
   function buildFreshnessModel() {
     var model = { text: "", title: "", color: null, saveWarning: false };
-    var warning = sessionSaveWarningModel(getSessionSaveState(getModelName()));
+    var warning = sessionSaveWarningModel(getSessionSaveState(getModelName())) || presentationWarningModel(runtime.history, runtime.initGuard, location.href);
     if (warning) return warning;
     if (runtime.isStopped) {
       model.text = "Stopped";
@@ -4312,6 +4335,143 @@ underlying system, so should run in the browser, Node, or Plask.
     }
   }
 
+  // src/session-analysis.js
+  var ANALYSIS_METRICS = Object.freeze({
+    room: "Room audience",
+    total: "Registered viewers",
+    withTokens: "Viewers with tokens",
+    red: "Moderators",
+    green: "Fan club",
+    purple: "Dark purple",
+    pink: "Light purple",
+    "dark-blue": "Dark blue",
+    "light-blue": "Light blue",
+    gray: "Grey",
+    "female-trans": "Female / trans",
+    anonymous: "Anonymous viewers"
+  });
+  function analysisSeries(archive, metric) {
+    if (!Object.prototype.hasOwnProperty.call(ANALYSIS_METRICS, metric)) throw new Error("Unknown analysis metric.");
+    const history = archive.session.history;
+    const values = metric === "room" ? (
+      /** @type {number[]} */
+      history.total.map((v, i) => v + /** @type {number[]} */
+      history.anonymous[i])
+    ) : (
+      /** @type {number[]} */
+      history[metric]
+    );
+    const origin = history.timestamps[0];
+    const times = history.timestamps.map((time) => time - origin);
+    for (let i = 0; i < times.length; i++) times[i] = Math.max(0, times[i], i ? times[i - 1] : 0);
+    return { times, values, breaks: history.breaks || times.map(() => false) };
+  }
+  function summarizeSession(archive, metric = "room", threshold = 100, limitMs = Infinity) {
+    if (!Number.isFinite(threshold) || threshold < 0 || !(limitMs >= 0)) throw new Error("Invalid summary range or threshold.");
+    const { times, values, breaks } = analysisSeries(archive, metric);
+    const end = Math.min(times.length ? times[times.length - 1] : 0, limitMs);
+    let coveredMs = 0, weighted = 0, registeredWeight = 0, tokenWeight = 0, atOrAboveMs = 0, peak = 0, samples = 0;
+    let peakTime = null;
+    for (let i = 0; i < times.length && times[i] <= end; i++) {
+      samples++;
+      if (peakTime === null || values[i] > peak) {
+        peak = values[i];
+        peakTime = archive.session.history.timestamps[i];
+      }
+      if (i + 1 >= times.length || breaks[i + 1]) continue;
+      const duration = Math.max(0, Math.min(end, times[i + 1]) - times[i]);
+      coveredMs += duration;
+      weighted += duration * values[i];
+      registeredWeight += duration * /** @type {number[]} */
+      archive.session.history.total[i];
+      tokenWeight += duration * /** @type {number[]} */
+      archive.session.history.withTokens[i];
+      if (values[i] >= threshold) atOrAboveMs += duration;
+    }
+    return {
+      samples,
+      spanMs: end,
+      coveredMs,
+      gapMs: end - coveredMs,
+      peak,
+      peakTime,
+      sessionPeak: metric === "room" ? archive.session.roomTotalHigh : archive.session.sessionHighs[metric].value,
+      mean: coveredMs ? weighted / coveredMs : null,
+      tokenShare: registeredWeight ? tokenWeight / registeredWeight * 100 : null,
+      atOrAboveMs,
+      coverage: end ? coveredMs / end * 100 : null
+    };
+  }
+  function summarizeAudience(archive) {
+    const audience = ["room", "total", "withTokens", "anonymous"].map((metric) => __spreadValues({ metric }, summarizeSession(archive, metric)));
+    const [room, registered, tokens, anonymous] = audience;
+    return {
+      audience,
+      tokenShareRegistered: registered.tokenShare,
+      tokenShareRoom: room.mean && tokens.mean !== null ? tokens.mean / room.mean * 100 : null,
+      anonymousShareRoom: room.mean && anonymous.mean !== null ? anonymous.mean / room.mean * 100 : null
+    };
+  }
+  var ANALYSIS_MAX_THRESHOLDS = 8;
+  function parseAnalysisThresholds(text) {
+    const parts = text.split(",").map((part) => part.trim());
+    if (!parts.length || parts.length > ANALYSIS_MAX_THRESHOLDS || parts.some((part) => !/^\d+$/.test(part) || !Number.isSafeInteger(Number(part)))) {
+      throw new Error("Enter 1–" + ANALYSIS_MAX_THRESHOLDS + " non-negative whole numbers separated by commas, without thousands separators.");
+    }
+    return [...new Set(parts.map(Number))].sort((a, b) => a - b);
+  }
+  function summarizeThresholds(archive, metric, thresholds) {
+    if (!thresholds.length || thresholds.length > ANALYSIS_MAX_THRESHOLDS || thresholds.some((value) => !Number.isSafeInteger(value) || value < 0)) {
+      throw new Error("Invalid analysis thresholds.");
+    }
+    return thresholds.map((threshold) => {
+      const summary = summarizeSession(archive, metric, threshold);
+      return {
+        threshold,
+        durationMs: summary.coveredMs ? summary.atOrAboveMs : null,
+        percent: summary.coveredMs ? summary.atOrAboveMs / summary.coveredMs * 100 : null
+      };
+    });
+  }
+  function compareSessions(a, b, metric = "room", threshold = 100, sharedLength = true) {
+    const sa = analysisSeries(a, metric), sb = analysisSeries(b, metric);
+    const spanA = sa.times.length ? sa.times[sa.times.length - 1] : 0;
+    const spanB = sb.times.length ? sb.times[sb.times.length - 1] : 0;
+    const limitMs = sharedLength ? Math.min(spanA, spanB) : Infinity;
+    return {
+      a: summarizeSession(a, metric, threshold, limitMs),
+      b: summarizeSession(b, metric, threshold, limitMs),
+      limitMs,
+      axisMs: sharedLength ? limitMs : Math.max(spanA, spanB)
+    };
+  }
+
+  // src/analysis-preference-data.js
+  var ANALYSIS_PREFERENCE_KEY = "tierscope:ui:analysis:v1";
+  var DEFAULT_ANALYSIS_PREFERENCES = Object.freeze({
+    metric: "room",
+    threshold: 100,
+    summaryThresholds: Object.freeze([25, 50, 100]),
+    sharedLength: true
+  });
+  function validateAnalysisPreferences(input) {
+    if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("Invalid analysis preferences.");
+    const value = (
+      /** @type {Record<string, any>} */
+      input
+    );
+    if (Object.keys(value).some((key) => !Object.hasOwn(DEFAULT_ANALYSIS_PREFERENCES, key)) || !Object.hasOwn(ANALYSIS_METRICS, value.metric) || !Number.isSafeInteger(value.threshold) || value.threshold < 0 || typeof value.sharedLength !== "boolean" || !Array.isArray(value.summaryThresholds) || !value.summaryThresholds.length || value.summaryThresholds.length > ANALYSIS_MAX_THRESHOLDS || value.summaryThresholds.some((number) => !Number.isSafeInteger(number) || number < 0)) throw new Error("Invalid analysis preferences.");
+    return Object.freeze({
+      metric: String(value.metric),
+      threshold: Number(value.threshold),
+      sharedLength: value.sharedLength,
+      summaryThresholds: Object.freeze([...new Set(
+        /** @type {number[]} */
+        value.summaryThresholds
+      )].sort((a, b) => a - b))
+    });
+  }
+
   // src/session-library.js
   var LIBRARY_PREFIX = "tierscope:library:v1:";
   var LIBRARY_MAX_COUNT = 500;
@@ -4355,12 +4515,25 @@ underlying system, so should run in the browser, Node, or Plask.
     return newer ? 1 : older ? -1 : null;
   }
   function readSessionLibrary() {
-    const entries = [], damaged = [], sessions = /* @__PURE__ */ new Map();
+    const entries = [], damaged = [], unavailable = [], sessions = /* @__PURE__ */ new Map();
     let bytes = 0;
     for (const key of GM_listValues().filter((key2) => key2.startsWith(LIBRARY_PREFIX))) {
-      const raw = GM_getValue(key, null);
-      if (raw === null) continue;
-      bytes += new Blob([typeof raw === "string" ? raw : JSON.stringify(raw)]).size;
+      let raw;
+      try {
+        raw = GM_getValue(key, void 0);
+      } catch (error) {
+        damaged.push(key);
+        unavailable.push(key);
+        continue;
+      }
+      if (raw === void 0) continue;
+      try {
+        bytes += new Blob([typeof raw === "string" ? raw : JSON.stringify(raw)]).size;
+      } catch (error) {
+        damaged.push(key);
+        unavailable.push(key);
+        continue;
+      }
       try {
         const record = JSON.parse(raw);
         if (record.schemaVersion !== 1 || !Number.isSafeInteger(record.addedAt) || record.addedAt < 0) throw new Error("Invalid library record.");
@@ -4384,9 +4557,10 @@ underlying system, so should run in the browser, Node, or Plask.
       }
     }
     entries.sort((a, b) => b.archive.session.history.timestamps[0] - a.archive.session.history.timestamps[0] || b.addedAt - a.addedAt || a.id.localeCompare(b.id));
-    return { entries, damaged, bytes, count: entries.length + damaged.length };
+    return { entries, damaged, unavailable, bytes, count: entries.length + damaged.length };
   }
   function planLibraryAdditions(incoming, library = readSessionLibrary()) {
+    if (library.unavailable && library.unavailable.length) throw new Error("Some library records could not be read. Refresh the list before saving more recordings.");
     const entries = library.entries.slice(), writes = [];
     let bytes = library.bytes;
     for (const entry of incoming) {
@@ -4441,6 +4615,7 @@ underlying system, so should run in the browser, Node, or Plask.
   }
   function verifyLibraryCapacity() {
     const state = readSessionLibrary();
+    if (state.unavailable.length) throw new Error("Library capacity could not be checked because some records could not be read.");
     if (state.count > LIBRARY_MAX_COUNT || state.bytes > LIBRARY_MAX_BYTES) throw new Error("Library limit reached, possibly by another tab. Refresh the list and remove recordings before retrying.");
   }
   function removeLibrarySession(id) {
@@ -4454,6 +4629,7 @@ underlying system, so should run in the browser, Node, or Plask.
   }
   function renameLibrarySession(id, title) {
     const key = libraryRecordKey(id), state = readSessionLibrary();
+    if (state.unavailable.length) throw new Error("Some library records could not be read. Refresh the list before renaming.");
     const entry = state.entries.find((entry2) => entry2.records.some((record) => record.key === key));
     if (!entry) throw new Error("This recording changed in another tab. Refresh the list.");
     const cleanTitle = libraryTitle(title);
@@ -4523,10 +4699,16 @@ underlying system, so should run in the browser, Node, or Plask.
       preferences: validateBackupPreferences(input.preferences),
       library
     };
+    if (input.analysisPreferences !== void 0) backup.analysisPreferences = validateAnalysisPreferences(input.analysisPreferences);
+    if (input.recovery !== void 0) {
+      const keys = input.recovery && input.recovery.omittedLibraryKeys;
+      if (!Array.isArray(keys) || !keys.length || keys.length > 1e4 || keys.some((key) => typeof key !== "string" || !key.startsWith(LIBRARY_PREFIX) || key.length > 256) || new Set(keys).size !== keys.length) throw new Error("Invalid partial-backup recovery notice.");
+      backup.recovery = { omittedLibraryKeys: keys.slice() };
+    }
     if (new Blob([JSON.stringify(backup)]).size > BACKUP_MAX_BYTES) throw new Error("Backup exceeds 32 MB.");
     return backup;
   }
-  function createTierScopeBackup(includeLibrary = true) {
+  function createTierScopeBackup(includeLibrary = true, allowPartialLibrary = false) {
     const rooms = /* @__PURE__ */ new Set();
     for (const key of GM_listValues()) {
       if (key.startsWith(runtime.ALL_TIME_PREFIX)) {
@@ -4553,15 +4735,30 @@ underlying system, so should run in the browser, Node, or Plask.
       if (saved !== null) preferences[name] = name === "geometry" || name === "collapsedRows" ? JSON.parse(saved) : saved;
     }
     const library = includeLibrary ? readSessionLibrary() : { entries: [], damaged: [] };
-    if (library.damaged.length) throw new Error("The library contains unreadable recordings. Export ATH/preferences separately or resolve those entries first.");
-    return validateTierScopeBackup({
+    if (library.damaged.length && !allowPartialLibrary) throw new Error("The library contains unreadable recordings. Choose the healthy-recordings option to make a partial backup, or export ATH/preferences separately.");
+    const rawAnalysis = GM_getValue(ANALYSIS_PREFERENCE_KEY, null);
+    return validateTierScopeBackup(__spreadValues(__spreadValues({
       format: "TierScopeBackup",
       formatVersion: 1,
       producerVersion: runtime.TIERSCOPE_VERSION,
       rooms: records,
       preferences,
       library: library.entries.map((entry) => ({ title: entry.title, archive: entry.archive }))
+    }, rawAnalysis === null ? {} : { analysisPreferences: validateAnalysisPreferences(JSON.parse(rawAnalysis)) }), library.damaged.length ? { recovery: { omittedLibraryKeys: library.damaged } } : {}));
+  }
+  function createLibraryRecoveryExport() {
+    const state = readSessionLibrary();
+    const records = state.damaged.map((key) => {
+      try {
+        const value = GM_getValue(key, void 0);
+        if (value === void 0) return { key, error: "Record no longer present." };
+        if (JSON.stringify(value) === void 0) throw new Error("Value is not JSON data.");
+        return { key, value };
+      } catch (error) {
+        return { key, error: "Record could not be read or exported: " + String(error.message || error) };
+      }
     });
+    return { format: "TierScopeLibraryRecovery", formatVersion: 1, producerVersion: runtime.TIERSCOPE_VERSION, records };
   }
   function restoreTierScopeBackup(input, options = { highs: true, preferences: true, library: true }) {
     const backup = validateTierScopeBackup(input), writes = [], epochs = [];
@@ -4581,6 +4778,7 @@ underlying system, so should run in the browser, Node, or Plask.
     if (options.preferences) for (const [name, value] of Object.entries(backup.preferences)) {
       writes.push({ key: preferenceKeys[name], value: name === "geometry" || name === "collapsedRows" ? JSON.stringify(value) : value });
     }
+    if (options.preferences && backup.analysisPreferences) writes.push({ key: ANALYSIS_PREFERENCE_KEY, value: JSON.stringify(backup.analysisPreferences) });
     const touched = [];
     try {
       for (const write of writes) {
@@ -4612,8 +4810,38 @@ underlying system, so should run in the browser, Node, or Plask.
       rooms: epochs.length,
       recordings: newLibrary.filter((write) => !write.updated).length,
       updatedRecordings: newLibrary.filter((write) => write.updated).length,
-      preferences: options.preferences ? Object.keys(backup.preferences).length : 0
+      preferences: options.preferences ? Object.keys(backup.preferences).length + (backup.analysisPreferences ? 1 : 0) : 0
     };
+  }
+
+  // src/analysis-preferences.js
+  var analysisPreferences = DEFAULT_ANALYSIS_PREFERENCES;
+  var analysisPreferencesPending = false;
+  var analysisPreferencesError = "";
+  function readAnalysisPreferences() {
+    if (!analysisPreferencesPending) {
+      try {
+        const raw = GM_getValue(ANALYSIS_PREFERENCE_KEY, null);
+        analysisPreferences = raw === null ? DEFAULT_ANALYSIS_PREFERENCES : validateAnalysisPreferences(JSON.parse(raw));
+        analysisPreferencesError = "";
+      } catch (error) {
+        analysisPreferencesError = "Saved analysis preferences could not be read. Using the choices available in this tab.";
+      }
+    }
+    return { preferences: analysisPreferences, error: analysisPreferencesError };
+  }
+  function rememberAnalysisPreferences(patch) {
+    const current = readAnalysisPreferences().preferences;
+    analysisPreferences = validateAnalysisPreferences(__spreadValues(__spreadValues({}, current), patch));
+    analysisPreferencesPending = true;
+    try {
+      GM_setValue(ANALYSIS_PREFERENCE_KEY, JSON.stringify(analysisPreferences));
+      analysisPreferencesPending = false;
+      analysisPreferencesError = "";
+    } catch (error) {
+      analysisPreferencesError = "Analysis choices are kept in this tab only. Saving will retry when you change a choice.";
+    }
+    return { preferences: analysisPreferences, error: analysisPreferencesError };
   }
 
   // src/data-io.js
@@ -5094,117 +5322,6 @@ underlying system, so should run in the browser, Node, or Plask.
     }
   }
 
-  // src/session-analysis.js
-  var ANALYSIS_METRICS = Object.freeze({
-    room: "Room audience",
-    total: "Registered viewers",
-    withTokens: "Viewers with tokens",
-    red: "Moderators",
-    green: "Fan club",
-    purple: "Dark purple",
-    pink: "Light purple",
-    "dark-blue": "Dark blue",
-    "light-blue": "Light blue",
-    gray: "Grey",
-    "female-trans": "Female / trans",
-    anonymous: "Anonymous viewers"
-  });
-  function analysisSeries(archive, metric) {
-    if (!Object.prototype.hasOwnProperty.call(ANALYSIS_METRICS, metric)) throw new Error("Unknown analysis metric.");
-    const history = archive.session.history;
-    const values = metric === "room" ? (
-      /** @type {number[]} */
-      history.total.map((v, i) => v + /** @type {number[]} */
-      history.anonymous[i])
-    ) : (
-      /** @type {number[]} */
-      history[metric]
-    );
-    const origin = history.timestamps[0];
-    const times = history.timestamps.map((time) => time - origin);
-    for (let i = 0; i < times.length; i++) times[i] = Math.max(0, times[i], i ? times[i - 1] : 0);
-    return { times, values, breaks: history.breaks || times.map(() => false) };
-  }
-  function summarizeSession(archive, metric = "room", threshold = 100, limitMs = Infinity) {
-    if (!Number.isFinite(threshold) || threshold < 0 || !(limitMs >= 0)) throw new Error("Invalid summary range or threshold.");
-    const { times, values, breaks } = analysisSeries(archive, metric);
-    const end = Math.min(times.length ? times[times.length - 1] : 0, limitMs);
-    let coveredMs = 0, weighted = 0, registeredWeight = 0, tokenWeight = 0, atOrAboveMs = 0, peak = 0, samples = 0;
-    let peakTime = null;
-    for (let i = 0; i < times.length && times[i] <= end; i++) {
-      samples++;
-      if (peakTime === null || values[i] > peak) {
-        peak = values[i];
-        peakTime = archive.session.history.timestamps[i];
-      }
-      if (i + 1 >= times.length || breaks[i + 1]) continue;
-      const duration = Math.max(0, Math.min(end, times[i + 1]) - times[i]);
-      coveredMs += duration;
-      weighted += duration * values[i];
-      registeredWeight += duration * /** @type {number[]} */
-      archive.session.history.total[i];
-      tokenWeight += duration * /** @type {number[]} */
-      archive.session.history.withTokens[i];
-      if (values[i] >= threshold) atOrAboveMs += duration;
-    }
-    return {
-      samples,
-      spanMs: end,
-      coveredMs,
-      gapMs: end - coveredMs,
-      peak,
-      peakTime,
-      sessionPeak: metric === "room" ? archive.session.roomTotalHigh : archive.session.sessionHighs[metric].value,
-      mean: coveredMs ? weighted / coveredMs : null,
-      tokenShare: registeredWeight ? tokenWeight / registeredWeight * 100 : null,
-      atOrAboveMs,
-      coverage: end ? coveredMs / end * 100 : null
-    };
-  }
-  function summarizeAudience(archive) {
-    const audience = ["room", "total", "withTokens", "anonymous"].map((metric) => __spreadValues({ metric }, summarizeSession(archive, metric)));
-    const [room, registered, tokens, anonymous] = audience;
-    return {
-      audience,
-      tokenShareRegistered: registered.tokenShare,
-      tokenShareRoom: room.mean && tokens.mean !== null ? tokens.mean / room.mean * 100 : null,
-      anonymousShareRoom: room.mean && anonymous.mean !== null ? anonymous.mean / room.mean * 100 : null
-    };
-  }
-  var ANALYSIS_MAX_THRESHOLDS = 8;
-  function parseAnalysisThresholds(text) {
-    const parts = text.split(",").map((part) => part.trim());
-    if (!parts.length || parts.length > ANALYSIS_MAX_THRESHOLDS || parts.some((part) => !/^\d+$/.test(part) || !Number.isSafeInteger(Number(part)))) {
-      throw new Error("Enter 1–" + ANALYSIS_MAX_THRESHOLDS + " non-negative whole numbers separated by commas, without thousands separators.");
-    }
-    return [...new Set(parts.map(Number))].sort((a, b) => a - b);
-  }
-  function summarizeThresholds(archive, metric, thresholds) {
-    if (!thresholds.length || thresholds.length > ANALYSIS_MAX_THRESHOLDS || thresholds.some((value) => !Number.isSafeInteger(value) || value < 0)) {
-      throw new Error("Invalid analysis thresholds.");
-    }
-    return thresholds.map((threshold) => {
-      const summary = summarizeSession(archive, metric, threshold);
-      return {
-        threshold,
-        durationMs: summary.coveredMs ? summary.atOrAboveMs : null,
-        percent: summary.coveredMs ? summary.atOrAboveMs / summary.coveredMs * 100 : null
-      };
-    });
-  }
-  function compareSessions(a, b, metric = "room", threshold = 100, sharedLength = true) {
-    const sa = analysisSeries(a, metric), sb = analysisSeries(b, metric);
-    const spanA = sa.times.length ? sa.times[sa.times.length - 1] : 0;
-    const spanB = sb.times.length ? sb.times[sb.times.length - 1] : 0;
-    const limitMs = sharedLength ? Math.min(spanA, spanB) : Infinity;
-    return {
-      a: summarizeSession(a, metric, threshold, limitMs),
-      b: summarizeSession(b, metric, threshold, limitMs),
-      limitMs,
-      axisMs: sharedLength ? limitMs : Math.max(spanA, spanB)
-    };
-  }
-
   // src/session-tools.js
   var closeSessionTools = null;
   var refreshSessionTools = null;
@@ -5244,8 +5361,10 @@ underlying system, so should run in the browser, Node, or Plask.
     dialog.innerHTML = libraryShell();
     document.body.appendChild(dialog);
     let currentArchive = null, library = null, tab = "library", fileRequest = 0, chartObserver = null;
-    let selectedA = "current", selectedB = "", metric = "room", threshold = 100, sharedLength = true, pendingBackup = null;
-    let summaryThresholds = [25, 50, 100], libraryRoom = null, chartDraw = null;
+    const savedAnalysis = readAnalysisPreferences();
+    let { metric, threshold, sharedLength, summaryThresholds } = savedAnalysis.preferences;
+    let selectedA = "current", selectedB = "", pendingBackup = null;
+    let libraryRoom = null, chartDraw = null, analysisPreferenceError = savedAnalysis.error;
     let observedSource = null, observedSignature = "";
     let detachDock = null;
     try {
@@ -5257,6 +5376,21 @@ underlying system, so should run in the browser, Node, or Plask.
     function tell(text, error = false) {
       message.textContent = text;
       message.style.color = error ? "var(--panel-negative)" : "var(--panel-positive)";
+    }
+    function rememberAnalysis(patch) {
+      const result = rememberAnalysisPreferences(patch);
+      ({ metric, threshold, sharedLength, summaryThresholds } = result.preferences);
+      analysisPreferenceError = result.error;
+    }
+    function downloadUnreadableRecords() {
+      const recovery = createLibraryRecoveryExport();
+      if (!recovery.records.length) {
+        tell("No unreadable library records remain. Refresh the list.");
+        return;
+      }
+      downloadDataFile(recovery, "TierScope-library-recovery-" + (/* @__PURE__ */ new Date()).toISOString().slice(0, 10) + ".json");
+      const missing = recovery.records.filter((record) => record.error).length;
+      tell("Recovery download requested. Originals were kept. This file is for manual recovery, not normal backup restore." + (missing ? " " + missing + " record(s) could not be exported; the file lists those errors." : ""), !!missing);
     }
     function action(fn) {
       return () => {
@@ -5517,6 +5651,8 @@ underlying system, so should run in the browser, Node, or Plask.
       rows();
       if (state.damaged.length) {
         node(content, "p", state.damaged.length + " unreadable library record(s) were retained.", "tools-muted");
+        if (state.unavailable.length) node(content, "p", "Some records could not be read. The displayed storage size excludes them; saving new recordings waits until they can be read.", "tools-muted");
+        button(content, "Download unreadable records", downloadUnreadableRecords, "tools-recovery-download");
         button(content, "Remove unreadable library records…", () => {
           if (!confirm("Delete the " + state.damaged.length + " unreadable library record(s)? This cannot be undone.")) return;
           for (const key of state.damaged) removeLibrarySession(key.slice(LIBRARY_PREFIX.length));
@@ -5554,7 +5690,7 @@ underlying system, so should run in the browser, Node, or Plask.
       }
       metricSelect.value = metric;
       metricSelect.onchange = () => {
-        metric = metricSelect.value;
+        rememberAnalysis({ metric: metricSelect.value });
         render(tab);
       };
       const thresholdLabel = node(controls, "label", comparing ? "Threshold " : "Thresholds "), input = node(thresholdLabel, "input");
@@ -5578,8 +5714,8 @@ underlying system, so should run in the browser, Node, or Plask.
         try {
           if (comparing) {
             if (!Number.isSafeInteger(input.valueAsNumber) || input.valueAsNumber < 0) throw new Error("Enter a non-negative whole number.");
-            threshold = input.valueAsNumber;
-          } else summaryThresholds = parseAnalysisThresholds(input.value);
+            rememberAnalysis({ threshold: input.valueAsNumber });
+          } else rememberAnalysis({ summaryThresholds: parseAnalysisThresholds(input.value) });
         } catch (error) {
           input.setCustomValidity(error.message);
           input.reportValidity();
@@ -5602,7 +5738,7 @@ underlying system, so should run in the browser, Node, or Plask.
         check.id = "tools-shared-length";
         node(label2, "span", "Match shared length");
         check.onchange = () => {
-          sharedLength = check.checked;
+          rememberAnalysis({ sharedLength: check.checked });
           render(tab);
         };
       }
@@ -5783,12 +5919,21 @@ underlying system, so should run in the browser, Node, or Plask.
     }
     function renderBackup() {
       node(content, "h3", "Back up this browser");
-      node(content, "p", "Download ATH for every room and your saved preferences: theme, panel size/position, collapsed rows, compact metric, chart window and SH/ATH mode. Keep this file somewhere safe. Session-only controls such as the scan interval are not saved preferences.", "tools-muted");
+      node(content, "p", "Download ATH for every room and your saved preferences: theme, panel size/position, collapsed rows, compact metric, chart window, SH/ATH mode and analysis choices. Keep this file somewhere safe. Session-only controls such as the scan interval are not saved preferences.", "tools-muted");
       const include = checkbox(content, "tools-backup-library", "Include library recordings");
+      const state = readSessionLibrary();
+      let partial = null;
+      if (state.damaged.length) {
+        node(content, "p", state.damaged.length + " unreadable library record(s) are retained. You can back up healthy recordings and download the unreadable values separately for recovery.", "tools-muted");
+        partial = checkbox(content, "tools-backup-partial", "Back up healthy recordings; omit unreadable entries", false);
+        button(content, "Download unreadable records", downloadUnreadableRecords, "tools-backup-recovery");
+      }
       const actions = node(content, "div", void 0, "tools-actions");
       button(actions, "Download backup", () => {
-        downloadDataFile(createTierScopeBackup(include.checked), "TierScope-backup-" + (/* @__PURE__ */ new Date()).toISOString().slice(0, 10) + ".json");
-        tell("Backup download requested. Check your browser downloads.");
+        const backup = createTierScopeBackup(include.checked, !!(partial && partial.checked));
+        const omitted = backup.recovery ? backup.recovery.omittedLibraryKeys.length : 0;
+        downloadDataFile(backup, "TierScope-" + (omitted ? "partial-backup-" : "backup-") + (/* @__PURE__ */ new Date()).toISOString().slice(0, 10) + ".json");
+        tell(omitted ? "Partial backup download requested: " + backup.library.length + " healthy recordings included; " + omitted + " unreadable entries omitted and left untouched. Download unreadable records separately for recovery." : "Backup download requested. Check your browser downloads.", !!omitted);
       }, "tools-backup-download");
       node(content, "h3", "Restore a backup");
       node(content, "p", "ATH is merged without lowering existing records. New library sessions are added; fuller versions of the same session update its entry and keep its name. Saved preferences take effect after refreshing your room tabs.", "tools-muted");
@@ -5802,12 +5947,13 @@ underlying system, so should run in the browser, Node, or Plask.
         });
       }, "tools-backup-open");
       if (pendingBackup) {
-        node(content, "p", pendingBackup.rooms.length + " rooms · " + Object.keys(pendingBackup.preferences).length + " saved preferences · " + pendingBackup.library.length + " recordings", "tools-muted");
+        if (pendingBackup.recovery) node(content, "p", "This is a partial backup. " + pendingBackup.recovery.omittedLibraryKeys.length + " unreadable library entries were excluded when it was created; they cannot be restored from this file.", "tools-muted");
+        node(content, "p", pendingBackup.rooms.length + " rooms · " + (Object.keys(pendingBackup.preferences).length + (pendingBackup.analysisPreferences ? 1 : 0)) + " saved preferences · " + pendingBackup.library.length + " recordings", "tools-muted");
         const choices = node(content, "div", void 0, "tools-actions");
         const highs = checkbox(choices, "tools-restore-highs", "Merge ATH"), preferences = checkbox(choices, "tools-restore-preferences", "Restore preferences"), recordings = checkbox(choices, "tools-restore-library", "Add library recordings");
         button(content, "Restore selected data", () => {
           if (!highs.checked && !preferences.checked && !recordings.checked) throw new Error("Choose at least one kind of data to restore.");
-          if (!confirm("Restore the selected backup data?\n\nATH will be merged, library recordings added or updated with fuller versions, and selected saved preferences replaced. Your live session is not replaced.")) return;
+          if (!confirm("Restore the selected backup data?\n\nATH will be merged, library recordings added or updated with fuller versions, and selected saved preferences replaced. Your live session is not replaced." + (pendingBackup.recovery ? "\n\nThis partial backup excludes " + pendingBackup.recovery.omittedLibraryKeys.length + " unreadable library entries." : ""))) return;
           const result = restoreTierScopeBackup(pendingBackup, { highs: highs.checked, preferences: preferences.checked, library: recordings.checked });
           library = null;
           if (runtime.playback) setPlaybackAllTimeState(runtime.playback, readAllTimeHighs(displayedHighRoom()));
@@ -5833,6 +5979,7 @@ underlying system, so should run in the browser, Node, or Plask.
         if (tab === "library") renderLibrary();
         else if (tab === "backup") renderBackup();
         else renderAnalysis(tab === "compare");
+        if ((tab === "summary" || tab === "compare") && analysisPreferenceError) tell(analysisPreferenceError, true);
       } catch (error) {
         tell(error.message, true);
       }
@@ -6626,6 +6773,40 @@ underlying system, so should run in the browser, Node, or Plask.
     synchronizeSessionHighTimes();
   }
 
+  // src/sample-presentation.js
+  function presentAcceptedSample() {
+    const history = runtime.history, generation = runtime.initGuard, url = location.href;
+    const current = () => history === runtime.history && generation === runtime.initGuard && url === location.href;
+    try {
+      if (!runtime.isMinimized) drawAllSparklines();
+      if (!current()) return false;
+      updateDisplay();
+      if (!current()) return false;
+      updateTrendDisplay();
+      if (!current()) return false;
+      clearPresentationFailure(history, generation, url);
+      updateAcquisitionStatus();
+      return current();
+    } catch (error) {
+      if (current()) {
+        const previous = getPresentationFailure(history, generation, url);
+        notePresentationFailure(history, generation, url, error);
+        const message = getPresentationFailure(history, generation, url);
+        if (message !== previous) diagnostic("warn", "Display unavailable; committed data retained: " + message);
+        try {
+          updateAcquisitionStatus();
+        } catch (statusError) {
+        }
+      }
+      return false;
+    }
+  }
+  function retrySamplePresentation() {
+    if (getPresentationFailure(runtime.history, runtime.initGuard, location.href) && runtime.presentationMode !== "PLAYBACK") {
+      presentAcceptedSample();
+    }
+  }
+
   // src/scanning.js
   function parseGetChatUserListResponse(text) {
     if (typeof text !== "string" || !text.trim()) throw new Error("Empty API response");
@@ -6876,7 +7057,11 @@ underlying system, so should run in the browser, Node, or Plask.
     var priorAbsence = runtime.broadcasterAbsence;
     var checkingReturn = isAbsencePaused();
     var statusEl = document.getElementById("auto-status");
-    updateCountdownDisplay();
+    try {
+      updateCountdownDisplay();
+    } catch (error) {
+      log("Countdown display unavailable: " + error.message);
+    }
     try {
       var snapshot = checkingReturn ? await checkBroadcasterReturn(context) : await acquireRoomSnapshot(context, returnToChat);
       if (!isAcquisitionCurrent(context)) return;
@@ -6891,55 +7076,51 @@ underlying system, so should run in the browser, Node, or Plask.
         return;
       }
       sampleReceipt = acceptRoomSnapshot(snapshot, context.room);
-      priorState = Object.assign({}, sampleReceipt.before, {
-        trendHTML: (document.getElementById("trend-container") || {}).innerHTML,
-        trendHeaderText: (document.getElementById("trend-header-label") || {}).textContent,
-        allTimeHighs: readAllTimeHighs(context.room).highs
-      });
-      var diagnostics = sampleReceipt.diagnostics;
-      if (!runtime.isMinimized) drawAllSparklines();
-      updateDisplay();
-      updateTrendDisplay();
-      updateAcquisitionStatus();
       sampleCommitted = isAcquisitionCurrent(context) && commitAcceptedSample(sampleReceipt);
-      if (!sampleCommitted) abortAcceptedSample(sampleReceipt);
+      if (!sampleCommitted) {
+        abortAcceptedSample(sampleReceipt);
+        return;
+      }
+      priorState = sampleReceipt.before;
+      try {
+        priorState = Object.assign({}, priorState, { allTimeHighs: readAllTimeHighs(context.room).highs });
+      } catch (error) {
+        log("Could not read prior all-time highs: " + error.message);
+      }
+      if (!isAcquisitionCurrent(context)) return;
+      try {
+        saveSession(context.room);
+      } catch (error) {
+        log("Could not save accepted sample: " + error.message);
+      }
+      if (!isAcquisitionCurrent(context)) return;
+      try {
+        recordAcceptedAllTimeHighs(context.room);
+      } catch (error) {
+        log("Could not update all-time highs: " + error.message);
+      }
+      if (!isAcquisitionCurrent(context)) return;
+      if (presentAcceptedSample() && isAcquisitionCurrent(context)) pulseAcceptedHighs(priorState);
+      if (sampleReceipt.diagnostics) diagnostic("log", "API scan accepted", sampleReceipt.diagnostics);
     } catch (err) {
-      var rolledBack = sampleReceipt && abortAcceptedSample(sampleReceipt);
-      if (rolledBack && priorState) {
-        try {
-          var trendEl = document.getElementById("trend-container");
-          if (trendEl && typeof priorState.trendHTML === "string") trendEl.innerHTML = priorState.trendHTML;
-          var trendHeader = document.getElementById("trend-header-label");
-          if (trendHeader && typeof priorState.trendHeaderText === "string") trendHeader.textContent = priorState.trendHeaderText;
-          updateDisplay();
-          updateAcquisitionStatus();
-          if (!runtime.isMinimized) drawAllSparklines();
-        } catch (displayError) {
-          log("Could not repaint previous data: " + displayError.message);
-        }
+      if (!sampleCommitted) {
+        if (sampleReceipt) abortAcceptedSample(sampleReceipt);
+        if (isAcquisitionCurrent(context)) markSessionGap();
       }
-      if (isAcquisitionCurrent(context)) markSessionGap();
-      log("Error during scan; retaining previous valid data: " + err.message);
+      log((sampleCommitted ? "Accepted sample retained despite an effect failure: " : "Error during scan; retaining previous valid data: ") + err.message);
     } finally {
-      if (sampleCommitted) {
-        try {
-          saveSession(context.room);
-        } catch (error) {
-          log("Could not save accepted sample: " + error.message);
-        }
-        try {
-          recordAcceptedAllTimeHighs(context.room);
-          updateDisplay();
-        } catch (error) {
-          log("Could not update all-time highs: " + error.message);
-        }
-        pulseAcceptedHighs(priorState);
-        if (diagnostics) diagnostic("log", "API scan accepted", diagnostics);
-      }
       if (finishAcquisition(context, location.href)) {
-        resetCountdown();
-        updateAcquisitionStatus();
-        if (checkingReturn || !priorState && priorAbsence !== runtime.broadcasterAbsence) saveSession(context.room);
+        try {
+          resetCountdown();
+        } catch (error) {
+          log("Countdown refresh unavailable: " + error.message);
+        }
+        try {
+          updateAcquisitionStatus();
+        } catch (error) {
+          log("Status display unavailable: " + error.message);
+        }
+        if (checkingReturn || !sampleReceipt && priorAbsence !== runtime.broadcasterAbsence) saveSession(context.room);
       }
     }
   }
@@ -7216,6 +7397,7 @@ underlying system, so should run in the browser, Node, or Plask.
     stopAcquisitionClock("healthCheckInterval");
     if (runtime.freshnessInterval) clearInterval(runtime.freshnessInterval);
     runtime.freshnessInterval = setInterval(function() {
+      retrySamplePresentation();
       updateAcquisitionStatus();
       updateCountdownDisplay();
     }, 1e3);
@@ -7378,7 +7560,7 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/bootstrap.js
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.10.1";
+    runtime.TIERSCOPE_VERSION = "3.11.0";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;
