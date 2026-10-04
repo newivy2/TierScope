@@ -7,6 +7,17 @@ TierScope is a free, open-source userscript that charts how a Chaturbate room’
 
 ---
 
+
+## Installation
+
+Install [Tampermonkey](https://www.tampermonkey.net/), follow Tampermonkey’s [userscript permission instructions](https://www.tampermonkey.net/faq.php?q=Q209) for your browser so installed scripts can run, open [the official userscript](https://raw.githubusercontent.com/newivy2/TierScope/main/tierscope.user.js), and accept the installation. Refresh a Chaturbate room to start tracking.
+
+If you used the beta, install from the official link above to follow main releases. Keep only one enabled copy of TierScope.
+
+[Usage and development notes](DEVELOPMENT_NOTES.md) · [Report an issue](https://github.com/newivy2/TierScope/issues)
+
+---
+
 Open the **Library** to unfold a matching left-hand page next to the chart. Save, export, open a saved file, and browse recordings in model folders. Session summaries and comparisons are available too. Easily compare up to 6 recent streams. Visual bugs corrected. [Build and source guide](BUILDING.md).
 
 The **Session-High / All-Time-High** switch sits on the main header. Session highs (SH) and all-time highs (ATH) are tracked separately for each room. ATH survive session Reset and expiry; hover a high to see the exact value and its recorded time. Opening a saved file does not change these records: but you can use **Add to all-time highs** in Library to add that file's highs to its own room.
@@ -55,13 +66,6 @@ Charts use periodic room-data samples. Session history is stored locally through
 
 Session history and all-time records are stored locally through your userscript manager. All-time highs remain separate for each room and survive session resets.
 
-## Installation
-
-Install [Tampermonkey](https://www.tampermonkey.net/), follow Tampermonkey’s [userscript permission instructions](https://www.tampermonkey.net/faq.php?q=Q209) for your browser so installed scripts can run, open [the official userscript](https://raw.githubusercontent.com/newivy2/TierScope/main/tierscope.user.js), and accept the installation. Refresh a Chaturbate room to start tracking.
-
-If you used the beta, install from the official link above to follow main releases. Keep only one enabled copy of TierScope.
-
-[Usage and development notes](DEVELOPMENT_NOTES.md) · [Report an issue](https://github.com/newivy2/TierScope/issues)
 
 ## Thanks
 
