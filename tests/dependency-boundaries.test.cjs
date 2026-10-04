@@ -62,7 +62,7 @@ test('panel views have no dependency on owners, live selectors, controllers or s
 
 test('record stores and validation cannot reach session/playback owners, panel code or coordinators', () => {
   const stores = ['storage.js', 'highs-store.js', 'session-library.js', 'backup.js', 'session-file-format.js'];
-  const permitted = new Set([...stores, 'analysis-preference-data.js', 'session-analysis.js', 'record-validation.js', 'history-data.js', 'utils.js', 'diagnostics.js', 'room-context.js', 'runtime.js']);
+  const permitted = new Set([...stores, 'immutable-data.js', 'analysis-preference-data.js', 'session-analysis.js', 'record-validation.js', 'history-data.js', 'utils.js', 'diagnostics.js', 'room-context.js', 'runtime.js']);
   const metadata = new Set(['activeRoomEpoch', 'activeSessionStorageKey', 'sessionRecordWarnings', 'sessionStorageNotice',
     'sessionStorageStatus', 'tabRecords', 'allTimeCache', 'chartTimeCache',
     // Backup captures preferences as data; applying them belongs to session tools.

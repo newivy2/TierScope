@@ -24,6 +24,7 @@ npm run test:unit
 npm run test:browser
 npm run test:firefox
 npm run test:performance
+npm run test:library-performance
 ```
 
 `TIERSCOPE_CHROMIUM_PATH` can select an already-installed Chromium executable. `TIERSCOPE_CHROMIUM_ARGS`, if needed, is a JSON array of launch arguments. Normal installations need neither setting. Browser tests remove temporary downloads and screenshots on completion.
@@ -96,3 +97,9 @@ Run `TIERSCOPE_CPU_THROTTLE=4 npm run test:performance` for a Chromium CPU-slowd
 ## Recovery maintenance (3.11.0)
 
 `recovery.test.cjs` covers failed painting with successful and failed saves, the automatic redraw interval, Reset/navigation/Stop during painting, Replay isolation, retained gaps/trends/highs, partial backups, raw damaged-value downloads, individual unreadable keys, unknown capacity, restore validation/rollback and preference persistence across tabs. The session-tools browser fixture exercises explicit partial-backup selection, omission warnings in previews and confirmation, recovery-file rejection as a normal backup, analysis choices across refresh, and visible preference-write failure/retry in both engines. The pulse fixture verifies that drawing recovery neither loses samples nor replays a missed high pulse.
+
+## Library cache and benchmark (3.12.0 beta)
+
+`library-cache.test.cjs` verifies bounded reuse of validated records without skipping storage reads, isolation of returned containers, deep immutability of reused snapshots, invalidation on changed/deleted/missing/unreadable values and failed key listing, and fresh state after closing/reopening. It compares cached and uncached reads through deduplication, growing sessions, rename, deletion and backup restore, and checks UTF-8 byte counts for non-ASCII text and lone surrogates. The session-tools browser fixture uses an actual second page sharing storage to change a title and corrupt/restore a record while Library remains open.
+
+`npm run test:library-performance` is informational, with no machine-dependent timing gate. It reports action work (including a forced layout), storage-read counts, backup record counts and JavaScript heap observations for 12 × 300, 500 × 500 and 36 × 10,000 retained samples. It uses an in-memory GM storage fixture, so it does not measure a userscript manager's storage bridge or actual website load. Use `TIERSCOPE_SOURCE=/path/to/older.user.js`, `TIERSCOPE_CPU_THROTTLE=4` and optionally `TIERSCOPE_BENCH_ROUNDS=1` for paired runs. `TIERSCOPE_PROFILE_PATH=/tmp/library-profile` writes Chromium CPU profiles. See [PERFORMANCE.md](PERFORMANCE.md) for measured results and remaining costs.
