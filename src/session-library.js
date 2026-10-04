@@ -1,5 +1,5 @@
-import { validateSessionFile } from './files.js';
 import { makeStorageId } from './record-validation.js';
+import { validateSessionFile } from './session-file-format.js';
 
 export const LIBRARY_PREFIX = 'tierscope:library:v1:';
 export const LIBRARY_MAX_COUNT = 500;

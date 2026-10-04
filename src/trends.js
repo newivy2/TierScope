@@ -1,6 +1,6 @@
 import { updateTrendDisplay } from './presentation.js';
 import { runtime } from './runtime.js';
-import { saveSession } from './storage.js';
+import { saveSession } from './session-persistence.js';
 import { getModelName, log } from './utils.js';
 
 export function checkTrendAutoEscalation() {

@@ -11,8 +11,8 @@ import { leavePlayback, updateReplayAvailability } from './replay.js';
 import { downloadTrackingCSV, downloadTrackingReport } from './reports.js';
 import { runtime } from './runtime.js';
 import { parseGetChatUserListResponse } from './scanning.js';
+import { saveSession } from './session-persistence.js';
 import { checkUrlChange, scheduleInit } from './startup.js';
-import { saveSession } from './storage.js';
 import { getModelName, log } from './utils.js';
 
 // Initialize defaults and effects in their original order, after modules load.

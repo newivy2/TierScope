@@ -1,7 +1,7 @@
-import { validateSessionFile } from './files.js';
 import { allTimeRoom, emptyAllTimeHighs, mergeAllTimeHighs, readAllTimeHighs, validateAllTimeRecord } from './highs-store.js';
 import { makeStorageId } from './record-validation.js';
 import { runtime } from './runtime.js';
+import { validateSessionFile } from './session-file-format.js';
 import { LIBRARY_MAX_COUNT, finalizeLibraryWrites, libraryTitle, planLibraryAdditions, readSessionLibrary, verifyLibraryCapacity } from './session-library.js';
 
 export const BACKUP_MAX_BYTES = 32 * 1024 * 1024;

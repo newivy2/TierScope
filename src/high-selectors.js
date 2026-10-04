@@ -1,6 +1,6 @@
 import { compactNumber } from './format.js';
 import { allTimeRoom, readAllTimeHighs } from './highs-store.js';
-import { readSessionHigh, synchronizeSessionHighTimes } from './live-session.js';
+import { readSessionHigh } from './live-session.js';
 import { isPlaybackCurrent } from './playback-data.js';
 import { runtime } from './runtime.js';
 import { getModelName } from './utils.js';
@@ -17,10 +17,6 @@ export function displayedAllTimeState() {
 
 export function getSessionHigh(key, current) {
     return readSessionHigh(key, current);
-}
-
-export function syncHighTimes() {
-    synchronizeSessionHighTimes();
 }
 
 export function getDisplayHigh(frame, key, current) {

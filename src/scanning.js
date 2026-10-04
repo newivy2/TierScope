@@ -1,8 +1,8 @@
 import { drawAllSparklines } from './charts.js';
 import { diagnostic } from './diagnostics.js';
 import { findTab, isScanValid, scanUsers } from './dom.js';
-import { readAllTimeHighs, recordAcceptedAllTimeHighs } from './highs-store.js';
-import { pulseAcceptedHighs } from './highs.js';
+import { readAllTimeHighs } from './highs-store.js';
+import { pulseAcceptedHighs, recordAcceptedAllTimeHighs } from './highs.js';
 import { getSessionSamplePolicy } from './history.js';
 import { checkAbsenceStop, pauseAutoRefresh, resetCountdown, startTrackingTimer, updateCountdownDisplay, updateStopControls } from './lifecycle.js';
 import { abortAcceptedSample, beginAcceptedSample, commitAcceptedSample, markSessionGap, observeSessionPresence, resumeSessionForOwnerReturn } from './live-session.js';
@@ -10,8 +10,8 @@ import { updateAcquisitionStatus } from './presentation-status.js';
 import { updateDisplay, updateTrendDisplay } from './presentation.js';
 import { clearRequestFailures, getDOMFallbackWaitSeconds, readRequestPolicy, recordRequestFailure, retryAfterTime } from './request-policy.js';
 import { runtime } from './runtime.js';
+import { saveSession } from './session-persistence.js';
 import { isAbsencePaused } from './session-selectors.js';
-import { saveSession } from './storage.js';
 import { getModelName, log } from './utils.js';
 
 export function pauseForAccessRestriction() {

@@ -1,6 +1,6 @@
 import { hideChartTooltip } from './chart-view.js';
 import { drawAllSparklines, drawHistorySparklines } from './charts.js';
-import { captureSessionFile, updatePanelOptions } from './files.js';
+import { updatePanelOptions } from './files.js';
 import { cancelGifExport } from './gif.js';
 import { readAllTimeHighs } from './highs-store.js';
 import { cancelHighPulses, setAllTimeActionStatus } from './highs.js';
@@ -11,6 +11,7 @@ import { updateAcquisitionStatus } from './presentation-status.js';
 import { renderDisplayFrame, updateDisplay, updateTrendDisplay } from './presentation.js';
 import { getStorageKey } from './record-validation.js';
 import { runtime } from './runtime.js';
+import { captureSessionFile } from './session-capture.js';
 import { formatElapsedTime, getModelName, log } from './utils.js';
 
 export function setPlaybackSamplePosition(state, position) {

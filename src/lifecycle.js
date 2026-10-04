@@ -9,8 +9,9 @@ import { leavePlayback } from './replay.js';
 import { getDOMFallbackWaitSeconds, readRequestPolicy, requestPolicyMessage, writeRequestPolicy } from './request-policy.js';
 import { runtime } from './runtime.js';
 import { isAcquisitionCurrent, pauseForAccessRestriction, performScanThenReturn } from './scanning.js';
+import { saveSession } from './session-persistence.js';
 import { absencePauseDescription, getEffectiveScanIntervalSeconds, isAbsencePaused, stopDescription } from './session-selectors.js';
-import { deleteSession, saveSession } from './storage.js';
+import { deleteSession } from './storage.js';
 import { checkTrendAutoEscalation, updateAutoTrendButton, updateTrendPresetButtons } from './trends.js';
 import { formatElapsedTime, getModelName, isBroadcastRoom, log } from './utils.js';
 

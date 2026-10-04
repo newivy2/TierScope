@@ -10,8 +10,8 @@ import { leavePlayback } from './replay.js';
 import { readRequestPolicy } from './request-policy.js';
 import { runtime } from './runtime.js';
 import { isAcquisitionCurrent, performScanThenReturn } from './scanning.js';
+import { loadSession, saveSession } from './session-persistence.js';
 import { isAbsencePaused } from './session-selectors.js';
-import { loadSession, saveSession } from './storage.js';
 import { getModelName, getModelNameFromUrl, isBroadcastRoom, log } from './utils.js';
 
 export function scheduleInit(delay) {

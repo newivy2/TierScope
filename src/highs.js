@@ -1,12 +1,12 @@
-import { validateSessionFile } from './files.js';
 import { displayedAllTimeState, displayedHighRoom } from './high-selectors.js';
-import { readAllTimeHighs, sessionAllTimeHighs, storeAllTimeHighs } from './highs-store.js';
+import { emptyAllTimeHighs, readAllTimeHighs, sessionAllTimeHighs, storeAllTimeHighs } from './highs-store.js';
 import { isPlaybackCurrent } from './playback-data.js';
 import { setPlaybackAllTimeState } from './playback-state.js';
 import { updateDisplay } from './presentation.js';
 import { makeStorageId } from './record-validation.js';
 import { paintPlayback } from './replay.js';
 import { runtime } from './runtime.js';
+import { validateSessionFile } from './session-file-format.js';
 import { log } from './utils.js';
 
 export function repaintHighMode() {
@@ -139,4 +139,15 @@ export function pulseAcceptedHighs(priorState) {
             };
         });
     } catch (error) { log('High pulse unavailable: ' + error.message); }
+}
+
+export function recordAcceptedAllTimeHighs(room) {
+    var index = runtime.history.timestamps.length - 1;
+    if (index < 0) return;
+    var incoming = emptyAllTimeHighs(), time = runtime.history.timestamps[index];
+    runtime.ALL_TIME_SERIES.forEach(function(key) {
+        incoming[key] = { value: key === 'roomTotal' ? runtime.history.total[index] + runtime.history.anonymous[index] : runtime.history[key][index],
+            time: time, source: 'live' };
+    });
+    storeAllTimeHighs(room, incoming);
 }

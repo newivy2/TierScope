@@ -120,14 +120,3 @@ export function sessionAllTimeHighs(data, source) {
     });
     return highs;
 }
-
-export function recordAcceptedAllTimeHighs(room) {
-    var index = runtime.history.timestamps.length - 1;
-    if (index < 0) return;
-    var incoming = emptyAllTimeHighs(), time = runtime.history.timestamps[index];
-    runtime.ALL_TIME_SERIES.forEach(function(key) {
-        incoming[key] = { value: key === 'roomTotal' ? runtime.history.total[index] + runtime.history.anonymous[index] : runtime.history[key][index],
-            time: time, source: 'live' };
-    });
-    storeAllTimeHighs(room, incoming);
-}

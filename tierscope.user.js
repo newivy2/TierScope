@@ -657,11 +657,6 @@ underlying system, so should run in the browser, Node, or Plask.
     }
   });
 
-  // src/format.js
-  function compactNumber(value) {
-    return value >= 1e6 ? (value / 1e6).toFixed(1).replace(/\.0$/, "") + "m" : value >= 1e4 ? (value / 1e3).toFixed(1).replace(/\.0$/, "") + "k" : String(value);
-  }
-
   // src/runtime.js
   var runtime = {};
 
@@ -803,18 +798,10 @@ underlying system, so should run in the browser, Node, or Plask.
     });
     return highs;
   }
-  function recordAcceptedAllTimeHighs(room) {
-    var index = runtime.history.timestamps.length - 1;
-    if (index < 0) return;
-    var incoming = emptyAllTimeHighs(), time = runtime.history.timestamps[index];
-    runtime.ALL_TIME_SERIES.forEach(function(key) {
-      incoming[key] = {
-        value: key === "roomTotal" ? runtime.history.total[index] + runtime.history.anonymous[index] : runtime.history[key][index],
-        time,
-        source: "live"
-      };
-    });
-    storeAllTimeHighs(room, incoming);
+
+  // src/format.js
+  function compactNumber(value) {
+    return value >= 1e6 ? (value / 1e6).toFixed(1).replace(/\.0$/, "") + "m" : value >= 1e4 ? (value / 1e3).toFixed(1).replace(/\.0$/, "") + "k" : String(value);
   }
 
   // src/live-session.js
@@ -1383,9 +1370,6 @@ underlying system, so should run in the browser, Node, or Plask.
   }
   function getSessionHigh(key, current) {
     return readSessionHigh(key, current);
-  }
-  function syncHighTimes() {
-    synchronizeSessionHighTimes();
   }
   function getDisplayHigh(frame, key, current) {
     if (runtime.highMode === "ath") return displayedAllTimeState().highs[key];
@@ -2829,6 +2813,9 @@ underlying system, so should run in the browser, Node, or Plask.
     appendCurrentSessionSample(Date.now(), getSessionSamplePolicy());
     if (!runtime.isMinimized) drawAllSparklines();
   }
+  function syncHighTimes() {
+    synchronizeSessionHighTimes();
+  }
 
   // src/storage.js
   function roomEpochKey(key) {
@@ -3065,13 +3052,6 @@ underlying system, so should run in the browser, Node, or Plask.
       return protectSessionStorage(key, e.message, producerVersion);
     }
   }
-  function restoreSessionState(data) {
-    var snapshot = createPlaybackSnapshot(data.history);
-    restoreLiveSession(data, getPlaybackFrame(snapshot, snapshot.durationMs));
-    runtime.lastScheduledIntervalSeconds = getEffectiveScanIntervalSeconds();
-    runtime.trendComparisonMode = data.trendComparisonMode;
-    runtime.autoTrendEscalation = data.autoTrendEscalation;
-  }
   function getStorageReportStatus(model) {
     if (!model || model === "unknown") return { producer: "Unknown (no saved session)", access: "No room" };
     var status = inspectStoredSession(model, false);
@@ -3080,83 +3060,6 @@ underlying system, so should run in the browser, Node, or Plask.
       producer: status.producerVersion === null ? status.legacy ? "Unknown (legacy session)" : "Unknown" : status.producerVersion || "(empty string)",
       access: status.protected ? "Protected / read-only: " + status.reason : (runtime.sessionStorageNotice || (runtime.activeSessionStorageKey === getStorageKey(model) ? "Writable (separate tab record)" : "Not initialized")) + (warnings.length ? "; " + warnings.length + " skipped record(s) retained; see console" : "")
     };
-  }
-  function saveSession(model) {
-    if (!model || model === "unknown") return;
-    try {
-      var key = getStorageKey(model);
-      if (runtime.activeSessionStorageKey !== key || inspectStoredSession(model, false).protected) return;
-      if (getRoomEpoch(key) !== runtime.activeRoomEpoch) {
-        runtime.sessionStorageNotice = "Reset in another tab — local data only; export TXT/CSV before reloading";
-        updateAcquisitionStatus();
-        return;
-      }
-      prepareSessionHighsForSave();
-      var saveData = {
-        schemaVersion: runtime.STORAGE_SCHEMA_VERSION,
-        producerVersion: runtime.TIERSCOPE_VERSION,
-        timestamp: Date.now(),
-        history: runtime.history,
-        tierHighTimes: runtime.tierHighTimes,
-        withTokensHighTime: runtime.withTokensHighTime,
-        totalHighTime: runtime.totalHighTime,
-        anonHighTime: runtime.anonHighTime,
-        femaleTransHighTime: runtime.femaleTransHighTime,
-        roomTotalHigh: runtime.roomTotalHigh,
-        roomTotalHighTime: runtime.roomTotalHighTime,
-        trackingStartTime: runtime.trackingStartTime,
-        sessionStartedAt: runtime.sessionStartedAt,
-        sessionStartEstimated: runtime.sessionStartEstimated,
-        sessionHighs: runtime.sessionHighs,
-        roomEpoch: runtime.activeRoomEpoch,
-        isPaused: runtime.isPaused,
-        isStopped: runtime.isStopped,
-        stoppedAt: runtime.stoppedAt,
-        stopReason: runtime.stopReason,
-        broadcasterAbsence: runtime.broadcasterAbsence,
-        absencePausedAt: runtime.absencePausedAt,
-        absenceOverrideActive: runtime.absenceOverrideActive,
-        pausedElapsedTime: runtime.pausedElapsedTime,
-        previousCounts: runtime.previousCounts,
-        hasTrendBaseline: runtime.hasTrendBaseline,
-        trendComparisonMode: runtime.trendComparisonMode,
-        autoTrendEscalation: runtime.autoTrendEscalation
-      };
-      validateStoredSession(saveData);
-      var raw = JSON.stringify(saveData);
-      var tabRecord = runtime.tabRecords.get(key);
-      if (!tabRecord || Date.now() - tabRecord.savedAt > runtime.STORAGE_MAX_AGE_MS) {
-        tabRecord = { id: makeStorageId(), savedAt: Date.now() };
-      }
-      GM_setValue(roomTabPrefix(key) + tabRecord.id, raw);
-      tabRecord.savedAt = Date.now();
-      runtime.tabRecords.set(key, tabRecord);
-      runtime.sessionStorageStatus.set(key, { protected: false, raw, producerVersion: runtime.TIERSCOPE_VERSION, legacy: false });
-      noteSessionSave(model);
-      log("Session saved for " + model + " (storage schema " + runtime.STORAGE_SCHEMA_VERSION + ", producer " + runtime.TIERSCOPE_VERSION + ")");
-    } catch (e) {
-      noteSessionSave(model, e.message || String(e));
-      log("Failed to save session: " + e);
-    }
-  }
-  function loadSession(model) {
-    clearRestoredSessionFrame();
-    if (!model || model === "unknown") return false;
-    leavePlayback(false);
-    var key = getStorageKey(model);
-    runtime.activeSessionStorageKey = key;
-    runtime.activeRoomEpoch = getRoomEpoch(key);
-    runtime.sessionStorageNotice = "";
-    var allTime = readAllTimeHighs(model);
-    var saved = inspectStoredSession(model, true);
-    if (saved.protected || !saved.data) return false;
-    var age = Date.now() - saved.data.timestamp;
-    restoreSessionState(saved.data);
-    if (!allTime.error && allTime.epoch === "initial" && !allTime.keys.length && saved.data.history.timestamps.length) {
-      storeAllTimeHighs(model, sessionAllTimeHighs(saved.data, "saved"));
-    }
-    log("Session restored for " + model + " (" + Math.round(age / 6e4) + " min old; " + (saved.legacy ? "validated legacy schema 1" : "storage schema " + runtime.STORAGE_SCHEMA_VERSION) + "; producer " + (saved.producerVersion === null ? "unknown" : saved.producerVersion) + ")");
-    return true;
   }
   function deleteSession(model) {
     if (!model || model === "unknown") return;
@@ -3182,6 +3085,125 @@ underlying system, so should run in the browser, Node, or Plask.
       );
       log("Reset cleared live tracking but saved storage remains protected: " + e.message);
     }
+  }
+  function getSessionWriteStatus(model) {
+    try {
+      if (!model || model === "unknown") return { status: "inactive" };
+      var key = getStorageKey(model);
+      if (runtime.activeSessionStorageKey !== key) return { status: "inactive" };
+      if (inspectStoredSession(model, false).protected) return { status: "protected" };
+      if (getRoomEpoch(key) !== runtime.activeRoomEpoch) return {
+        status: "reset",
+        message: "Reset in another tab — local data only; export TXT/CSV before reloading"
+      };
+      return { status: "ready" };
+    } catch (error) {
+      return { status: "failed", error: error.message || String(error) };
+    }
+  }
+  function writeSessionRecord(model, saveData) {
+    var access = getSessionWriteStatus(model);
+    if (access.status !== "ready") return access;
+    try {
+      var key = getStorageKey(model);
+      if (saveData.roomEpoch !== runtime.activeRoomEpoch) return { status: "stale" };
+      validateStoredSession(saveData);
+      var raw = JSON.stringify(saveData);
+      var tabRecord = runtime.tabRecords.get(key);
+      if (!tabRecord || Date.now() - tabRecord.savedAt > runtime.STORAGE_MAX_AGE_MS) {
+        tabRecord = { id: makeStorageId(), savedAt: Date.now() };
+      }
+      GM_setValue(roomTabPrefix(key) + tabRecord.id, raw);
+      tabRecord.savedAt = Date.now();
+      runtime.tabRecords.set(key, tabRecord);
+      runtime.sessionStorageStatus.set(key, { protected: false, raw, producerVersion: saveData.producerVersion, legacy: false });
+      log("Session saved for " + model + " (storage schema " + runtime.STORAGE_SCHEMA_VERSION + ", producer " + saveData.producerVersion + ")");
+      return { status: "saved" };
+    } catch (error) {
+      return { status: "failed", error: error.message || String(error) };
+    }
+  }
+
+  // src/session-persistence.js
+  function restoreSessionState(data) {
+    var snapshot = createPlaybackSnapshot(data.history);
+    restoreLiveSession(data, getPlaybackFrame(snapshot, snapshot.durationMs));
+    runtime.lastScheduledIntervalSeconds = getEffectiveScanIntervalSeconds();
+    runtime.trendComparisonMode = data.trendComparisonMode;
+    runtime.autoTrendEscalation = data.autoTrendEscalation;
+  }
+  function saveSession(model) {
+    if (!model || model === "unknown") return;
+    try {
+      var result = getSessionWriteStatus(model);
+      if (result.status === "ready") {
+        prepareSessionHighsForSave();
+        var saveData = {
+          schemaVersion: runtime.STORAGE_SCHEMA_VERSION,
+          producerVersion: runtime.TIERSCOPE_VERSION,
+          timestamp: Date.now(),
+          history: runtime.history,
+          tierHighTimes: runtime.tierHighTimes,
+          withTokensHighTime: runtime.withTokensHighTime,
+          totalHighTime: runtime.totalHighTime,
+          anonHighTime: runtime.anonHighTime,
+          femaleTransHighTime: runtime.femaleTransHighTime,
+          roomTotalHigh: runtime.roomTotalHigh,
+          roomTotalHighTime: runtime.roomTotalHighTime,
+          trackingStartTime: runtime.trackingStartTime,
+          sessionStartedAt: runtime.sessionStartedAt,
+          sessionStartEstimated: runtime.sessionStartEstimated,
+          sessionHighs: runtime.sessionHighs,
+          roomEpoch: runtime.activeRoomEpoch,
+          isPaused: runtime.isPaused,
+          isStopped: runtime.isStopped,
+          stoppedAt: runtime.stoppedAt,
+          stopReason: runtime.stopReason,
+          broadcasterAbsence: runtime.broadcasterAbsence,
+          absencePausedAt: runtime.absencePausedAt,
+          absenceOverrideActive: runtime.absenceOverrideActive,
+          pausedElapsedTime: runtime.pausedElapsedTime,
+          previousCounts: runtime.previousCounts,
+          hasTrendBaseline: runtime.hasTrendBaseline,
+          trendComparisonMode: runtime.trendComparisonMode,
+          autoTrendEscalation: runtime.autoTrendEscalation
+        };
+        result = writeSessionRecord(model, saveData);
+      }
+      if (result.status === "reset") {
+        runtime.sessionStorageNotice = result.message;
+        updateAcquisitionStatus();
+      } else if (result.status === "saved") {
+        noteSessionSave(model);
+      } else if (result.status === "failed") {
+        noteSessionSave(model, result.error);
+        log("Failed to save session: " + result.error);
+      }
+      return result;
+    } catch (e) {
+      noteSessionSave(model, e.message || String(e));
+      log("Failed to save session: " + e);
+      return { status: "failed", error: e.message || String(e) };
+    }
+  }
+  function loadSession(model) {
+    clearRestoredSessionFrame();
+    if (!model || model === "unknown") return false;
+    leavePlayback(false);
+    var key = getStorageKey(model);
+    runtime.activeSessionStorageKey = key;
+    runtime.activeRoomEpoch = getRoomEpoch(key);
+    runtime.sessionStorageNotice = "";
+    var allTime = readAllTimeHighs(model);
+    var saved = inspectStoredSession(model, true);
+    if (saved.protected || !saved.data) return false;
+    var age = Date.now() - saved.data.timestamp;
+    restoreSessionState(saved.data);
+    if (!allTime.error && allTime.epoch === "initial" && !allTime.keys.length && saved.data.history.timestamps.length) {
+      storeAllTimeHighs(model, sessionAllTimeHighs(saved.data, "saved"));
+    }
+    log("Session restored for " + model + " (" + Math.round(age / 6e4) + " min old; " + (saved.legacy ? "validated legacy schema 1" : "storage schema " + runtime.STORAGE_SCHEMA_VERSION) + "; producer " + (saved.producerVersion === null ? "unknown" : saved.producerVersion) + ")");
+    return true;
   }
 
   // src/scanning.js
@@ -4484,6 +4506,100 @@ underlying system, so should run in the browser, Node, or Plask.
     });
   }
 
+  // src/session-file-format.js
+  function validateSessionFile(file) {
+    if (!isStorageObject(file) || file.format !== runtime.SESSION_FILE_FORMAT || file.formatVersion !== runtime.SESSION_FILE_VERSION) {
+      throw new Error("This is not a supported TierScope session file.");
+    }
+    if (typeof file.room !== "string" || !/^[a-z0-9_-]{1,100}$/i.test(file.room) || typeof file.producerVersion !== "string" || file.producerVersion.length > 40) {
+      throw new Error("Invalid session file information.");
+    }
+    var data = file.session;
+    validateStoredSession(data);
+    if (data.schemaVersion !== runtime.STORAGE_SCHEMA_VERSION || !data.history.timestamps.length || !isStorageObject(data.sessionHighs) || !isStorageNumber(data.roomTotalHigh) || !(data.sessionStartedAt === null || isStorageTimestamp(data.sessionStartedAt)) || typeof data.sessionStartEstimated !== "boolean" || !isStorageTimestamp(data.pausedElapsedTime) || typeof data.isPaused !== "boolean" || typeof data.isStopped !== "boolean" || !(data.roomTotalHighTime === null || isStorageTimestamp(data.roomTotalHighTime))) {
+      throw new Error("Session file is incomplete.");
+    }
+    runtime.STORAGE_HISTORY_SERIES.forEach(function(key) {
+      if (!data.history[key].every(Number.isSafeInteger) || !Number.isSafeInteger(data.sessionHighs[key].value)) {
+        throw new Error("Session counts must be whole numbers.");
+      }
+    });
+    var roomPeak = 0;
+    data.history.timestamps.forEach(function(_, i) {
+      var total = data.history.total[i] + data.history.anonymous[i];
+      if (!Number.isSafeInteger(total)) throw new Error("Invalid session room total.");
+      roomPeak = Math.max(roomPeak, total);
+    });
+    if (!Number.isSafeInteger(data.roomTotalHigh) || data.roomTotalHigh < roomPeak) throw new Error("Invalid session room high.");
+    var normalized = normalizeStoredSession(data);
+    var clean = { schemaVersion: runtime.STORAGE_SCHEMA_VERSION };
+    [
+      "timestamp",
+      "history",
+      "sessionStartedAt",
+      "sessionStartEstimated",
+      "sessionHighs",
+      "roomTotalHigh",
+      "roomTotalHighTime",
+      "pausedElapsedTime",
+      "isPaused",
+      "isStopped",
+      "stoppedAt",
+      "stopReason"
+    ].forEach(function(key) {
+      clean[key] = normalized[key];
+    });
+    return {
+      format: runtime.SESSION_FILE_FORMAT,
+      formatVersion: runtime.SESSION_FILE_VERSION,
+      producerVersion: file.producerVersion,
+      room: file.room,
+      session: clean
+    };
+  }
+
+  // src/session-capture.js
+  function captureSessionFile() {
+    if (isPlaybackCurrent(runtime.playback) && runtime.playback.archive) return runtime.playback.archive;
+    if (!runtime.history.timestamps.length || runtime.activeSessionStorageKey !== getStorageKey(getModelName()) || location.href !== runtime.lastUrl) {
+      throw new Error("No recorded session to save yet.");
+    }
+    var now = Date.now();
+    var data = {
+      schemaVersion: runtime.STORAGE_SCHEMA_VERSION,
+      timestamp: now,
+      history: { timestamps: runtime.history.timestamps.slice(), breaks: getHistoryBreaks(runtime.history).slice() },
+      sessionStartedAt: runtime.sessionStartedAt,
+      sessionStartEstimated: runtime.sessionStartEstimated,
+      sessionHighs: {},
+      roomTotalHigh: runtime.roomTotalHigh,
+      roomTotalHighTime: runtime.roomTotalHighTime,
+      pausedElapsedTime: runtime.isPaused ? runtime.pausedElapsedTime : runtime.trackingStartTime ? Math.max(0, now - runtime.trackingStartTime) : 0,
+      isPaused: runtime.isPaused,
+      isStopped: runtime.isStopped,
+      stoppedAt: runtime.stoppedAt,
+      stopReason: runtime.stopReason
+    };
+    runtime.STORAGE_HISTORY_SERIES.forEach(function(key) {
+      data.history[key] = runtime.history[key].slice();
+      data.sessionHighs[key] = getSessionHigh(key, 0);
+    });
+    runtime.history.timestamps.forEach(function(time, i) {
+      var total = runtime.history.total[i] + runtime.history.anonymous[i];
+      if (total > data.roomTotalHigh) {
+        data.roomTotalHigh = total;
+        data.roomTotalHighTime = time;
+      }
+    });
+    return validateSessionFile({
+      format: runtime.SESSION_FILE_FORMAT,
+      formatVersion: runtime.SESSION_FILE_VERSION,
+      producerVersion: runtime.TIERSCOPE_VERSION,
+      room: getModelName(),
+      session: data
+    });
+  }
+
   // src/replay.js
   function setPlaybackSamplePosition(state, position) {
     return moveOwnedPlayback(state, position);
@@ -4906,6 +5022,19 @@ underlying system, so should run in the browser, Node, or Plask.
     } catch (error) {
       log("High pulse unavailable: " + error.message);
     }
+  }
+  function recordAcceptedAllTimeHighs(room) {
+    var index = runtime.history.timestamps.length - 1;
+    if (index < 0) return;
+    var incoming = emptyAllTimeHighs(), time = runtime.history.timestamps[index];
+    runtime.ALL_TIME_SERIES.forEach(function(key) {
+      incoming[key] = {
+        value: key === "roomTotal" ? runtime.history.total[index] + runtime.history.anonymous[index] : runtime.history[key][index],
+        time,
+        source: "live"
+      };
+    });
+    storeAllTimeHighs(room, incoming);
   }
 
   // src/session-library.js
@@ -5969,96 +6098,6 @@ underlying system, so should run in the browser, Node, or Plask.
     runtime.chartLayoutRevision++;
     updatePanelOptions();
     redrawPanelCharts();
-  }
-  function captureSessionFile() {
-    if (isPlaybackCurrent(runtime.playback) && runtime.playback.archive) return runtime.playback.archive;
-    if (!runtime.history.timestamps.length || runtime.activeSessionStorageKey !== getStorageKey(getModelName()) || location.href !== runtime.lastUrl) {
-      throw new Error("No recorded session to save yet.");
-    }
-    var now = Date.now();
-    var data = {
-      schemaVersion: runtime.STORAGE_SCHEMA_VERSION,
-      timestamp: now,
-      history: { timestamps: runtime.history.timestamps.slice(), breaks: getHistoryBreaks(runtime.history).slice() },
-      sessionStartedAt: runtime.sessionStartedAt,
-      sessionStartEstimated: runtime.sessionStartEstimated,
-      sessionHighs: {},
-      roomTotalHigh: runtime.roomTotalHigh,
-      roomTotalHighTime: runtime.roomTotalHighTime,
-      pausedElapsedTime: runtime.isPaused ? runtime.pausedElapsedTime : runtime.trackingStartTime ? Math.max(0, now - runtime.trackingStartTime) : 0,
-      isPaused: runtime.isPaused,
-      isStopped: runtime.isStopped,
-      stoppedAt: runtime.stoppedAt,
-      stopReason: runtime.stopReason
-    };
-    runtime.STORAGE_HISTORY_SERIES.forEach(function(key) {
-      data.history[key] = runtime.history[key].slice();
-      data.sessionHighs[key] = getSessionHigh(key, 0);
-    });
-    runtime.history.timestamps.forEach(function(time, i) {
-      var total = runtime.history.total[i] + runtime.history.anonymous[i];
-      if (total > data.roomTotalHigh) {
-        data.roomTotalHigh = total;
-        data.roomTotalHighTime = time;
-      }
-    });
-    return validateSessionFile({
-      format: runtime.SESSION_FILE_FORMAT,
-      formatVersion: runtime.SESSION_FILE_VERSION,
-      producerVersion: runtime.TIERSCOPE_VERSION,
-      room: getModelName(),
-      session: data
-    });
-  }
-  function validateSessionFile(file) {
-    if (!isStorageObject(file) || file.format !== runtime.SESSION_FILE_FORMAT || file.formatVersion !== runtime.SESSION_FILE_VERSION) {
-      throw new Error("This is not a supported TierScope session file.");
-    }
-    if (typeof file.room !== "string" || !/^[a-z0-9_-]{1,100}$/i.test(file.room) || typeof file.producerVersion !== "string" || file.producerVersion.length > 40) {
-      throw new Error("Invalid session file information.");
-    }
-    var data = file.session;
-    validateStoredSession(data);
-    if (data.schemaVersion !== runtime.STORAGE_SCHEMA_VERSION || !data.history.timestamps.length || !isStorageObject(data.sessionHighs) || !isStorageNumber(data.roomTotalHigh) || !(data.sessionStartedAt === null || isStorageTimestamp(data.sessionStartedAt)) || typeof data.sessionStartEstimated !== "boolean" || !isStorageTimestamp(data.pausedElapsedTime) || typeof data.isPaused !== "boolean" || typeof data.isStopped !== "boolean" || !(data.roomTotalHighTime === null || isStorageTimestamp(data.roomTotalHighTime))) {
-      throw new Error("Session file is incomplete.");
-    }
-    runtime.STORAGE_HISTORY_SERIES.forEach(function(key) {
-      if (!data.history[key].every(Number.isSafeInteger) || !Number.isSafeInteger(data.sessionHighs[key].value)) {
-        throw new Error("Session counts must be whole numbers.");
-      }
-    });
-    var roomPeak = 0;
-    data.history.timestamps.forEach(function(_, i) {
-      var total = data.history.total[i] + data.history.anonymous[i];
-      if (!Number.isSafeInteger(total)) throw new Error("Invalid session room total.");
-      roomPeak = Math.max(roomPeak, total);
-    });
-    if (!Number.isSafeInteger(data.roomTotalHigh) || data.roomTotalHigh < roomPeak) throw new Error("Invalid session room high.");
-    var normalized = normalizeStoredSession(data);
-    var clean = { schemaVersion: runtime.STORAGE_SCHEMA_VERSION };
-    [
-      "timestamp",
-      "history",
-      "sessionStartedAt",
-      "sessionStartEstimated",
-      "sessionHighs",
-      "roomTotalHigh",
-      "roomTotalHighTime",
-      "pausedElapsedTime",
-      "isPaused",
-      "isStopped",
-      "stoppedAt",
-      "stopReason"
-    ].forEach(function(key) {
-      clean[key] = normalized[key];
-    });
-    return {
-      format: runtime.SESSION_FILE_FORMAT,
-      formatVersion: runtime.SESSION_FILE_VERSION,
-      producerVersion: file.producerVersion,
-      room: file.room,
-      session: clean
-    };
   }
   function downloadSessionFile() {
     try {
