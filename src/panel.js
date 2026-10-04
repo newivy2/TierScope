@@ -226,9 +226,23 @@ export function createPanel() {
                             'Reset' +
                         '</button>' +
                     '</div>' +
-                    '<label id="dark-mode-control" style="justify-self:end;display:inline-flex;align-items:center;gap:2px;cursor:pointer;color:var(--panel-secondary);line-height:1;">' +
-                        '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 13a9 9 0 0 1-10-10 9 9 0 1 0 10 10Z"/></svg>' +
-                        '<input type="checkbox" id="dark-mode-toggle" checked aria-label="Dark mode" style="appearance:auto;width:12px;height:12px;margin:0;cursor:pointer;accent-color:#4169E1;">' +
+                    '<style>' +
+                        '#dark-mode-control #dark-mode-track{position:relative;display:block;flex:0 0 22px;width:22px;height:12px;box-sizing:border-box;border:1px solid #9b701d;border-radius:7px;background:#e8b444;transition:background-color .16s ease;}' +
+                        '#dark-mode-control #dark-mode-thumb{position:absolute;left:1px;top:1px;width:8px;height:8px;border-radius:50%;background:#4c3300;transform:translateX(10px);transition:transform .16s ease,background-color .16s ease;}' +
+                        '#dark-mode-control #dark-mode-moon{color:var(--panel-muted);opacity:.55;}' +
+                        '#dark-mode-control #dark-mode-sun{color:#825d00;}' +
+                        '#dark-mode-control #dark-mode-toggle:checked~#dark-mode-track{background:#4169e1;border-color:#8ca8ff;}' +
+                        '#dark-mode-control #dark-mode-toggle:checked~#dark-mode-track #dark-mode-thumb{transform:translateX(0);background:#fff;}' +
+                        '#dark-mode-control #dark-mode-toggle:checked~#dark-mode-moon{color:#b4c5ff;opacity:1;}' +
+                        '#dark-mode-control #dark-mode-toggle:checked~#dark-mode-sun{color:var(--panel-muted);opacity:.55;}' +
+                        '#dark-mode-control #dark-mode-toggle:focus-visible~#dark-mode-track{outline:2px solid var(--panel-accent);outline-offset:2px;}' +
+                        '@media(prefers-reduced-motion:reduce){#dark-mode-control #dark-mode-track,#dark-mode-control #dark-mode-thumb{transition:none;}}' +
+                    '</style>' +
+                    '<label id="dark-mode-control" style="position:relative;justify-self:end;display:inline-flex;align-items:center;gap:2px;height:14px;cursor:pointer;line-height:1;">' +
+                        '<input type="checkbox" role="switch" id="dark-mode-toggle" checked aria-label="Dark mode" style="position:absolute;inset:0;z-index:1;width:100%;height:100%;box-sizing:border-box;margin:0;padding:0;border:0;opacity:0;cursor:pointer;">' +
+                        '<svg id="dark-mode-moon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" style="flex:none;"><path d="M21 13a9 9 0 0 1-10-10 9 9 0 1 0 10 10Z"/></svg>' +
+                        '<span id="dark-mode-track" aria-hidden="true"><span id="dark-mode-thumb"></span></span>' +
+                        '<svg id="dark-mode-sun" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" style="flex:none;"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg>' +
                     '</label>' +
                 '</div>' +
             '</div>' +

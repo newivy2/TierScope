@@ -39,8 +39,18 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
     collapsedHigh:s('restore-row-green').backgroundColor,row:s('tier-row-dark-blue').backgroundColor,highText:s('high-purple').color};
   });
   await setup('https://tierscope.test/testroom/');
-  const checkbox=page.getByRole('checkbox',{name:'Dark mode'}),panel=page.locator('#tracker-container');
+  const checkbox=page.getByRole('switch',{name:'Dark mode'}),panel=page.locator('#tracker-container');
   assert(await checkbox.isChecked());assert.equal(await panel.getAttribute('data-theme'),'dark');
+  const switchAppearance=()=>page.evaluate(()=>{
+    const track=document.getElementById('dark-mode-track'),thumb=document.getElementById('dark-mode-thumb');
+    const t=track.getBoundingClientRect(),b=thumb.getBoundingClientRect();
+    return {trackColor:getComputedStyle(track).backgroundColor,left:b.left-t.left,right:t.right-b.right,
+      moonOpacity:getComputedStyle(document.getElementById('dark-mode-moon')).opacity,
+      sunOpacity:getComputedStyle(document.getElementById('dark-mode-sun')).opacity};
+  });
+  const darkSwitch=await switchAppearance();
+  assert(darkSwitch.left<darkSwitch.right,'dark indicator sits toward the moon');
+  assert.equal(darkSwitch.moonOpacity,'1');
   const before=await page.evaluate(()=>ViewerTracker.__theme.state()),bounds=await panel.boundingBox();
   await checkControlLayout(page);
   const dark=await styles();assert.equal(dark.panel,'rgba(20, 20, 30, 0.95)');assert.equal(dark.totalLine,'#ffffff');
@@ -49,18 +59,31 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   assert(Math.abs(toggle.x+toggle.width-(controls.x+controls.width-5))<2,'toggle sits at right edge');
   assert(toggle.y+toggle.height<=controls.y+controls.height&&controls.y+controls.height-toggle.y-toggle.height<10,'toggle sits at bottom');
   if(process.env.TIERSCOPE_THEME_SHOTS)await panel.screenshot({path:path.join(process.env.TIERSCOPE_THEME_SHOTS,'dark-expanded.png')});
-  await checkbox.uncheck();assert.equal(await panel.getAttribute('data-theme'),'bright');
+  await checkbox.click();assert(!(await checkbox.isChecked()));assert.equal(await panel.getAttribute('data-theme'),'bright');
   assert.deepEqual(await panel.boundingBox(),bounds,'theme switch preserves panel size and position');
   assert.deepEqual(await page.evaluate(()=>ViewerTracker.__theme.state()),before,'theme switch preserves tracking state');assert.equal(scans,0);
   await checkControlLayout(page);
+  await page.waitForFunction(()=>getComputedStyle(document.getElementById('dark-mode-thumb')).transform==='matrix(1, 0, 0, 1, 10, 0)');
+  const brightSwitch=await switchAppearance();
+  assert(brightSwitch.right<brightSwitch.left,'bright indicator sits toward the sun');
+  assert.notEqual(brightSwitch.trackColor,darkSwitch.trackColor,'track color identifies the active theme');
+  assert.equal(brightSwitch.sunOpacity,'1');
   const bright=await styles();assert.equal(bright.panel,'rgba(248, 249, 252, 0.95)');assert.equal(bright.text,'rgb(32, 35, 48)');assert.equal(bright.totalLine,'#202330');
   for(const key of ['purple','blue','purpleLine','blueLine','highlight','collapsedHigh'])assert.equal(bright[key],dark[key],key+' stays unchanged');
   assert.equal(bright.purpleLine,'#804baa');assert.equal(bright.blueLine,'#393993');assert.equal(bright.highText,'rgb(35, 117, 31)');
   if(process.env.TIERSCOPE_THEME_SHOTS)await panel.screenshot({path:path.join(process.env.TIERSCOPE_THEME_SHOTS,'bright-expanded.png')});
   await page.locator('#opacity-slider').evaluate(e=>{e.value='30';e.dispatchEvent(new Event('input'));});
   const translucent=await styles();assert.equal(translucent.panel,'rgba(248, 249, 252, 0.3)');assert.notEqual(translucent.row,bright.row);assert.equal(translucent.highlight,bright.highlight);assert.equal(translucent.text,bright.text);
-  await checkbox.focus();await page.keyboard.press('Space');assert(await checkbox.isChecked());assert.equal((await styles()).panel,'rgba(20, 20, 30, 0.3)');
+  await page.locator('#btn-main-reset').focus();await page.keyboard.press('Tab');
+  assert(await checkbox.evaluate(e=>e===document.activeElement),'Tab reaches the theme switch after Reset');
+  await page.keyboard.press('Space');
+  assert.equal(await page.locator('#dark-mode-track').evaluate(e=>getComputedStyle(e).outlineStyle),'solid','keyboard focus stays visible');assert(await checkbox.isChecked());assert.equal((await styles()).panel,'rgba(20, 20, 30, 0.3)');
   await page.keyboard.press('Space');assert(!(await checkbox.isChecked()));
+  await page.emulateMedia({reducedMotion:'reduce'});
+  assert.equal(await page.locator('#dark-mode-thumb').evaluate(e=>getComputedStyle(e).transitionDuration),'0s');
+  await checkbox.check();assert((await switchAppearance()).left<(await switchAppearance()).right);
+  await checkbox.uncheck();assert((await switchAppearance()).right<(await switchAppearance()).left);
+  await page.emulateMedia({reducedMotion:'no-preference'});
   await page.locator('#opacity-slider').evaluate(e=>{e.value='95';e.dispatchEvent(new Event('input'));});
   await page.locator('#spark-purple').focus();await page.keyboard.press('End');
   assert.equal(await page.locator('#tierscope-chart-tooltip').evaluate(e=>getComputedStyle(e).backgroundColor),'rgb(255, 255, 255)');
@@ -83,6 +106,6 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   await page.evaluate(()=>localStorage.setItem('tierscope:ui:theme:v1',JSON.stringify({bad:true})));
   await setup('https://tierscope.test/thirdroom/');assert(await checkbox.isChecked(),'invalid preference defaults to dark');
   assert.deepEqual(errors,[]);
-  console.log('PASS dark/bright toggle placement, default/persistence, keyboard, opacity, original tier colors, highlights, tooltips, compact/Replay rendering, state preservation and storage failure');
+  console.log('PASS moon/sun switch position/color, visible keyboard focus, reduced motion, placement, default/persistence, keyboard, opacity, original tier colors, highlights, tooltips, compact/Replay rendering, state preservation and storage failure');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1});
