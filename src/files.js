@@ -1,7 +1,9 @@
-import { getHistoryBreaks } from './charts.js';
+import { openOwnedPlayback, nextSessionFileRequest } from './playback-state.js';
+import { getHistoryBreaks } from './history-data.js';
 import { addFileToAllTimeHighs, cancelHighPulses, clearAllTimeHighs, getSessionHigh, readAllTimeHighs, toggleHighMode, updateHighControls } from './highs.js';
 import { redrawPanelCharts, toggleView } from './layout.js';
-import { createPlaybackSnapshot, isPlaybackCurrent, leavePlayback, paintPlayback, setPlaybackLayout } from './replay.js';
+import { isPlaybackCurrent, leavePlayback, paintPlayback, setPlaybackLayout } from './replay.js';
+import { createPlaybackSnapshot } from './playback-data.js';
 import { runtime } from './runtime.js';
 import { getStorageKey, hasStorageField, isStorageNumber, isStorageObject, isStorageTimestamp, normalizeStoredSession, validateStoredSession } from './storage.js';
 import { getModelName, log } from './utils.js';
@@ -100,19 +102,17 @@ export function openSessionReplay(file) {
     var archive = validateSessionFile(file);
     leavePlayback(false);
     if (runtime.isMinimized) toggleView();
-    runtime.playback = { url: location.href, key: runtime.activeSessionStorageKey, generation: runtime.initGuard,
+    openOwnedPlayback({url: location.href, key: runtime.activeSessionStorageKey, generation: runtime.initGuard,
         imported: true, archive: archive, snapshot: createPlaybackSnapshot(archive.session.history),
-        allTimeState: readAllTimeHighs(archive.room),
-        positionMs: 0, samplePosition: 0, stepIndex: 0, speed: 1, lastTickAt: Date.now(), playing: false, timer: null };
+        allTimeState: readAllTimeHighs(archive.room)}, Date.now(), false);
     cancelHighPulses();
-    runtime.presentationMode = 'PLAYBACK';
     setPlaybackLayout(true);
     return paintPlayback(runtime.playback);
 }
 
 export async function readSessionFile(file) {
     if (!file) return false;
-    var request = ++runtime.sessionFileLoadGeneration, url = location.href, generation = runtime.initGuard;
+    var request = nextSessionFileRequest(), url = location.href, generation = runtime.initGuard;
     function current() { return request === runtime.sessionFileLoadGeneration && url === location.href && generation === runtime.initGuard; }
     try {
         if (file.size > runtime.SESSION_FILE_MAX_BYTES) throw new Error('Session files must be 8 MB or smaller.');

@@ -1,4 +1,5 @@
-import { bindChartInspection, drawCanvasChart, getHistoryBreaks } from './charts.js';
+import { bindChartInspection, drawCanvasChart } from './charts.js';
+import { getHistoryBreaks } from './history-data.js';
 import { getDisplayHigh, highDescription, highLabel } from './highs.js';
 import { absencePauseDescription, getEffectiveScanIntervalSeconds, isAbsencePaused, stopDescription } from './lifecycle.js';
 import { runtime } from './runtime.js';

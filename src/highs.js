@@ -1,3 +1,4 @@
+import { setPlaybackAllTimeState } from './playback-state.js';
 import { readSessionHigh, synchronizeSessionHighTimes } from './live-session.js';
 import { compactNumber } from './compact.js';
 import { validateSessionFile } from './files.js';
@@ -159,7 +160,7 @@ export function repaintHighMode() {
 export function toggleHighMode() {
     runtime.highMode = runtime.highMode === 'sh' ? 'ath' : 'sh';
     var state = readAllTimeHighs(displayedHighRoom());
-    if (isPlaybackCurrent(runtime.playback)) runtime.playback.allTimeState = state;
+    if (isPlaybackCurrent(runtime.playback)) setPlaybackAllTimeState(runtime.playback, state);
     try { GM_setValue(runtime.HIGH_MODE_KEY, runtime.highMode); } catch (error) { /* The selected view still works for this tab. */ }
     repaintHighMode();
 }
@@ -180,7 +181,7 @@ export function addFileToAllTimeHighs() {
     try {
         var archive = validateSessionFile(runtime.playback.archive);
         var result = storeAllTimeHighs(archive.room, sessionAllTimeHighs(archive.session, 'file'));
-        runtime.playback.allTimeState = result.state;
+        setPlaybackAllTimeState(runtime.playback, result.state);
         repaintHighMode();
         setAllTimeActionStatus(result.saved ? (result.changed ? 'Records updated for ' : 'No higher records in this file for ') + archive.room + '.' :
             result.state.error || 'Records changed in another tab. Try adding this file again.',
@@ -198,7 +199,7 @@ export function clearAllTimeHighs() {
         runtime.allTimeCache.delete(room);
         keys.forEach(function(key) { try { GM_deleteValue(key); } catch (error) { /* Old generations are ignored. */ } });
         var state = readAllTimeHighs(room);
-        if (isPlaybackCurrent(runtime.playback)) runtime.playback.allTimeState = state;
+        if (isPlaybackCurrent(runtime.playback)) setPlaybackAllTimeState(runtime.playback, state);
         repaintHighMode();
         setAllTimeActionStatus('All-time highs cleared for ' + room + '.');
     } catch (error) { alert('Could not clear all-time highs: ' + error.message); }

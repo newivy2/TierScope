@@ -1,8 +1,9 @@
 import { restoreLiveSession, prepareSessionHighsForSave, clearRestoredSessionFrame } from './live-session.js';
-import { getHistoryBreaks } from './charts.js';
+import { getHistoryBreaks } from './history-data.js';
 import { readAllTimeHighs, sessionAllTimeHighs, storeAllTimeHighs } from './highs.js';
 import { getEffectiveScanIntervalSeconds } from './lifecycle.js';
-import { createPlaybackSnapshot, getPlaybackFrame, leavePlayback } from './replay.js';
+import { leavePlayback } from './replay.js';
+import { createPlaybackSnapshot, getPlaybackFrame } from './playback-data.js';
 import { runtime } from './runtime.js';
 import { updateAcquisitionStatus } from './scanning.js';
 import { log } from './utils.js';

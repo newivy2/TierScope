@@ -657,6 +657,158 @@ underlying system, so should run in the browser, Node, or Plask.
     }
   });
 
+  // src/playback-state.js
+  var PLAYBACK_FIELDS = Object.freeze(["playback", "presentationMode", "sessionFileLoadGeneration"]);
+  var playbackState;
+  var playbackClock;
+  var playbackRecords = /* @__PURE__ */ new WeakMap();
+  function initializePlaybackState(target, clock) {
+    playbackState = {
+      playback: target.playback,
+      presentationMode: target.presentationMode,
+      sessionFileLoadGeneration: target.sessionFileLoadGeneration
+    };
+    playbackClock = clock;
+    for (const key of PLAYBACK_FIELDS) {
+      Object.defineProperty(target, key, { enumerable: true, configurable: false, get: () => playbackState[key] });
+    }
+  }
+  function copyPlaybackData(value) {
+    if (Array.isArray(value)) return (
+      /** @type {T} */
+      Object.freeze(value.map((item) => copyPlaybackData(item)))
+    );
+    if (value && typeof value === "object") return (
+      /** @type {T} */
+      Object.freeze(Object.fromEntries(
+        Object.entries(value).map(([key, item]) => [key, copyPlaybackData(item)])
+      ))
+    );
+    return value;
+  }
+  function activePlaybackData(view) {
+    return view && view === playbackState.playback ? playbackRecords.get(view) : null;
+  }
+  function openOwnedPlayback(options, now, playing) {
+    closeOwnedPlayback();
+    const data = {
+      url: options.url,
+      key: options.key,
+      generation: options.generation,
+      imported: options.imported === true,
+      archive: copyPlaybackData(options.archive),
+      snapshot: copyPlaybackData(options.snapshot),
+      allTimeState: copyPlaybackData(options.allTimeState),
+      positionMs: 0,
+      samplePosition: 0,
+      stepIndex: 0,
+      speed: 1,
+      lastTickAt: now,
+      playing: playing && options.snapshot.replayDurationMs > 0,
+      timer: null,
+      paintedPosition: void 0,
+      paintLayout: void 0
+    };
+    const view = (
+      /** @type {PlaybackView} */
+      /* @__PURE__ */ Object.create(null)
+    );
+    for (const key of Object.keys(data)) Object.defineProperty(view, key, { enumerable: true, get: () => data[key] });
+    Object.freeze(view);
+    playbackRecords.set(view, data);
+    playbackState.playback = view;
+    playbackState.presentationMode = "PLAYBACK";
+    return view;
+  }
+  function nextSessionFileRequest() {
+    return ++playbackState.sessionFileLoadGeneration;
+  }
+  function closeOwnedPlayback() {
+    stopOwnedPlaybackClock(playbackState.playback);
+    playbackState.playback = null;
+    playbackState.presentationMode = "LIVE";
+  }
+  function stopOwnedPlaybackClock(view) {
+    const data = view && playbackRecords.get(view);
+    if (!data || data.timer === null) return;
+    playbackClock.stop(data.timer);
+    data.timer = null;
+  }
+  function startOwnedPlaybackClock(view, tick) {
+    const data = activePlaybackData(view);
+    if (!data || !data.playing || data.timer !== null) return;
+    data.timer = playbackClock.start(() => {
+      if (activePlaybackData(view)) tick(view);
+    });
+  }
+  function movePlaybackPosition(data, position) {
+    const last = data.snapshot.timeline.length - 1;
+    data.samplePosition = Math.max(0, Math.min(last, position));
+    if (Math.abs(data.samplePosition - Math.round(data.samplePosition)) < 1e-9) data.samplePosition = Math.round(data.samplePosition);
+    data.stepIndex = Math.floor(data.samplePosition);
+    const time = data.snapshot.timeline[data.stepIndex], nextTime = data.snapshot.timeline[Math.min(last, data.stepIndex + 1)];
+    data.positionMs = time + (nextTime - time) * (data.samplePosition - data.stepIndex);
+  }
+  function moveOwnedPlayback(view, position) {
+    const data = activePlaybackData(view);
+    if (!data || !Number.isFinite(position)) return false;
+    movePlaybackPosition(data, position);
+    return true;
+  }
+  function advanceOwnedPlayback(view, now) {
+    const data = activePlaybackData(view);
+    if (!data || !data.playing) return false;
+    const elapsed = Math.max(0, now - data.lastTickAt);
+    data.lastTickAt = now;
+    const last = data.snapshot.timeline.length - 1;
+    const rate = data.snapshot.replayDurationMs > 0 ? last / data.snapshot.replayDurationMs : 0;
+    movePlaybackPosition(data, data.samplePosition + elapsed * rate * data.speed);
+    if (data.samplePosition >= last) pauseOwnedPlayback(view);
+    return true;
+  }
+  function pauseOwnedPlayback(view) {
+    const data = activePlaybackData(view);
+    if (!data) return false;
+    data.playing = false;
+    stopOwnedPlaybackClock(view);
+    return true;
+  }
+  function resumeOwnedPlayback(view, now) {
+    const data = activePlaybackData(view);
+    if (!data || !data.snapshot.replayDurationMs) return false;
+    if (data.samplePosition >= data.snapshot.timeline.length - 1) movePlaybackPosition(data, 0);
+    data.playing = true;
+    data.lastTickAt = now;
+    return true;
+  }
+  function seekOwnedPlayback(view, position, now) {
+    const data = activePlaybackData(view);
+    if (!data || !Number.isFinite(position)) return false;
+    pauseOwnedPlayback(view);
+    movePlaybackPosition(data, position);
+    data.lastTickAt = now;
+    return true;
+  }
+  function changeOwnedPlaybackSpeed(view, speed, now) {
+    const data = activePlaybackData(view);
+    if (!data || ![0.5, 1, 2].includes(speed)) return false;
+    data.speed = speed;
+    data.lastTickAt = now;
+    return true;
+  }
+  function markPlaybackPainted(view, revision) {
+    const data = activePlaybackData(view);
+    if (!data) return;
+    data.paintedPosition = data.samplePosition;
+    data.paintLayout = revision;
+  }
+  function setPlaybackAllTimeState(view, records) {
+    const data = activePlaybackData(view);
+    if (!data) return false;
+    data.allTimeState = copyPlaybackData(records);
+    return true;
+  }
+
   // src/live-session.js
   var LIVE_SESSION_FIELDS = Object.freeze(["users", "roomTotal", "previousUserCount", "previousRoomTotal", "previousCounts", "hasTrendBaseline", "lastAcceptedAcquisition", "restoredDisplayFrame", "history", "pendingHistoryGap", "roomTotalHigh", "roomTotalHighTime", "tierHighTimes", "withTokensHighTime", "totalHighTime", "anonHighTime", "femaleTransHighTime", "sessionStartedAt", "sessionStartEstimated", "sessionHighs", "newHighTiers", "trackingStartTime", "isPaused", "isStopped", "stoppedAt", "stopReason", "broadcasterAbsence", "absencePausedAt", "absenceOverrideActive", "pausedElapsedTime", "isAutoRefreshOn"]);
   var liveSessionState;
@@ -1006,6 +1158,111 @@ underlying system, so should run in the browser, Node, or Plask.
     state.isPaused = true;
     state.pendingHistoryGap = false;
     return true;
+  }
+
+  // src/runtime.js
+  var runtime = {};
+
+  // src/history-data.js
+  function getChartTimes(times) {
+    var cached = runtime.chartTimeCache.get(times);
+    var last = times.length ? times[times.length - 1] : 0;
+    if (cached && cached.length === times.length && cached.last === last && cached.first === times[0]) return cached.axis;
+    var axis = [];
+    times.forEach(function(time, i) {
+      axis.push(i ? Math.max(axis[i - 1], time) : time);
+    });
+    runtime.chartTimeCache.set(times, { length: times.length, first: times[0], last, axis });
+    return axis;
+  }
+  function getHistoryBreaks(data) {
+    if (data.breaks && data.breaks.length === data.timestamps.length) return data.breaks;
+    var times = getChartTimes(data.timestamps), intervals = [];
+    for (var i = 1; i < times.length; i++) if (times[i] > times[i - 1]) intervals.push(times[i] - times[i - 1]);
+    intervals.sort(function(a, b) {
+      return a - b;
+    });
+    var typical = intervals.length ? intervals[Math.floor((intervals.length - 1) / 2)] : 6e4;
+    var threshold = Math.max(12e4, typical * 2 + runtime.API_TIMEOUT_MS);
+    return times.map(function(time, i2) {
+      return i2 > 0 && time - times[i2 - 1] > threshold;
+    });
+  }
+
+  // src/playback-data.js
+  function createPlaybackSnapshot(sourceHistory) {
+    var copiedHistory = { timestamps: sourceHistory.timestamps.slice(), breaks: getHistoryBreaks(sourceHistory).slice() };
+    var timeline = [];
+    var highs = { roomTotal: [] };
+    var firstTimestamp = copiedHistory.timestamps.length ? copiedHistory.timestamps[0] : 0;
+    runtime.STORAGE_HISTORY_SERIES.forEach(function(key) {
+      copiedHistory[key] = sourceHistory[key].slice();
+      highs[key] = [];
+    });
+    copiedHistory.timestamps.forEach(function(timestamp, index) {
+      timeline.push(Math.max(index ? timeline[index - 1] : 0, timestamp - firstTimestamp));
+      runtime.STORAGE_HISTORY_SERIES.forEach(function(key) {
+        highs[key].push(Math.max(index ? highs[key][index - 1] : 0, copiedHistory[key][index]));
+      });
+      var total = copiedHistory.total[index] + copiedHistory.anonymous[index];
+      highs.roomTotal.push(Math.max(index ? highs.roomTotal[index - 1] : 0, total));
+    });
+    var durationMs = timeline.length ? timeline[timeline.length - 1] : 0;
+    return {
+      history: copiedHistory,
+      timeline,
+      highs,
+      // Recording gaps affect the chart's time axis, not how long Replay
+      // waits for its next sample. Keep one second per step, capped at 30s.
+      durationMs,
+      replayDurationMs: Math.min(3e4, Math.max(0, timeline.length - 1) * 1e3)
+    };
+  }
+  function getPlaybackSampleIndex(snapshot, positionMs, exactIndex) {
+    if (!snapshot || !snapshot.timeline.length) return -1;
+    var position = Number(positionMs);
+    position = Number.isFinite(position) ? Math.max(0, Math.min(snapshot.durationMs, position)) : 0;
+    var low = 0;
+    var high = snapshot.timeline.length;
+    while (low < high) {
+      var middle = Math.floor((low + high) / 2);
+      if (snapshot.timeline[middle] <= position) low = middle + 1;
+      else high = middle;
+    }
+    return Number.isInteger(exactIndex) ? Math.max(0, Math.min(snapshot.timeline.length - 1, exactIndex)) : Math.max(0, low - 1);
+  }
+  function getPlaybackFrame(snapshot, positionMs, exactIndex) {
+    var index = getPlaybackSampleIndex(snapshot, positionMs, exactIndex);
+    if (index < 0) return null;
+    var frameHistory = snapshot.history;
+    var frameHighs = {};
+    var counts = {};
+    var playbackNewHighTiers = {};
+    runtime.STORAGE_HISTORY_SERIES.forEach(function(key) {
+      frameHighs[key] = snapshot.highs[key][index];
+      var count = snapshot.history[key][index];
+      if (Object.prototype.hasOwnProperty.call(runtime.TIERS, key)) counts[key] = count;
+      if (count > 0 && count >= snapshot.highs[key][index]) {
+        playbackNewHighTiers[key] = true;
+      }
+    });
+    frameHighs.roomTotal = snapshot.highs.roomTotal[index];
+    var total = snapshot.history.total[index];
+    var anonymousCount = snapshot.history.anonymous[index];
+    return {
+      counts,
+      total,
+      withTokens: snapshot.history.withTokens[index],
+      anonymousCount,
+      fullRoomTotal: total + anonymousCount,
+      roomTotalHigh: frameHighs.roomTotal,
+      history: frameHistory,
+      historyEndIndex: index,
+      highs: frameHighs,
+      index,
+      timestamp: snapshot.history.timestamps[index],
+      playbackNewHighTiers
+    };
   }
 
   // src/history.js
@@ -2819,105 +3076,17 @@ underlying system, so should run in the browser, Node, or Plask.
   }
 
   // src/replay.js
-  function createPlaybackSnapshot(sourceHistory) {
-    var copiedHistory = { timestamps: sourceHistory.timestamps.slice(), breaks: getHistoryBreaks(sourceHistory).slice() };
-    var timeline = [];
-    var highs = { roomTotal: [] };
-    var firstTimestamp = copiedHistory.timestamps.length ? copiedHistory.timestamps[0] : 0;
-    runtime.STORAGE_HISTORY_SERIES.forEach(function(key) {
-      copiedHistory[key] = sourceHistory[key].slice();
-      highs[key] = [];
-    });
-    copiedHistory.timestamps.forEach(function(timestamp, index) {
-      timeline.push(Math.max(index ? timeline[index - 1] : 0, timestamp - firstTimestamp));
-      runtime.STORAGE_HISTORY_SERIES.forEach(function(key) {
-        highs[key].push(Math.max(index ? highs[key][index - 1] : 0, copiedHistory[key][index]));
-      });
-      var total = copiedHistory.total[index] + copiedHistory.anonymous[index];
-      highs.roomTotal.push(Math.max(index ? highs.roomTotal[index - 1] : 0, total));
-    });
-    var durationMs = timeline.length ? timeline[timeline.length - 1] : 0;
-    return {
-      history: copiedHistory,
-      timeline,
-      highs,
-      // Recording gaps affect the chart's time axis, not how long Replay
-      // waits for its next sample. Keep one second per step, capped at 30s.
-      durationMs,
-      replayDurationMs: Math.min(3e4, Math.max(0, timeline.length - 1) * 1e3)
-    };
-  }
   function setPlaybackSamplePosition(state, position) {
-    var last = state.snapshot.timeline.length - 1;
-    state.samplePosition = Math.max(0, Math.min(last, position));
-    if (Math.abs(state.samplePosition - Math.round(state.samplePosition)) < 1e-9) {
-      state.samplePosition = Math.round(state.samplePosition);
-    }
-    state.stepIndex = Math.floor(state.samplePosition);
-    var time = state.snapshot.timeline[state.stepIndex];
-    var nextTime = state.snapshot.timeline[Math.min(last, state.stepIndex + 1)];
-    state.positionMs = time + (nextTime - time) * (state.samplePosition - state.stepIndex);
-  }
-  function getPlaybackSampleIndex(snapshot, positionMs, exactIndex) {
-    if (!snapshot || !snapshot.timeline.length) return -1;
-    var position = Number(positionMs);
-    position = Number.isFinite(position) ? Math.max(0, Math.min(snapshot.durationMs, position)) : 0;
-    var low = 0;
-    var high = snapshot.timeline.length;
-    while (low < high) {
-      var middle = Math.floor((low + high) / 2);
-      if (snapshot.timeline[middle] <= position) low = middle + 1;
-      else high = middle;
-    }
-    return Number.isInteger(exactIndex) ? Math.max(0, Math.min(snapshot.timeline.length - 1, exactIndex)) : Math.max(0, low - 1);
-  }
-  function getPlaybackFrame(snapshot, positionMs, exactIndex) {
-    var index = getPlaybackSampleIndex(snapshot, positionMs, exactIndex);
-    if (index < 0) return null;
-    var frameHistory = snapshot.history;
-    var frameHighs = {};
-    var counts = {};
-    var playbackNewHighTiers = {};
-    runtime.STORAGE_HISTORY_SERIES.forEach(function(key) {
-      frameHighs[key] = snapshot.highs[key][index];
-      var count = snapshot.history[key][index];
-      if (hasStorageField(runtime.TIERS, key)) counts[key] = count;
-      if (count > 0 && count >= snapshot.highs[key][index]) {
-        playbackNewHighTiers[key] = true;
-      }
-    });
-    frameHighs.roomTotal = snapshot.highs.roomTotal[index];
-    var total = snapshot.history.total[index];
-    var anonymousCount = snapshot.history.anonymous[index];
-    return {
-      counts,
-      total,
-      withTokens: snapshot.history.withTokens[index],
-      anonymousCount,
-      fullRoomTotal: total + anonymousCount,
-      roomTotalHigh: frameHighs.roomTotal,
-      history: frameHistory,
-      historyEndIndex: index,
-      highs: frameHighs,
-      index,
-      timestamp: snapshot.history.timestamps[index],
-      playbackNewHighTiers
-    };
+    return moveOwnedPlayback(state, position);
   }
   function isPlaybackCurrent(state) {
     return !!state && state === runtime.playback && runtime.presentationMode === "PLAYBACK" && state.url === location.href && runtime.lastUrl === location.href && state.generation === runtime.initGuard && state.key === runtime.activeSessionStorageKey && (state.imported || state.key === getStorageKey(getModelName()));
   }
   function stopPlaybackClock(state) {
-    if (state && state.timer !== null) {
-      clearInterval(state.timer);
-      state.timer = null;
-    }
+    stopOwnedPlaybackClock(state);
   }
   function startPlaybackClock(state) {
-    if (!state.playing || state.timer !== null) return;
-    state.timer = setInterval(function() {
-      if (runtime.playback === state) tickPlayback(state);
-    }, 50);
+    startOwnedPlaybackClock(state, tickPlayback);
   }
   function paintPlayback(state) {
     if (!isPlaybackCurrent(state)) return false;
@@ -2925,14 +3094,12 @@ underlying system, so should run in the browser, Node, or Plask.
       var index = getPlaybackSampleIndex(state.snapshot, state.positionMs, state.stepIndex);
       if (state.paintedPosition !== state.samplePosition || state.paintLayout !== runtime.chartLayoutRevision) {
         renderPlaybackFrame(getPlaybackFrame(state.snapshot, state.positionMs, state.stepIndex), state.samplePosition - index);
-        state.paintedPosition = state.samplePosition;
-        state.paintLayout = runtime.chartLayoutRevision;
+        markPlaybackPainted(state, runtime.chartLayoutRevision);
       }
       updatePlaybackControls();
       return true;
     } catch (error) {
-      state.playing = false;
-      stopPlaybackClock(state);
+      pauseOwnedPlayback(state);
       log("Playback paused after a presentation error: " + error.message);
       try {
         updatePlaybackControls();
@@ -2951,38 +3118,29 @@ underlying system, so should run in the browser, Node, or Plask.
     try {
       var archive = captureSessionFile();
       var snapshot = createPlaybackSnapshot(archive.session.history);
-      runtime.playback = {
+      openOwnedPlayback({
         url: location.href,
         key: runtime.activeSessionStorageKey,
         generation: runtime.initGuard,
         archive,
         snapshot,
-        positionMs: 0,
-        samplePosition: 0,
-        stepIndex: 0,
-        allTimeState: readAllTimeHighs(model),
-        speed: 1,
-        lastTickAt: Date.now(),
-        playing: snapshot.replayDurationMs > 0,
-        timer: null
-      };
+        allTimeState: readAllTimeHighs(model)
+      }, Date.now(), true);
       cancelHighPulses();
-      runtime.presentationMode = "PLAYBACK";
       setPlaybackLayout(true);
       if (!paintPlayback(runtime.playback)) return false;
       startPlaybackClock(runtime.playback);
       return true;
     } catch (error) {
       if (runtime.playback) {
-        runtime.playback.playing = false;
-        stopPlaybackClock(runtime.playback);
+        pauseOwnedPlayback(runtime.playback);
       }
       log("Could not start playback: " + error.message);
       return false;
     }
   }
   function leavePlayback(renderLive) {
-    runtime.sessionFileLoadGeneration++;
+    nextSessionFileRequest();
     setAllTimeActionStatus("");
     hideChartTooltip();
     cancelHighPulses();
@@ -2990,9 +3148,7 @@ underlying system, so should run in the browser, Node, or Plask.
     if (typeof renderLive === "undefined") renderLive = true;
     if (!runtime.playback && runtime.presentationMode === "LIVE") return false;
     var canRenderLive = renderLive && isPlaybackCurrent(runtime.playback);
-    stopPlaybackClock(runtime.playback);
-    runtime.playback = null;
-    runtime.presentationMode = "LIVE";
+    closeOwnedPlayback();
     try {
       setPlaybackLayout(false);
       if (canRenderLive) repaintLivePresentation();
@@ -3009,17 +3165,7 @@ underlying system, so should run in the browser, Node, or Plask.
       if (state) leavePlayback(false);
       return false;
     }
-    if (!state.playing) return false;
-    var now = Date.now();
-    var elapsed = Math.max(0, now - state.lastTickAt);
-    state.lastTickAt = now;
-    var last = state.snapshot.timeline.length - 1;
-    var rate = state.snapshot.replayDurationMs > 0 ? last / state.snapshot.replayDurationMs : 0;
-    setPlaybackSamplePosition(state, state.samplePosition + elapsed * rate * state.speed);
-    if (state.samplePosition >= last) {
-      state.playing = false;
-      stopPlaybackClock(state);
-    }
+    if (!advanceOwnedPlayback(state, Date.now())) return false;
     return paintPlayback(state);
   }
   function togglePlayback() {
@@ -3031,12 +3177,9 @@ underlying system, so should run in the browser, Node, or Plask.
     if (!state.snapshot.replayDurationMs) return false;
     if (state.playing) {
       tickPlayback(state);
-      state.playing = false;
-      stopPlaybackClock(state);
+      pauseOwnedPlayback(state);
     } else {
-      if (state.samplePosition >= state.snapshot.timeline.length - 1) setPlaybackSamplePosition(state, 0);
-      state.playing = true;
-      state.lastTickAt = Date.now();
+      resumeOwnedPlayback(state, Date.now());
     }
     if (!paintPlayback(state)) return false;
     startPlaybackClock(state);
@@ -3050,10 +3193,7 @@ underlying system, so should run in the browser, Node, or Plask.
     }
     var position = Number(samplePosition);
     if (!Number.isFinite(position)) return false;
-    state.playing = false;
-    stopPlaybackClock(state);
-    setPlaybackSamplePosition(state, position);
-    state.lastTickAt = Date.now();
+    seekOwnedPlayback(state, position, Date.now());
     return paintPlayback(state);
   }
   function stepPlayback(direction) {
@@ -3061,10 +3201,7 @@ underlying system, so should run in the browser, Node, or Plask.
     if (!isPlaybackCurrent(state)) return false;
     var index = getPlaybackSampleIndex(state.snapshot, state.positionMs, state.stepIndex);
     if (index < 0) return false;
-    state.playing = false;
-    stopPlaybackClock(state);
-    setPlaybackSamplePosition(state, index + direction);
-    state.lastTickAt = Date.now();
+    seekOwnedPlayback(state, index + direction, Date.now());
     return paintPlayback(state);
   }
   function setPlaybackSpeed(value) {
@@ -3076,8 +3213,7 @@ underlying system, so should run in the browser, Node, or Plask.
     var speed = Number(value);
     if ([0.5, 1, 2].indexOf(speed) === -1) return false;
     if (state.playing) tickPlayback(state);
-    state.speed = speed;
-    state.lastTickAt = Date.now();
+    changeOwnedPlaybackSpeed(state, speed, Date.now());
     return paintPlayback(state);
   }
   function updateReplayAvailability() {
@@ -4216,7 +4352,7 @@ underlying system, so should run in the browser, Node, or Plask.
           if (!confirm("Restore the selected backup data?\n\nATH will be merged, library recordings added or updated with fuller versions, and selected saved preferences replaced. Your live session is not replaced.")) return;
           const result = restoreTierScopeBackup(pendingBackup, { highs: highs.checked, preferences: preferences.checked, library: recordings.checked });
           library = null;
-          if (runtime.playback) runtime.playback.allTimeState = readAllTimeHighs(displayedHighRoom());
+          if (runtime.playback) setPlaybackAllTimeState(runtime.playback, readAllTimeHighs(displayedHighRoom()));
           repaintHighMode();
           tell("Restored: " + result.rooms + " room ATH updates, " + result.recordings + " new recordings, " + result.updatedRecordings + " updated recordings, " + result.preferences + " preferences." + (result.preferences ? "\nRefresh your room tabs when convenient to apply preferences." : ""));
         }, "tools-backup-restore");
@@ -4397,30 +4533,22 @@ underlying system, so should run in the browser, Node, or Plask.
     var archive = validateSessionFile(file);
     leavePlayback(false);
     if (runtime.isMinimized) toggleView();
-    runtime.playback = {
+    openOwnedPlayback({
       url: location.href,
       key: runtime.activeSessionStorageKey,
       generation: runtime.initGuard,
       imported: true,
       archive,
       snapshot: createPlaybackSnapshot(archive.session.history),
-      allTimeState: readAllTimeHighs(archive.room),
-      positionMs: 0,
-      samplePosition: 0,
-      stepIndex: 0,
-      speed: 1,
-      lastTickAt: Date.now(),
-      playing: false,
-      timer: null
-    };
+      allTimeState: readAllTimeHighs(archive.room)
+    }, Date.now(), false);
     cancelHighPulses();
-    runtime.presentationMode = "PLAYBACK";
     setPlaybackLayout(true);
     return paintPlayback(runtime.playback);
   }
   async function readSessionFile(file) {
     if (!file) return false;
-    var request = ++runtime.sessionFileLoadGeneration, url = location.href, generation = runtime.initGuard;
+    var request = nextSessionFileRequest(), url = location.href, generation = runtime.initGuard;
     function current() {
       return request === runtime.sessionFileLoadGeneration && url === location.href && generation === runtime.initGuard;
     }
@@ -4675,7 +4803,7 @@ underlying system, so should run in the browser, Node, or Plask.
   function toggleHighMode() {
     runtime.highMode = runtime.highMode === "sh" ? "ath" : "sh";
     var state = readAllTimeHighs(displayedHighRoom());
-    if (isPlaybackCurrent(runtime.playback)) runtime.playback.allTimeState = state;
+    if (isPlaybackCurrent(runtime.playback)) setPlaybackAllTimeState(runtime.playback, state);
     try {
       GM_setValue(runtime.HIGH_MODE_KEY, runtime.highMode);
     } catch (error) {
@@ -4697,7 +4825,7 @@ underlying system, so should run in the browser, Node, or Plask.
     try {
       var archive = validateSessionFile(runtime.playback.archive);
       var result = storeAllTimeHighs(archive.room, sessionAllTimeHighs(archive.session, "file"));
-      runtime.playback.allTimeState = result.state;
+      setPlaybackAllTimeState(runtime.playback, result.state);
       repaintHighMode();
       setAllTimeActionStatus(
         result.saved ? (result.changed ? "Records updated for " : "No higher records in this file for ") + archive.room + "." : result.state.error || "Records changed in another tab. Try adding this file again.",
@@ -4724,7 +4852,7 @@ underlying system, so should run in the browser, Node, or Plask.
         }
       });
       var state = readAllTimeHighs(room);
-      if (isPlaybackCurrent(runtime.playback)) runtime.playback.allTimeState = state;
+      if (isPlaybackCurrent(runtime.playback)) setPlaybackAllTimeState(runtime.playback, state);
       repaintHighMode();
       setAllTimeActionStatus("All-time highs cleared for " + room + ".");
     } catch (error) {
@@ -5885,30 +6013,6 @@ underlying system, so should run in the browser, Node, or Plask.
   }
 
   // src/charts.js
-  function getChartTimes(times) {
-    var cached = runtime.chartTimeCache.get(times);
-    var last = times.length ? times[times.length - 1] : 0;
-    if (cached && cached.length === times.length && cached.last === last && cached.first === times[0]) return cached.axis;
-    var axis = [];
-    times.forEach(function(time, i) {
-      axis.push(i ? Math.max(axis[i - 1], time) : time);
-    });
-    runtime.chartTimeCache.set(times, { length: times.length, first: times[0], last, axis });
-    return axis;
-  }
-  function getHistoryBreaks(data) {
-    if (data.breaks && data.breaks.length === data.timestamps.length) return data.breaks;
-    var times = getChartTimes(data.timestamps), intervals = [];
-    for (var i = 1; i < times.length; i++) if (times[i] > times[i - 1]) intervals.push(times[i] - times[i - 1]);
-    intervals.sort(function(a, b) {
-      return a - b;
-    });
-    var typical = intervals.length ? intervals[Math.floor((intervals.length - 1) / 2)] : 6e4;
-    var threshold = Math.max(12e4, typical * 2 + runtime.API_TIMEOUT_MS);
-    return times.map(function(time, i2) {
-      return i2 > 0 && time - times[i2 - 1] > threshold;
-    });
-  }
   function buildChartPlot(values, times, breaks, width, lastIndex, windowMs, replayProgress) {
     var end = Math.min(values.length, times.length) - 1;
     if (Number.isInteger(lastIndex)) end = Math.min(end, lastIndex);
@@ -6601,8 +6705,7 @@ underlying system, so should run in the browser, Node, or Plask.
     }
   }
 
-  // src/runtime.js
-  var runtime = {};
+  // src/bootstrap.js
   function initializeRuntime() {
     runtime.TIERSCOPE_VERSION = "3.7.0";
     runtime.API_TIMEOUT_MS = 1e4;
@@ -6946,6 +7049,7 @@ underlying system, so should run in the browser, Node, or Plask.
     runtime.panelBackgroundPercent = 95;
     runtime.lastUrl = location.href;
     initializeLiveSession(runtime);
+    initializePlaybackState(runtime, { start: (tick) => setInterval(tick, 50), stop: (handle) => clearInterval(handle) });
     runtime.urlCheckInterval = setInterval(checkUrlChange, 500);
     window.addEventListener("beforeunload", function() {
       cancelGifExport();

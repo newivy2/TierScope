@@ -15,6 +15,24 @@ const modules = fs.readdirSync(path.join(root, 'src')).filter(file => file.endsW
 // Deliberate fixes and features have behavioral coverage; keep the original baseline
 // untouched so every other function still proves the extraction preserved it.
 const reviewedChanges = new Set([
+  // Playback owner operations: playback-ownership.test.cjs and existing replay/files/ATH browser suites.
+  'openSessionReplay',
+  'readSessionFile',
+  'toggleHighMode',
+  'addFileToAllTimeHighs',
+  'clearAllTimeHighs',
+  'getPlaybackFrame',
+  'setPlaybackSamplePosition',
+  'stopPlaybackClock',
+  'startPlaybackClock',
+  'paintPlayback',
+  'enterPlayback',
+  'leavePlayback',
+  'tickPlayback',
+  'togglePlayback',
+  'scrubPlayback',
+  'stepPlayback',
+  'setPlaybackSpeed',
   'performScanThenReturn', // durable commit boundary: review-regressions.test.cjs
   'log', // throwing console: review-regressions.test.cjs
   'acquireDOMSnapshot', // tab restoration: browser.cjs
@@ -41,7 +59,7 @@ const reviewedChanges = new Set([
   'pauseAutoRefresh', 'toggleAutoRefresh', 'updateDisplay', 'checkBroadcasterReturn',
   'acceptRoomSnapshot', 'init', 'checkUrlChange', 'restoreSessionState', 'loadSession',
 ]);
-const featureModules = new Set(['live-session.js', 'diagnostics.js', 'room-context.js', 'backup.js', 'data-io.js', 'session-analysis.js', 'session-health.js', 'session-library.js', 'session-tools.js']);
+const featureModules = new Set(['playback-state.js', 'live-session.js', 'diagnostics.js', 'room-context.js', 'backup.js', 'data-io.js', 'session-analysis.js', 'session-health.js', 'session-library.js', 'session-tools.js']);
 const addedFunctions = new Set(['getSessionSamplePolicy']); // shared history-gap policy; session/ownership tests
 
 test('unchanged extracted functions preserve 3.4.0; reviewed changes have behavior coverage', () => {
@@ -63,7 +81,7 @@ test('unchanged extracted functions preserve 3.4.0; reviewed changes have behavi
 });
 
 test('runtime initialization preserves preference loading and startup order', () => {
-  const runtime = modules.find(m => m.file === 'runtime.js');
+  const runtime = modules.find(m => m.file === 'bootstrap.js');
   const fn = runtime.ast.body.find(n => n.declaration?.id?.name === 'initializeRuntime').declaration;
   const body = fn.body.body;
   const bindings = body.filter(n => n.expression?.callee?.name === 'initializeLiveSession');
@@ -71,9 +89,12 @@ test('runtime initialization preserves preference loading and startup order', ()
   assert.deepEqual(bindings[0].expression.arguments.map(n => n.name), ['runtime']);
   const index = body.indexOf(bindings[0]);
   assert.equal(body[index - 1].expression.left.property.name, 'lastUrl');
-  assert.equal(body[index + 1].expression.left.property.name, 'urlCheckInterval');
+  const playbackBinding = body[index + 1];
+  assert.equal(playbackBinding.expression.callee.name, 'initializePlaybackState');
+  assert.equal(playbackBinding.expression.arguments[0].name, 'runtime');
+  assert.equal(body[index + 2].expression.left.property.name, 'urlCheckInterval');
   // Preserve every original default, preference read and effect in order.
-  assert.equal(hash(body.filter(n => n !== bindings[0]), baseline.stateNames), baseline.initialization);
+  assert.equal(hash(body.filter(n => n !== bindings[0] && n !== playbackBinding), baseline.stateNames), baseline.initialization);
 });
 
 test('module dependencies are explicit and the built script preserves userscript permissions', () => {

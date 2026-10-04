@@ -4,7 +4,7 @@ const eslintScope = require('eslint-scope');
 // A source guard for common direct/aliased writes, not a general effect system.
 // Copies (slice/map/spread) remain writable. New helpers receiving shared objects
 // still need review; runtime getters do not deeply freeze their returned values.
-function sessionWrites(source, fields) {
+function sessionWrites(source, fields, ownedParameters = new Set()) {
   const ast = acorn.parse(source, {ecmaVersion: 2022, sourceType: 'module', ranges: true});
   const nodes = [], variables = new Map(), aliases = new Map();
   function visit(node) {
@@ -28,6 +28,7 @@ function sessionWrites(source, fields) {
     if (!node) return null;
     if (node.type === 'Identifier') {
       if (node.name === 'runtime') return 'runtime';
+      if (ownedParameters.has(node.name)) return 'session';
       const alias = aliases.get(variables.get(node));
       return alias && node.start >= alias.start ? alias.value : null;
     }

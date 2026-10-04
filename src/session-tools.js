@@ -1,3 +1,4 @@
+import { setPlaybackAllTimeState } from './playback-state.js';
 import { createTierScopeBackup, restoreTierScopeBackup, validateTierScopeBackup, BACKUP_MAX_BYTES } from './backup.js';
 import { downloadDataFile, readDataFile } from './data-io.js';
 import { captureSessionFile, openSessionReplay, validateSessionFile } from './files.js';
@@ -393,7 +394,7 @@ export function openSessionTools(focusTarget) {
                 if (!confirm('Restore the selected backup data?\n\nATH will be merged, library recordings added or updated with fuller versions, and selected saved preferences replaced. Your live session is not replaced.')) return;
                 const result = restoreTierScopeBackup(pendingBackup, { highs: highs.checked, preferences: preferences.checked, library: recordings.checked });
                 library = null;
-                if (runtime.playback) runtime.playback.allTimeState = readAllTimeHighs(displayedHighRoom());
+                if (runtime.playback) setPlaybackAllTimeState(runtime.playback, readAllTimeHighs(displayedHighRoom()));
                 repaintHighMode();
                 tell('Restored: ' + result.rooms + ' room ATH updates, ' + result.recordings + ' new recordings, ' + result.updatedRecordings + ' updated recordings, ' + result.preferences + ' preferences.' + (result.preferences ? '\nRefresh your room tabs when convenient to apply preferences.' : ''));
             }, 'tools-backup-restore');
