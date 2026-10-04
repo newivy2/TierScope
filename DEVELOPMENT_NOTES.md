@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **3.12.0**. This release improves large-library browsing while preserving the panel, recordings, exports and retention limits. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation links, see the [README](readme.md).
+Detailed reference for **3.13.0**. This release adds model history to Library folders, preserving the panel, recordings, exports and retention limits. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation links, see the [README](readme.md).
 
 ## Contents
 
@@ -269,6 +269,16 @@ The library opens with alphabetically ordered **model folders**, each showing it
 
 While Library is open, unchanged recordings are validated once and reused across its tabs. **Refresh**, switching tabs and reopening still check stored values, so additions, changes and deletions from another tab are visible. An unreadable record never falls back to its cached copy. Closing Library discards the cache; reopening performs a fresh read. This does not change library capacity, automatic retention, or file contents.
 
+### Model history
+
+Open a model folder and choose **History overview**. The chart comes first below its controls. Each saved recording has a circle for its time-weighted average and a diamond for its peak within retained samples. Choose any audience/tier metric and show all recordings or the latest 10 or 30. Dates and spacing use the **first retained sample**, not the export date, an estimated session start, or evenly paced Replay time. Separate recordings on the same day remain separate; points are not joined across unrecorded time.
+
+The overview shows the recording count, average, peak, token-holder share of registered viewers, covered time and excluded gaps for the selected set. Averages weight the covered intervals across recordings; token share divides token-holder viewer-time by registered-viewer time. Time between separate recordings is not counted as a recording gap. Durations are summed across recordings; overlapping time ranges show an explicit notice because they can count a period more than once. Library deduplication still combines compatible copies of the same session, but conflicting recordings remain distinct.
+
+Select a chart point, a table entry, or a recording from the dropdown. **Summary** opens its detailed statistics; **Replay** keeps the overview open; **Compare with previous** compares it with the preceding recording in the selected chronological set. The earliest recording has no previous comparison. A single-sample or gap-only recording still shows its peak, but has no time-weighted average or token share. Full-session highs are listed separately in the selected recording card and can predate retained history. Overview peaks are not ATH, and the view never writes ATH or adds recordings automatically.
+
+The list shows 50 recordings at a time with **Show more**; the chart and totals include the entire selected set. The metric shares the existing remembered analysis preference; range and recording selection last only while Library is open. **Refresh** checks other tabs' edits, additions, deletions and unreadable records. Unreadable records are excluded with a notice and remain available for recovery from Recordings. **‹ Recordings** returns to the model folder; the Recordings tab also returns to library browsing.
+
 ### Summary and comparison
 
 Choose the current/replayed snapshot or a library recording. **Refresh current / replayed snapshot** captures newer data without saving it to the library. The individual **Summary** starts with the selected metric's chart below the controls, matching Compare. The audience overview follows: room audience (registered + anonymous), registered viewers, viewers with tokens and anonymous viewers, each with a time-weighted average, peak within retained history and full-session high. Hover a recording peak for its first recorded time. Audience proportions show token holders as a share of registered viewers and the whole room, plus the anonymous share of the whole room.
@@ -461,6 +471,8 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
+| **3.13.0** | Release model history overviews inside Library folders, with per-recording average/peak charts, covered-time statistics, token-holder proportions and direct Summary/Replay/Compare actions. Preserve the reviewed beta behavior and existing saved data. |
+| **3.13.0-beta.1** | Add model-folder history overviews with per-recording average/peak charts, time-weighted totals, token-holder shares, coverage/gaps, recording windows and Summary/Replay/Compare actions. Preserve live data, ATH, library formats and explicit saving. |
 | **3.12.0** | Speed up repeated Library reads with bounded, per-opening reuse of validated records; preserve refresh and cross-tab changes, avoid repeated source-label formatting, and measure large-library performance and memory. |
 | **3.11.0** | Retain committed samples through drawing failures and retry presentation independently; add explicit healthy-recording partial backups with omission notices and separate raw recovery downloads; remember analysis metric, thresholds and shared-length choices, including in backups. |
 | **3.10.1** | Keep the main panel above Library in both attached and narrow-window sheet layouts, so overlap cannot hide Scope or intercept its controls. Preserve positioning, scale and the sheet breakpoint. |

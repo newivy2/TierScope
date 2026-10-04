@@ -3,7 +3,9 @@
 TierScope is a free, open-source userscript that charts how a Chaturbate room’s audience changes over time. 
 
 ---
-**Current stable release: 3.12.0** · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.12.0)
+**Current stable release: 3.13.0** · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.13.0)
+
+Open **Library → a model folder → History overview** to review that model’s saved recordings over time. Each saved recording has its own average and peak markers, with covered-time statistics and shortcuts to Summary, Replay and Compare. [Dark preview](docs/previews/model-history-dark.png) · [Bright preview](docs/previews/model-history-bright.png).
 ---
 
 Open the **Library** to unfold a matching left-hand page next to the chart. Save, export, open a saved file, and browse recordings in model folders. Session summaries and comparisons are available too. Visual bugs corrected. [Build and source guide](BUILDING.md).
@@ -39,6 +41,8 @@ Charts use periodic room-data samples. Session history is stored locally through
 - **Session library** — Choose **Library → Keep in library** from live Controls or Replay. Recordings are organized into model folders. Keeping a fuller version of the same session updates its entry and preserves your custom name. Search, rename, replay, download or delete recordings; the library holds up to 500 recordings / 25 MB.
 
 - **Summaries and comparison** — See audience averages and peaks together, token-holder proportions, coverage and gaps. Choose several thresholds to see time at or above each count and its percentage of covered time. Statistics use real timestamps and exclude recording gaps. Compare two recordings from their first retained samples, optionally matching their shared duration.
+
+- **Model history** — Review one model’s saved recordings over time, with one point per recording for the selected metric’s average and peak. View all recordings or the latest 10 or 30, then select one to inspect, replay, or compare with the previous recording.
 
 - **Backups** — Export ATH for every room and saved preferences, optionally including the library. 
 

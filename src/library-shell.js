@@ -46,6 +46,14 @@ export function libraryShell() {
 #tierscope-session-tools caption{text-align:left;font-weight:bold;padding:7px 0;color:var(--panel-secondary)}
 #tierscope-session-tools .tools-scroll{overflow-x:auto}
 #tierscope-session-tools canvas{display:block;width:100%;height:200px}
+#tierscope-session-tools .tools-history-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin:8px 0}
+#tierscope-session-tools .tools-history-stats>div{padding:7px;border:1px solid var(--panel-divider);border-radius:4px;background:rgba(var(--panel-row-rgb),.035)}
+#tierscope-session-tools .tools-history-stats dt{font-size:.9em;color:var(--panel-muted)}
+#tierscope-session-tools .tools-history-stats dd{margin:3px 0 0;font-weight:bold;color:var(--panel-secondary);overflow-wrap:anywhere}
+#tools-history-recording{width:100%}
+#tools-history-table button{max-width:155px;text-align:left;overflow-wrap:anywhere}
+#tools-history-table button[aria-pressed=true]{color:var(--panel-accent);border-color:var(--panel-accent)}
+#tools-history-chart{cursor:crosshair}
 #tierscope-session-tools label{display:inline-flex;gap:5px;align-items:center;flex-wrap:wrap;min-width:0;max-width:100%}
 #tierscope-session-tools select{width:auto;max-width:100%}
 #tools-source-a,#tools-source-b{width:100%}

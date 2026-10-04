@@ -7,6 +7,8 @@ import { readAllTimeHighs, sessionAllTimeHighs, storeAllTimeHighs } from './high
 import { repaintHighMode } from './highs.js';
 import { attachLibraryDock } from './library-dock.js';
 import { libraryShell } from './library-shell.js';
+import { createModelHistoryReader } from './model-history.js';
+import { renderModelHistoryView } from './model-history-view.js';
 import { isPlaybackCurrent } from './playback-data.js';
 import { setPlaybackAllTimeState } from './playback-state.js';
 import { getStorageKey } from './record-validation.js';
@@ -54,6 +56,8 @@ export function openSessionTools(focusTarget) {
     document.body.appendChild(dialog);
     let currentArchive = null, library = null, tab = 'library', fileRequest = 0, chartObserver = null;
     const libraryReader = createLibraryReader();
+    const modelHistoryReader = createModelHistoryReader();
+    let historyLimit = Infinity, historySelected = '';
     let optionsLibrary = null, optionsArchive = null, options = [];
     const savedAnalysis = readAnalysisPreferences();
     let {metric, threshold, sharedLength, summaryThresholds} = savedAnalysis.preferences;
@@ -78,7 +82,7 @@ export function openSessionTools(focusTarget) {
         tell('Recovery download requested. Originals were kept. This file is for manual recovery, not normal backup restore.' +
             (missing ? ' ' + missing + ' record(s) could not be exported; the file lists those errors.' : ''), !!missing);
     }
-    function action(fn) { return () => { try { fn(); } catch (error) { tell(error.message, true); } }; }
+    function action(fn) { return (...args) => { try { fn(...args); } catch (error) { tell(error.message, true); } }; }
     function button(parent, text, fn, id) {
         const element = document.createElement('button'); element.type = 'button'; element.textContent = text;
         if (id) element.id = id; element.onclick = action(fn); parent.appendChild(element); return element;
@@ -151,7 +155,7 @@ export function openSessionTools(focusTarget) {
             button.dataset.currentAvailable = String(!!available);
             button.disabled = !available || button.id === 'btn-export-gif' && !!runtime.gifExportJob;
         });
-        if (replaced && tab !== 'library' && tab !== 'backup') render(tab);
+        if (replaced && (tab === 'summary' || tab === 'compare')) render(tab);
     }
     function currentCard() {
         const card = node(content, 'section', undefined, 'tools-current'); card.setAttribute('aria-label', 'Current or replayed recording');
@@ -215,6 +219,9 @@ export function openSessionTools(focusTarget) {
                 (document.getElementById('tools-folder-' + previous) || search).focus();
             }, 'tools-library-all-models');
             node(heading, 'h3', query ? 'Search results — all models' : libraryRoom ? 'Folder: ' + libraryRoom : 'Model folders');
+            if (libraryRoom && !query) button(heading, 'History overview', () => {
+                render('history'); dialog.querySelector('#tools-history-back').focus();
+            }, 'tools-model-history').className = 'tools-primary';
             if (!visible.length) node(list, 'p', state.entries.length ? 'No matching recordings.' : 'Your library is empty. Keep a recording above or import a session file.', 'tools-muted');
             if (browsingFolders) for (const room of visible.slice(0, shown)) {
                 const entries = folders.get(room), row = node(list, 'div', undefined, 'tools-folder');
@@ -312,6 +319,40 @@ export function openSessionTools(focusTarget) {
     }
     const number = value => value === null ? 'Not enough data' : value.toLocaleString(undefined, { maximumFractionDigits: 1 });
     const percent = value => value === null ? 'Not enough data' : number(value) + '%';
+    function renderHistory() {
+        if (!library) readLibrary();
+        const heading = node(content, 'div', undefined, 'tools-actions');
+        button(heading, '‹ Recordings', () => {
+            render('library'); (dialog.querySelector('#tools-model-history') || dialog.querySelector('#tools-library-search')).focus();
+        }, 'tools-history-back');
+        node(heading, 'h3', 'Model history · ' + libraryRoom);
+        const controls = node(content, 'div', undefined, 'tools-actions');
+        const metricLabel = node(controls, 'label', 'Metric '), metricSelect = node(metricLabel, 'select'); metricSelect.id = 'tools-history-metric';
+        for (const [key, name] of Object.entries(ANALYSIS_METRICS)) { const option = node(metricSelect, 'option', name); option.value = key; }
+        metricSelect.value = metric; metricSelect.onchange = () => { rememberAnalysis({metric: metricSelect.value}); render('history'); };
+        const rangeLabel = node(controls, 'label', 'Show '), range = node(rangeLabel, 'select'); range.id = 'tools-history-range';
+        for (const [value, label] of [['Infinity', 'All recordings'], ['30', 'Latest 30'], ['10', 'Latest 10']]) {
+            const option = node(range, 'option', label); option.value = value;
+        }
+        range.value = String(historyLimit); range.onchange = () => { historyLimit = Number(range.value); render('history'); };
+        button(controls, 'Refresh', () => { readLibrary(); render('history'); }, 'tools-history-refresh').title = 'Read the latest saved recordings from this browser';
+        const overview = modelHistoryReader.read(library.entries, libraryRoom, metric, historyLimit);
+        const view = renderModelHistoryView(content, overview, {
+            metricLabel: ANALYSIS_METRICS[metric], duration: formatElapsedTime,
+            selected: historySelected, select: id => { historySelected = id; },
+            summary: action(id => { selectedA = id; render('summary'); }),
+            replay: action(id => {
+                const entry = library.entries.find(entry => entry.id === id);
+                openSessionReplay(entry.archive); observedSignature = ''; refreshCurrent(); tell('Replaying ' + (entry.title || entry.archive.room) + '.');
+            }),
+            compare: (a, b) => { selectedA = a; selectedB = b; render('compare'); }
+        });
+        if (view) {
+            chartDraw = view.draw;
+            if (window.ResizeObserver) { chartObserver = new window.ResizeObserver(view.draw); chartObserver.observe(view.canvas); }
+        }
+        if (library.damaged.length) node(content, 'p', library.damaged.length + ' unreadable library record(s) are excluded. Return to Recordings for recovery options.', 'tools-muted');
+    }
     function audienceOverview(archive) {
         const overview = summarizeAudience(archive), coverage = overview.audience[0];
         node(content, 'h3', 'Audience overview');
@@ -476,10 +517,10 @@ export function openSessionTools(focusTarget) {
         tab = next; fileRequest++; chartDraw = null;
         if (chartObserver) { chartObserver.disconnect(); chartObserver = null; }
         content.replaceChildren(); message.textContent = '';
-        dialog.querySelectorAll('[data-tools-tab]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.toolsTab === tab)));
+        dialog.querySelectorAll('[data-tools-tab]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.toolsTab === (tab === 'history' ? 'library' : tab))));
         try {
-            if (tab === 'library') renderLibrary(); else if (tab === 'backup') renderBackup(); else renderAnalysis(tab === 'compare');
-            if ((tab === 'summary' || tab === 'compare') && analysisPreferenceError) tell(analysisPreferenceError, true);
+            if (tab === 'library') renderLibrary(); else if (tab === 'history') renderHistory(); else if (tab === 'backup') renderBackup(); else renderAnalysis(tab === 'compare');
+            if ((tab === 'summary' || tab === 'compare' || tab === 'history') && analysisPreferenceError) tell(analysisPreferenceError, true);
         } catch (error) { tell(error.message, true); }
         if (focusedId) {
             const target = document.getElementById(focusedId);
@@ -488,7 +529,7 @@ export function openSessionTools(focusTarget) {
     }
     function close() {
         fileRequest++; refreshSessionTools = null;
-        libraryReader.clear(); options = []; optionsLibrary = null; optionsArchive = null; library = null; currentArchive = null;
+        libraryReader.clear(); modelHistoryReader.clear(); options = []; optionsLibrary = null; optionsArchive = null; library = null; currentArchive = null;
         cancelGifExport();
         if (detachDock) detachDock();
         document.removeEventListener('keydown', escape);

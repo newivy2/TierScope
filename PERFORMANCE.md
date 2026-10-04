@@ -87,3 +87,28 @@ The initial CPU profile identified library reading, temporary Blob construction 
 - Action times include JavaScript and a forced layout. They exclude browser paint/compositing, network acquisition and the userscript manager's native storage bridge: the fixture uses an in-memory GM-value store. Actions execute in a deterministic sequence in one task, not as a measurement of user input latency. Four-times CPU throttling is a stress comparison, not a particular slow device.
 
 Reproduce with `npm run test:library-performance`. Set `TIERSCOPE_SOURCE` for a prior generated script, `TIERSCOPE_CPU_THROTTLE=4` for slowdown, and `TIERSCOPE_BENCH_ROUNDS=1` when alternating individual runs. `TIERSCOPE_PROFILE_PATH=/tmp/library-profile` optionally saves profiles; leave it unset for comparable timing runs. Existing replay, layout, exports and cross-tab correctness checks remain separate regression gates.
+
+## 3.13.0 model history costs
+
+Measured during 3.13.0-beta.1 review on 2026-10-04 with the same pinned Node.js/Chromium environment, three fresh pages per dataset and CPU setting. Stable 3.13.0 preserves the measured runtime code. Every recording belongs to one model to exercise the whole dataset in a single overview. The cases remain 12 × 300 samples (0.20 MiB), 500 × 500 (13.45 MiB) and 36 × 10,000 (18.64 MiB). [Raw results](docs/benchmarks/model-history-3.13.0-beta.1.json) include every run, storage reads and heap observations. These are costs of the new feature, not a speedup comparison with an older release.
+
+| Model folder | Action | Median, normal | Median, 4× CPU slowdown |
+| --- | --- | ---: | ---: |
+| 12 recordings | First overview | 13.3 ms | 58.2 ms |
+| 12 recordings | Revisit overview | 3.2 ms | 24.5 ms |
+| 500 recordings | First overview | 66.1 ms | 319.2 ms |
+| 500 recordings | New metric | 37.8 ms | 176.3 ms |
+| 500 recordings | Cached metric | 19.6 ms | 99.3 ms |
+| 500 recordings | Latest 10 | 4.4 ms | 26.5 ms |
+| 500 recordings | Refresh | 19.5 ms | 111.9 ms |
+| 500 recordings | Revisit overview | 19.8 ms | 113.6 ms |
+| 36 long recordings | First overview | 71.8 ms | 278.1 ms |
+| 36 long recordings | New metric | 32.4 ms | 172.0 ms |
+| 36 long recordings | Cached metric | 7.7 ms | 43.2 ms |
+| 36 long recordings | Refresh | 7.1 ms | 40.6 ms |
+
+Calculations run only when opening a model overview; folder browsing does not compute them. A private WeakMap reuses compact summaries of immutable archives, without copying sample arrays. It is cleared on Library close. New metrics still scan retained samples; changed archives are recomputed. The table renders at most 50 rows initially, while the chart and selector represent all selected recordings. The existing Library initial read remains a separate cost (about 131 ms for 500 recordings and 189 ms for long recordings here; approximately 624/878 ms under slowdown).
+
+Large overviews can still pause the UI briefly, especially on slower devices. Selecting an already calculated metric or reducing the view to the latest 10 avoids most calculation work, but building hundreds of selector entries also has a cost. These measurements include synchronous JavaScript and forced layout, excluding paint, native userscript storage, website workload and user input scheduling. Four-times slowdown is a stress simulation, not a named device. Heap snapshots in the raw data are observations after forced collection, not peak process memory or a leak proof.
+
+Reproduce with `TIERSCOPE_BENCH_HISTORY=1 npm run test:library-performance`, optionally adding `TIERSCOPE_CPU_THROTTLE=4`. Leave history mode unset to retain the existing multi-model Library/backup benchmark.

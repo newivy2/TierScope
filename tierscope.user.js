@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.12.0
+// @version      3.13.0
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -5020,6 +5020,14 @@ underlying system, so should run in the browser, Node, or Plask.
 #tierscope-session-tools caption{text-align:left;font-weight:bold;padding:7px 0;color:var(--panel-secondary)}
 #tierscope-session-tools .tools-scroll{overflow-x:auto}
 #tierscope-session-tools canvas{display:block;width:100%;height:200px}
+#tierscope-session-tools .tools-history-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin:8px 0}
+#tierscope-session-tools .tools-history-stats>div{padding:7px;border:1px solid var(--panel-divider);border-radius:4px;background:rgba(var(--panel-row-rgb),.035)}
+#tierscope-session-tools .tools-history-stats dt{font-size:.9em;color:var(--panel-muted)}
+#tierscope-session-tools .tools-history-stats dd{margin:3px 0 0;font-weight:bold;color:var(--panel-secondary);overflow-wrap:anywhere}
+#tools-history-recording{width:100%}
+#tools-history-table button{max-width:155px;text-align:left;overflow-wrap:anywhere}
+#tools-history-table button[aria-pressed=true]{color:var(--panel-accent);border-color:var(--panel-accent)}
+#tools-history-chart{cursor:crosshair}
 #tierscope-session-tools label{display:inline-flex;gap:5px;align-items:center;flex-wrap:wrap;min-width:0;max-width:100%}
 #tierscope-session-tools select{width:auto;max-width:100%}
 #tools-source-a,#tools-source-b{width:100%}
@@ -5030,6 +5038,264 @@ underlying system, so should run in the browser, Node, or Plask.
 <div id="tools-message" role="status" aria-live="polite"></div>
 <div id="gif-export-controls" style="display:none"><span id="gif-export-status" role="status"></span><button id="btn-cancel-gif" hidden type="button">Cancel</button></div>
 <div id="tools-content"></div>`;
+  }
+
+  // src/model-history.js
+  function createModelHistoryReader() {
+    let cache = /* @__PURE__ */ new WeakMap();
+    function summary(archive, metric) {
+      if (!Object.isFrozen(archive)) return summarizeSession(archive, metric);
+      let metrics = cache.get(archive);
+      if (!metrics) {
+        metrics = /* @__PURE__ */ new Map();
+        cache.set(archive, metrics);
+      }
+      if (!metrics.has(metric)) metrics.set(metric, summarizeSession(archive, metric));
+      return metrics.get(metric);
+    }
+    function read(entries, room, metric = "room", limit = Infinity) {
+      if (!Object.prototype.hasOwnProperty.call(ANALYSIS_METRICS, metric)) throw new Error("Unknown analysis metric.");
+      if (limit !== Infinity && (!Number.isSafeInteger(limit) || limit < 1)) throw new Error("Invalid history limit.");
+      const matching = entries.filter((entry) => entry.archive.room.toLowerCase() === room.toLowerCase()).sort((a, b) => a.archive.session.history.timestamps[0] - b.archive.session.history.timestamps[0] || a.id.localeCompare(b.id));
+      const selected = limit === Infinity ? matching : matching.slice(-limit);
+      let coveredMs = 0, gapMs = 0, weighted = 0, registeredWeight = 0, tokenWeight = 0, latestEnd = -Infinity, overlaps = false;
+      let peak = null;
+      const recordings = selected.map((entry) => {
+        const stats = summary(entry.archive, metric), registered = summary(entry.archive, "total");
+        const time = entry.archive.session.history.timestamps[0];
+        coveredMs += stats.coveredMs;
+        gapMs += stats.gapMs;
+        weighted += (stats.mean || 0) * stats.coveredMs;
+        const weight = (registered.mean || 0) * registered.coveredMs;
+        registeredWeight += weight;
+        tokenWeight += weight * (registered.tokenShare || 0) / 100;
+        peak = peak === null ? stats.peak : Math.max(peak, stats.peak);
+        if (time < latestEnd) overlaps = true;
+        latestEnd = Math.max(latestEnd, time + stats.spanMs);
+        return __spreadValues({ id: entry.id, title: entry.title || entry.archive.room, time }, stats);
+      });
+      return {
+        room: room.toLowerCase(),
+        metric,
+        totalCount: matching.length,
+        recordings,
+        overlaps,
+        coveredMs,
+        gapMs,
+        peak,
+        mean: coveredMs ? weighted / coveredMs : null,
+        tokenShare: registeredWeight ? tokenWeight / registeredWeight * 100 : null
+      };
+    }
+    return { read, clear() {
+      cache = /* @__PURE__ */ new WeakMap();
+    } };
+  }
+
+  // src/model-history-view.js
+  function renderModelHistoryView(parent, overview, actions) {
+    const { recordings } = overview;
+    const number = (value) => value === null ? "Not enough data" : value.toLocaleString(void 0, { maximumFractionDigits: 1 });
+    const percent = (value) => value === null ? "Not enough data" : number(value) + "%";
+    const date = (time) => new Date(time).toLocaleString();
+    function node(target, tag, text, className) {
+      const element = document.createElement(tag);
+      if (text !== void 0) element.textContent = text;
+      if (className) element.className = className;
+      target.appendChild(element);
+      return element;
+    }
+    function button(target, text, click, id) {
+      const element = node(target, "button", text);
+      element.type = "button";
+      element.onclick = click;
+      if (id) element.id = id;
+      return element;
+    }
+    if (!recordings.length) {
+      node(parent, "p", "No saved recordings for this model. Return to Recordings to keep or import one.", "tools-muted");
+      return null;
+    }
+    const legend = node(parent, "p", "● Average · ◆ Peak in recording", "tools-history-legend");
+    legend.id = "tools-history-legend";
+    const canvas = node(parent, "canvas");
+    canvas.id = "tools-history-chart";
+    canvas.setAttribute("role", "img");
+    canvas.setAttribute("aria-label", actions.metricLabel + " across saved recordings, positioned by the date of their first retained sample. Select a recording below for the values.");
+    canvas.setAttribute("aria-describedby", legend.id);
+    node(parent, "p", "One point per recording, using its first retained sample date. Averages use real covered time; gaps and time after the final sample are excluded. Select a point or use the recording selector below.", "tools-muted");
+    node(parent, "h3", "Across these recordings");
+    const cards = node(parent, "dl", void 0, "tools-history-stats");
+    cards.id = "tools-history-stats";
+    for (const [label2, value] of [
+      ["Recordings", recordings.length + " / " + overview.totalCount],
+      ["Time-weighted average", number(overview.mean)],
+      ["Peak in recordings", number(overview.peak)],
+      ["Token holders / registered", percent(overview.tokenShare)],
+      ["Covered time (sum)", actions.duration(overview.coveredMs)],
+      ["Excluded gaps (sum)", actions.duration(overview.gapMs)]
+    ]) {
+      const card = node(cards, "div");
+      node(card, "dt", label2);
+      node(card, "dd", value);
+    }
+    node(parent, "p", "Based only on saved recordings shown here. Token share uses registered-viewer time. These peaks are not ATH. Full-session highs may predate retained samples.", "tools-muted");
+    if (overview.overlaps) {
+      const warning = node(parent, "p", "Some recording time ranges overlap. Totals sum recordings and may count the same period more than once.", "tools-muted");
+      warning.id = "tools-history-overlap";
+    }
+    const controls = node(parent, "div", void 0, "tools-actions");
+    const label = node(controls, "label", "Recording "), select = node(label, "select");
+    select.id = "tools-history-recording";
+    for (const record of [...recordings].reverse()) {
+      const option = node(select, "option", date(record.time) + " · " + record.title);
+      option.value = record.id;
+    }
+    if (recordings.some((record) => record.id === actions.selected)) select.value = actions.selected;
+    const detail = node(parent, "section", void 0, "tools-current");
+    detail.id = "tools-history-detail";
+    detail.setAttribute("aria-label", "Selected recording");
+    const heading = node(detail, "strong"), meta = node(detail, "p", void 0, "tools-muted");
+    const values = node(detail, "p");
+    values.setAttribute("aria-live", "polite");
+    const buttons = node(detail, "div", void 0, "tools-actions");
+    const selected = () => recordings.find((record) => record.id === select.value);
+    button(buttons, "Summary", () => actions.summary(select.value), "tools-history-summary").className = "tools-primary";
+    button(buttons, "Replay", () => actions.replay(select.value), "tools-history-replay");
+    const compare = button(buttons, "Compare with previous", () => {
+      const index = recordings.indexOf(selected());
+      if (index > 0) actions.compare(recordings[index - 1].id, select.value);
+    }, "tools-history-compare");
+    let positions = [], shown = 50;
+    function draw() {
+      const width = Math.max(240, canvas.clientWidth), height = 200, ratio = window.devicePixelRatio || 1;
+      canvas.width = width * ratio;
+      canvas.height = height * ratio;
+      const ctx = canvas.getContext("2d");
+      ctx.scale(ratio, ratio);
+      const style = window.getComputedStyle(parent), color = (name) => style.getPropertyValue(name).trim();
+      const accent = color("--panel-accent"), secondary = color("--panel-secondary");
+      const left = 48, right = width - 16, top = 16, bottom = height - 45;
+      const first = recordings[0].time, last = recordings[recordings.length - 1].time;
+      const max = Math.max(1, ...recordings.map((record) => record.peak));
+      ctx.strokeStyle = color("--panel-divider");
+      ctx.lineWidth = 1;
+      ctx.fillStyle = color("--panel-muted");
+      ctx.font = "10px Arial";
+      for (let step = 0; step <= 2; step++) {
+        const y = bottom - step / 2 * (bottom - top);
+        ctx.beginPath();
+        ctx.moveTo(left, y);
+        ctx.lineTo(right, y);
+        ctx.stroke();
+        ctx.textAlign = "right";
+        ctx.fillText(number(max * step / 2), left - 6, y + 3);
+      }
+      ctx.textAlign = first === last ? "center" : "left";
+      const shortDate = (time) => new Date(time).toLocaleDateString(void 0, { year: "2-digit", month: "short", day: "numeric" });
+      ctx.fillText(shortDate(first), first === last ? (left + right) / 2 : left, bottom + 19);
+      if (first !== last) {
+        ctx.textAlign = "right";
+        ctx.fillText(shortDate(last), right, bottom + 19);
+      }
+      positions = [];
+      for (const record of recordings) {
+        const x = first === last ? (left + right) / 2 : left + (record.time - first) / (last - first) * (right - left);
+        if (record.id === select.value) {
+          ctx.strokeStyle = color("--panel-muted");
+          ctx.setLineDash([2, 3]);
+          ctx.beginPath();
+          ctx.moveTo(x, top);
+          ctx.lineTo(x, bottom);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+        for (const [value, peak] of [[record.peak, true], [record.mean, false]]) {
+          if (value === null) continue;
+          const y = bottom - value / max * (bottom - top), radius = record.id === select.value ? 5 : 3;
+          ctx.fillStyle = peak ? secondary : accent;
+          ctx.beginPath();
+          if (peak) {
+            ctx.moveTo(x, y - radius);
+            ctx.lineTo(x + radius, y);
+            ctx.lineTo(x, y + radius);
+            ctx.lineTo(x - radius, y);
+            ctx.closePath();
+          } else ctx.arc(x, y, radius, 0, Math.PI * 2);
+          ctx.fill();
+          positions.push({ x, y, id: record.id });
+        }
+      }
+      legend.style.color = accent;
+      legend.replaceChildren();
+      node(legend, "span", "● Average");
+      node(legend, "span", " ◆ Peak in recording").style.color = secondary;
+    }
+    function updateSelection() {
+      const record = selected();
+      actions.select(record.id);
+      heading.textContent = record.title;
+      meta.textContent = date(record.time) + " · " + record.samples.toLocaleString() + " samples";
+      values.textContent = "Average " + number(record.mean) + " · Peak in recording " + number(record.peak) + " · Full-session high " + number(record.sessionPeak) + " · Token holders / registered " + percent(record.tokenShare) + " · Covered " + actions.duration(record.coveredMs) + " · Gaps " + actions.duration(record.gapMs);
+      compare.disabled = recordings.indexOf(record) === 0;
+      table.querySelectorAll("button[data-history-id]").forEach((button2) => button2.setAttribute("aria-pressed", String(button2.dataset.historyId === record.id)));
+      draw();
+    }
+    select.onchange = updateSelection;
+    canvas.onclick = (event) => {
+      const bounds = canvas.getBoundingClientRect(), width = Math.max(240, canvas.clientWidth);
+      const x = (event.clientX - bounds.left) * width / bounds.width, y = (event.clientY - bounds.top) * 200 / bounds.height;
+      let closest = null, distance = 15 * 15;
+      for (const point of positions) {
+        const d = (point.x - x) ** 2 + (point.y - y) ** 2;
+        if (d <= distance) {
+          closest = point;
+          distance = d;
+        }
+      }
+      if (closest) {
+        select.value = closest.id;
+        updateSelection();
+      }
+    };
+    const scroll = node(parent, "div", void 0, "tools-scroll"), table = node(scroll, "table");
+    table.id = "tools-history-table";
+    node(table, "caption", actions.metricLabel + " · newest recording first");
+    const head = node(node(table, "thead"), "tr");
+    ["Recording", "Average", "Peak", "Token share¹", "Covered"].forEach((text) => {
+      node(head, "th", text).scope = "col";
+    });
+    const body = node(table, "tbody");
+    const more = button(parent, "Show more recordings", () => {
+      shown += 50;
+      rows();
+      updateSelection();
+      if (more.hidden) select.focus();
+    }, "tools-history-more");
+    function rows() {
+      body.replaceChildren();
+      for (const record of [...recordings].reverse().slice(0, shown)) {
+        const row = node(body, "tr"), cell = node(row, "th");
+        cell.scope = "row";
+        const choose = button(cell, record.title, () => {
+          select.value = record.id;
+          updateSelection();
+          select.focus();
+        });
+        choose.dataset.historyId = record.id;
+        node(cell, "div", date(record.time), "tools-muted");
+        node(row, "td", number(record.mean));
+        node(row, "td", number(record.peak)).title = "First recorded at " + date(record.peakTime);
+        node(row, "td", percent(record.tokenShare));
+        node(row, "td", actions.duration(record.coveredMs));
+      }
+      more.hidden = shown >= recordings.length;
+      more.textContent = "Show " + Math.min(50, recordings.length - shown) + " more (" + Math.min(shown, recordings.length) + " / " + recordings.length + ")";
+    }
+    node(parent, "p", "¹ Token holders as a proportion of registered viewers. Recordings with no covered interval have no average; recorded peaks remain available. Overlapping dates can be selected individually in the list.", "tools-muted");
+    rows();
+    updateSelection();
+    return { canvas, draw };
   }
 
   // src/recording-export-data.js
@@ -5404,6 +5670,8 @@ underlying system, so should run in the browser, Node, or Plask.
     document.body.appendChild(dialog);
     let currentArchive = null, library = null, tab = "library", fileRequest = 0, chartObserver = null;
     const libraryReader = createLibraryReader();
+    const modelHistoryReader = createModelHistoryReader();
+    let historyLimit = Infinity, historySelected = "";
     let optionsLibrary = null, optionsArchive = null, options = [];
     const savedAnalysis = readAnalysisPreferences();
     let { metric, threshold, sharedLength, summaryThresholds } = savedAnalysis.preferences;
@@ -5437,9 +5705,9 @@ underlying system, so should run in the browser, Node, or Plask.
       tell("Recovery download requested. Originals were kept. This file is for manual recovery, not normal backup restore." + (missing ? " " + missing + " record(s) could not be exported; the file lists those errors." : ""), !!missing);
     }
     function action(fn) {
-      return () => {
+      return (...args) => {
         try {
-          fn();
+          fn(...args);
         } catch (error) {
           tell(error.message, true);
         }
@@ -5552,7 +5820,7 @@ underlying system, so should run in the browser, Node, or Plask.
         button2.dataset.currentAvailable = String(!!available);
         button2.disabled = !available || button2.id === "btn-export-gif" && !!runtime.gifExportJob;
       });
-      if (replaced && tab !== "library" && tab !== "backup") render(tab);
+      if (replaced && (tab === "summary" || tab === "compare")) render(tab);
     }
     function currentCard() {
       const card = node(content, "section", void 0, "tools-current");
@@ -5636,6 +5904,10 @@ underlying system, so should run in the browser, Node, or Plask.
           (document.getElementById("tools-folder-" + previous) || search).focus();
         }, "tools-library-all-models");
         node(heading, "h3", query ? "Search results — all models" : libraryRoom ? "Folder: " + libraryRoom : "Model folders");
+        if (libraryRoom && !query) button(heading, "History overview", () => {
+          render("history");
+          dialog.querySelector("#tools-history-back").focus();
+        }, "tools-model-history").className = "tools-primary";
         if (!visible.length) node(list, "p", state.entries.length ? "No matching recordings." : "Your library is empty. Keep a recording above or import a session file.", "tools-muted");
         if (browsingFolders) for (const room of visible.slice(0, shown)) {
           const entries = folders.get(room), row = node(list, "div", void 0, "tools-folder");
@@ -5799,6 +6071,75 @@ underlying system, so should run in the browser, Node, or Plask.
     }
     const number = (value) => value === null ? "Not enough data" : value.toLocaleString(void 0, { maximumFractionDigits: 1 });
     const percent = (value) => value === null ? "Not enough data" : number(value) + "%";
+    function renderHistory() {
+      if (!library) readLibrary();
+      const heading = node(content, "div", void 0, "tools-actions");
+      button(heading, "‹ Recordings", () => {
+        render("library");
+        (dialog.querySelector("#tools-model-history") || dialog.querySelector("#tools-library-search")).focus();
+      }, "tools-history-back");
+      node(heading, "h3", "Model history · " + libraryRoom);
+      const controls = node(content, "div", void 0, "tools-actions");
+      const metricLabel = node(controls, "label", "Metric "), metricSelect = node(metricLabel, "select");
+      metricSelect.id = "tools-history-metric";
+      for (const [key, name] of Object.entries(ANALYSIS_METRICS)) {
+        const option = node(metricSelect, "option", name);
+        option.value = key;
+      }
+      metricSelect.value = metric;
+      metricSelect.onchange = () => {
+        rememberAnalysis({ metric: metricSelect.value });
+        render("history");
+      };
+      const rangeLabel = node(controls, "label", "Show "), range = node(rangeLabel, "select");
+      range.id = "tools-history-range";
+      for (const [value, label] of [["Infinity", "All recordings"], ["30", "Latest 30"], ["10", "Latest 10"]]) {
+        const option = node(range, "option", label);
+        option.value = value;
+      }
+      range.value = String(historyLimit);
+      range.onchange = () => {
+        historyLimit = Number(range.value);
+        render("history");
+      };
+      button(controls, "Refresh", () => {
+        readLibrary();
+        render("history");
+      }, "tools-history-refresh").title = "Read the latest saved recordings from this browser";
+      const overview = modelHistoryReader.read(library.entries, libraryRoom, metric, historyLimit);
+      const view = renderModelHistoryView(content, overview, {
+        metricLabel: ANALYSIS_METRICS[metric],
+        duration: formatElapsedTime,
+        selected: historySelected,
+        select: (id) => {
+          historySelected = id;
+        },
+        summary: action((id) => {
+          selectedA = id;
+          render("summary");
+        }),
+        replay: action((id) => {
+          const entry = library.entries.find((entry2) => entry2.id === id);
+          openSessionReplay(entry.archive);
+          observedSignature = "";
+          refreshCurrent();
+          tell("Replaying " + (entry.title || entry.archive.room) + ".");
+        }),
+        compare: (a, b) => {
+          selectedA = a;
+          selectedB = b;
+          render("compare");
+        }
+      });
+      if (view) {
+        chartDraw = view.draw;
+        if (window.ResizeObserver) {
+          chartObserver = new window.ResizeObserver(view.draw);
+          chartObserver.observe(view.canvas);
+        }
+      }
+      if (library.damaged.length) node(content, "p", library.damaged.length + " unreadable library record(s) are excluded. Return to Recordings for recovery options.", "tools-muted");
+    }
     function audienceOverview(archive) {
       const overview = summarizeAudience(archive), coverage = overview.audience[0];
       node(content, "h3", "Audience overview");
@@ -6025,12 +6366,13 @@ underlying system, so should run in the browser, Node, or Plask.
       }
       content.replaceChildren();
       message.textContent = "";
-      dialog.querySelectorAll("[data-tools-tab]").forEach((button2) => button2.setAttribute("aria-pressed", String(button2.dataset.toolsTab === tab)));
+      dialog.querySelectorAll("[data-tools-tab]").forEach((button2) => button2.setAttribute("aria-pressed", String(button2.dataset.toolsTab === (tab === "history" ? "library" : tab))));
       try {
         if (tab === "library") renderLibrary();
+        else if (tab === "history") renderHistory();
         else if (tab === "backup") renderBackup();
         else renderAnalysis(tab === "compare");
-        if ((tab === "summary" || tab === "compare") && analysisPreferenceError) tell(analysisPreferenceError, true);
+        if ((tab === "summary" || tab === "compare" || tab === "history") && analysisPreferenceError) tell(analysisPreferenceError, true);
       } catch (error) {
         tell(error.message, true);
       }
@@ -6043,6 +6385,7 @@ underlying system, so should run in the browser, Node, or Plask.
       fileRequest++;
       refreshSessionTools = null;
       libraryReader.clear();
+      modelHistoryReader.clear();
       options = [];
       optionsLibrary = null;
       optionsArchive = null;
@@ -7617,7 +7960,7 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/bootstrap.js
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.12.0";
+    runtime.TIERSCOPE_VERSION = "3.13.0";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;
