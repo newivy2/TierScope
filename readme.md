@@ -6,6 +6,8 @@ TierScope is a free, open-source userscript that charts how a Chaturbate room’
 **Current release: 3.7.0** ·  [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.7.0)
 ---
 
+**Beta review: 3.8.0-beta.1** — [Install the beta](https://raw.githubusercontent.com/newivy2/TierScope/beta/playback-presentation/tierscope.user.js). This structural update separates playback, display rendering and record storage while preserving the existing controls, appearance and file formats. [Architecture and checks](STATE_OWNERSHIP.md). Main remains on 3.7.0; keep only one TierScope copy enabled.
+
 Open **Session tools** with **Library** beside Replay / Save / Open or from the chart-window menu: a local recording library with model folders, time-aware summaries, two-recording comparison, and ATH/preferences backup and restore. A visible warning reports failed session saves. [Build and source guide](BUILDING.md).
 
 The **SH / ATH** switch sits to the left of the chart-window menu. Session highs and all-time highs are tracked separately for each room. All-time records survive session Reset and expiry; hover a high to see the exact value and its recorded time. Opening a saved file does not change these records: use **Add to all-time highs** beside the room name in FILE REPLAY or in the chart-window menu to add that file's highs to its own room.

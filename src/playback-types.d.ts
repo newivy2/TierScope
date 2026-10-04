@@ -24,7 +24,9 @@ export interface PlaybackData {
     paintedPosition: number | undefined;
     paintLayout: number | undefined;
 }
-export type PlaybackView = Readonly<PlaybackData>;
+export type DeepReadonly<T> = T extends readonly (infer Item)[] ? ReadonlyArray<DeepReadonly<Item>> :
+    T extends object ? {readonly [Key in keyof T]: DeepReadonly<T[Key]>} : T;
+export type PlaybackView = DeepReadonly<PlaybackData>;
 export interface PlaybackRoot {
     playback: PlaybackView | null;
     presentationMode: 'LIVE' | 'PLAYBACK';

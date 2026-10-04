@@ -16,3 +16,14 @@ Run `npm run test:performance` to repeat the measurement. `TIERSCOPE_SOURCE` can
 ## 3.6.0-beta.1 regression check
 
 The same 120-frame fixture completed in headless Chromium with Node.js 22: mean **3.20 ms**, 95th percentile **4.10 ms**, maximum **7.20 ms**. This is a local rendering check, not a measured improvement over 3.5.0; no paired 3.5.0 run was performed. It does not measure library loading, backup operations or the new analysis dialog.
+
+## 3.8.0-beta.1 ownership check
+
+A paired run of the same fixture on Node.js 22/headless Chromium in the same cloud workspace measured:
+
+| Build | Mean frame time | 95th percentile | Maximum |
+| --- | ---: | ---: | ---: |
+| Main 3.7.0 | 2.54 ms | 3.80 ms | 5.00 ms |
+| 3.8.0-beta.1 code | 5.02 ms | 5.70 ms | 8.90 ms |
+
+The new immutable recording/display boundary adds rendering cost in this fixture. Both runs remained below the existing 50 ms replay tick interval on this host; this is not a guarantee for slower devices. Replay history is frozen once and reused across frames instead of copied per frame. Browser pacing/layout checks still verify the moving gap connector and exact sample values. This benchmark measures frame work only, not opening a recording, live acquisition, memory or library/backup operations. The beta's installed-script review should include a long recording on the user's normal browser.
