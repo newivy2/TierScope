@@ -122,7 +122,7 @@ For history costs, set `TIERSCOPE_BENCH_HISTORY=1 npm run test:library-performan
 
 `TIERSCOPE_BENCH_COMPARE=1 npm run test:library-performance` measures six-record chart metric changes, zoom and 120 cursor updates after 20 warmups. It uses the existing 12 × 300, 500 × 500 and 36 × 10,000 datasets, selecting six recordings per case. Set `TIERSCOPE_CPU_THROTTLE=4` for simulated slowdown. Cursor timing includes inspection-table layout and excludes native userscript storage and actual site load; see PERFORMANCE.md for results and limitations.
 
-## Library continuity (3.15.0 beta)
+## Library continuity (3.15.0)
 
 `library-drafts.test.cjs` checks independent draft/read copies, reverting edits, saved-note conflicts, explicit snapshot aliases, and missing/replaced recording recovery without guessing from timestamps. The Library analysis fixture checks editor-node preservation through individual/bulk selection, drafts through filters/tabs/close, explicit Save/Discard, failed persistence, another browser tab's conflicting edit, recoverable text after deletion, and beforeunload warning cleanup. It also checks unchanged chart/picker nodes on metric changes, zoom/hidden-line/pin retention through threshold updates, filtering and Summary/Compare transitions. Both theme fixtures check the generated version beneath the logo, separation from opacity controls and the unchanged 14-pixel footer; all existing scale/collapse/narrow-window checks remain active.
 

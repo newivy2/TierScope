@@ -104,7 +104,7 @@ The tools coordinator clears the reader and source-label choices on close. Sourc
 
 `analysis-chart-data.js` provides typed binary-search inspection, bounded zoom and pixel-column plot reduction that retains first/last points, extrema and gap boundaries. The chart view receives elapsed series plus original timestamps; it never reads live state, playback or storage. A cached bitmap avoids rescanning history on cursor movement. Zoom, theme, viewport or line visibility rebuild the bitmap. The coordinator disconnects observers and disposes the bitmap on view changes and close. Summary totals are independent of presentation zoom/visibility. Source guards include every new module and still reject application import cycles.
 
-## Library continuity (3.15.0 beta)
+## Library continuity (3.15.0)
 
 `library-drafts.js` owns temporary plain-text drafts independently of Library DOM lifetimes. It receives entries and returns copies, with no storage/DOM/runtime dependencies. The coordinator keeps one owner for the tab, saves only on an explicit action, checks freshly read notes for conflicts, and clears a draft only after successful persistence or explicit discard. Reconciliation follows IDs and explicit redundant-record aliases; unavailable recordings retain recoverable drafts. A beforeunload handler exists only while drafts remain. Closing Library releases its readers, charts and observers while keeping draft text/metadata for reopening.
 

@@ -140,7 +140,7 @@ Reproduce with `TIERSCOPE_BENCH_COMPARE=1 npm run test:library-performance`, opt
 
 ## 3.15.0-beta.1 Library continuity
 
-Paired measurements on 2026-10-04 compare published 3.14.0 with 3.15.0-beta.1 using the same Node.js 22/Playwright Chromium environment and the comparison fixture. Three fresh-page runs per build and CPU setting alternate build order. Existing datasets, six recordings, 20 cursor warmups and 120 measured cursor updates are unchanged. The fixture now also measures hiding/showing one line and applying a threshold after restoring the full range. Values below are medians in milliseconds. [Raw results](docs/benchmarks/library-continuity-3.15.0-beta.1.json) include both script hashes, all runs, storage reads and heap snapshots.
+Stable 3.15.0 preserves the measured beta behavior; only the displayed release version changes. Paired measurements on 2026-10-04 compare published 3.14.0 with 3.15.0-beta.1 using the same Node.js 22/Playwright Chromium environment and the comparison fixture. Three fresh-page runs per build and CPU setting alternate build order. Existing datasets, six recordings, 20 cursor warmups and 120 measured cursor updates are unchanged. The fixture now also measures hiding/showing one line and applying a threshold after restoring the full range. Values below are medians in milliseconds. [Raw results](docs/benchmarks/library-continuity-3.15.0-beta.1.json) include both script hashes, all runs, storage reads and heap snapshots.
 
 | Dataset / action | 3.14.0 normal | Beta normal | 3.14.0 at 4× slowdown | Beta at 4× slowdown |
 | --- | ---: | ---: | ---: | ---: |

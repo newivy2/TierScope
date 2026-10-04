@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **3.15.0-beta.1**. This beta protects Library note drafts, preserves chart interaction during analysis changes, and reduces unnecessary rendering. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation instructions, see the [README](readme.md).
+Detailed reference for **3.15.0**. This release protects Library note drafts, preserves chart interaction during analysis changes, and reduces unnecessary rendering. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation instructions, see the [README](readme.md).
 
 ## Contents
 
@@ -302,7 +302,7 @@ Time calculations use original timestamps, not evenly paced Replay time. Each sa
 Compare up to six distinct recordings (A–F) on the same elapsed-time axis, starting from each recording's first retained sample. The newest selected recording by first retained date is solid pink; older recordings use distinct colors with dashed lines. The legend marks the latest recording and shows matching line styles. Styling follows recording dates when slots change; equal dates use the first tied slot. Hiding a line does not reassign its style. Use **Add recording** for more slots, or select 2–6 recordings in Library and choose **Compare selected**. The recordings may belong to one model or several. Duplicate slots must be corrected before a comparison is displayed. Comparison keeps its single threshold control; use **Apply threshold** or press Enter to update it. **Match shared length** restricts all selected recordings to the shortest recording's elapsed span. Turn it off to show their complete retained spans on the longest recording’s axis. Gaps remain blank and are excluded separately for each recording, so check coverage when comparing averages. Full-session highs may predate retained history and are not clipped to the comparison range.
 
 
-In this beta, changing the metric preserves zoom, cursor position, pinning and hidden lines. Applying thresholds updates the statistics without rebuilding the chart or recording selectors. Changing the shared-length setting fits the current window and cursor within the available range. Filters and switching between Summary and Compare retain their separate chart settings while the same recording snapshots remain selected. A different selection or replacement snapshot resets the chart; closing Library clears these chart settings. Statistics still use the complete analysis range, independently of zoom and hidden lines.
+Changing the metric preserves zoom, cursor position, pinning and hidden lines. Applying thresholds updates the statistics without rebuilding the chart or recording selectors. Changing the shared-length setting fits the current window and cursor within the available range. Filters and switching between Summary and Compare retain their separate chart settings while the same recording snapshots remain selected. A different selection or replacement snapshot resets the chart; closing Library clears these chart settings. Statistics still use the complete analysis range, independently of zoom and hidden lines.
 
 Summary and Compare charts now support shared inspection. Move over the chart to see each visible recording's count and original sample timestamp at that elapsed time. Between accepted samples, the table labels a count held until the next sample. Marked gaps and time beyond a recording's last sample show no value. Click or use **Pin** to hold the cursor. With the canvas focused, Left/Right move through sample times, Home/End jump to the visible endpoints, and Escape releases the cursor; other Library Escape handling remains unchanged.
 
@@ -490,6 +490,7 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
+| **3.15.0** | Release protected tab-local note drafts, preserved chart settings, faster comparison controls and the small footer version label. Preserve the approved beta behavior and existing recording formats. |
 | **3.15.0-beta.1** | Protect temporary note drafts with Save/Discard and cross-tab conflict handling; preserve chart interaction through metric/threshold changes; reuse comparison controls and reduced plots; fit a small version label beneath the logo without increasing footer height. |
 | **3.14.0** | Release model/date Library filters, favorite models, recording notes and bulk import/export; interactive Summary/Compare charts for up to six recordings; direct page-model history and comparison with up to five earlier recordings. The newest recording is solid pink and older recordings are dashed. Preserve the reviewed beta behavior and explicit saving. |
 | **3.14.0-beta.4** | Use longer dashed lines for older recordings, keeping the newest recording solid pink and matching the legend styles. |

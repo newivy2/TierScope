@@ -98,7 +98,7 @@ Notes belong to stored library entries; favorites belong to model records under 
 
 Interactive charts own only zoom, visible lines, cursor and a disposable rendering bitmap. They receive prepared series and original timestamps, with pure gap-aware inspection helpers. Plot reduction affects drawing only; original samples remain authoritative for inspection and statistics. Neither hovering nor zooming can change history, highs, playback or statistical coverage. Changes in unrelated live data do not rebuild saved-recording comparisons. Removed recordings require a new choice; filter changes preserve existing selections visibly.
 
-## Temporary drafts and chart continuity (3.15.0 beta)
+## Temporary drafts and chart continuity (3.15.0)
 
 The tab owns note drafts through `createLibraryDrafts`, separately from durable library metadata. Views request edits, saves and discards through callbacks. A draft stores text, original saved text, recording identity and small display metadata, never an archive or DOM node. Closing Library retains drafts; refresh/navigation out of the document does not persist them. Missing or replaced records retain recoverable text instead of automatic reassignment. Durable note edits still use the existing verified metadata write/rollback path.
 
