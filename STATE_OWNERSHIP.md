@@ -1,6 +1,6 @@
 # State ownership
 
-Beta 3.8.0-beta.1 builds on the 3.7.0 live-session boundary with owned playback, immutable display models and separate record storage. The panel, single-script installation, file formats and storage keys stay compatible with 3.7.0. This is an incremental migration; it does not claim that every subsystem is already an independent store.
+Release 3.8.0 builds on the 3.7.0 live-session boundary with owned playback, immutable display models and separate record storage. The panel, single-script installation, file formats and storage keys stay compatible with 3.7.0. This is an incremental migration; it does not claim that every subsystem is already an independent store.
 
 ## Responsibilities
 
@@ -66,4 +66,4 @@ The source checks reject unauthorized live/playback writes, renderer dependencie
 
 Behavior tests cover receipt commit/rollback, Reset/navigation/Stop with delayed API responses, replay replacement and stale callbacks, immutable recording/display snapshots, repainting without live mutations, storage failure/retry, captured records after Reset, and two tabs with Reset during replay and a pending scan. Existing file, library, backup, layout, theme, pulse and browser checks remain in the gate. The original 3.4.0 migration fingerprints are retained with explicit exceptions for reviewed changes.
 
-Remaining work includes acquisition ownership, panel-preference ownership, replacing the remaining shared live collection reads, and simplifying the remaining UI/coordinator cycles. The current guards are targeted checks, not a general effect/type system; helpers that receive shared values still require review. No new UI features are part of this beta.
+Remaining work includes acquisition ownership, panel-preference ownership, replacing the remaining shared live collection reads, and simplifying the remaining UI/coordinator cycles. The current guards are targeted checks, not a general effect/type system; helpers that receive shared values still require review. No new UI features are part of this release.
