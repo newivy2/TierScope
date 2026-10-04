@@ -1,14 +1,17 @@
-import { configureSessionTracking, resetLiveSession } from './live-session.js';
 import { drawAllSparklines } from './charts.js';
 import { validateDOMHealth } from './dom.js';
 import { cleanupDragListeners, restorePanelGeometry } from './layout.js';
-import { isAbsencePaused, startCountdown, startTrackingTimer, stopCountdown, stopTrackingTimer, updateCountdownDisplay, updateStopControls, updateTrackingTimer } from './lifecycle.js';
-import { createPanel, updateDisplay } from './panel.js';
+import { startCountdown, startTrackingTimer, stopCountdown, stopTrackingTimer, updateCountdownDisplay, updateStopControls, updateTrackingTimer } from './lifecycle.js';
+import { configureSessionTracking, resetLiveSession } from './live-session.js';
+import { createPanel } from './panel.js';
+import { updateAcquisitionStatus } from './presentation-status.js';
+import { updateDisplay, updateTrendDisplay } from './presentation.js';
 import { leavePlayback } from './replay.js';
+import { readRequestPolicy } from './request-policy.js';
 import { runtime } from './runtime.js';
-import { isAcquisitionCurrent, performScanThenReturn, readRequestPolicy, updateAcquisitionStatus } from './scanning.js';
-import { loadSession, saveSession } from './storage.js';
-import { updateTrendDisplay } from './trends.js';
+import { isAcquisitionCurrent, performScanThenReturn } from './scanning.js';
+import { loadSession, saveSession } from './session-persistence.js';
+import { isAbsencePaused } from './session-selectors.js';
 import { getModelName, getModelNameFromUrl, isBroadcastRoom, log } from './utils.js';
 
 export function scheduleInit(delay) {

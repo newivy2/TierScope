@@ -1,7 +1,8 @@
-import { drawAllSparklines, hideChartTooltip } from './charts.js';
+import { hideChartTooltip } from './chart-view.js';
+import { drawAllSparklines } from './charts.js';
 import { getAnonymousCount } from './dom.js';
-import { cancelHighPulse, cancelHighPulses, getDisplayHigh, highDescription, highLabel } from './highs.js';
-import { updateDisplay } from './panel.js';
+import { cancelHighPulse, cancelHighPulses } from './highs.js';
+import { updateDisplay } from './presentation.js';
 import { paintPlayback } from './replay.js';
 import { runtime } from './runtime.js';
 import { getTierMarker, log } from './utils.js';
@@ -156,23 +157,6 @@ export function redrawPanelCharts() {
     runtime.chartLayoutRevision++;
     if (runtime.presentationMode === 'PLAYBACK') paintPlayback(runtime.playback);
     else drawAllSparklines();
-}
-
-export function updateCollapsedRowStatus(frame, highlights) {
-    runtime.PANEL_ROWS.forEach(function(row) {
-        var button = document.getElementById('restore-row-' + row.key);
-        if (!button) return;
-        var value = row.key === 'withtokens' ? frame.withTokens : row.key === 'total' ? frame.total :
-            row.key === 'anon' ? frame.anonymousCount : frame.counts[row.key];
-        var historyKey = row.key === 'withtokens' ? 'withTokens' : row.key === 'anon' ? 'anonymous' : row.key;
-        var high = getDisplayHigh(frame, historyKey, value);
-        var context = frame.isPlayback ? 'Replay' : frame.isRestored ? 'Saved sample' : 'Latest sample';
-        button.title = row.label + ': ' + value.toLocaleString() + ' (' + highLabel(high) +
-            '). ' + highDescription(high) + '. ' + context + '. Click to restore row.';
-        button.setAttribute('aria-label', 'Restore ' + row.label + ' row. ' + context + ': ' + value.toLocaleString());
-        button.style.background = highlights && highlights[historyKey] ?
-            'rgba(50, 205, 50, 0.22)' : 'rgba(var(--panel-row-rgb),calc(0.05 * var(--tier-background-scale, 1)))';
-    });
 }
 
 export function cleanupDragListeners() {

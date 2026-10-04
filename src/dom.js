@@ -1,8 +1,8 @@
-import { sessionAnonymousCount } from './live-session.js';
+import { diagnostic } from './diagnostics.js';
 import { pauseAutoRefresh } from './lifecycle.js';
+import { sessionAnonymousCount } from './live-session.js';
 import { runtime } from './runtime.js';
 import { log } from './utils.js';
-import { diagnostic } from './diagnostics.js';
 
 export function validateDOMHealth() {
     const now = Date.now();

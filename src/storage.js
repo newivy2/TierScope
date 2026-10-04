@@ -1,37 +1,7 @@
-import { restoreLiveSession, prepareSessionHighsForSave, clearRestoredSessionFrame } from './live-session.js';
-import { getHistoryBreaks } from './charts.js';
-import { readAllTimeHighs, sessionAllTimeHighs, storeAllTimeHighs } from './highs.js';
-import { getEffectiveScanIntervalSeconds } from './lifecycle.js';
-import { createPlaybackSnapshot, getPlaybackFrame, leavePlayback } from './replay.js';
+import { getHistoryBreaks } from './history-data.js';
+import { getStorageKey, hasStorageField, isStorageNumber, isStorageObject, isStorageTimestamp, makeStorageId } from './record-validation.js';
 import { runtime } from './runtime.js';
-import { updateAcquisitionStatus } from './scanning.js';
 import { log } from './utils.js';
-import { noteSessionSave } from './session-health.js';
-
-export function getStorageKey(model) {
-    return runtime.STORAGE_KEY_PREFIX + model.toLowerCase();
-}
-
-export function isStorageObject(value) {
-    return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-export function hasStorageField(data, field) {
-    return Object.prototype.hasOwnProperty.call(data, field);
-}
-
-export function isStorageNumber(value) {
-    return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER;
-}
-
-export function isStorageTimestamp(value) {
-    return Number.isSafeInteger(value) && value >= 0 && value <= 8640000000000000;
-}
-
-export function makeStorageId() {
-    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
-    return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2) + '-' + Math.random().toString(36).slice(2);
-}
 
 export function roomEpochKey(key) { return runtime.ROOM_EPOCH_PREFIX + key.slice(runtime.STORAGE_KEY_PREFIX.length); }
 
@@ -281,14 +251,6 @@ export function inspectStoredSession(model, restore) {
     }
 }
 
-export function restoreSessionState(data) {
-    var snapshot = createPlaybackSnapshot(data.history);
-    restoreLiveSession(data, getPlaybackFrame(snapshot, snapshot.durationMs));
-    runtime.lastScheduledIntervalSeconds = getEffectiveScanIntervalSeconds();
-    runtime.trendComparisonMode = data.trendComparisonMode;
-    runtime.autoTrendEscalation = data.autoTrendEscalation;
-}
-
 export function getStorageReportStatus(model) {
     if (!model || model === 'unknown') return { producer: 'Unknown (no saved session)', access: 'No room' };
     var status = inspectStoredSession(model, false);
@@ -300,91 +262,6 @@ export function getStorageReportStatus(model) {
             (runtime.sessionStorageNotice || (runtime.activeSessionStorageKey === getStorageKey(model) ? 'Writable (separate tab record)' : 'Not initialized')) +
             (warnings.length ? '; ' + warnings.length + ' skipped record(s) retained; see console' : '')
     };
-}
-
-export function saveSession(model) {
-    if (!model || model === 'unknown') return;
-    try {
-        var key = getStorageKey(model);
-        if (runtime.activeSessionStorageKey !== key || inspectStoredSession(model, false).protected) return;
-        if (getRoomEpoch(key) !== runtime.activeRoomEpoch) {
-            runtime.sessionStorageNotice = 'Reset in another tab — local data only; export TXT/CSV before reloading';
-            updateAcquisitionStatus();
-            return;
-        }
-        prepareSessionHighsForSave();
-        var saveData = {
-            schemaVersion: runtime.STORAGE_SCHEMA_VERSION,
-            producerVersion: runtime.TIERSCOPE_VERSION,
-            timestamp: Date.now(),
-            history: runtime.history,
-            tierHighTimes: runtime.tierHighTimes,
-            withTokensHighTime: runtime.withTokensHighTime,
-            totalHighTime: runtime.totalHighTime,
-            anonHighTime: runtime.anonHighTime,
-            femaleTransHighTime: runtime.femaleTransHighTime,
-            roomTotalHigh: runtime.roomTotalHigh,
-            roomTotalHighTime: runtime.roomTotalHighTime,
-            trackingStartTime: runtime.trackingStartTime,
-            sessionStartedAt: runtime.sessionStartedAt,
-            sessionStartEstimated: runtime.sessionStartEstimated,
-            sessionHighs: runtime.sessionHighs,
-            roomEpoch: runtime.activeRoomEpoch,
-            isPaused: runtime.isPaused,
-            isStopped: runtime.isStopped,
-            stoppedAt: runtime.stoppedAt,
-            stopReason: runtime.stopReason,
-            broadcasterAbsence: runtime.broadcasterAbsence,
-            absencePausedAt: runtime.absencePausedAt,
-            absenceOverrideActive: runtime.absenceOverrideActive,
-            pausedElapsedTime: runtime.pausedElapsedTime,
-            previousCounts: runtime.previousCounts,
-            hasTrendBaseline: runtime.hasTrendBaseline,
-            trendComparisonMode: runtime.trendComparisonMode,
-            autoTrendEscalation: runtime.autoTrendEscalation
-        };
-        validateStoredSession(saveData);
-        var raw = JSON.stringify(saveData);
-        // A tab returning after expiration gets a new record ID. No read/modify/
-        // write of a shared history key, even when two tabs save simultaneously.
-        var tabRecord = runtime.tabRecords.get(key);
-        if (!tabRecord || Date.now() - tabRecord.savedAt > runtime.STORAGE_MAX_AGE_MS) {
-            tabRecord = { id: makeStorageId(), savedAt: Date.now() };
-        }
-        GM_setValue(roomTabPrefix(key) + tabRecord.id, raw);
-        tabRecord.savedAt = Date.now();
-        runtime.tabRecords.set(key, tabRecord);
-        runtime.sessionStorageStatus.set(key, { protected: false, raw: raw, producerVersion: runtime.TIERSCOPE_VERSION, legacy: false });
-        noteSessionSave(model);
-        log('Session saved for ' + model + ' (storage schema ' + runtime.STORAGE_SCHEMA_VERSION + ', producer ' + runtime.TIERSCOPE_VERSION + ')');
-    } catch (e) {
-        noteSessionSave(model, e.message || String(e));
-        log('Failed to save session: ' + e);
-    }
-}
-
-export function loadSession(model) {
-    clearRestoredSessionFrame();
-    if (!model || model === 'unknown') return false;
-    leavePlayback(false);
-    var key = getStorageKey(model);
-    runtime.activeSessionStorageKey = key;
-    runtime.activeRoomEpoch = getRoomEpoch(key);
-    runtime.sessionStorageNotice = '';
-    var allTime = readAllTimeHighs(model);
-    var saved = inspectStoredSession(model, true);
-    if (saved.protected || !saved.data) return false;
-    var age = Date.now() - saved.data.timestamp;
-    restoreSessionState(saved.data);
-    // Bootstrap once from available, validated local session highs. A
-    // deliberate ATH clear changes the epoch and disables this bootstrap.
-    if (!allTime.error && allTime.epoch === 'initial' && !allTime.keys.length && saved.data.history.timestamps.length) {
-        storeAllTimeHighs(model, sessionAllTimeHighs(saved.data, 'saved'));
-    }
-    log('Session restored for ' + model + ' (' + Math.round(age/60000) + ' min old; ' +
-        (saved.legacy ? 'validated legacy schema 1' : 'storage schema ' + runtime.STORAGE_SCHEMA_VERSION) +
-        '; producer ' + (saved.producerVersion === null ? 'unknown' : saved.producerVersion) + ')');
-    return true;
 }
 
 export function deleteSession(model) {
@@ -406,5 +283,47 @@ export function deleteSession(model) {
         protectSessionStorage(key, 'Explicit Reset could not delete saved session: ' + e.message,
             (runtime.sessionStorageStatus.get(key) || {}).producerVersion);
         log('Reset cleared live tracking but saved storage remains protected: ' + e.message);
+    }
+}
+
+// Storage returns outcomes to its caller. It never renders a panel, changes the
+// live session, or starts/stops playback.
+export function getSessionWriteStatus(model) {
+    try {
+        if (!model || model === 'unknown') return {status: 'inactive'};
+        var key = getStorageKey(model);
+        if (runtime.activeSessionStorageKey !== key) return {status: 'inactive'};
+        if (inspectStoredSession(model, false).protected) return {status: 'protected'};
+        if (getRoomEpoch(key) !== runtime.activeRoomEpoch) return {status: 'reset',
+            message: 'Reset in another tab — local data only; export TXT/CSV before reloading'};
+        return {status: 'ready'};
+    } catch (error) {
+        return {status: 'failed', error: error.message || String(error)};
+    }
+}
+
+export function writeSessionRecord(model, saveData) {
+    var access = getSessionWriteStatus(model);
+    if (access.status !== 'ready') return access;
+    try {
+        var key = getStorageKey(model);
+        // A captured record from before a Reset must not enter the new epoch.
+        if (saveData.roomEpoch !== runtime.activeRoomEpoch) return {status: 'stale'};
+        validateStoredSession(saveData);
+        var raw = JSON.stringify(saveData);
+        // A tab returning after expiration gets a new record ID. No read/modify/
+        // write of a shared history key, even when two tabs save simultaneously.
+        var tabRecord = runtime.tabRecords.get(key);
+        if (!tabRecord || Date.now() - tabRecord.savedAt > runtime.STORAGE_MAX_AGE_MS) {
+            tabRecord = { id: makeStorageId(), savedAt: Date.now() };
+        }
+        GM_setValue(roomTabPrefix(key) + tabRecord.id, raw);
+        tabRecord.savedAt = Date.now();
+        runtime.tabRecords.set(key, tabRecord);
+        runtime.sessionStorageStatus.set(key, { protected: false, raw: raw, producerVersion: saveData.producerVersion, legacy: false });
+        log('Session saved for ' + model + ' (storage schema ' + runtime.STORAGE_SCHEMA_VERSION + ', producer ' + saveData.producerVersion + ')');
+        return {status: 'saved'};
+    } catch (error) {
+        return {status: 'failed', error: error.message || String(error)};
     }
 }

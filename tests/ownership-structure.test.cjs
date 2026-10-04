@@ -12,7 +12,7 @@ const fields = new Set(ast.body.find(n => n.declaration?.declarations?.[0]?.id.n
 
 test('only the session owner and bootstrap write live-session fields', () => {
   for (const file of fs.readdirSync(root).filter(name => name.endsWith('.js'))) {
-    if (['live-session.js', 'runtime.js'].includes(file)) continue;
+    if (['live-session.js', 'bootstrap.js'].includes(file)) continue;
     const source = fs.readFileSync(path.join(root, file), 'utf8');
     assert.deepEqual(sessionWrites(source, fields), [], file);
     assert(!/\bliveSessionState\b/.test(source), file + ' reaches private session state');
@@ -36,4 +36,15 @@ test('the session owner has no effectful imports or browser/storage/timer depend
   assert(!/\bDate\.now\(/.test(owner), 'callers supply time explicitly');
   const exported = ast.body.filter(node => node.type === 'ExportNamedDeclaration').map(node => node.declaration.id?.name || node.declaration.declarations?.[0].id.name);
   assert(!exported.includes('liveSessionState'));
+});
+
+test('only the playback owner and bootstrap write playback state', () => {
+  const protectedFields = new Set(['playback', 'presentationMode', 'sessionFileLoadGeneration']);
+  for (const file of fs.readdirSync(root).filter(name => name.endsWith('.js'))) {
+    if (['playback-state.js', 'bootstrap.js'].includes(file)) continue;
+    const source = fs.readFileSync(path.join(root, file), 'utf8');
+    assert.deepEqual(sessionWrites(source, protectedFields, file === 'replay.js' ? new Set(['state']) : new Set()), [], file);
+    assert(!/\b(?:playbackState|playbackRecords)\b/.test(source), file + ' reaches private playback state');
+  }
+  assert(sessionWrites('function paint(state) {state.playing = false;}', protectedFields, new Set(['state'])).length);
 });

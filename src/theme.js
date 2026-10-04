@@ -1,17 +1,8 @@
-import { hideChartTooltip } from './charts.js';
+import { hideChartTooltip } from './chart-view.js';
 import { redrawPanelCharts } from './layout.js';
-import { updateDisplay } from './panel.js';
+import { updateDisplay } from './presentation.js';
 import { runtime } from './runtime.js';
-
-export function themeColor(token) { return runtime.PANEL_THEME_COLORS[token][runtime.isDarkMode ? 0 : 1]; }
-
-export function setThemeVariables(element) {
-    if (!element) return;
-    Object.keys(runtime.PANEL_THEME_COLORS).forEach(function(token) {
-        element.style.setProperty('--panel-' + token, themeColor(token));
-    });
-    element.style.colorScheme = runtime.isDarkMode ? 'dark' : 'light';
-}
+import { setThemeVariables, themeColor } from './theme-values.js';
 
 export function applyPanelTheme(redraw) {
     var container = document.getElementById('tracker-container');

@@ -1,41 +1,22 @@
-import { nextSessionAbsence, pauseSessionForAbsence, stopLiveSession, startSessionClock, pauseSessionClock, resetLiveSession, pauseSessionRecording, resumeSessionRecording } from './live-session.js';
 import { drawAllSparklines } from './charts.js';
-import { updateMiniFreshness } from './compact.js';
 import { cancelGifExport } from './gif.js';
 import { cancelHighPulses } from './highs.js';
-import { updateDisplay } from './panel.js';
+import { nextSessionAbsence, pauseSessionClock, pauseSessionForAbsence, pauseSessionRecording, resetLiveSession, resumeSessionRecording, startSessionClock, stopLiveSession } from './live-session.js';
+import { updateAcquisitionStatus, updateMiniFreshness } from './presentation-status.js';
+import { updateDisplay, updateTrendDisplay } from './presentation.js';
+import { getStorageKey } from './record-validation.js';
 import { leavePlayback } from './replay.js';
+import { getDOMFallbackWaitSeconds, readRequestPolicy, requestPolicyMessage, writeRequestPolicy } from './request-policy.js';
 import { runtime } from './runtime.js';
-import { getDOMFallbackWaitSeconds, isAcquisitionCurrent, pauseForAccessRestriction, performScanThenReturn, readRequestPolicy, requestPolicyMessage, updateAcquisitionStatus, writeRequestPolicy } from './scanning.js';
-import { deleteSession, getStorageKey, saveSession } from './storage.js';
-import { checkTrendAutoEscalation, updateAutoTrendButton, updateTrendDisplay, updateTrendPresetButtons } from './trends.js';
+import { isAcquisitionCurrent, pauseForAccessRestriction, performScanThenReturn } from './scanning.js';
+import { saveSession } from './session-persistence.js';
+import { absencePauseDescription, getEffectiveScanIntervalSeconds, isAbsencePaused, stopDescription } from './session-selectors.js';
+import { deleteSession } from './storage.js';
+import { checkTrendAutoEscalation, updateAutoTrendButton, updateTrendPresetButtons } from './trends.js';
 import { formatElapsedTime, getModelName, isBroadcastRoom, log } from './utils.js';
-
-export function isAbsencePaused() {
-    return runtime.absencePausedAt !== null && runtime.isPaused && runtime.isAutoRefreshOn && !runtime.isStopped;
-}
-
-export function absencePauseDescription() {
-    return 'Recording and elapsed time paused after 15 minutes without the broadcaster. ' +
-        'API return checks every minute, subject to retry restrictions. A confirmed return resumes recording. ' +
-        'Automatic Stop at ' + new Date(runtime.absencePausedAt + runtime.ABSENCE_STOP_MS).toLocaleString() +
-        ' (3 hours after auto-pause). Use Resume to keep recording during this absence.';
-}
-
-export function getEffectiveScanIntervalSeconds() {
-    if (isAbsencePaused()) return runtime.ABSENCE_CHECK_SECONDS;
-    if (runtime.absenceOverrideActive) return runtime.scanIntervalSeconds;
-    if (runtime.broadcasterAbsence.missing < 2 || runtime.broadcasterAbsence.since === null) return runtime.scanIntervalSeconds;
-    return Math.max(runtime.scanIntervalSeconds, Date.now() - runtime.broadcasterAbsence.since >= 10 * 60000 ? 300 : 120);
-}
 
 export function nextBroadcasterAbsence(snapshot) {
     return nextSessionAbsence(Object.assign({}, snapshot, {observedAt: Date.now()}));
-}
-
-export function stopDescription() {
-    return runtime.stopReason === 'absence' ? (runtime.absencePausedAt !== null ?
-        'Stopped after 3 hours auto-paused for broadcaster absence' : 'Stopped after 3 hours of broadcaster absence') : 'Session stopped';
 }
 
 export function checkAbsenceStop() {

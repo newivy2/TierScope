@@ -25,44 +25,40 @@ Set the release version in `package.json` and update `package-lock.json` with `n
 | File | Responsibility |
 | --- | --- |
 | `main.js` | Start one private tracker; panel controls stay inside the userscript sandbox. |
-| `runtime.js` | Bootstrap defaults, constants, saved preferences, compatibility reads and startup side effects. |
+| `runtime.js`, `bootstrap.js` | Leaf compatibility object; separate defaults, preferences, owner bindings and startup effects. |
 | `live-session.js` | Owned live data and coordinated sample/lifecycle operations; no effects. See [state ownership](STATE_OWNERSHIP.md). |
-| `scanning.js` | API acquisition, request restrictions, fallback coordination, accepted scans, and rollback. |
-| `dom.js` | Site selectors, DOM health, fallback parsing, and room counts. |
-| `storage.js` | Session validation, migration, persistence, tab records, and room generations. |
-| `history.js` | History policy and the append adapter; live-session ownership enforces gaps and retention. |
-| `highs.js` | Session/ATH values, persistence, explicit file additions, clearing, labels, and pulses. |
-| `lifecycle.js` | Session timers, pause/resume, Stop, absence checks, Reset, and scan scheduling. |
-| `files.js` | Session file capture/validation/open/save and the chart-window options menu. |
-| `replay.js` | Replay snapshots, clocks, stepping, controls, and live/replay transitions. |
-| `charts.js` | Plotting, time spacing, drawing, gaps, and sample inspection. |
-| `trends.js` | Trend comparisons, presets, automatic escalation, and rendering. |
-| `panel.js` | Existing panel markup, event bindings, and main display rendering. |
-| `compact.js` | Compact dashboard and freshness display. |
-| `layout.js` | Row collapsing, geometry, dragging, resizing, and view changes. |
-| `theme.js` | Theme tokens, bright/dark mode, and opacity. |
-| `reports.js` | TXT and CSV exports. |
-| `gif.js` | GIF drawing, encoding, and cancellation. |
-| `session-health.js` | Per-room save status and failure presentation without owning scan state. |
-| `session-library.js` | Recording snapshots, compatible-session updates, deduplication, limits and explicit deletion. |
-| `backup.js` | Allowlisted preferences, validated ATH/library backups, merge plans and rollback. |
-| `session-analysis.js` | Pure, typed real-time summary and comparison calculations. |
-| `session-tools.js` | Accessible dialog, library actions, comparison charts and restore preview. |
-| `data-io.js` | Bounded JSON file reading and downloads. |
-| `startup.js` | Initialization, delayed startup, and room navigation. |
-| `utils.js` | Room-name compatibility helpers, time formatting, tier markers, and logging. |
-| `room-context.js` | Pure parser for complete supported room routes; directories have no room target. |
-| `diagnostics.js` | Non-throwing console adapter for optional diagnostic output. |
+| `playback-state.js`, `playback-data.js` | Owned replay controls/clock and immutable recording snapshots; frame calculations. |
+| `scanning.js`, `request-policy.js` | Acquisition/fallback/commit coordination; separate persistent retry/access restrictions. |
+| `dom.js`, `room-context.js` | Site selectors, health/fallback parsing; pure supported-room route parser. |
+| `storage.js`, `record-validation.js` | Session validation/migration, record outcomes, tab records and room generations; shared validation primitives. |
+| `session-persistence.js` | Coordinate session capture/save/restore, playback cleanup and save feedback. |
+| `session-capture.js`, `session-file-format.js` | Capture an exportable recording; independently validate its file format. |
+| `history.js`, `history-data.js` | Append adapter and gap policy; chart-time axes and gap inference. |
+| `highs-store.js`, `high-selectors.js`, `highs.js` | ATH record persistence; high display values; explicit actions and pulse coordination. |
+| `lifecycle.js` | Timers, pause/resume, Stop, absence checks, Reset and scan scheduling. |
+| `files.js`, `replay.js` | File picker/download and chart-window controls; replay transitions and controls. |
+| `display-model.js`, `presentation-data.js`, `display-values.js` | Immutable panel/trend models, pure live-count calculations and supplied high labels. |
+| `presentation.js`, `presentation-status.js` | Coordinate display model selection, painting and explicit control callbacks. |
+| `panel-view.js`, `compact-view.js`, `trend-view.js`, `status-view.js` | Render supplied values without reading live/playback state or storage. |
+| `chart-view.js`, `charts.js` | Plot/draw/inspect supplied chart data; select live/replay history and coordinate row layout. |
+| `panel.js`, `layout.js`, `trends.js` | Panel markup/events, collapsing/geometry/drag/resize, trend settings and escalation. |
+| `theme.js`, `theme-values.js`, `format.js` | Theme actions, color preferences and compact number formatting. |
+| `session-health.js`, `status-model.js` | Per-room save results; data for source/freshness/save-failure display. |
+| `session-library.js`, `backup.js` | Explicit recording persistence, compatible updates/deduplication, limits; validated ATH/library/preferences backup and rollback. |
+| `session-analysis.js`, `session-tools.js` | Pure typed statistics; accessible library/summary/compare/restore dialog and actions. |
+| `reports.js`, `gif.js`, `data-io.js` | TXT/CSV/GIF exports and bounded JSON reading/download helpers. |
+| `startup.js`, `utils.js`, `diagnostics.js` | Initialization/navigation, shared formatting helpers and non-throwing logging. |
+| `immutable-data.js` | Deep-freeze freshly copied recording/display data. |
 
-Feature modules import their function dependencies explicitly. The live-session owner now controls 31 session fields through named operations; their `runtime` properties are getter-only compatibility reads. Other domains still use shared runtime fields. [STATE_OWNERSHIP.md](STATE_OWNERSHIP.md) defines each responsibility, the enforced boundary and its limits.
+Feature modules import dependencies explicitly. Live-session and playback owners expose getter-only compatibility reads; playback recordings and panel models are deeply frozen. Other domains still use shared runtime fields. [STATE_OWNERSHIP.md](STATE_OWNERSHIP.md) describes the boundaries and their limits.
 
-Some function dependencies are circular. Feature modules only declare functions: do not perform work or read runtime values at module load time. `initializeRuntime()` runs after the modules are loaded and initializes fields and listeners in the original order. The live-session owner binds after the original defaults and before navigation polling. Changes to ownership and startup order require lifecycle and initialization coverage.
+The owners, data selectors, views and record stores are outside all import cycles. Some controller dependencies remain circular; `dependency-boundaries.test.cjs` prevents new cyclic edges and enforces the protected layers. Modules must not read runtime values or start effects at module load. `initializeRuntime()` in `bootstrap.js` preserves original preference/default/effect order and then binds owners and explicit presentation callbacks before navigation polling.
 
 ## Migration safeguards
 
 The existing tests still execute the generated userscript. `tests/helpers/instrument.cjs` adapts their test-only hooks to shared/owned state and bundler formatting in memory; the assertions are unchanged, and no test API is included in the installed script. The helper also exposes the private tracker only inside the test copy; the installed script does not publish `window.ViewerTracker` or request `unsafeWindow`.
 
-`tests/modular-build.test.cjs` compares all 196 extracted function syntax trees and the initialization sequence with fingerprints of 3.4.0 in `tests/fixtures/3.4.0-structure.json`. Only state access, declaration placement, and the release version are normalized. The original baseline is unchanged. Release 3.5.0 introduced five explicit function exceptions, each with behavior coverage: `performScanThenReturn` and `log` for commit/logging safety, `acquireDOMSnapshot` for tab restoration, `generateGifFromHistory` for its bundled encoder, and `updateHighControls` for the retention tooltip. Release 3.6.0 additionally changes `saveSession`, `updateAcquisitionStatus`, `updateMiniFreshness`, `bindPanelOptions` and `updatePanelOptions` for save feedback and the tools entry, plus `createPanel` for the direct replay Keep in library button. Those changes have unit/browser coverage. Release 3.6.1 additionally changes `acquireRoomSnapshot` and `validateDOMHealth` for safe diagnostics, `getModelNameFromUrl` and `isBroadcastRoom` for consistent room routes, and `resetAllTracking`, `resetTrackingData` and `updateStopControls` for non-room Reset guards. `maintenance-regressions.test.cjs` and the ATH browser fixture cover these paths. Release 3.7.0 adds twenty reviewed function exceptions for session ownership and one explicit initialization step binding that owner. Their coverage is in the session, Stop/absence, startup, review-regression and new ownership suites. The other 158 original functions and the original defaults/effect order remain locked to 3.4.0. `getSessionSamplePolicy` is a new policy helper. New feature modules have behavioral tests rather than migration fingerprints. Metadata checks permit only removal of `unsafeWindow` and the external `@require`; the raw bundle is tested for absence of a page control API. The baseline commit is recorded in the fixture.
+`tests/modular-build.test.cjs` compares all 196 extracted function syntax trees and the initialization sequence with fingerprints of 3.4.0 in `tests/fixtures/3.4.0-structure.json`. Only state access, declaration placement, and the release version are normalized. The original baseline is unchanged. Release 3.5.0 introduced five explicit function exceptions, each with behavior coverage: `performScanThenReturn` and `log` for commit/logging safety, `acquireDOMSnapshot` for tab restoration, `generateGifFromHistory` for its bundled encoder, and `updateHighControls` for the retention tooltip. Release 3.6.0 additionally changes `saveSession`, `updateAcquisitionStatus`, `updateMiniFreshness`, `bindPanelOptions` and `updatePanelOptions` for save feedback and the tools entry, plus `createPanel` for the direct replay Keep in library button. Those changes have unit/browser coverage. Release 3.6.1 additionally changes `acquireRoomSnapshot` and `validateDOMHealth` for safe diagnostics, `getModelNameFromUrl` and `isBroadcastRoom` for consistent room routes, and `resetAllTracking`, `resetTrackingData` and `updateStopControls` for non-room Reset guards. `maintenance-regressions.test.cjs` and the ATH browser fixture cover these paths. Release 3.7.0 introduced session ownership. Release 3.8.0 adds playback operations, display models/views and record-store separation, with initialization coverage for the playback and presentation bindings. In total, 60 original functions have reviewed changes and 136 retain their original fingerprints. The original defaults/effect order remains locked. New feature modules and helpers have behavior/boundary tests rather than original-function fingerprints. Metadata checks permit only removal of `unsafeWindow` and the external `@require`; the raw bundle is tested for absence of a page control API. The baseline commit is recorded in the fixture.
 
 These fingerprints guard the unchanged parts of the migration. A later feature change must explicitly update or retire the relevant migration checks in its reviewed change, alongside behavior tests; do not regenerate the fingerprints merely to make a failure disappear.
 

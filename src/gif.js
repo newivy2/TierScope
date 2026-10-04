@@ -1,6 +1,7 @@
 import { GifWriter } from 'omggif';
-import { buildChartPlot, getHistoryBreaks } from './charts.js';
-import { isPlaybackCurrent } from './replay.js';
+import { buildChartPlot } from './chart-view.js';
+import { getHistoryBreaks } from './history-data.js';
+import { isPlaybackCurrent } from './playback-data.js';
 import { runtime } from './runtime.js';
 import { formatElapsedTime, getModelName, log } from './utils.js';
 

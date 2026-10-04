@@ -456,6 +456,8 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
+| **3.8.0** | Give playback protected state and frozen recording snapshots; render supplied display values; separate record storage from session/panel coordination. Enforce ownership and dependency boundaries while preserving controls, appearance and saved-data formats. |
+| **3.7.0** | Coordinate live-session sample acceptance, highs, timing and lifecycle operations under one owner. Keep timer cancellation separate from clearing data; preserve valid live samples through failed saves and reject stale responses after Reset, navigation or Stop. |
 | **3.6.1** | Release safe diagnostic logging and consistent room targets. Preserve API restrictions through console failures; guard non-room Reset/ATH Clear while retaining file replay actions for its own room. |
 | **3.6.1-beta.1** | Prevent console failures from bypassing API access blocks, retry waits, fallback or DOM health handling. Recognize complete room routes consistently; disable non-room Reset and ATH Clear while preserving file replay's own-room actions. |
 | **3.6.0** | Release Session tools with model folders, a 500-recording / 25 MB library, safe updates to growing sessions, direct Library and replay Keep controls, time-weighted audience summaries and thresholds, two-recording comparison, validated ATH/preferences/library backup and restore, and visible session-save failures. |

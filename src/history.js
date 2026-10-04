@@ -1,5 +1,6 @@
-import { appendCurrentSessionSample } from './live-session.js';
-import { drawAllSparklines, getHistoryBreaks } from './charts.js';
+import { drawAllSparklines } from './charts.js';
+import { getHistoryBreaks } from './history-data.js';
+import { appendCurrentSessionSample, synchronizeSessionHighTimes } from './live-session.js';
 import { runtime } from './runtime.js';
 
 export function getSessionSamplePolicy() {
@@ -10,4 +11,8 @@ export function getSessionSamplePolicy() {
 export function saveToHistory() {
     appendCurrentSessionSample(Date.now(), getSessionSamplePolicy());
     if (!runtime.isMinimized) drawAllSparklines();
+}
+
+export function syncHighTimes() {
+    synchronizeSessionHighTimes();
 }

@@ -6,7 +6,7 @@ const eslintScope = require('eslint-scope');
 // Existing fixtures describe the pre-refactor state names. Adapt only their
 // unresolved references after injection, so the same assertions exercise the
 // shipped bundle. No test hooks or compatibility aliases enter production.
-const stateNames = new Set([...fs.readFileSync(path.join(__dirname, '../../src/runtime.js'), 'utf8')
+const stateNames = new Set([...fs.readFileSync(path.join(__dirname, '../../src/bootstrap.js'), 'utf8')
   .matchAll(/\bruntime\.([A-Za-z_$][\w$]*)\s*=/g)].map(match => match[1]));
 // Old fixtures can seed adversarial state directly, but only inside the test
 // copy. Production runtime properties are getter-only and writes use operations.

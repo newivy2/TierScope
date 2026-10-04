@@ -1,11 +1,15 @@
-import { getHistoryBreaks } from './charts.js';
-import { addFileToAllTimeHighs, cancelHighPulses, clearAllTimeHighs, getSessionHigh, readAllTimeHighs, toggleHighMode, updateHighControls } from './highs.js';
+import { readAllTimeHighs } from './highs-store.js';
+import { addFileToAllTimeHighs, cancelHighPulses, clearAllTimeHighs, toggleHighMode, updateHighControls } from './highs.js';
 import { redrawPanelCharts, toggleView } from './layout.js';
-import { createPlaybackSnapshot, isPlaybackCurrent, leavePlayback, paintPlayback, setPlaybackLayout } from './replay.js';
+import { createPlaybackSnapshot, isPlaybackCurrent } from './playback-data.js';
+import { nextSessionFileRequest, openOwnedPlayback } from './playback-state.js';
+import { hasStorageField } from './record-validation.js';
+import { leavePlayback, paintPlayback, setPlaybackLayout } from './replay.js';
 import { runtime } from './runtime.js';
-import { getStorageKey, hasStorageField, isStorageNumber, isStorageObject, isStorageTimestamp, normalizeStoredSession, validateStoredSession } from './storage.js';
-import { getModelName, log } from './utils.js';
+import { captureSessionFile } from './session-capture.js';
+import { validateSessionFile } from './session-file-format.js';
 import { bindSessionTools, updateSessionToolsStatus } from './session-tools.js';
+import { log } from './utils.js';
 
 export function setChartWindow(value) {
     if (!hasStorageField(runtime.CHART_WINDOWS, value)) return;
@@ -14,74 +18,6 @@ export function setChartWindow(value) {
     runtime.chartLayoutRevision++;
     updatePanelOptions();
     redrawPanelCharts();
-}
-
-export function captureSessionFile() {
-    if (isPlaybackCurrent(runtime.playback) && runtime.playback.archive) return runtime.playback.archive;
-    if (!runtime.history.timestamps.length || runtime.activeSessionStorageKey !== getStorageKey(getModelName()) || location.href !== runtime.lastUrl) {
-        throw new Error('No recorded session to save yet.');
-    }
-    var now = Date.now();
-    var data = {
-        schemaVersion: runtime.STORAGE_SCHEMA_VERSION, timestamp: now,
-        history: { timestamps: runtime.history.timestamps.slice(), breaks: getHistoryBreaks(runtime.history).slice() },
-        sessionStartedAt: runtime.sessionStartedAt, sessionStartEstimated: runtime.sessionStartEstimated,
-        sessionHighs: {}, roomTotalHigh: runtime.roomTotalHigh, roomTotalHighTime: runtime.roomTotalHighTime,
-        pausedElapsedTime: runtime.isPaused ? runtime.pausedElapsedTime : runtime.trackingStartTime ? Math.max(0, now - runtime.trackingStartTime) : 0,
-        isPaused: runtime.isPaused, isStopped: runtime.isStopped, stoppedAt: runtime.stoppedAt, stopReason: runtime.stopReason
-    };
-    runtime.STORAGE_HISTORY_SERIES.forEach(function(key) {
-        data.history[key] = runtime.history[key].slice();
-        data.sessionHighs[key] = getSessionHigh(key, 0);
-    });
-    runtime.history.timestamps.forEach(function(time, i) {
-        var total = runtime.history.total[i] + runtime.history.anonymous[i];
-        if (total > data.roomTotalHigh) { data.roomTotalHigh = total; data.roomTotalHighTime = time; }
-    });
-    return validateSessionFile({ format: runtime.SESSION_FILE_FORMAT, formatVersion: runtime.SESSION_FILE_VERSION,
-        producerVersion: runtime.TIERSCOPE_VERSION, room: getModelName(), session: data });
-}
-
-export function validateSessionFile(file) {
-    if (!isStorageObject(file) || file.format !== runtime.SESSION_FILE_FORMAT || file.formatVersion !== runtime.SESSION_FILE_VERSION) {
-        throw new Error('This is not a supported TierScope session file.');
-    }
-    if (typeof file.room !== 'string' || !/^[a-z0-9_-]{1,100}$/i.test(file.room) ||
-        typeof file.producerVersion !== 'string' || file.producerVersion.length > 40) {
-        throw new Error('Invalid session file information.');
-    }
-    var data = file.session;
-    validateStoredSession(data);
-    if (data.schemaVersion !== runtime.STORAGE_SCHEMA_VERSION || !data.history.timestamps.length ||
-        !isStorageObject(data.sessionHighs) || !isStorageNumber(data.roomTotalHigh) ||
-        !(data.sessionStartedAt === null || isStorageTimestamp(data.sessionStartedAt)) ||
-        typeof data.sessionStartEstimated !== 'boolean' || !isStorageTimestamp(data.pausedElapsedTime) ||
-        typeof data.isPaused !== 'boolean' || typeof data.isStopped !== 'boolean' ||
-        !(data.roomTotalHighTime === null || isStorageTimestamp(data.roomTotalHighTime))) {
-        throw new Error('Session file is incomplete.');
-    }
-    runtime.STORAGE_HISTORY_SERIES.forEach(function(key) {
-        if (!data.history[key].every(Number.isSafeInteger) || !Number.isSafeInteger(data.sessionHighs[key].value)) {
-            throw new Error('Session counts must be whole numbers.');
-        }
-    });
-    var roomPeak = 0;
-    data.history.timestamps.forEach(function(_, i) {
-        var total = data.history.total[i] + data.history.anonymous[i];
-        if (!Number.isSafeInteger(total)) throw new Error('Invalid session room total.');
-        roomPeak = Math.max(roomPeak, total);
-    });
-    if (!Number.isSafeInteger(data.roomTotalHigh) || data.roomTotalHigh < roomPeak) throw new Error('Invalid session room high.');
-    // Copy only supported aggregate fields. Ignore extra fields, including
-    // obsolete username collections; imported data never enters live storage.
-    var normalized = normalizeStoredSession(data);
-    var clean = { schemaVersion: runtime.STORAGE_SCHEMA_VERSION };
-    ['timestamp', 'history', 'sessionStartedAt', 'sessionStartEstimated', 'sessionHighs',
-        'roomTotalHigh', 'roomTotalHighTime', 'pausedElapsedTime', 'isPaused', 'isStopped', 'stoppedAt', 'stopReason'].forEach(function(key) {
-        clean[key] = normalized[key];
-    });
-    return { format: runtime.SESSION_FILE_FORMAT, formatVersion: runtime.SESSION_FILE_VERSION,
-        producerVersion: file.producerVersion, room: file.room, session: clean };
 }
 
 export function downloadSessionFile() {
@@ -100,19 +36,17 @@ export function openSessionReplay(file) {
     var archive = validateSessionFile(file);
     leavePlayback(false);
     if (runtime.isMinimized) toggleView();
-    runtime.playback = { url: location.href, key: runtime.activeSessionStorageKey, generation: runtime.initGuard,
+    openOwnedPlayback({url: location.href, key: runtime.activeSessionStorageKey, generation: runtime.initGuard,
         imported: true, archive: archive, snapshot: createPlaybackSnapshot(archive.session.history),
-        allTimeState: readAllTimeHighs(archive.room),
-        positionMs: 0, samplePosition: 0, stepIndex: 0, speed: 1, lastTickAt: Date.now(), playing: false, timer: null };
+        allTimeState: readAllTimeHighs(archive.room)}, Date.now(), false);
     cancelHighPulses();
-    runtime.presentationMode = 'PLAYBACK';
     setPlaybackLayout(true);
     return paintPlayback(runtime.playback);
 }
 
 export async function readSessionFile(file) {
     if (!file) return false;
-    var request = ++runtime.sessionFileLoadGeneration, url = location.href, generation = runtime.initGuard;
+    var request = nextSessionFileRequest(), url = location.href, generation = runtime.initGuard;
     function current() { return request === runtime.sessionFileLoadGeneration && url === location.href && generation === runtime.initGuard; }
     try {
         if (file.size > runtime.SESSION_FILE_MAX_BYTES) throw new Error('Session files must be 8 MB or smaller.');
