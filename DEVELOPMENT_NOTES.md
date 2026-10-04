@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **3.10.0**. This release groups the timers above the action buttons and adds a moon–sun theme switch. Acquisition and panel preferences have explicit state owners, application imports are acyclic, and long-recording chart rendering uses a private cache. Tracking, replay, storage formats and retention stay compatible with 3.9.0. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation links, see the [README](readme.md).
+Detailed reference for **3.10.1**. This patch keeps the main panel above Library wherever they overlap, including narrow windows. Positioning, scale, tracking, replay, storage formats and retention stay compatible with 3.10.0. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation links, see the [README](readme.md).
 
 ## Contents
 
@@ -255,7 +255,7 @@ Replay controls belong to the panel. The downloaded GIF does not contain pause, 
 
 ## Session tools
 
-Click **Library** beside Replay in Controls or beside Play in Replay. It opens a matching page to the left of the chart, with Recordings, Summary, Compare and Backup tabs. The chart remains usable. The page follows panel movement, scale and theme; small windows use a scrollable sheet. The × button, Library button or Escape closes it. Temporary space borrowed for docking is restored on close unless you moved the panel. Room navigation closes Library and discards pending file reads.
+Click **Library** beside Replay in Controls or beside Play in Replay. It opens a matching page to the left of the chart, with Recordings, Summary, Compare and Backup tabs. The chart remains usable. The page follows panel movement, scale and theme; small windows use a scrollable sheet. The main panel stays above Library wherever they overlap, including in sheet layout, and receives clicks in the overlapping area. The × button, Library button or Escape closes Library. Temporary space borrowed for docking is restored on close unless you moved the panel. Room navigation closes Library and discards pending file reads.
 
 ### Library
 
@@ -455,6 +455,7 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
+| **3.10.1** | Keep the main panel above Library in both attached and narrow-window sheet layouts, so overlap cannot hide Scope or intercept its controls. Preserve positioning, scale and the sheet breakpoint. |
 | **3.10.0** | Give acquisition and panel preferences explicit state owners; eliminate application import cycles; cache immutable chart data for faster long replays. Group timers above Library, Replay and the other actions, keep control positions stable, match button sizes and the pink Library accent, and add an accessible moon–sun theme switch. Preserve saved-data compatibility. |
 | **3.9.0** | Release the attached Library, consolidated recording actions and simplified controls. Put the Summary chart first below its controls, followed by the audience overview and statistics. Preserve existing saved recordings and tracking behavior. |
 | **3.9.0-beta.1** | Unfold Library beside the panel with matching themes, model folders and responsive docking. Consolidate current/replayed/stored session files and TXT/CSV/GIF exports in Library; keep the chart usable and simplify main controls. |
