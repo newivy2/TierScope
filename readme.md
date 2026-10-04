@@ -5,7 +5,6 @@ TierScope is a free, open-source userscript that charts how a Chaturbate room’
 ---
 **Current stable release: 3.13.0** · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.13.0)
 
-Open **Library → a model folder → History overview** to review that model’s saved recordings over time. Each saved recording has its own average and peak markers, with covered-time statistics and shortcuts to Summary, Replay and Compare. [Dark preview](docs/previews/model-history-dark.png) · [Bright preview](docs/previews/model-history-bright.png).
 ---
 
 Open the **Library** to unfold a matching left-hand page next to the chart. Save, export, open a saved file, and browse recordings in model folders. Session summaries and comparisons are available too. Visual bugs corrected. [Build and source guide](BUILDING.md).
