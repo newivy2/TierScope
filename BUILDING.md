@@ -82,6 +82,6 @@ Statistics hold each sample until the next accepted sample, exclude marked gaps 
 
 All console access goes through `diagnostics.js`; a structural check prevents new direct calls elsewhere. Logging failures must never alter acquisition, request restrictions or persistence. `room-context.js` recognizes only complete `/<room>/`, `/b/<room>/` and `/<room>/cam/` routes (with optional trailing slash), excluding reserved directories and invalid room names. File archives use their independently validated room field, so directory-page replay retains its own ATH actions.
 
-## Recovery maintenance (3.11.0 beta)
+## Recovery maintenance (3.11.0)
 
 Valid acquisitions commit before any drawing or persistence effect. `recovery.test.cjs` and the pulse/browser fixtures verify sample retention, independent save failures, automatic redraw, stale-session protection and Replay isolation. The library reader can isolate individual read failures; a partial backup requires explicit opt-in, declares omissions and leaves originals intact. Raw recovery exports are deliberately separate from importable backups. Remembered analysis choices use `tierscope:ui:analysis:v1`; their validation is shared with backup code without a store-to-controller dependency. Existing import-cycle and ownership gates continue to apply.

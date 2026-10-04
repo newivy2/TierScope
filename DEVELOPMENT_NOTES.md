@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **3.11.0-beta.1**. This beta retains valid samples through drawing failures, adds explicit partial backups and raw library recovery downloads, and remembers analysis choices. Positioning, scale, tracking, replay and existing recordings remain compatible with 3.10.1; retention limits are unchanged. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation links, see the [README](readme.md).
+Detailed reference for **3.11.0**. This release retains valid samples through drawing failures, adds explicit partial backups and raw library recovery downloads, and remembers analysis choices. Positioning, scale, tracking, replay and existing recordings remain compatible with 3.10.1; retention limits are unchanged. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation links, see the [README](readme.md).
 
 ## Contents
 
@@ -459,7 +459,7 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
-| **3.11.0-beta.1** | Retain committed samples through drawing failures and retry presentation independently; add explicit healthy-recording partial backups with omission notices and separate raw recovery downloads; remember analysis metric, thresholds and shared-length choices, including in backups. |
+| **3.11.0** | Retain committed samples through drawing failures and retry presentation independently; add explicit healthy-recording partial backups with omission notices and separate raw recovery downloads; remember analysis metric, thresholds and shared-length choices, including in backups. |
 | **3.10.1** | Keep the main panel above Library in both attached and narrow-window sheet layouts, so overlap cannot hide Scope or intercept its controls. Preserve positioning, scale and the sheet breakpoint. |
 | **3.10.0** | Give acquisition and panel preferences explicit state owners; eliminate application import cycles; cache immutable chart data for faster long replays. Group timers above Library, Replay and the other actions, keep control positions stable, match button sizes and the pink Library accent, and add an accessible moon–sun theme switch. Preserve saved-data compatibility. |
 | **3.9.0** | Release the attached Library, consolidated recording actions and simplified controls. Put the Summary chart first below its controls, followed by the audience overview and statistics. Preserve existing saved recordings and tracking behavior. |

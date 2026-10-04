@@ -1,6 +1,6 @@
 # State ownership
 
-The 3.11.0 beta builds on the existing live-session, playback, acquisition and preference owners. Valid samples now commit before drawing, and analysis preferences have a separate owner. The panel and single-script installation stay compatible; backups gain optional analysis and recovery fields. This is an incremental migration; it does not claim that every subsystem is already an independent store.
+Release 3.11.0 builds on the existing live-session, playback, acquisition and preference owners. Valid samples now commit before drawing, and analysis preferences have a separate owner. The panel and single-script installation stay compatible; backups gain optional analysis and recovery fields. This is an incremental migration; it does not claim that every subsystem is already an independent store.
 
 ## Responsibilities
 
@@ -66,7 +66,7 @@ The source checks reject unauthorized writes to live/playback/acquisition/prefer
 
 Behavior tests cover receipt commit/rollback, Reset/navigation/Stop with delayed API responses, replay replacement and stale callbacks, immutable recording/display snapshots, repainting without live mutations, storage failure/retry, captured records after Reset, and two tabs with Reset during replay and a pending scan. Existing file, library, backup, layout, theme, pulse and browser checks remain in the gate. The original 3.4.0 migration fingerprints are retained with explicit exceptions for reviewed changes.
 
-Remaining shared state includes live collection read views, storage metadata, layout measurements, drag/resize state and some DOM resource handles. The current guards are targeted checks, not a general effect/type system; helpers that receive shared values still require review. The beta preserves existing features and panel layout while separating committed samples from drawing success.
+Remaining shared state includes live collection read views, storage metadata, layout measurements, drag/resize state and some DOM resource handles. The current guards are targeted checks, not a general effect/type system; helpers that receive shared values still require review. The release preserves existing features and panel layout while separating committed samples from drawing success.
 
 ## Acquisition and preference boundaries (3.10.0)
 
@@ -78,7 +78,7 @@ Timer replacement and cancellation invalidate queued callbacks, including a vali
 
 The chart renderer keeps weakly keyed, private dense copies of immutable sample arrays. These copies are used only for plot reduction; tooltips, exports and playback retain their original immutable recording data. Mutable live arrays bypass the cache, avoiding stale samples after append/trim. See [performance measurements and tradeoffs](PERFORMANCE.md).
 
-## Sample presentation and recovery (3.11.0 beta)
+## Sample presentation and recovery (3.11.0)
 
 `sample-presentation.js` paints committed data and records failure through the independent `presentation-health.js` owner. Its warning belongs to a history identity, initialization generation and URL; Reset or navigation cannot carry an old warning or redraw into a new session. The existing one-second freshness interval retries drawing, except during Replay. Repainting never appends history, writes storage or replays high pulses; repeated identical errors do not flood the console. Session-save warnings take priority if drawing and saving both fail.
 

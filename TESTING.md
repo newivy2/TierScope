@@ -93,6 +93,6 @@ The browser fixtures run in Chromium and Firefox. The local release check used c
 
 Run `TIERSCOPE_CPU_THROTTLE=4 npm run test:performance` for a Chromium CPU-slowdown comparison. This simulates CPU pressure, not a particular phone or computer. `TIERSCOPE_SOURCE=/path/to/older.user.js` uses the same fixture and test-only instrumentation for a paired comparison. Results and limitations are in [PERFORMANCE.md](PERFORMANCE.md).
 
-## Recovery maintenance (3.11.0 beta)
+## Recovery maintenance (3.11.0)
 
 `recovery.test.cjs` covers failed painting with successful and failed saves, the automatic redraw interval, Reset/navigation/Stop during painting, Replay isolation, retained gaps/trends/highs, partial backups, raw damaged-value downloads, individual unreadable keys, unknown capacity, restore validation/rollback and preference persistence across tabs. The session-tools browser fixture exercises explicit partial-backup selection, omission warnings in previews and confirmation, recovery-file rejection as a normal backup, analysis choices across refresh, and visible preference-write failure/retry in both engines. The pulse fixture verifies that drawing recovery neither loses samples nor replays a missed high pulse.

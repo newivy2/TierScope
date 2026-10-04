@@ -3,11 +3,7 @@
 TierScope is a free, open-source userscript that charts how a Chaturbate room’s audience changes over time. 
 
 ---
-**Current stable release: 3.10.1** · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.10.1)
-
-**Beta: 3.11.0-beta.1** · [Install beta](https://raw.githubusercontent.com/newivy2/TierScope/beta/sample-and-backup-recovery/tierscope.user.js)
-
-This beta retains valid samples through drawing failures, offers explicit partial backups and raw recovery downloads for unreadable library entries, and remembers analysis choices. Main remains on 3.10.1 while this stage is reviewed.
+**Current stable release: 3.11.0** · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.11.0)
 ---
 
 Open **Library** beside Replay to unfold a matching left-hand page next to the chart. Save or export the current/replayed session, open a saved file, and browse recordings in model folders. Summary, Compare and Backup tabs bring the session tools into the same panel. On small windows, the library becomes a scrollable sheet. TierScope stays above Library wherever they overlap, keeping the main panel visible and clickable. A visible warning reports failed session saves. [Build and source guide](BUILDING.md).
