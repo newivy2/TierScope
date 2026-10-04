@@ -3,7 +3,7 @@
 TierScope is a free, open-source userscript that charts how a Chaturbate room’s audience changes over time. 
 
 ---
-**Beta under review: 3.10.0-beta.2** · [Install beta](https://raw.githubusercontent.com/newivy2/TierScope/beta/state-and-performance/tierscope.user.js)
+**Beta under review: 3.10.0-beta.3** · [Install beta](https://raw.githubusercontent.com/newivy2/TierScope/beta/state-and-performance/tierscope.user.js)
 
 This beta tightens scan and display-setting ownership, removes circular module imports, speeds up long-recording charts, and groups timing above the action buttons. The top control row shows Controls, elapsed time and countdown; the bottom row has Library, Replay, play/pause, Stop, Reset and dark mode. Status changes do not move the controls. Features and saved-data formats remain compatible.
 
