@@ -392,9 +392,10 @@ export function openSessionTools(focusTarget) {
             summaryTable([result.a, result.b], ['A', 'B']);
         } else {
             const summary = summarizeSession(a.archive, metric, threshold);
+            chart([a.archive], [a.archive.room], summary.spanMs);
             audienceOverview(a.archive); thresholdTable(a.archive);
-            node(content, 'h3', ANALYSIS_METRICS[metric] + ' — chart and details');
-            chart([a.archive], [a.archive.room], summary.spanMs); summaryTable([summary], [a.archive.room], false);
+            node(content, 'h3', ANALYSIS_METRICS[metric] + ' — details');
+            summaryTable([summary], [a.archive.room], false);
         }
     }
     function checkbox(parent, id, text, checked = true) {

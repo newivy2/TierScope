@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.9.0-beta.1
+// @version      3.9.0
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -6492,10 +6492,10 @@ underlying system, so should run in the browser, Node, or Plask.
         summaryTable([result.a, result.b], ["A", "B"]);
       } else {
         const summary = summarizeSession(a.archive, metric, threshold);
+        chart([a.archive], [a.archive.room], summary.spanMs);
         audienceOverview(a.archive);
         thresholdTable(a.archive);
-        node(content, "h3", ANALYSIS_METRICS[metric] + " — chart and details");
-        chart([a.archive], [a.archive.room], summary.spanMs);
+        node(content, "h3", ANALYSIS_METRICS[metric] + " — details");
         summaryTable([summary], [a.archive.room], false);
       }
     }
@@ -7158,7 +7158,7 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/bootstrap.js
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.9.0-beta.1";
+    runtime.TIERSCOPE_VERSION = "3.9.0";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;

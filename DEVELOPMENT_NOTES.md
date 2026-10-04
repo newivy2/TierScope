@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **3.9.0-beta.1**. This beta turns Library into an attached left-hand page, moves file and export actions there, and simplifies the main controls. Tracking, replay, storage formats and retention stay compatible with 3.8.0. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation links, see the [README](readme.md).
+Detailed reference for **3.9.0**. This release turns Library into an attached left-hand page, moves file and export actions there, and simplifies the main controls. Summary places its chart below the controls, followed by the audience overview and detailed statistics. Tracking, replay, storage formats and retention stay compatible with 3.8.0. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation links, see the [README](readme.md).
 
 ## Contents
 
@@ -267,9 +267,9 @@ The library opens with alphabetically ordered **model folders**, each showing it
 
 ### Summary and comparison
 
-Choose the current/replayed snapshot or a library recording. **Refresh current / replayed snapshot** captures newer data without saving it to the library. The individual **Summary** starts with an audience overview: room audience (registered + anonymous), registered viewers, viewers with tokens and anonymous viewers, each with a time-weighted average, peak within retained history and full-session high. Hover a recording peak for its first recorded time. Audience proportions show token holders as a share of registered viewers and the whole room, plus the anonymous share of the whole room.
+Choose the current/replayed snapshot or a library recording. **Refresh current / replayed snapshot** captures newer data without saving it to the library. The individual **Summary** starts with the selected metric's chart below the controls, matching Compare. The audience overview follows: room audience (registered + anonymous), registered viewers, viewers with tokens and anonymous viewers, each with a time-weighted average, peak within retained history and full-session high. Hover a recording peak for its first recorded time. Audience proportions show token holders as a share of registered viewers and the whole room, plus the anonymous share of the whole room.
 
-Select a metric and enter up to eight non-negative whole-number thresholds, separated by commas (for example, `25, 50, 100`), then choose **Apply thresholds** or press Enter. Duplicates are removed and the thresholds are sorted. The table shows time at or above each count and its percentage of **covered recording time**. Counts equal to a threshold are included. The selected metric also has a chart and detailed statistics below the overview. These thresholds are analysis controls, not live alerts.
+Select a metric and enter up to eight non-negative whole-number thresholds, separated by commas (for example, `25, 50, 100`), then choose **Apply thresholds** or press Enter. Duplicates are removed and the thresholds are sorted. The table shows time at or above each count and its percentage of **covered recording time**. Counts equal to a threshold are included. Detailed statistics for the selected metric follow the overview and threshold table. These thresholds are analysis controls, not live alerts.
 
 Time calculations use original timestamps, not evenly paced Replay time. Each sample's count is held until the next sample; marked gaps and zero-duration intervals contribute no weight. The last sample adds no assumed duration. With no covered interval, averages, proportions and threshold durations are shown as unavailable. A measured zero remains zero. Audience proportions divide the relevant viewer-time totals; a crowded interval contributes more than a quiet interval of the same length. They are not averages of per-sample percentages. A zero denominator is shown as unavailable.
 
@@ -453,6 +453,7 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
+| **3.9.0** | Release the attached Library, consolidated recording actions and simplified controls. Put the Summary chart first below its controls, followed by the audience overview and statistics. Preserve existing saved recordings and tracking behavior. |
 | **3.9.0-beta.1** | Unfold Library beside the panel with matching themes, model folders and responsive docking. Consolidate current/replayed/stored session files and TXT/CSV/GIF exports in Library; keep the chart usable and simplify main controls. |
 | **3.8.0** | Give playback protected state and frozen recording snapshots; render supplied display values; separate record storage from session/panel coordination. Enforce ownership and dependency boundaries while preserving controls, appearance and saved-data formats. |
 | **3.7.0** | Coordinate live-session sample acceptance, highs, timing and lifecycle operations under one owner. Keep timer cancellation separate from clearing data; preserve valid live samples through failed saves and reject stale responses after Reset, navigation or Stop. |
