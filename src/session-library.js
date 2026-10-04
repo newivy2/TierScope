@@ -54,12 +54,15 @@ export function compareLibrarySessions(existing, incoming) {
 }
 
 export function readSessionLibrary() {
-    const entries = [], damaged = [], sessions = new Map();
+    const entries = [], damaged = [], unavailable = [], sessions = new Map();
     let bytes = 0;
     for (const key of GM_listValues().filter(key => key.startsWith(LIBRARY_PREFIX))) {
-        const raw = GM_getValue(key, null);
-        if (raw === null) continue;
-        bytes += new Blob([typeof raw === 'string' ? raw : JSON.stringify(raw)]).size;
+        let raw;
+        try { raw = GM_getValue(key, undefined); }
+        catch (error) { damaged.push(key); unavailable.push(key); continue; }
+        if (raw === undefined) continue;
+        try { bytes += new Blob([typeof raw === 'string' ? raw : JSON.stringify(raw)]).size; }
+        catch (error) { damaged.push(key); unavailable.push(key); continue; }
         try {
             const record = JSON.parse(raw);
             if (record.schemaVersion !== 1 || !Number.isSafeInteger(record.addedAt) || record.addedAt < 0) throw new Error('Invalid library record.');
@@ -76,10 +79,11 @@ export function readSessionLibrary() {
         } catch (error) { damaged.push(key); }
     }
     entries.sort((a, b) => b.archive.session.history.timestamps[0] - a.archive.session.history.timestamps[0] || b.addedAt - a.addedAt || a.id.localeCompare(b.id));
-    return { entries, damaged, bytes, count: entries.length + damaged.length };
+    return { entries, damaged, unavailable, bytes, count: entries.length + damaged.length };
 }
 
 export function planLibraryAdditions(incoming, library = readSessionLibrary()) {
+    if (library.unavailable && library.unavailable.length) throw new Error('Some library records could not be read. Refresh the list before saving more recordings.');
     const entries = library.entries.slice(), writes = [];
     let bytes = library.bytes;
     for (const entry of incoming) {
@@ -130,6 +134,7 @@ export function keepSessionInLibrary(archive, title = '') {
 
 export function verifyLibraryCapacity() {
     const state = readSessionLibrary();
+    if (state.unavailable.length) throw new Error('Library capacity could not be checked because some records could not be read.');
     if (state.count > LIBRARY_MAX_COUNT || state.bytes > LIBRARY_MAX_BYTES) throw new Error('Library limit reached, possibly by another tab. Refresh the list and remove recordings before retrying.');
 }
 
@@ -142,6 +147,7 @@ export function removeLibrarySession(id) {
 
 export function renameLibrarySession(id, title) {
     const key = libraryRecordKey(id), state = readSessionLibrary();
+    if (state.unavailable.length) throw new Error('Some library records could not be read. Refresh the list before renaming.');
     const entry = state.entries.find(entry => entry.records.some(record => record.key === key));
     if (!entry) throw new Error('This recording changed in another tab. Refresh the list.');
     const cleanTitle = libraryTitle(title);

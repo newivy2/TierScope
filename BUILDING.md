@@ -30,6 +30,7 @@ Set the release version in `package.json` and update `package-lock.json` with `n
 | `playback-state.js`, `playback-data.js` | Owned replay controls/clock and immutable recording snapshots; frame calculations. |
 | `acquisition-state.js`, `acquisition-context.js` | Owned request generations, deadlines, retry state, fallback cadence and injected timer resources; current-page context adapter. |
 | `scanning.js`, `request-policy.js` | API/DOM acquisition and sample-commit coordination; request-policy persistence. |
+| `analysis-preferences.js`, `analysis-preference-data.js` | Owned remembered analysis choices; pure typed validation shared by backup code. |
 | `panel-preferences.js` | Owned theme, highs mode, chart window, collapsed rows, scale/geometry, compact view and trend choices. |
 | `dom.js`, `dom-health.js`, `room-context.js` | Site selectors/fallback parsing, health coordination; pure supported-room route parser. |
 | `storage.js`, `record-validation.js` | Session validation/migration, record outcomes, tab records and room generations; shared validation primitives. |
@@ -40,6 +41,7 @@ Set the release version in `package.json` and update `package-lock.json` with `n
 | `lifecycle.js` | Timers, pause/resume, Stop, absence checks, Reset and scan scheduling. |
 | `files.js`, `session-replay.js`, `replay.js` | File picker/download and chart-window controls; validated file replay; replay transitions and controls. |
 | `display-model.js`, `presentation-data.js`, `display-values.js` | Immutable panel/trend models, pure live-count calculations and supplied high labels. |
+| `sample-presentation.js`, `presentation-health.js` | Repaint committed samples, retain session-specific drawing warnings and retry without recording or saving again. |
 | `presentation.js`, `presentation-status.js` | Coordinate display model selection, painting and explicit control callbacks. |
 | `panel-view.js`, `compact-view.js`, `trend-view.js`, `status-view.js` | Render supplied values without reading live/playback state or storage. |
 | `chart-view.js`, `charts.js` | Plot/draw/inspect supplied chart data; select live/replay history and coordinate row layout. |
@@ -79,3 +81,7 @@ Library keys use `tierscope:library:v1:<id>`, independent of temporary sessions 
 Statistics hold each sample until the next accepted sample, exclude marked gaps and zero-duration intervals, and assign no duration after the last sample. Comparison alignment starts at the first retained sample, not an estimated earlier session start. Shared-duration mode clips weighted intervals at the shorter recording's span. Full-session highs stay separate from peaks within that range.
 
 All console access goes through `diagnostics.js`; a structural check prevents new direct calls elsewhere. Logging failures must never alter acquisition, request restrictions or persistence. `room-context.js` recognizes only complete `/<room>/`, `/b/<room>/` and `/<room>/cam/` routes (with optional trailing slash), excluding reserved directories and invalid room names. File archives use their independently validated room field, so directory-page replay retains its own ATH actions.
+
+## Recovery maintenance (3.11.0 beta)
+
+Valid acquisitions commit before any drawing or persistence effect. `recovery.test.cjs` and the pulse/browser fixtures verify sample retention, independent save failures, automatic redraw, stale-session protection and Replay isolation. The library reader can isolate individual read failures; a partial backup requires explicit opt-in, declares omissions and leaves originals intact. Raw recovery exports are deliberately separate from importable backups. Remembered analysis choices use `tierscope:ui:analysis:v1`; their validation is shared with backup code without a store-to-controller dependency. Existing import-cycle and ownership gates continue to apply.

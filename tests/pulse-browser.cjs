@@ -13,6 +13,7 @@ const injected=source.replaceAll('scheduleInit(2000);','/* fixture startup */').
   },
   scan:performScanThenReturn,
   repaint:repaintLivePresentation,
+  retry:retrySamplePresentation,
   length:()=>history.timestamps.length
  },
  downloadTrackingReport: downloadTrackingReport,`);
@@ -71,11 +72,15 @@ const injected=source.replaceAll('scheduleInit(2000);','/* fixture startup */').
   await page.evaluate(()=>GM_deleteValue('tierscope:requests:v1:'+location.origin));
   const before=await page.evaluate(()=>ViewerTracker.__pulse.length());
   await page.evaluate(()=>{const c=document.getElementById('spark-purple'),original=c.getContext.bind(c);let once=true;c.getContext=(...args)=>{if(once){once=false;throw new Error('test paint failure');}return original(...args);};});
-  assert.equal((await scan(8)).length,0,'a rolled-back sample must not pulse');
-  assert.equal(await page.evaluate(()=>ViewerTracker.__pulse.length()),before);
-  assert((await scan(8)).some(e=>e.id==='tier-row-red'));
+  assert.equal((await scan(8)).length,0,'a failed paint must not pulse');
+  assert.equal(await page.evaluate(()=>ViewerTracker.__pulse.length()),before+1,'valid sample survives paint failure');
+  await page.evaluate(()=>ViewerTracker.__pulse.retry());
+  assert.notEqual(await page.locator('#acquisition-status').textContent(),'Display needs refresh');
+  assert.equal((await calls()).length,0,'redraw recovery must not generate delayed pulses');
+  assert.equal((await scan(8)).length,0,'the retained high is a plateau on the next scan');
+  assert((await scan(9)).some(e=>e.id==='tier-row-red'));
   await page.click('#btn-main-reset');assert.equal((await active()).length,0);
   assert.deepEqual(errors,[]);
-  console.log('PASS failed acquisition and rendering rollback suppress pulses; Reset cancels active animations');
+  console.log('PASS failed acquisition and failed painting suppress pulses without dropping valid data; Reset cancels active animations');
  } finally {await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

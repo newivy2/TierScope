@@ -100,7 +100,7 @@ test('expired tab data is not restored and returning writers rotate record IDs',
   assert.equal(saved(h).history.red.at(-1),2);
 });
 
-test('saved display remains non-live; failed scan and render rollback retain data and highs',async()=>{
+test('saved display remains non-live until a valid sample; painting failure retains its data and highs',async()=>{
   const h=harness();const data=record(h);h.storage.set(key,JSON.stringify(data));h.t.initPanel();
   assert.match(h.e('header-text').textContent,/^SAVED:/);assert.equal(h.t.state().users.length,0);
   assert.match(await h.report(),/NOT A LIVE SAMPLE/);
@@ -110,8 +110,12 @@ test('saved display remains non-live; failed scan and render rollback retain dat
   h.advance(60000);h.setResponse('5,testroom|o|f|0,viewer|t|m|0');
   const spark=h.e('spark-purple'),get=spark.getContext;let once=true;
   spark.getContext=()=>{if(once){once=false;throw new Error('render failure');}return get();};
-  await h.t.performScanThenReturn();assert.deepEqual(clean(h.t.highState()),before);
-  assert.deepEqual(clean(h.t.state().history),history);assert.match(h.e('header-text').textContent,/^SAVED:/);
+  await h.t.performScanThenReturn();
+  assert.equal(h.t.state().history.timestamps.length,history.timestamps.length+1);
+  assert.equal(h.t.highState().sessionHighs.anonymous.value,5);
+  assert.equal(h.t.highState().sessionHighs.red.value,before.sessionHighs.red.value);
+  assert.equal(h.t.state().restoredDisplayFrame,null);
+  assert.equal(h.e('acquisition-status').textContent,'Display needs refresh');
   await h.t.performScanThenReturn();assert.equal(h.t.state().restoredDisplayFrame,null);
   assert.match(h.e('header-text').textContent,/^USERS:/);
 });

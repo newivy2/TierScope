@@ -1,6 +1,6 @@
 # State ownership
 
-Release 3.8.0 builds on the 3.7.0 live-session boundary with owned playback, immutable display models and separate record storage. The panel, single-script installation, file formats and storage keys stay compatible with 3.7.0. This is an incremental migration; it does not claim that every subsystem is already an independent store.
+The 3.11.0 beta builds on the existing live-session, playback, acquisition and preference owners. Valid samples now commit before drawing, and analysis preferences have a separate owner. The panel and single-script installation stay compatible; backups gain optional analysis and recovery fields. This is an incremental migration; it does not claim that every subsystem is already an independent store.
 
 ## Responsibilities
 
@@ -26,9 +26,9 @@ The returned collections are shared read views, **not deeply frozen snapshots**.
 
 | Operation | Rule |
 | --- | --- |
-| `beginAcceptedSample` | Starts one candidate, coordinating users, counts, acquisition metadata, history, gaps and highs. Retains the previous count baseline while presentation calculates the trend. |
-| `commitAcceptedSample` | After presentation succeeds and the acquisition context is still current, installs the next trend baseline and closes the receipt. A receipt commits only once. |
-| `abortAcceptedSample` | Restores the prior session after a presentation error, only while that receipt is pending and current. A committed or invalidated receipt cannot roll back data. |
+| `beginAcceptedSample` | Starts one candidate, coordinating users, counts, acquisition metadata, history, gaps and highs. Retains the previous count baseline until commit. |
+| `commitAcceptedSample` | While the acquisition context is still current, installs the next trend baseline and closes the receipt before storage, drawing or logging. A receipt commits only once. |
+| `abortAcceptedSample` | Restores an uncommitted candidate only while that receipt is pending and current. A committed or invalidated receipt cannot roll back data. |
 | `resetLiveSession` | Clears the live session together for Reset, Start or navigation. Reset retains the selected scan on/off preference; Start enables scanning; navigation lets initialization decide from the destination room's saved record. Does not clear ATH, library entries or preferences. |
 | `restoreLiveSession` | Takes validated saved data and a derived display frame; restores counts/history/highs/timing without treating saved identities as a fresh live scan. The next sample has a recording gap. |
 | `pauseSessionRecording` / `resumeSessionRecording` | Preserve session start and recorded data, exclude the pause from elapsed time, and maintain the recording gap and existing absence-override rules. Normal Pause still allows an already-running request to finish. |
@@ -40,7 +40,7 @@ Reset, navigation, restore and Stop invalidate outstanding receipts. Stop retain
 
 `stopTrackingTimer()` now only cancels the browser interval. Clearing history, highs or timing requires a session operation. This distinction prevents cleanup from accidentally destroying recorded data.
 
-History-gap policy still comes from the existing chart/timing rules. Session highs survive the 10,000-sample retention window, pauses and Stop. ATH is a separate persistent record. No transaction crosses live state, browser storage and the DOM: candidate rollback preserves the existing presentation-error behavior, and durable saves occur only after live commit.
+History-gap policy still comes from the existing chart/timing rules. Session highs survive the 10,000-sample retention window, pauses and Stop. ATH is a separate persistent record. No transaction crosses live state, browser storage and the DOM: candidate rollback is limited to uncommitted work, and durable saves and drawing occur only after live commit. A drawing failure cannot erase a valid sample or its highs.
 
 ## Storage failure
 
@@ -66,7 +66,7 @@ The source checks reject unauthorized writes to live/playback/acquisition/prefer
 
 Behavior tests cover receipt commit/rollback, Reset/navigation/Stop with delayed API responses, replay replacement and stale callbacks, immutable recording/display snapshots, repainting without live mutations, storage failure/retry, captured records after Reset, and two tabs with Reset during replay and a pending scan. Existing file, library, backup, layout, theme, pulse and browser checks remain in the gate. The original 3.4.0 migration fingerprints are retained with explicit exceptions for reviewed changes.
 
-Remaining shared state includes live collection read views, storage metadata, layout measurements, drag/resize state and some DOM resource handles. The current guards are targeted checks, not a general effect/type system; helpers that receive shared values still require review. The beta preserves existing features and fixes the shifting scan-status row without redesigning the panel.
+Remaining shared state includes live collection read views, storage metadata, layout measurements, drag/resize state and some DOM resource handles. The current guards are targeted checks, not a general effect/type system; helpers that receive shared values still require review. The beta preserves existing features and panel layout while separating committed samples from drawing success.
 
 ## Acquisition and preference boundaries (3.10.0)
 
@@ -77,3 +77,11 @@ Timer replacement and cancellation invalidate queued callbacks, including a vali
 `PANEL_PREFERENCE_FIELDS` owns 11 choices. Runtime roots are getter-only, geometry/health/policy reads are frozen copies, and collapsed-row/fallback collections expose read-only facades. Controllers request explicit operations before performing existing DOM and persistence effects. A failed preference save keeps the selected value locally. Reset/navigation reset session trend choices while retaining theme, SH/ATH selection, chart window, collapsed rows and geometry, as before. `control-types.d.ts` and checked JSDoc describe both owners.
 
 The chart renderer keeps weakly keyed, private dense copies of immutable sample arrays. These copies are used only for plot reduction; tooltips, exports and playback retain their original immutable recording data. Mutable live arrays bypass the cache, avoiding stale samples after append/trim. See [performance measurements and tradeoffs](PERFORMANCE.md).
+
+## Sample presentation and recovery (3.11.0 beta)
+
+`sample-presentation.js` paints committed data and records failure through the independent `presentation-health.js` owner. Its warning belongs to a history identity, initialization generation and URL; Reset or navigation cannot carry an old warning or redraw into a new session. The existing one-second freshness interval retries drawing, except during Replay. Repainting never appends history, writes storage or replays high pulses; repeated identical errors do not flood the console. Session-save warnings take priority if drawing and saving both fail.
+
+`analysis-preferences.js` owns the saved metric, summary thresholds, comparison threshold and shared-length choice outside runtime. Its pure validator lives in `analysis-preference-data.js`, shared by backup validation. A failed write keeps the choices locally and reports that they are not durable; the next choice change retries. Each successful read merges a changed choice with the latest saved choices from other tabs. This is best-effort preference persistence, not a cross-tab transaction.
+
+Library reading isolates unreadable keys while retaining healthy entries. Explicit partial backups list every omitted key; raw recovery downloads preserve damaged values separately and are not accepted as normal backups. An unreadable value with unknown size prevents library additions until it can be read or explicitly removed. Normal session/library schemas and retention limits are unchanged. Backup format 1 gains optional root fields `analysisPreferences` and `recovery`; older readers can still restore the standard fields, but do not display the new partial-backup notice. New readers accept old backups without clearing analysis preferences that the old file does not contain.

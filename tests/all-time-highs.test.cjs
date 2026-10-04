@@ -143,7 +143,7 @@ test('live recording behind another room file Replay updates only the live room 
   assert.equal(h.e('high-red').textContent, 'ATH:2');
 });
 
-test('failed and rolled-back scans cannot raise ATH, and a failed write retries without losing a local peak', async () => {
+test('failed acquisition cannot raise ATH; paint failure retains valid highs and failed writes retry local peaks', async () => {
   const h = setup(); await scan(h, 3);
   const original = high(h), history = clean(h.t.state().history);
   h.setResponse(new Error('offline')); await h.t.performScanThenReturn();
@@ -151,9 +151,10 @@ test('failed and rolled-back scans cannot raise ATH, and a failed write retries 
   h.storage.delete('tierscope:requests:v1:' + h.context.location.origin);
   const canvas = h.e('spark-purple'), getContext = canvas.getContext;
   canvas.getContext = () => {throw Error('paint failed');};
-  await scan(h, 50);
-  assert.deepEqual(high(h), original);
-  assert.deepEqual(clean(h.t.state().history), history);
+  await scan(h, 5);
+  assert.equal(high(h).value, 5);
+  assert.equal(h.t.state().history.red.length, history.red.length + 1);
+  assert.equal(h.e('acquisition-status').textContent, 'Display needs refresh');
   canvas.getContext = getContext;
   const set = h.context.GM_setValue;
   h.context.GM_setValue = (key, value) => {if (key.startsWith('tierscope:ath:v1:')) throw Error('quota'); return set(key, value);};
@@ -163,7 +164,7 @@ test('failed and rolled-back scans cannot raise ATH, and a failed write retries 
   assert.match(h.e('high-red').title, /Local only, not saved/);
   assert.match(h.e('all-time-info').textContent, /local only/, 'changing modes must not hide an unsaved-record warning');
   const other = setup(h.storage);
-  assert.equal(high(other).value, 3, 'the unsaved peak must not be presented as persisted');
+  assert.equal(high(other).value, 5, 'the unsaved peak must not be presented as persisted');
   h.context.GM_setValue = set;
   await scan(h, 4);
   assert.equal(h.ath.read('testroom').pending, false);

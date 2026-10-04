@@ -1,12 +1,13 @@
 import { readRequestPolicy, requestPolicyMessage } from './request-policy.js';
 import { runtime } from './runtime.js';
+import { presentationWarningModel } from './presentation-health.js';
 import { getSessionSaveState, sessionSaveWarningModel } from './session-health.js';
 import { absencePauseDescription, getEffectiveScanIntervalSeconds, isAbsencePaused, stopDescription } from './session-selectors.js';
 import { formatSampleAge, getModelName } from './utils.js';
 
 export function buildAcquisitionStatusModel() {
     var model = {text: '', title: '', color: null, saveWarning: false};
-    var warning = sessionSaveWarningModel(getSessionSaveState(getModelName()));
+    var warning = sessionSaveWarningModel(getSessionSaveState(getModelName())) || presentationWarningModel(runtime.history, runtime.initGuard, location.href);
     if (warning) return warning;
     if (runtime.isStopped) {
         model.text = 'Stopped';
@@ -50,7 +51,7 @@ export function buildAcquisitionStatusModel() {
 
 export function buildFreshnessModel() {
     var model = {text: '', title: '', color: null, saveWarning: false};
-    var warning = sessionSaveWarningModel(getSessionSaveState(getModelName()));
+    var warning = sessionSaveWarningModel(getSessionSaveState(getModelName())) || presentationWarningModel(runtime.history, runtime.initGuard, location.href);
     if (warning) return warning;
     if (runtime.isStopped) {
         model.text = 'Stopped'; model.title = stopDescription() + '. Start begins a new session.';

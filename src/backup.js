@@ -1,8 +1,9 @@
 import { allTimeRoom, emptyAllTimeHighs, mergeAllTimeHighs, readAllTimeHighs, validateAllTimeRecord } from './highs-store.js';
 import { makeStorageId } from './record-validation.js';
 import { runtime } from './runtime.js';
+import { ANALYSIS_PREFERENCE_KEY, validateAnalysisPreferences } from './analysis-preference-data.js';
 import { validateSessionFile } from './session-file-format.js';
-import { LIBRARY_MAX_COUNT, finalizeLibraryWrites, libraryTitle, planLibraryAdditions, readSessionLibrary, verifyLibraryCapacity } from './session-library.js';
+import { LIBRARY_MAX_COUNT, LIBRARY_PREFIX, finalizeLibraryWrites, libraryTitle, planLibraryAdditions, readSessionLibrary, verifyLibraryCapacity } from './session-library.js';
 
 export const BACKUP_MAX_BYTES = 32 * 1024 * 1024;
 const preferenceKeys = Object.freeze({ theme: 'tierscope:ui:theme:v1', highMode: 'tierscope:ui:highMode:v1',
@@ -51,11 +52,19 @@ export function validateTierScopeBackup(input) {
     const library = input.library.map(entry => ({ title: libraryTitle(entry.title), archive: validateSessionFile(entry.archive) }));
     const backup = { format: 'TierScopeBackup', formatVersion: 1, producerVersion: input.producerVersion,
         rooms, preferences: validateBackupPreferences(input.preferences), library };
+    if (input.analysisPreferences !== undefined) backup.analysisPreferences = validateAnalysisPreferences(input.analysisPreferences);
+    if (input.recovery !== undefined) {
+        const keys = input.recovery && input.recovery.omittedLibraryKeys;
+        if (!Array.isArray(keys) || !keys.length || keys.length > 10000 ||
+            keys.some(key => typeof key !== 'string' || !key.startsWith(LIBRARY_PREFIX) || key.length > 256) ||
+            new Set(keys).size !== keys.length) throw new Error('Invalid partial-backup recovery notice.');
+        backup.recovery = {omittedLibraryKeys: keys.slice()};
+    }
     if (new Blob([JSON.stringify(backup)]).size > BACKUP_MAX_BYTES) throw new Error('Backup exceeds 32 MB.');
     return backup;
 }
 
-export function createTierScopeBackup(includeLibrary = true) {
+export function createTierScopeBackup(includeLibrary = true, allowPartialLibrary = false) {
     const rooms = new Set();
     for (const key of GM_listValues()) {
         if (key.startsWith(runtime.ALL_TIME_PREFIX)) {
@@ -78,9 +87,27 @@ export function createTierScopeBackup(includeLibrary = true) {
         if (saved !== null) preferences[name] = name === 'geometry' || name === 'collapsedRows' ? JSON.parse(saved) : saved;
     }
     const library = includeLibrary ? readSessionLibrary() : { entries: [], damaged: [] };
-    if (library.damaged.length) throw new Error('The library contains unreadable recordings. Export ATH/preferences separately or resolve those entries first.');
+    if (library.damaged.length && !allowPartialLibrary) throw new Error('The library contains unreadable recordings. Choose the healthy-recordings option to make a partial backup, or export ATH/preferences separately.');
+    const rawAnalysis = GM_getValue(ANALYSIS_PREFERENCE_KEY, null);
     return validateTierScopeBackup({ format: 'TierScopeBackup', formatVersion: 1, producerVersion: runtime.TIERSCOPE_VERSION,
-        rooms: records, preferences, library: library.entries.map(entry => ({ title: entry.title, archive: entry.archive })) });
+        rooms: records, preferences, library: library.entries.map(entry => ({ title: entry.title, archive: entry.archive })),
+        ...(rawAnalysis === null ? {} : {analysisPreferences: validateAnalysisPreferences(JSON.parse(rawAnalysis))}),
+        ...(library.damaged.length ? {recovery: {omittedLibraryKeys: library.damaged}} : {}) });
+}
+
+// A separate download preserves raw damaged values for manual recovery. It is
+// deliberately not a TierScopeBackup and cannot be imported as valid sessions.
+export function createLibraryRecoveryExport() {
+    const state = readSessionLibrary();
+    const records = state.damaged.map(key => {
+        try {
+            const value = GM_getValue(key, undefined);
+            if (value === undefined) return {key, error: 'Record no longer present.'};
+            if (JSON.stringify(value) === undefined) throw new Error('Value is not JSON data.');
+            return {key, value};
+        } catch (error) { return {key, error: 'Record could not be read or exported: ' + String(error.message || error)}; }
+    });
+    return {format: 'TierScopeLibraryRecovery', formatVersion: 1, producerVersion: runtime.TIERSCOPE_VERSION, records};
 }
 
 export function restoreTierScopeBackup(input, options = { highs: true, preferences: true, library: true }) {
@@ -101,6 +128,7 @@ export function restoreTierScopeBackup(input, options = { highs: true, preferenc
     if (options.preferences) for (const [name, value] of Object.entries(backup.preferences)) {
         writes.push({ key: preferenceKeys[name], value: name === 'geometry' || name === 'collapsedRows' ? JSON.stringify(value) : value });
     }
+    if (options.preferences && backup.analysisPreferences) writes.push({key: ANALYSIS_PREFERENCE_KEY, value: JSON.stringify(backup.analysisPreferences)});
     const touched = [];
     try {
         for (const write of writes) {
@@ -129,5 +157,5 @@ export function restoreTierScopeBackup(input, options = { highs: true, preferenc
     backup.rooms.forEach(record => readAllTimeHighs(record.room));
     return { rooms: epochs.length, recordings: newLibrary.filter(write => !write.updated).length,
         updatedRecordings: newLibrary.filter(write => write.updated).length,
-        preferences: options.preferences ? Object.keys(backup.preferences).length : 0 };
+        preferences: options.preferences ? Object.keys(backup.preferences).length + (backup.analysisPreferences ? 1 : 0) : 0 };
 }

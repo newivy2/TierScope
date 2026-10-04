@@ -13,6 +13,7 @@ import { leavePlayback } from './replay.js';
 import { readRequestPolicy } from './request-policy.js';
 import { runtime } from './runtime.js';
 import { performScanThenReturn } from './scanning.js';
+import { retrySamplePresentation } from './sample-presentation.js';
 import { loadSession, saveSession } from './session-persistence.js';
 import { isAbsencePaused } from './session-selectors.js';
 import { getModelName, getModelNameFromUrl, isBroadcastRoom, log } from './utils.js';
@@ -32,6 +33,7 @@ export function init() {
     stopAcquisitionClock('healthCheckInterval');
     if (runtime.freshnessInterval) clearInterval(runtime.freshnessInterval);
     runtime.freshnessInterval = setInterval(function() {
+        retrySamplePresentation();
         updateAcquisitionStatus();
         updateCountdownDisplay();
     }, 1000);
