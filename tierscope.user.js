@@ -6014,8 +6014,9 @@ underlying system, so should run in the browser, Node, or Plask.
       input.type = "file";
       input.accept = ".json,application/json";
       input.hidden = true;
-      const request = ++fileRequest;
+      const request = ++fileRequest, playbackAtRequest = runtime.playback;
       dialog.appendChild(input);
+      const stillSelected = () => current() && request === fileRequest && runtime.playback === playbackAtRequest;
       input.onchange = async () => {
         const file = input.files && input.files[0];
         if (!file) {
@@ -6024,9 +6025,9 @@ underlying system, so should run in the browser, Node, or Plask.
         }
         try {
           const value = await readDataFile(file, maxBytes);
-          if (current() && request === fileRequest) accept(value);
+          if (stillSelected()) accept(value);
         } catch (error) {
-          if (current() && request === fileRequest) tell(error.message, true);
+          if (stillSelected()) tell(error.message, true);
         } finally {
           input.remove();
         }

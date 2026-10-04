@@ -71,13 +71,14 @@ export function openSessionTools(focusTarget) {
     }
     function chooseFile(maxBytes, accept) {
         const input = document.createElement('input'); input.type = 'file'; input.accept = '.json,application/json'; input.hidden = true;
-        const request = ++fileRequest; dialog.appendChild(input);
+        const request = ++fileRequest, playbackAtRequest = runtime.playback; dialog.appendChild(input);
+        const stillSelected = () => current() && request === fileRequest && runtime.playback === playbackAtRequest;
         input.onchange = async () => {
             const file = input.files && input.files[0]; if (!file) { input.remove(); return; }
             try {
                 const value = await readDataFile(file, maxBytes);
-                if (current() && request === fileRequest) accept(value);
-            } catch (error) { if (current() && request === fileRequest) tell(error.message, true); }
+                if (stillSelected()) accept(value);
+            } catch (error) { if (stillSelected()) tell(error.message, true); }
             finally { input.remove(); }
         };
         input.addEventListener('cancel', () => input.remove(), { once: true }); input.click();
