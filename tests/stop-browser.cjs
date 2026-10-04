@@ -35,7 +35,7 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   }
   for(const row of [['btn-replay','btn-control-library'],['btn-control-auto','btn-control-stop','btn-main-reset']]){
    const boxes=await Promise.all(row.map(id=>page.locator('#'+id).boundingBox()));
-   boxes.slice(1).forEach((r,i)=>{assert(r.x>=boxes[i].x+boxes[i].width,'buttons do not overlap');assert(Math.abs(r.y-boxes[i].y)<1,'buttons stay on one row');});
+   boxes.slice(1).forEach((r,i)=>{assert(r.x>=boxes[i].x+boxes[i].width,'buttons do not overlap');assert(Math.abs(r.y-boxes[i].y)<1,'buttons stay on one row: '+JSON.stringify({row,boxes}));});
   }
   const frozen=await page.locator('#spark-light-blue').evaluate(c=>c.toDataURL());
   const running=await page.evaluate(()=>ViewerTracker.__stop.state());
