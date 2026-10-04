@@ -1,5 +1,6 @@
 import { updateCompactDashboard } from './compact-view.js';
 import { displayHigh, displayHighDescription, displayHighLabel } from './display-values.js';
+import { paintFavoriteButton } from './favorite-view.js';
 
 export function paintPanelFrame(frame) {
     var counts = frame.counts;
@@ -15,18 +16,11 @@ export function paintPanelFrame(frame) {
     var registeredPct = fullRoomTotal > 0 ? Math.round((total / fullRoomTotal) * 100) + '%' : '0%';
     var headerText = document.getElementById('header-text');
     if (headerText) {
-        var roomHigh = displayHigh(frame, 'roomTotal', fullRoomTotal);
-        var displayedRoomHigh = displayHighLabel(roomHigh);
-        headerText.title = (frame.isPlayback && frame.replayRoom ? 'Replay: ' + frame.replayRoom + ' · ' : '') +
-            'Room total: ' + fullRoomTotal.toLocaleString() + ' · ' + displayHighDescription(roomHigh);
-        if (frame.stopped && !frame.isPlayback) {
-            headerText.textContent = 'STOPPED: ' + fullRoomTotal.toLocaleString() + ' (' + displayedRoomHigh + ')';
-        } else if (frame.minimized) {
-            headerText.textContent = (frame.isPlayback ? 'PLAYBACK: ' : (frame.isRestored ? 'SAVED: ' : '')) + fullRoomTotal.toLocaleString() + ' (' + displayedRoomHigh + ')';
-        } else {
-            headerText.textContent = (frame.isPlayback ? (frame.imported ? 'FILE: ' : 'PLAYBACK: ') : (frame.isRestored ? 'SAVED: ' : 'USERS: ')) + fullRoomTotal.toLocaleString() + ' (' + displayedRoomHigh + ')';
-        }
+        headerText.textContent = frame.modelName === 'unknown' ? 'TierScope' : frame.modelName;
+        headerText.title = (frame.isPlayback ? 'Replay: ' : frame.stopped ? 'Stopped session: ' : frame.isRestored ? 'Saved session: ' : 'Live room: ') + frame.modelName;
     }
+    var favorite = document.getElementById('btn-model-favorite');
+    if (favorite) paintFavoriteButton(favorite, frame.modelName, frame.favorite);
     var miniWithTokens = document.getElementById('mini-withtokens');
     var miniWithTokensPct = document.getElementById('mini-withtokens-pct');
     var miniTotal = document.getElementById('mini-total');
@@ -41,6 +35,14 @@ export function paintPanelFrame(frame) {
     if (miniTotal) miniTotal.parentElement && (miniTotal.parentElement.title = 'Registered: ' + total.toLocaleString() + ' (' + registeredPct + ' of room total)');
     updateCompactDashboard(frame);
     if (!frame.minimized) {
+        var roomCount = document.getElementById('count-roomTotal'), roomHigh = document.getElementById('high-roomTotal');
+        var roomRow = document.getElementById('tier-row-roomTotal'), roomResult = displayHigh(frame, 'roomTotal');
+        if (roomCount) {
+            roomCount.textContent = fullRoomTotal.toLocaleString();
+            roomCount.style.fontSize = fullRoomTotal >= 100000 ? '9px' : fullRoomTotal >= 10000 ? '11px' : '14px';
+        }
+        if (roomHigh) { roomHigh.textContent = displayHighLabel(roomResult, true); roomHigh.title = displayHighDescription(roomResult); }
+        if (roomRow) roomRow.style.background = highlights.roomTotal ? 'rgba(50, 205, 50, 0.22)' : 'rgba(255,212,59,.08)';
         frame.tierKeys.forEach(function(tier) {
             var countEl = document.getElementById('count-' + tier);
             var highEl = document.getElementById('high-' + tier);
@@ -114,7 +116,7 @@ export function updateCollapsedRowStatus(frame, highlights) {
         var button = document.getElementById('restore-row-' + row.key);
         if (!button) return;
         var value = row.key === 'withtokens' ? frame.withTokens : row.key === 'total' ? frame.total :
-            row.key === 'anon' ? frame.anonymousCount : frame.counts[row.key];
+            row.key === 'anon' ? frame.anonymousCount : row.key === 'roomTotal' ? frame.fullRoomTotal : frame.counts[row.key];
         var historyKey = row.key === 'withtokens' ? 'withTokens' : row.key === 'anon' ? 'anonymous' : row.key;
         var high = displayHigh(frame, historyKey, value);
         var context = frame.isPlayback ? 'Replay' : frame.isRestored ? 'Saved sample' : 'Latest sample';

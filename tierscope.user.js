@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.15.0
+// @version      3.16.0
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -1593,11 +1593,17 @@ underlying system, so should run in the browser, Node, or Plask.
         var key = row.key === "withtokens" ? "withTokens" : row.key === "anon" ? "anonymous" : row.key;
         var atHigh = runtime.newHighTiers[key], wasAtHigh = priorState.newHighTiers[key];
         var previousHigh = priorState.sessionHighs[key];
-        var raisedHigh = runtime.sessionHighs[key].value > (previousHigh ? previousHigh.value : 0);
+        var raisedHigh = key === "roomTotal" ? runtime.roomTotalHigh > priorState.roomTotalHigh : runtime.sessionHighs[key].value > (previousHigh ? previousHigh.value : 0);
+        if (key === "roomTotal") {
+          var currentRoom = runtime.history.total.at(-1) + runtime.history.anonymous.at(-1);
+          var previousRoom = priorState.history.total.at(-1) + priorState.history.anonymous.at(-1);
+          atHigh = currentRoom > 0 && currentRoom >= runtime.roomTotalHigh;
+          wasAtHigh = previousRoom > 0 && previousRoom >= priorState.roomTotalHigh;
+        }
         if (runtime.highMode === "ath") {
           var high = displayedAllTimeState().highs[key], before = priorState.allTimeHighs[key];
-          var current = runtime.history[key][runtime.history[key].length - 1];
-          var oldValue = priorState.history[key][priorState.history[key].length - 1];
+          var current = key === "roomTotal" ? currentRoom : runtime.history[key].at(-1);
+          var oldValue = key === "roomTotal" ? previousRoom : priorState.history[key].at(-1);
           atHigh = high.source && current > 0 && current >= high.value;
           wasAtHigh = priorState.lastAcceptedAcquisition && before.source && oldValue > 0 && oldValue >= before.value;
           raisedHigh = high.value > before.value;
@@ -1864,6 +1870,80 @@ underlying system, so should run in the browser, Node, or Plask.
     return true;
   }
 
+  // src/library-models.js
+  var MODEL_FAVORITE_PREFIX = "tierscope:library-model:v1:";
+  function modelFavoriteKey(room) {
+    const normalized = allTimeRoom(room);
+    if (!normalized) throw new Error("Invalid favorite model.");
+    return MODEL_FAVORITE_PREFIX + normalized;
+  }
+  function validateFavoriteModels(value) {
+    if (!Array.isArray(value) || value.length > 1e4 || value.some((room) => !allTimeRoom(room))) throw new Error("Invalid favorite models.");
+    return [...new Set(value.map(allTimeRoom))].sort();
+  }
+  function readModelFavorite(room) {
+    const key = modelFavoriteKey(room), normalized = allTimeRoom(room), raw = GM_getValue(key, void 0);
+    if (raw === void 0) return { favorite: false, autoKeep: false };
+    const record = JSON.parse(raw);
+    if (record.schemaVersion !== 1 || record.room !== normalized || typeof record.favorite !== "boolean" || record.autoKeep !== void 0 && typeof record.autoKeep !== "boolean") throw new Error("Invalid favorite model record.");
+    return { favorite: record.favorite, autoKeep: record.favorite && record.autoKeep === true };
+  }
+  function readModelFavorites(entries = []) {
+    const favorites = new Set(entries.filter((entry) => entry.favorite).map((entry) => entry.archive.room.toLowerCase()));
+    const errors = [], automatic = /* @__PURE__ */ new Set();
+    for (const key of GM_listValues().filter((key2) => key2.startsWith(MODEL_FAVORITE_PREFIX))) {
+      const room = key.slice(MODEL_FAVORITE_PREFIX.length);
+      try {
+        if (modelFavoriteKey(room) !== key) throw new Error("Invalid favorite model key.");
+        const record = readModelFavorite(room);
+        if (record.favorite) favorites.add(room);
+        else favorites.delete(room);
+        if (record.autoKeep) automatic.add(room);
+      } catch (error) {
+        favorites.delete(room);
+        errors.push(room);
+      }
+    }
+    return { favorites, automatic, errors };
+  }
+  function planModelFavoriteWrites(rooms) {
+    const writes = [];
+    for (const room of validateFavoriteModels(rooms)) {
+      const key = modelFavoriteKey(room);
+      if (GM_getValue(key, void 0) === void 0) writes.push({
+        key,
+        expectedBefore: void 0,
+        value: JSON.stringify({ schemaVersion: 1, room, favorite: true })
+      });
+    }
+    return writes;
+  }
+  function setModelFavorite(room, favorite, autoKeep = false) {
+    const key = modelFavoriteKey(room);
+    if (typeof favorite !== "boolean" || typeof autoKeep !== "boolean" || autoKeep && !favorite) throw new Error("Invalid favorite model choice.");
+    const before = GM_getValue(key, void 0), value = JSON.stringify({ schemaVersion: 1, room: allTimeRoom(room), favorite, autoKeep });
+    try {
+      GM_setValue(key, value);
+      if (GM_getValue(key, void 0) !== value) throw new Error("Favorite changed in another tab. Refresh the library.");
+    } catch (error) {
+      try {
+        if (GM_getValue(key, void 0) === value) {
+          if (before === void 0) GM_deleteValue(key);
+          else GM_setValue(key, before);
+        }
+      } catch (rollbackError) {
+        throw new Error("The favorite could not be saved or restored. Refresh the library before retrying.");
+      }
+      throw error;
+    }
+  }
+  function migrateRecordingFavorites(entries) {
+    const rooms = entries.filter((entry) => entry.favorite).map((entry) => entry.archive.room);
+    for (const write of planModelFavoriteWrites(rooms)) {
+      if (GM_getValue(write.key, void 0) === void 0) setModelFavorite(write.key.slice(MODEL_FAVORITE_PREFIX.length), true);
+    }
+  }
+
   // src/presentation-data.js
   function captureDisplayHistory(history) {
     if (Object.isFrozen(history)) return history;
@@ -2088,896 +2168,6 @@ underlying system, so should run in the browser, Node, or Plask.
   function getDOMFallbackWaitSeconds(modelName) {
     var readyAt = runtime.domFallbackReadyAtByRoom.get(modelName.toLowerCase()) || 0;
     return Math.max(0, Math.ceil((readyAt - Date.now()) / 1e3));
-  }
-
-  // src/presentation-health.js
-  var presentationFailure = null;
-  function notePresentationFailure(history, generation, url, error) {
-    presentationFailure = { history, generation, url, error: String(error && error.message || error) };
-  }
-  function getPresentationFailure(history, generation, url) {
-    if (presentationFailure && (presentationFailure.history !== history || presentationFailure.generation !== generation || presentationFailure.url !== url)) presentationFailure = null;
-    return presentationFailure ? presentationFailure.error : "";
-  }
-  function clearPresentationFailure(history, generation, url) {
-    getPresentationFailure(history, generation, url);
-    presentationFailure = null;
-  }
-  function presentationWarningModel(history, generation, url) {
-    const error = getPresentationFailure(history, generation, url);
-    return error ? {
-      saveWarning: true,
-      text: "Display needs refresh",
-      color: "var(--panel-warning)",
-      title: "Recorded data is retained in this tab. Drawing will retry automatically; saving is handled separately. " + error
-    } : null;
-  }
-
-  // src/session-health.js
-  var sessionSaveStates = /* @__PURE__ */ new Map();
-  function noteSessionSave(room, error = "") {
-    const previous = sessionSaveStates.get(room);
-    sessionSaveStates.set(room, { savedAt: error ? previous ? previous.savedAt : null : Date.now(), error });
-  }
-  function getSessionSaveState(room) {
-    return sessionSaveStates.get(room) || { savedAt: null, error: "" };
-  }
-  function sessionSaveWarningModel(state) {
-    return state.error ? {
-      saveWarning: true,
-      text: "Session not saved",
-      title: "The latest session data is only in this tab. Keep it open and use Save to download a session file. Saving will retry on the next scan. " + state.error,
-      color: "var(--panel-warning)"
-    } : null;
-  }
-
-  // src/status-model.js
-  function buildAcquisitionStatusModel() {
-    var model = { text: "", title: "", color: null, saveWarning: false };
-    var warning = sessionSaveWarningModel(getSessionSaveState(getModelName())) || presentationWarningModel(runtime.history, runtime.initGuard, location.href);
-    if (warning) return warning;
-    if (runtime.isStopped) {
-      model.text = "Stopped";
-      model.title = stopDescription() + " at " + new Date(runtime.stoppedAt).toLocaleString() + ". History and elapsed time are frozen.";
-      return model;
-    }
-    if (runtime.sessionStorageNotice) {
-      model.text = "Local only • room reset";
-      model.title = runtime.sessionStorageNotice;
-      return model;
-    }
-    var policyMessage = requestPolicyMessage(readRequestPolicy());
-    if (policyMessage) {
-      var sample = runtime.lastAcceptedAcquisition || runtime.restoredDisplayFrame;
-      model.text = policyMessage;
-      model.title = policyMessage + (sample ? ". Last sample: " + new Date(sample.timestamp).toISOString() : ". No accepted sample.");
-      return model;
-    }
-    if (isAbsencePaused()) {
-      model.text = "Auto-paused • return checks";
-      model.title = absencePauseDescription();
-      return model;
-    }
-    if (!runtime.lastAcceptedAcquisition) {
-      if (runtime.restoredDisplayFrame) {
-        model.text = "Saved • " + formatSampleAge(runtime.restoredDisplayFrame.timestamp);
-        model.title = "Saved sample recorded at: " + new Date(runtime.restoredDisplayFrame.timestamp).toISOString() + ". Age is measured from the sample time, not the session save time. Waiting for the first fresh sample since restore.";
-      } else {
-        model.text = "No sample";
-        model.title = "No accepted sample in this page session";
-      }
-      return model;
-    }
-    model.text = runtime.lastAcceptedAcquisition.source + " • " + formatSampleAge(runtime.lastAcceptedAcquisition.timestamp);
-    model.title = "Last accepted sample: " + new Date(runtime.lastAcceptedAcquisition.timestamp).toISOString() + ". TierScope and the USERS tab refresh independently.";
-    return model;
-  }
-  function buildFreshnessModel() {
-    var model = { text: "", title: "", color: null, saveWarning: false };
-    var warning = sessionSaveWarningModel(getSessionSaveState(getModelName())) || presentationWarningModel(runtime.history, runtime.initGuard, location.href);
-    if (warning) return warning;
-    if (runtime.isStopped) {
-      model.text = "Stopped";
-      model.title = stopDescription() + ". Start begins a new session.";
-      model.color = "var(--panel-muted)";
-      return model;
-    }
-    if (isAbsencePaused() && !runtime.sessionStorageNotice) {
-      var waitingPolicy = requestPolicyMessage(readRequestPolicy());
-      model.text = waitingPolicy || "Auto-paused";
-      model.title = absencePauseDescription() + (waitingPolicy ? " " + waitingPolicy + "." : " Next return check: " + runtime.countdownSeconds + "s.");
-      model.color = "var(--panel-warning)";
-      return model;
-    }
-    var sample = runtime.lastAcceptedAcquisition || runtime.restoredDisplayFrame;
-    var source = runtime.lastAcceptedAcquisition ? runtime.lastAcceptedAcquisition.source : sample ? "Saved" : "No sample";
-    model.text = runtime.sessionStorageNotice ? "Local only" : (runtime.isAutoRefreshOn ? source : "Paused") + (sample ? " · " + formatSampleAge(sample.timestamp) : "");
-    model.color = runtime.sessionStorageNotice ? "var(--panel-warning)" : runtime.isAutoRefreshOn ? "var(--panel-muted)" : "var(--panel-paused)";
-    var policyMessage = requestPolicyMessage(readRequestPolicy());
-    if (policyMessage && !runtime.sessionStorageNotice) {
-      model.text = policyMessage;
-      model.color = "var(--panel-warning)";
-    }
-    if (!policyMessage && runtime.isAutoRefreshOn && getEffectiveScanIntervalSeconds() > runtime.scanIntervalSeconds) {
-      model.text = "Reduced · " + getEffectiveScanIntervalSeconds() / 60 + "m";
-    }
-    model.title = runtime.sessionStorageNotice || (policyMessage ? policyMessage + ". " : "") + source + (sample ? ": " + new Date(sample.timestamp).toISOString() : "") + ". Age of the last accepted sample. " + (runtime.isAutoRefreshOn ? "Next attempt: " + runtime.countdownSeconds + "s." : "Automatic scans paused.");
-    return model;
-  }
-
-  // src/theme-values.js
-  function themeColor(token) {
-    return runtime.PANEL_THEME_COLORS[token][runtime.isDarkMode ? 0 : 1];
-  }
-  function setThemeVariables(element) {
-    if (!element) return;
-    Object.keys(runtime.PANEL_THEME_COLORS).forEach(function(token) {
-      element.style.setProperty("--panel-" + token, themeColor(token));
-    });
-    element.style.colorScheme = runtime.isDarkMode ? "dark" : "light";
-  }
-
-  // src/display-model.js
-  function buildLiveDisplayFrame() {
-    return runtime.restoredDisplayFrame || liveDisplayData(runtime, Object.keys(runtime.TIERS));
-  }
-  function buildPanelDisplayModel(frame) {
-    const displayHighs = {};
-    const highlights = __spreadValues({}, frame.isPlayback || frame.isRestored ? frame.playbackNewHighTiers : runtime.newHighTiers);
-    if (runtime.highMode === "ath") for (const key of Object.keys(highlights)) delete highlights[key];
-    for (const key of runtime.ALL_TIME_SERIES) {
-      const value = key === "roomTotal" ? frame.fullRoomTotal : key === "withTokens" ? frame.withTokens : key === "total" ? frame.total : key === "anonymous" ? frame.anonymousCount : frame.counts[key];
-      const high = getDisplayHigh(frame, key, value);
-      displayHighs[key] = __spreadProps(__spreadValues({}, high), { label: highLabel(high), shortLabel: highLabel(high, true), description: highDescription(high) });
-      if (runtime.highMode === "ath" && high.source && value > 0 && value >= high.value) highlights[key] = true;
-    }
-    const comparison = !frame.isRestored && runtime.hasTrendBaseline ? getComparisonCounts().counts : null;
-    return freezeRecordingData({
-      counts: __spreadValues({}, frame.counts),
-      total: frame.total,
-      withTokens: frame.withTokens,
-      anonymousCount: frame.anonymousCount,
-      fullRoomTotal: frame.fullRoomTotal,
-      roomTotalHigh: frame.roomTotalHigh,
-      history: captureDisplayHistory(frame.history),
-      historyEndIndex: frame.historyEndIndex,
-      isPlayback: frame.isPlayback === true,
-      isRestored: frame.isRestored === true,
-      displayHighs,
-      highlights,
-      stopped: runtime.isStopped,
-      minimized: runtime.isMinimized,
-      replayRoom: frame.isPlayback && runtime.playback && runtime.playback.archive ? runtime.playback.archive.room : "",
-      imported: !!(frame.isPlayback && runtime.playback && runtime.playback.imported),
-      tierKeys: Object.keys(runtime.TIERS),
-      rows: runtime.PANEL_ROWS.map((row) => __spreadValues({}, row)),
-      roomName: getModelName(),
-      miniMetric: runtime.miniMetric,
-      highMode: runtime.highMode,
-      textColor: themeColor("text"),
-      comparison: comparison ? __spreadValues({}, comparison) : null,
-      comparisonLabel: runtime.trendComparisonMode === "last" ? "previous sample" : runtime.trendComparisonMode === "start" ? "first retained sample" : runtime.trendComparisonMode,
-      freshness: runtime.isMinimized ? buildFreshnessModel() : null
-    });
-  }
-  function buildTrendDisplayModel() {
-    const frame = buildLiveDisplayFrame(), comparison = getComparisonCounts();
-    return freezeRecordingData({
-      isPlayback: runtime.presentationMode === "PLAYBACK",
-      isRestored: !!runtime.restoredDisplayFrame,
-      stopped: runtime.isStopped,
-      hasTrendBaseline: runtime.hasTrendBaseline,
-      counts: __spreadValues({}, frame.counts),
-      total: frame.total,
-      withTokens: frame.withTokens,
-      anonymousCount: frame.anonymousCount,
-      historyLength: runtime.history.timestamps.length,
-      comparison: __spreadProps(__spreadValues({}, comparison), { counts: comparison.counts ? __spreadValues({}, comparison.counts) : null }),
-      tierMarkers: Object.fromEntries(Object.keys(runtime.TIERS).map((key) => [key, getTierMarker(key)]))
-    });
-  }
-
-  // src/chart-view.js
-  var chartSampleCache = /* @__PURE__ */ new WeakMap();
-  function chartSamples(values) {
-    if (!values || !Object.isFrozen(values)) return values;
-    let cached = chartSampleCache.get(values);
-    if (!cached) {
-      cached = Array.from(values);
-      chartSampleCache.set(values, cached);
-    }
-    return cached;
-  }
-  function buildChartPlot(values, times, breaks, width, lastIndex, windowMs, replayProgress) {
-    values = chartSamples(values);
-    breaks = chartSamples(breaks);
-    var end = Math.min(values.length, times.length) - 1;
-    if (Number.isInteger(lastIndex)) end = Math.min(end, lastIndex);
-    if (end < 0) return { points: [], min: 0, max: 0, end: -1 };
-    var axis = getChartTimes(times);
-    var progress = end + 1 < Math.min(values.length, times.length) && Number.isFinite(replayProgress) ? Math.max(0, Math.min(1, replayProgress)) : 0;
-    var endTime = axis[end] + (progress ? (axis[end + 1] - axis[end]) * progress : 0);
-    var startTime = windowMs ? Math.max(axis[0], endTime - windowMs) : axis[0];
-    var start = 0;
-    while (start < end && axis[start] < startTime) start++;
-    var firstDrawn = start > 0 && axis[start] > startTime ? start - 1 : start, span = endTime - startTime;
-    var min = Infinity, max = -Infinity, points = [], bucket = null, breakNext = true;
-    function flush() {
-      if (!bucket) return;
-      var indices = [bucket.first, bucket.low, bucket.high, bucket.last].sort(function(a, b) {
-        return a - b;
-      });
-      indices.forEach(function(index, j) {
-        if (j && index === indices[j - 1]) return;
-        points.push({
-          index,
-          x: span ? (axis[index] - startTime) / span * width : width / 2,
-          value: values[index],
-          move: breakNext
-        });
-        breakNext = false;
-      });
-      bucket = null;
-    }
-    for (var i = firstDrawn; i <= end; i++) {
-      var value = values[i];
-      min = Math.min(min, value);
-      max = Math.max(max, value);
-      var column = span ? Math.floor((axis[i] - startTime) / span * width) : 0;
-      if (breaks && breaks[i]) {
-        flush();
-        breakNext = true;
-      }
-      if (!bucket || bucket.column !== column) {
-        flush();
-        bucket = { column, first: i, last: i, low: i, high: i };
-      } else {
-        bucket.last = i;
-        if (value < values[bucket.low]) bucket.low = i;
-        if (value > values[bucket.high]) bucket.high = i;
-      }
-    }
-    flush();
-    var continuation = progress ? {
-      fromX: span ? (axis[end] - startTime) / span * width : width / 2,
-      toX: span ? width : width / 2,
-      fromValue: values[end],
-      value: values[end] + (values[end + 1] - values[end]) * progress,
-      gap: !!(breaks && breaks[end + 1]),
-      progress
-    } : null;
-    return {
-      points,
-      min,
-      max,
-      start,
-      end,
-      startTime,
-      endTime,
-      continuation
-    };
-  }
-  function hideChartTooltip() {
-    var tooltip = document.getElementById("tierscope-chart-tooltip");
-    if (tooltip) tooltip.style.display = "none";
-  }
-  function nearestChartSample(times, end, target) {
-    var low = 0, high = end + 1;
-    while (low < high) {
-      var middle = Math.floor((low + high) / 2);
-      if (times[middle] <= target) low = middle + 1;
-      else high = middle;
-    }
-    if (low === 0) return 0;
-    if (low > end) return end;
-    return target - times[low - 1] <= times[low] - target ? low - 1 : low;
-  }
-  function showChartTooltip(canvas, index, clientX, clientY, gapIndex) {
-    var model = canvas._tierScopeChart;
-    if (!model || model.plot.end < 0) return;
-    var firstIndex = model.firstIndex || 0;
-    index = Math.max(firstIndex, Math.min(model.plot.end, index));
-    canvas._tierScopeIndex = index;
-    var tooltip = document.getElementById("tierscope-chart-tooltip");
-    if (!tooltip) {
-      tooltip = document.createElement("div");
-      tooltip.id = "tierscope-chart-tooltip";
-      tooltip.setAttribute("role", "tooltip");
-      tooltip.style.cssText = "position:fixed;z-index:2147483647;pointer-events:none;max-width:310px;padding:7px 9px;background:var(--panel-tooltip);color:var(--panel-text);border:1px solid #a36acb;border-radius:5px;font:12px/1.5 Arial,sans-serif;white-space:pre-line;box-shadow:0 3px 12px #0008;";
-      document.body.appendChild(tooltip);
-    }
-    setThemeVariables(tooltip);
-    tooltip.textContent = gapIndex > 0 ? model.label + "\nNo samples recorded during this interval.\n" + new Date(model.times[gapIndex - 1]).toLocaleString() + " – " + new Date(model.times[gapIndex]).toLocaleString() + "\nOrange dashes connect recorded endpoints only." : model.label + " · " + model.values[index].toLocaleString() + "\n" + new Date(model.times[index]).toLocaleString() + "\nRange: " + model.plot.min.toLocaleString() + "–" + model.plot.max.toLocaleString() + " · Sample " + (index - firstIndex + 1) + "/" + (model.plot.end - firstIndex + 1);
-    tooltip.style.display = "block";
-    var rect = tooltip.getBoundingClientRect();
-    tooltip.style.left = Math.max(4, Math.min(clientX + 12, window.innerWidth - rect.width - 4)) + "px";
-    tooltip.style.top = Math.max(4, Math.min(clientY + 12, window.innerHeight - rect.height - 4)) + "px";
-  }
-  function bindChartInspection(canvas, model) {
-    canvas._tierScopeChart = model;
-    canvas.setAttribute("tabindex", "0");
-    canvas.setAttribute("role", "img");
-    canvas.setAttribute("aria-describedby", "tierscope-chart-tooltip");
-    canvas.setAttribute("aria-label", model.label + " history. " + (model.plot.end < 0 ? "No samples." : "Range " + model.plot.min + " to " + model.plot.max + ". " + (model.plot.end - (model.firstIndex || 0) + 1) + " samples. Orange dashes mark intervals with no recorded samples. Use Left and Right arrows to inspect samples; Home and End to jump; Escape to close."));
-    if (canvas._tierScopeBound) return;
-    canvas._tierScopeBound = true;
-    canvas.addEventListener("pointermove", function(event) {
-      var m = canvas._tierScopeChart;
-      if (m.plot.end < 0) return;
-      var rect = canvas.getBoundingClientRect();
-      var fraction = Math.max(0, Math.min(1, ((event.clientX - rect.left) / rect.width * m.width - 2) / (m.width - 4)));
-      var time = m.plot.startTime + fraction * (m.plot.endTime - m.plot.startTime);
-      var axis = getChartTimes(m.times), index = nearestChartSample(axis, m.plot.end, time);
-      var next = axis[index] > time ? index : index + 1;
-      var gapEnd = m.plot.end + (m.plot.continuation ? 1 : 0);
-      var gap = next > 0 && next <= gapEnd && m.breaks[next] && time > axis[next - 1] && time < axis[next];
-      showChartTooltip(canvas, index, event.clientX, event.clientY, gap ? next : 0);
-    });
-    canvas.addEventListener("pointerleave", hideChartTooltip);
-    canvas.addEventListener("blur", hideChartTooltip);
-    canvas.addEventListener("focus", function() {
-      var rect = canvas.getBoundingClientRect();
-      showChartTooltip(canvas, canvas._tierScopeChart.plot.end, rect.left + rect.width / 2, rect.top + rect.height, false);
-    });
-    canvas.addEventListener("keydown", function(event) {
-      if (event.key === "Escape") {
-        hideChartTooltip();
-        event.stopPropagation();
-        return;
-      }
-      var end = canvas._tierScopeChart.plot.end, index = canvas._tierScopeIndex === void 0 ? end : canvas._tierScopeIndex;
-      if (event.key === "ArrowLeft") index--;
-      else if (event.key === "ArrowRight") index++;
-      else if (event.key === "Home") index = 0;
-      else if (event.key === "End") index = end;
-      else return;
-      event.preventDefault();
-      event.stopPropagation();
-      var rect = canvas.getBoundingClientRect();
-      showChartTooltip(canvas, index, rect.left + rect.width / 2, rect.top + rect.height, false);
-    });
-  }
-  function drawCanvasChart(ctx, points, color) {
-    ctx.save();
-    ctx.strokeStyle = themeColor("gap");
-    ctx.lineWidth = 1.5;
-    ctx.lineCap = "butt";
-    ctx.setLineDash([4, 3]);
-    ctx.beginPath();
-    points.forEach(function(point, i) {
-      if (i && point.move) {
-        ctx.moveTo(points[i - 1].x, points[i - 1].y);
-        ctx.lineTo(point.x, point.y);
-      }
-    });
-    ctx.stroke();
-    ctx.restore();
-    ctx.strokeStyle = color;
-    ctx.fillStyle = color;
-    ctx.lineWidth = 2;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.setLineDash([]);
-    ctx.beginPath();
-    points.forEach(function(point, i) {
-      if (point.move) ctx.moveTo(point.x, point.y);
-      else ctx.lineTo(point.x, point.y);
-      if (point.move && (i === points.length - 1 || points[i + 1].move)) ctx.fillRect(point.x - 1.5, point.y - 1.5, 3, 3);
-    });
-    ctx.stroke();
-  }
-  function drawSparkline(canvasId, data, color, customHeight, times, breaks, lastIndex, label, replayProgress) {
-    var canvas = document.getElementById(canvasId);
-    if (!canvas) return;
-    var ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    var scale = Math.max(1, (runtime.currentScale || 1) * (window.devicePixelRatio || 1));
-    var height = customHeight || 28;
-    canvas.style.width = "105px";
-    canvas.style.minWidth = "0";
-    canvas.style.height = height + "px";
-    var width = canvas.clientWidth || 105;
-    canvas.width = Math.ceil(width * scale);
-    canvas.height = Math.ceil(height * scale);
-    ctx.scale(scale, scale);
-    ctx.clearRect(0, 0, width, height);
-    var plot = buildChartPlot(data, times, breaks, Math.max(1, width - 4), lastIndex, runtime.CHART_WINDOWS[runtime.chartWindowMode], replayProgress);
-    bindChartInspection(canvas, { values: data, times, breaks, firstIndex: plot.start || 0, plot, width, label });
-    var continuation = plot.continuation;
-    var min = continuation ? Math.min(plot.min, continuation.value) : plot.min;
-    var max = continuation ? Math.max(plot.max, continuation.value) : plot.max;
-    function y(value) {
-      return max === min ? height / 2 : height - 2 - (value - min) / (max - min) * (height - 4);
-    }
-    ctx.strokeStyle = color;
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(2, 0, width - 2, height);
-    ctx.clip();
-    drawCanvasChart(ctx, plot.points.map(function(point) {
-      return {
-        x: 2 + point.x,
-        y: y(point.value),
-        move: point.move
-      };
-    }), color);
-    if (continuation) {
-      ctx.save();
-      ctx.strokeStyle = continuation.gap ? themeColor("gap") : color;
-      ctx.lineWidth = continuation.gap ? 1.5 : 2;
-      ctx.setLineDash(continuation.gap ? [4, 3] : []);
-      ctx.lineDashOffset = continuation.gap ? -continuation.progress * 14 : 0;
-      ctx.beginPath();
-      ctx.moveTo(2 + continuation.fromX, y(continuation.fromValue));
-      ctx.lineTo(2 + continuation.toX, y(continuation.value));
-      ctx.stroke();
-      ctx.restore();
-    }
-    ctx.restore();
-  }
-
-  // src/display-values.js
-  function displayHigh(frame, key) {
-    return frame.displayHighs[key];
-  }
-  function displayHighLabel(high, compact) {
-    return compact ? high.shortLabel : high.label;
-  }
-  function displayHighDescription(high) {
-    return high.description;
-  }
-
-  // src/status-view.js
-  function renderStatus(element, model) {
-    if (!element) return;
-    if (model.saveWarning) element.dataset.sessionSaveWarning = "true";
-    else if (element.dataset.sessionSaveWarning) {
-      element.style.color = "";
-      delete element.dataset.sessionSaveWarning;
-    }
-    element.textContent = model.text;
-    element.title = model.title;
-    if (model.color !== null) element.style.color = model.color;
-  }
-
-  // src/compact-view.js
-  function updateCompactDashboard(frame) {
-    if (!frame.minimized) return;
-    var comparison = frame.comparison;
-    var mode = frame.comparisonLabel;
-    function delta(id, value, old) {
-      var el = document.getElementById(id);
-      if (!el) return "";
-      var change = comparison ? value - old : null;
-      var text = change === null ? "" : change > 0 ? "+" + compactNumber(change) : change < 0 ? "−" + compactNumber(-change) : "0";
-      el.textContent = text;
-      el.style.color = change > 0 ? "var(--panel-delta-up)" : change < 0 ? "var(--panel-delta-down)" : "var(--panel-warning)";
-      el.title = change === null ? "Waiting for a fresh sample and comparison history" : "Change versus " + mode + ": " + change;
-      return text;
-    }
-    delta("mini-withtokens-change", frame.withTokens, comparison && comparison.withTokens);
-    delta("mini-total-change", frame.total, comparison && comparison.total);
-    var roomChange = delta("mini-room-change", frame.fullRoomTotal, comparison && comparison.total + comparison.anonymous);
-    var header = document.getElementById("header-text");
-    if (header) {
-      header.textContent = (frame.stopped ? "STOPPED: " : frame.isRestored ? "SAVED: " : "") + compactNumber(frame.fullRoomTotal);
-      header.title = frame.roomName + " — Room total: " + frame.fullRoomTotal.toLocaleString() + "; " + displayHighDescription(displayHigh(frame, "roomTotal", frame.fullRoomTotal)) + (roomChange ? "; change: " + roomChange + " versus " + mode : "");
-    }
-    ["withtokens", "total"].forEach(function(key) {
-      var el = document.getElementById("mini-" + key);
-      var value = key === "total" ? frame.total : frame.withTokens;
-      if (el) {
-        el.textContent = compactNumber(value);
-        el.title = value.toLocaleString() + (key === "total" ? " registered users" : " users in token-classified tiers");
-      }
-    });
-    var label = document.getElementById("mini-metric");
-    var names = { room: "Room total", withTokens: "With Tokens", total: "Registered" };
-    if (label) {
-      label.textContent = (frame.miniMetric === "room" ? "Room total" : frame.miniMetric === "withTokens" ? "💎" : "📊") + " ▾";
-      label.setAttribute("aria-label", names[frame.miniMetric] + " chart. Activate to change metric.");
-      label.title = "Click to cycle Room total, With Tokens, and Registered. Showing the last 15 recorded minutes.";
-    }
-    var high = document.getElementById("mini-high");
-    var peak = displayHigh(
-      frame,
-      frame.miniMetric === "room" ? "roomTotal" : frame.miniMetric,
-      frame.miniMetric === "room" ? frame.fullRoomTotal : frame[frame.miniMetric]
-    );
-    if (high) {
-      high.textContent = displayHighLabel(peak, true);
-      high.title = displayHighDescription(peak) + ". Click to switch SH/ATH.";
-      high.setAttribute("aria-label", high.title);
-      high.setAttribute("aria-pressed", String(frame.highMode === "ath"));
-    }
-    var canvas = document.getElementById("mini-chart");
-    if (!canvas) return;
-    var ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    var width = 140, height = 36, scale = window.devicePixelRatio || 1;
-    canvas.width = Math.ceil(width * scale);
-    canvas.height = Math.ceil(height * scale);
-    ctx.scale(scale, scale);
-    ctx.clearRect(0, 0, width, height);
-    var times = frame.history.timestamps;
-    canvas.title = names[frame.miniMetric] + " — last 15 recorded minutes; vertical scale fits the plotted values";
-    if (!times.length) {
-      bindChartInspection(canvas, { values: [], times: [], breaks: [], plot: { end: -1 }, width, label: names[frame.miniMetric] });
-      return;
-    }
-    var end = times[times.length - 1], start = end - 15 * 6e4;
-    var breaks = getHistoryBreaks(frame.history);
-    var points = [], firstVisible = times.findIndex(function(time) {
-      return time >= start;
-    });
-    var firstDrawn = firstVisible > 0 && breaks[firstVisible] ? firstVisible - 1 : firstVisible;
-    times.forEach(function(time, i) {
-      if (i >= firstDrawn && time <= end) points.push({ time, move: breaks[i], value: frame.miniMetric === "room" ? frame.history.total[i] + frame.history.anonymous[i] : frame.history[frame.miniMetric][i] });
-    });
-    var values = points.map(function(p) {
-      return p.value;
-    });
-    var firstIndex = points[0].time < start ? 1 : 0;
-    var visibleValues = values.slice(firstIndex);
-    var min = Math.min.apply(null, values), max = Math.max.apply(null, values);
-    canvas.title += "; range " + min + "–" + max + "; " + visibleValues.length + " samples through " + new Date(end).toISOString() + ". Orange dashes: no samples recorded during the interval.";
-    bindChartInspection(canvas, {
-      values,
-      times: points.map(function(p) {
-        return p.time;
-      }),
-      breaks: points.map(function(p) {
-        return p.move;
-      }),
-      firstIndex,
-      plot: { min, max, end: points.length - 1, startTime: start, endTime: end },
-      width,
-      label: names[frame.miniMetric]
-    });
-    points.forEach(function(point, i) {
-      point.x = 2 + (point.time - start) / (15 * 6e4) * (width - 4);
-      point.y = max === min ? height / 2 : height - 3 - (point.value - min) / (max - min) * (height - 6);
-      point.move = i === 0 || point.move;
-    });
-    var color = frame.miniMetric === "withTokens" ? "#ff69b4" : frame.miniMetric === "total" ? frame.textColor : "#69BE45";
-    ctx.strokeStyle = color;
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(2, 0, width - 2, height);
-    ctx.clip();
-    drawCanvasChart(ctx, points, color);
-    ctx.restore();
-    renderStatus(document.getElementById("mini-freshness"), frame.freshness);
-  }
-
-  // src/panel-view.js
-  function paintPanelFrame(frame) {
-    var counts = frame.counts;
-    var total = frame.total;
-    var withTokens = frame.withTokens;
-    var anonymousCount = frame.anonymousCount;
-    var fullRoomTotal = frame.fullRoomTotal;
-    var roomTotalHigh = frame.roomTotalHigh;
-    var displayHistory = frame.history;
-    var highlights = frame.highlights;
-    updateCollapsedRowStatus(frame, highlights);
-    var withTokensPct = total > 0 ? Math.round(withTokens / total * 100) + "%" : "0%";
-    var registeredPct = fullRoomTotal > 0 ? Math.round(total / fullRoomTotal * 100) + "%" : "0%";
-    var headerText = document.getElementById("header-text");
-    if (headerText) {
-      var roomHigh = displayHigh(frame, "roomTotal", fullRoomTotal);
-      var displayedRoomHigh = displayHighLabel(roomHigh);
-      headerText.title = (frame.isPlayback && frame.replayRoom ? "Replay: " + frame.replayRoom + " · " : "") + "Room total: " + fullRoomTotal.toLocaleString() + " · " + displayHighDescription(roomHigh);
-      if (frame.stopped && !frame.isPlayback) {
-        headerText.textContent = "STOPPED: " + fullRoomTotal.toLocaleString() + " (" + displayedRoomHigh + ")";
-      } else if (frame.minimized) {
-        headerText.textContent = (frame.isPlayback ? "PLAYBACK: " : frame.isRestored ? "SAVED: " : "") + fullRoomTotal.toLocaleString() + " (" + displayedRoomHigh + ")";
-      } else {
-        headerText.textContent = (frame.isPlayback ? frame.imported ? "FILE: " : "PLAYBACK: " : frame.isRestored ? "SAVED: " : "USERS: ") + fullRoomTotal.toLocaleString() + " (" + displayedRoomHigh + ")";
-      }
-    }
-    var miniWithTokens = document.getElementById("mini-withtokens");
-    var miniWithTokensPct = document.getElementById("mini-withtokens-pct");
-    var miniTotal = document.getElementById("mini-total");
-    var miniTotalPct = document.getElementById("mini-total-pct");
-    if (miniWithTokens) miniWithTokens.textContent = withTokens;
-    if (miniWithTokensPct) miniWithTokensPct.textContent = withTokensPct;
-    if (miniTotal) miniTotal.textContent = total;
-    if (miniTotalPct) miniTotalPct.textContent = registeredPct;
-    var miniChange = document.getElementById("mini-room-change");
-    if (miniChange) miniChange.style.display = frame.minimized ? "inline" : "none";
-    if (miniWithTokens) miniWithTokens.parentElement && (miniWithTokens.parentElement.title = "With Tokens: " + withTokens.toLocaleString() + " (" + withTokensPct + " of registered users)");
-    if (miniTotal) miniTotal.parentElement && (miniTotal.parentElement.title = "Registered: " + total.toLocaleString() + " (" + registeredPct + " of room total)");
-    updateCompactDashboard(frame);
-    if (!frame.minimized) {
-      frame.tierKeys.forEach(function(tier) {
-        var countEl = document.getElementById("count-" + tier);
-        var highEl = document.getElementById("high-" + tier);
-        var rowEl = document.getElementById("tier-row-" + tier);
-        var currentVal = counts[tier];
-        var highResult = displayHigh(frame, tier, currentVal);
-        if (countEl) countEl.textContent = currentVal;
-        if (highEl) {
-          highEl.textContent = displayHighLabel(highResult, true);
-          highEl.title = displayHighDescription(highResult);
-        }
-        if (rowEl) {
-          if (highlights && highlights[tier]) {
-            rowEl.style.background = "rgba(50, 205, 50, 0.22)";
-          } else {
-            rowEl.style.background = "rgba(var(--panel-row-rgb),calc(0.05 * var(--tier-background-scale, 1)))";
-          }
-        }
-      });
-      var withTokensCountEl = document.getElementById("count-withtokens");
-      var withTokensPctEl = document.getElementById("pct-withtokens");
-      var withTokensHighEl = document.getElementById("high-withtokens");
-      var withTokensRowEl = document.getElementById("tier-row-withtokens");
-      var withTokensResult = displayHigh(frame, "withTokens", withTokens);
-      if (withTokensCountEl) withTokensCountEl.textContent = withTokens;
-      if (withTokensPctEl) withTokensPctEl.textContent = withTokensPct;
-      if (withTokensHighEl) {
-        withTokensHighEl.textContent = displayHighLabel(withTokensResult, true);
-        withTokensHighEl.title = displayHighDescription(withTokensResult);
-      }
-      if (withTokensRowEl) {
-        if (highlights && highlights["withTokens"]) {
-          withTokensRowEl.style.background = "rgba(50, 205, 50, 0.22)";
-        } else {
-          withTokensRowEl.style.background = "rgba(255,105,180,0.15)";
-        }
-      }
-      var totalEl = document.getElementById("count-total");
-      var totalHighEl = document.getElementById("high-total");
-      var totalRowEl = document.getElementById("tier-row-total");
-      var totalResult = displayHigh(frame, "total", total);
-      if (totalEl) totalEl.textContent = total;
-      if (totalHighEl) {
-        totalHighEl.textContent = displayHighLabel(totalResult, true);
-        totalHighEl.title = displayHighDescription(totalResult);
-      }
-      if (totalRowEl) {
-        if (highlights && highlights["total"]) {
-          totalRowEl.style.background = "rgba(50, 205, 50, 0.22)";
-        } else {
-          totalRowEl.style.background = "rgba(var(--panel-row-rgb),0.1)";
-        }
-      }
-      var fullAnonText = document.getElementById("anon-ratio-full");
-      var anonHighEl = document.getElementById("high-anon");
-      var anonRowEl = document.getElementById("tier-row-anon");
-      var anonResult = displayHigh(frame, "anonymous", anonymousCount);
-      if (fullAnonText) {
-        var anonLabel = anonymousCount > 0 ? anonymousCount.toLocaleString() : "0";
-        var digits = String(Math.abs(anonymousCount)).length;
-        fullAnonText.textContent = anonLabel;
-        fullAnonText.style.fontSize = digits >= 6 ? "9px" : digits === 5 ? "11px" : "13px";
-      }
-      if (anonHighEl) {
-        anonHighEl.textContent = displayHighLabel(anonResult, true);
-        anonHighEl.title = displayHighDescription(anonResult);
-      }
-      if (anonRowEl) {
-        if (highlights && highlights["anonymous"]) {
-          anonRowEl.style.background = "rgba(50, 205, 50, 0.22)";
-        } else {
-          anonRowEl.style.background = "rgba(136,136,136,0.15)";
-        }
-      }
-    }
-  }
-  function updateCollapsedRowStatus(frame, highlights) {
-    frame.rows.forEach(function(row) {
-      var button = document.getElementById("restore-row-" + row.key);
-      if (!button) return;
-      var value = row.key === "withtokens" ? frame.withTokens : row.key === "total" ? frame.total : row.key === "anon" ? frame.anonymousCount : frame.counts[row.key];
-      var historyKey = row.key === "withtokens" ? "withTokens" : row.key === "anon" ? "anonymous" : row.key;
-      var high = displayHigh(frame, historyKey, value);
-      var context = frame.isPlayback ? "Replay" : frame.isRestored ? "Saved sample" : "Latest sample";
-      button.title = row.label + ": " + value.toLocaleString() + " (" + displayHighLabel(high) + "). " + displayHighDescription(high) + ". " + context + ". Click to restore row.";
-      button.setAttribute("aria-label", "Restore " + row.label + " row. " + context + ": " + value.toLocaleString());
-      button.style.background = highlights && highlights[historyKey] ? "rgba(50, 205, 50, 0.22)" : "rgba(var(--panel-row-rgb),calc(0.05 * var(--tier-background-scale, 1)))";
-    });
-  }
-
-  // src/trend-view.js
-  function renderTrendDisplay(model) {
-    if (model.isPlayback) return;
-    var trendContainer = document.getElementById("trend-container");
-    var trendHeaderLabel = document.getElementById("trend-header-label");
-    if (!trendContainer) return;
-    if (model.isRestored) {
-      trendContainer.innerHTML = '<div style="font-size:8px;color:var(--panel-muted);text-align:center;padding:8px;">' + (model.stopped ? "Session stopped — history remains available in Replay." : "Saved snapshot — trends resume after a new sample.") + "</div>";
-      if (trendHeaderLabel) trendHeaderLabel.textContent = "📈 TREND";
-      return;
-    }
-    if (!model.hasTrendBaseline) {
-      trendContainer.innerHTML = '<div style="font-size:8px;color:var(--panel-faint);text-align:center;padding:8px;">Waiting for scan...</div>';
-      if (trendHeaderLabel) trendHeaderLabel.textContent = "📈 TREND";
-      return;
-    }
-    var counts = model.counts, total = model.total, withTokens = model.withTokens, anonymousCount = model.anonymousCount;
-    var comparison = model.comparison;
-    var comparisonCounts = comparison.counts;
-    var shortSession = comparison.short;
-    var actualMinutes = comparison.actualMinutes;
-    if (!comparisonCounts) {
-      var waitingText = model.historyLength === 1 ? "Waiting for second scan..." : "Waiting for scan...";
-      trendContainer.innerHTML = '<div style="font-size:8px;color:var(--panel-faint);text-align:center;padding:8px;">' + waitingText + "</div>";
-      if (trendHeaderLabel) trendHeaderLabel.textContent = "📈 TREND";
-      return;
-    }
-    var getShortLabel = function() {
-      if (!shortSession || actualMinutes <= 0) return "";
-      if (actualMinutes < 60) return " vs " + actualMinutes + "m";
-      var hours = Math.floor(actualMinutes / 60);
-      var mins = actualMinutes % 60;
-      return " vs " + hours + "h" + (mins > 0 ? mins : "");
-    };
-    function buildTrendItem(name, current, prev, isSpecial, isLarge) {
-      var diff = current - prev;
-      var deltaText = diff !== 0 ? diff > 0 ? "+" + diff : diff : "";
-      var deltaColor = diff > 0 ? "var(--panel-positive)" : "var(--panel-negative)";
-      var bgStyle;
-      if (diff > 0) {
-        bgStyle = "background:rgba(50, 205, 50, 0.22);";
-      } else if (diff < 0) {
-        bgStyle = "background:rgba(255, 85, 85, 0.15);";
-      } else {
-        bgStyle = "background:rgba(255, 215, 0, 0.15);";
-      }
-      if (isSpecial) bgStyle += "border:1px solid #ff69b4;";
-      var padding = isLarge ? "6px 12px" : "2px 6px";
-      var fontSize = isLarge ? "12px" : "10px";
-      var deltaFont = fontSize;
-      if (deltaText) {
-        var dlen = String(Math.abs(diff)).length;
-        if (dlen >= 4) deltaFont = "8px";
-        else if (dlen === 3) deltaFont = "10px";
-      }
-      return '<div style="display:flex;align-items:center;gap:4px;' + bgStyle + "padding:" + padding + ';border-radius:4px;"><span style="font-size:' + fontSize + ';">' + name + "</span>" + (deltaText ? '<span style="font-size:' + deltaFont + ";font-weight:bold;color:" + deltaColor + ';">' + deltaText + "</span>" : "") + "</div>";
-    }
-    var headerLabel = "📈 TREND";
-    var shortLabel = getShortLabel();
-    var html = '<div style="display:flex;justify-content:center;gap:6px;padding:4px 0;">';
-    html += buildTrendItem(model.tierMarkers["red"], counts["red"] || 0, comparisonCounts["red"] || 0, false, false);
-    html += buildTrendItem(model.tierMarkers["green"], counts["green"] || 0, comparisonCounts["green"] || 0, false, false);
-    html += buildTrendItem(model.tierMarkers["purple"], counts["purple"] || 0, comparisonCounts["purple"] || 0, false, false);
-    html += buildTrendItem(model.tierMarkers["pink"], counts["pink"] || 0, comparisonCounts["pink"] || 0, false, false);
-    html += "</div>";
-    html += '<div style="display:flex;justify-content:center;gap:6px;padding:4px 0;">';
-    html += buildTrendItem(model.tierMarkers["dark-blue"], counts["dark-blue"] || 0, comparisonCounts["dark-blue"] || 0, false, false);
-    html += buildTrendItem(model.tierMarkers["light-blue"], counts["light-blue"] || 0, comparisonCounts["light-blue"] || 0, false, false);
-    html += buildTrendItem(model.tierMarkers["gray"], counts["gray"] || 0, comparisonCounts["gray"] || 0, false, false);
-    html += buildTrendItem(model.tierMarkers["female-trans"], counts["female-trans"] || 0, comparisonCounts["female-trans"] || 0, false, false);
-    html += "</div>";
-    html += '<div style="display:flex;justify-content:center;gap:8px;padding:4px 0;">';
-    html += buildTrendItem("💎", withTokens || 0, comparisonCounts.withTokens || 0, true, true);
-    html += buildTrendItem("📊", total || 0, comparisonCounts.total || 0, false, true);
-    html += buildTrendItem("👻", anonymousCount || 0, comparisonCounts.anonymous || 0, false, true);
-    html += "</div>";
-    trendContainer.innerHTML = html;
-    if (trendHeaderLabel) {
-      trendHeaderLabel.textContent = headerLabel + shortLabel;
-    }
-  }
-
-  // src/presentation.js
-  var presentationEffects;
-  function initializePresentation(effects) {
-    presentationEffects = effects;
-  }
-  function updateDisplay() {
-    presentationEffects.refreshReplayAvailability();
-    if (runtime.presentationMode !== "PLAYBACK") renderDisplayFrame(buildLiveDisplayFrame());
-  }
-  function renderDisplayFrame(frame) {
-    presentationEffects.refreshOptions();
-    paintPanelFrame(buildPanelDisplayModel(frame));
-  }
-  function updateTrendDisplay() {
-    if (runtime.presentationMode === "PLAYBACK") return;
-    renderTrendDisplay(buildTrendDisplayModel());
-  }
-  function refreshPanelOptions() {
-    presentationEffects.refreshOptions();
-  }
-  function refreshScanCountdown() {
-    presentationEffects.refreshCountdown();
-  }
-
-  // src/row-layout.js
-  function panelRowMarker(row) {
-    return row.icon || getTierMarker(row.key);
-  }
-  function collapseMarkerHtml(key) {
-    var row = runtime.PANEL_ROWS.find(function(item) {
-      return item.key === key;
-    });
-    return '<button type="button" class="tier-collapse-marker" id="collapse-row-' + key + '" aria-controls="tier-row-' + key + '" aria-expanded="true" aria-label="Collapse ' + row.label + ' row" title="Collapse ' + row.label + ' row" style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:24px;padding:0;border:0;border-radius:3px;background:transparent;color:inherit;font-size:14px;line-height:1;cursor:pointer;">' + panelRowMarker(row) + "</button>";
-  }
-  function collapsedTrayHtml() {
-    return '<div id="collapsed-tier-tray" role="group" aria-label="Collapsed rows. Click an icon to restore its row." style="display:none;flex-wrap:wrap;align-items:center;gap:3px;margin-bottom:4px;">' + runtime.PANEL_ROWS.map(function(row) {
-      return '<button type="button" id="restore-row-' + row.key + '" aria-controls="tier-row-' + row.key + '" aria-expanded="false" aria-label="Restore ' + row.label + ' row" title="Restore ' + row.label + ' row" style="display:none;align-items:center;justify-content:center;flex:0 0 22px;width:22px;height:22px;box-sizing:border-box;padding:0;border:1px solid ' + (row.key === "total" ? "var(--panel-text)" : row.color) + ';border-radius:3px;background:rgba(var(--panel-row-rgb),0.05);color:var(--panel-text);font-size:12px;line-height:1;cursor:pointer;">' + panelRowMarker(row) + "</button>";
-    }).join("") + "</div>";
-  }
-  function applyRowLayout() {
-    runtime.chartLayoutRevision++;
-    var region = document.getElementById("tier-chart-region");
-    var tray = document.getElementById("collapsed-tier-tray");
-    var group = document.getElementById("summary-tier-rows");
-    var measurable = region && region.offsetHeight > 0;
-    var visibleCount = runtime.PANEL_ROWS.length - runtime.collapsedRows.size;
-    if (region) region.style.height = "auto";
-    runtime.PANEL_ROWS.forEach(function(row) {
-      runtime.panelChartHeights[row.key] = row.height;
-      var canvas = document.getElementById("spark-" + row.key);
-      if (canvas) canvas.style.height = row.height + "px";
-      var element = document.getElementById("tier-row-" + row.key);
-      if (measurable && element) element.style.display = row.display;
-    });
-    if (measurable && tray) tray.style.display = "none";
-    if (measurable && group) group.style.display = "block";
-    if (measurable) {
-      runtime.PANEL_ROWS.forEach(function(row) {
-        var canvas = document.getElementById("spark-" + row.key);
-        if (!canvas) return;
-        var parent = canvas.parentElement;
-        var style = window.getComputedStyle(parent);
-        var minimum = parent.clientHeight - (parseFloat(style.paddingTop) || 0) - (parseFloat(style.paddingBottom) || 0);
-        runtime.panelChartHeights[row.key] = Math.max(row.height, minimum);
-        canvas.style.height = runtime.panelChartHeights[row.key] + "px";
-      });
-      if (runtime.panelChartRegionHeight === null) runtime.panelChartRegionHeight = region.offsetHeight;
-    }
-    if (tray) tray.style.display = runtime.collapsedRows.size ? "flex" : "none";
-    runtime.PANEL_ROWS.forEach(function(row) {
-      var collapsed = runtime.collapsedRows.has(row.key);
-      var element = document.getElementById("tier-row-" + row.key);
-      if (element) element.style.display = collapsed ? "none" : row.display;
-      var restore = document.getElementById("restore-row-" + row.key);
-      if (restore) restore.style.display = collapsed ? "inline-flex" : "none";
-      var collapse = document.getElementById("collapse-row-" + row.key);
-      if (collapse) collapse.setAttribute("aria-expanded", String(!collapsed));
-    });
-    if (group) group.style.display = runtime.collapsedRows.has("withtokens") && runtime.collapsedRows.has("total") ? "none" : "block";
-    var extra = measurable && visibleCount ? Math.max(0, runtime.panelChartRegionHeight - region.offsetHeight) / visibleCount : 0;
-    runtime.PANEL_ROWS.forEach(function(row) {
-      if (runtime.collapsedRows.has(row.key)) return;
-      runtime.panelChartHeights[row.key] += extra;
-      var canvas = document.getElementById("spark-" + row.key);
-      if (canvas) canvas.style.height = runtime.panelChartHeights[row.key] + "px";
-    });
-    if (region && visibleCount && runtime.panelChartRegionHeight !== null) {
-      region.style.height = runtime.panelChartRegionHeight + "px";
-    }
-    runtime.rowLayoutNeedsMeasure = !measurable;
-  }
-
-  // src/charts.js
-  function drawAllSparklines() {
-    if (runtime.presentationMode === "PLAYBACK") return;
-    drawHistorySparklines(runtime.history);
-  }
-  function drawHistorySparklines(displayHistory, lastIndex, replayProgress) {
-    hideChartTooltip();
-    if (runtime.rowLayoutNeedsMeasure) applyRowLayout();
-    var breaks = getHistoryBreaks(displayHistory);
-    runtime.PANEL_ROWS.forEach(function(row) {
-      if (runtime.collapsedRows.has(row.key)) return;
-      var key = row.key === "withtokens" ? "withTokens" : row.key === "anon" ? "anonymous" : row.key;
-      drawSparkline(
-        "spark-" + row.key,
-        displayHistory[key],
-        row.key === "total" ? themeColor("text") : row.color,
-        runtime.panelChartHeights[row.key] || row.height,
-        displayHistory.timestamps,
-        breaks,
-        lastIndex,
-        row.label,
-        replayProgress
-      );
-    });
   }
 
   // src/storage.js
@@ -3339,6 +2529,1293 @@ underlying system, so should run in the browser, Node, or Plask.
     };
   }
 
+  // src/session-capture.js
+  function captureSessionFile() {
+    if (isPlaybackCurrent(runtime.playback) && runtime.playback.archive) return runtime.playback.archive;
+    if (location.href !== runtime.lastUrl) throw new Error("No recorded session to save yet.");
+    return captureLiveSessionFile();
+  }
+  function captureLiveSessionFile(room = getModelName()) {
+    if (!runtime.history.timestamps.length || room === "unknown" || runtime.activeSessionStorageKey !== getStorageKey(room) || room !== getModelNameFromUrl(runtime.lastUrl)) {
+      throw new Error("No recorded session to save yet.");
+    }
+    var now = Date.now();
+    var data = {
+      schemaVersion: runtime.STORAGE_SCHEMA_VERSION,
+      timestamp: now,
+      history: { timestamps: runtime.history.timestamps.slice(), breaks: getHistoryBreaks(runtime.history).slice() },
+      sessionStartedAt: runtime.sessionStartedAt,
+      sessionStartEstimated: runtime.sessionStartEstimated,
+      sessionHighs: {},
+      roomTotalHigh: runtime.roomTotalHigh,
+      roomTotalHighTime: runtime.roomTotalHighTime,
+      pausedElapsedTime: runtime.isPaused ? runtime.pausedElapsedTime : runtime.trackingStartTime ? Math.max(0, now - runtime.trackingStartTime) : 0,
+      isPaused: runtime.isPaused,
+      isStopped: runtime.isStopped,
+      stoppedAt: runtime.stoppedAt,
+      stopReason: runtime.stopReason
+    };
+    runtime.STORAGE_HISTORY_SERIES.forEach(function(key) {
+      data.history[key] = runtime.history[key].slice();
+      data.sessionHighs[key] = getSessionHigh(key, 0);
+    });
+    runtime.history.timestamps.forEach(function(time, i) {
+      var total = runtime.history.total[i] + runtime.history.anonymous[i];
+      if (total > data.roomTotalHigh) {
+        data.roomTotalHigh = total;
+        data.roomTotalHighTime = time;
+      }
+    });
+    return validateSessionFile({
+      format: runtime.SESSION_FILE_FORMAT,
+      formatVersion: runtime.SESSION_FILE_VERSION,
+      producerVersion: runtime.TIERSCOPE_VERSION,
+      room,
+      session: data
+    });
+  }
+
+  // src/session-library.js
+  var LIBRARY_PREFIX = "tierscope:library:v1:";
+  var LIBRARY_MAX_COUNT = 500;
+  var LIBRARY_MAX_BYTES = 25 * 1024 * 1024;
+  function libraryRecordKey(id) {
+    if (typeof id !== "string" || !/^[a-z0-9_-]{1,100}$/i.test(id)) throw new Error("Invalid library record.");
+    return LIBRARY_PREFIX + id;
+  }
+  function libraryTitle(title) {
+    if (typeof title !== "string" || title.length > 80 || /[\x00-\x1f]/.test(title)) throw new Error("Use a title of up to 80 characters.");
+    return title.trim();
+  }
+  function libraryMetadata(value) {
+    const favorite = value.favorite === void 0 ? false : value.favorite, notes = value.notes === void 0 ? "" : value.notes;
+    if (typeof favorite !== "boolean" || typeof notes !== "string" || notes.length > 2e3 || /[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(notes)) {
+      throw new Error("Recording notes must be plain text of up to 2,000 characters; favorite must be true or false.");
+    }
+    return __spreadProps(__spreadValues({}, value.favorite === void 0 ? {} : { favorite }), { notes });
+  }
+  function libraryIdentity(archive) {
+    return JSON.stringify({ room: archive.room.toLowerCase(), session: __spreadProps(__spreadValues({}, archive.session), { timestamp: 0 }) });
+  }
+  function librarySessionKey(archive) {
+    var _a;
+    return archive.room.toLowerCase() + ":" + ((_a = archive.session.sessionStartedAt) != null ? _a : archive.session.history.timestamps[0]);
+  }
+  function compareLibrarySessions(existing, incoming) {
+    if (librarySessionKey(existing) !== librarySessionKey(incoming)) return null;
+    if (libraryIdentity(existing) === libraryIdentity(incoming)) return 0;
+    const a = existing.session, b = incoming.session, ah = a.history, bh = b.history;
+    const at = ah.timestamps, bt = bh.timestamps;
+    let ai = at.indexOf(bt[0]), bi = 0;
+    if (ai < 0) {
+      ai = 0;
+      bi = bt.indexOf(at[0]);
+    }
+    if (bi < 0) {
+      if (a.sessionStartEstimated || b.sessionStartEstimated || !(at.at(-1) < bt[0] || bt.at(-1) < at[0])) return null;
+    } else {
+      const series = Object.keys(ah).filter((key) => key !== "timestamps" && key !== "breaks");
+      for (; ai < at.length && bi < bt.length; ai++, bi++) {
+        if (at[ai] !== bt[bi] || series.some((key) => ah[key][ai] !== bh[key][bi]) || ai > 0 && bi > 0 && ah.breaks[ai] !== bh.breaks[bi]) return null;
+      }
+    }
+    const dominates = (left, right) => left.history.timestamps.length >= right.history.timestamps.length && left.history.timestamps.at(-1) >= right.history.timestamps.at(-1) && left.roomTotalHigh >= right.roomTotalHigh && Object.keys(right.sessionHighs).every((key) => left.sessionHighs[key].value >= right.sessionHighs[key].value);
+    const newer = dominates(b, a), older = dominates(a, b);
+    if (newer && older) return b.timestamp > a.timestamp ? 1 : -1;
+    return newer ? 1 : older ? -1 : null;
+  }
+  function createLibraryReader() {
+    const cache = /* @__PURE__ */ new Map();
+    return { read: () => readSessionLibrary(cache), clear: () => cache.clear() };
+  }
+  function readSessionLibrary(cache = null) {
+    const entries = [], damaged = [], unavailable = [], sessions = /* @__PURE__ */ new Map();
+    let bytes = 0, cachedBytes = 0, cachedCount = 0;
+    let keys;
+    try {
+      keys = GM_listValues().filter((key) => key.startsWith(LIBRARY_PREFIX));
+    } catch (error) {
+      if (cache) cache.clear();
+      throw error;
+    }
+    if (cache) {
+      const present = new Set(keys);
+      for (const key of cache.keys()) if (!present.has(key)) cache.delete(key);
+    }
+    for (const key of keys) {
+      let raw;
+      try {
+        raw = GM_getValue(key, void 0);
+      } catch (error) {
+        if (cache) cache.delete(key);
+        damaged.push(key);
+        unavailable.push(key);
+        continue;
+      }
+      let cached = cache && cache.get(key);
+      if (cached && cached.raw !== raw) {
+        cache.delete(key);
+        cached = null;
+      }
+      if (raw === void 0) {
+        if (cache) cache.delete(key);
+        continue;
+      }
+      let recordBytes;
+      try {
+        recordBytes = cached ? cached.bytes : new TextEncoder().encode(typeof raw === "string" ? raw : JSON.stringify(raw)).byteLength;
+        bytes += recordBytes;
+      } catch (error) {
+        if (cache) cache.delete(key);
+        damaged.push(key);
+        unavailable.push(key);
+        continue;
+      }
+      try {
+        const id = key.slice(LIBRARY_PREFIX.length);
+        let data = cached && cached.data;
+        if (!data) {
+          const record = JSON.parse(raw);
+          if (record.schemaVersion !== 1 || !Number.isSafeInteger(record.addedAt) || record.addedAt < 0) throw new Error("Invalid library record.");
+          libraryRecordKey(id);
+          const lineage = record.lineage === void 0 ? id : record.lineage;
+          libraryRecordKey(lineage);
+          data = __spreadProps(__spreadValues({ title: libraryTitle(record.title) }, libraryMetadata(record)), { lineage, addedAt: record.addedAt, archive: validateSessionFile(record.archive) });
+        }
+        if (cache) {
+          if (typeof raw === "string" && cachedCount < LIBRARY_MAX_COUNT && cachedBytes + recordBytes <= LIBRARY_MAX_BYTES) {
+            if (!cached) {
+              for (const values of Object.values(data.archive.session.history)) Object.freeze(values);
+              cache.set(key, { raw, bytes: recordBytes, data: freezeRecordingData(data) });
+            }
+            cachedBytes += recordBytes;
+            cachedCount++;
+          } else cache.delete(key);
+        }
+        const entry = __spreadProps(__spreadValues({ id }, data), { records: [{ key, value: raw }] });
+        const sessionKey = librarySessionKey(entry.archive), siblings = sessions.get(sessionKey) || [];
+        const previous = siblings.find((other) => compareLibrarySessions(other.archive, entry.archive) !== null);
+        if (previous) {
+          const records = previous.records.concat(entry.records), addedAt = Math.min(previous.addedAt, entry.addedAt);
+          if (compareLibrarySessions(previous.archive, entry.archive) === 1) Object.assign(previous, entry);
+          previous.records = records;
+          previous.addedAt = addedAt;
+        } else {
+          entries.push(entry);
+          siblings.push(entry);
+          sessions.set(sessionKey, siblings);
+        }
+      } catch (error) {
+        if (cache) cache.delete(key);
+        damaged.push(key);
+      }
+    }
+    entries.sort((a, b) => b.archive.session.history.timestamps[0] - a.archive.session.history.timestamps[0] || b.addedAt - a.addedAt || a.id.localeCompare(b.id));
+    return { entries, damaged, unavailable, bytes, count: entries.length + damaged.length };
+  }
+  function planLibraryAdditions(incoming, library = readSessionLibrary()) {
+    if (library.unavailable && library.unavailable.length) throw new Error("Some library records could not be read. Refresh the list before saving more recordings.");
+    const entries = library.entries.slice(), writes = [];
+    let bytes = library.bytes;
+    for (const entry of incoming) {
+      const archive = validateSessionFile(entry.archive);
+      const index = entries.findIndex((saved) => compareLibrarySessions(saved.archive, archive) !== null);
+      const previous = index >= 0 ? entries[index] : null;
+      if (previous && compareLibrarySessions(previous.archive, archive) !== 1) continue;
+      const title = previous ? previous.title : libraryTitle(entry.title || archive.room);
+      const metadata = libraryMetadata(previous || entry);
+      const id = makeStorageId();
+      const addedAt = previous ? previous.addedAt : Date.now();
+      const lineage = previous ? previous.lineage || previous.id : id;
+      const raw = JSON.stringify(__spreadProps(__spreadValues({ schemaVersion: 1, addedAt, title }, metadata), { lineage, archive })), key = libraryRecordKey(id);
+      bytes += new Blob([raw]).size;
+      writes.push({ key, value: raw, id, updated: !!previous, replaces: previous ? previous.records : [] });
+      const next = __spreadProps(__spreadValues({ id, title }, metadata), { lineage, addedAt, archive, records: [{ key, value: raw }] });
+      if (previous) entries[index] = next;
+      else entries.push(next);
+    }
+    if (library.count - library.entries.length + entries.length > LIBRARY_MAX_COUNT || bytes > LIBRARY_MAX_BYTES) {
+      throw new Error("Library full (" + LIBRARY_MAX_COUNT + " recordings / " + LIBRARY_MAX_BYTES / 1024 / 1024 + " MB). Export and remove recordings before adding more.");
+    }
+    return writes;
+  }
+  function finalizeLibraryWrites(writes) {
+    for (const write of writes) for (const old of write.replaces) {
+      try {
+        if (GM_getValue(old.key, null) === old.value) GM_deleteValue(old.key);
+      } catch (error) {
+      }
+    }
+  }
+  function keepSessionInLibrary(archive, title = "", reader2 = null) {
+    const library = reader2 ? reader2.read() : readSessionLibrary(), clean = validateSessionFile(archive);
+    const writes = planLibraryAdditions([{ archive: clean, title }], library);
+    if (!writes.length) return {
+      added: false,
+      updated: false,
+      id: library.entries.find((entry) => compareLibrarySessions(entry.archive, clean) !== null).id
+    };
+    function unchangedSource() {
+      for (const old of writes[0].replaces) if (GM_getValue(old.key, void 0) !== old.value) {
+        throw new Error("This session changed in another tab. Refresh or retry keeping it.");
+      }
+    }
+    try {
+      unchangedSource();
+      GM_setValue(writes[0].key, writes[0].value);
+      if (GM_getValue(writes[0].key, void 0) !== writes[0].value) throw new Error("The library save could not be verified. Try again.");
+      verifyLibraryCapacity(reader2);
+      unchangedSource();
+    } catch (error) {
+      try {
+        if (GM_getValue(writes[0].key, null) === writes[0].value) GM_deleteValue(writes[0].key);
+      } catch (cleanupError) {
+        throw new Error("Library save could not be completed or undone. Refresh the list before retrying.");
+      }
+      throw error;
+    }
+    finalizeLibraryWrites(writes);
+    return { added: !writes[0].updated, updated: writes[0].updated, id: writes[0].id };
+  }
+  function verifyLibraryCapacity(reader2 = null) {
+    const state = reader2 ? reader2.read() : readSessionLibrary();
+    if (state.unavailable.length) throw new Error("Library capacity could not be checked because some records could not be read.");
+    if (state.count > LIBRARY_MAX_COUNT || state.bytes > LIBRARY_MAX_BYTES) throw new Error("Library limit reached, possibly by another tab. Refresh the list and remove recordings before retrying.");
+  }
+  function removeLibrarySession(id) {
+    const key = libraryRecordKey(id), state = readSessionLibrary();
+    const entry = state.entries.find((entry2) => entry2.records.some((record) => record.key === key));
+    if (!entry) {
+      if (state.damaged.includes(key)) GM_deleteValue(key);
+      return;
+    }
+    for (const record of entry.records) if (GM_getValue(record.key, null) === record.value) GM_deleteValue(record.key);
+  }
+  function renameLibrarySession(id, title) {
+    return updateLibraryMetadata(id, { title });
+  }
+  function updateLibraryMetadata(id, patch) {
+    if (!patch || Object.keys(patch).some((key2) => !["title", "notes"].includes(key2))) throw new Error("Invalid recording metadata.");
+    const key = libraryRecordKey(id), state = readSessionLibrary();
+    if (state.unavailable.length) throw new Error("Some library records could not be read. Refresh the list before editing.");
+    const entry = state.entries.find((entry2) => entry2.records.some((record) => record.key === key));
+    if (!entry) throw new Error("This recording changed in another tab. Refresh the list.");
+    const clean = __spreadProps(__spreadValues({}, libraryMetadata(__spreadValues(__spreadValues({}, entry), patch))), { title: libraryTitle(patch.title === void 0 ? entry.title : patch.title) });
+    const writes = entry.records.map((record) => __spreadProps(__spreadValues({}, record), { next: JSON.stringify(__spreadValues(__spreadValues({}, JSON.parse(record.value)), clean)) }));
+    const bytes = state.bytes + writes.reduce((total, write) => total + new Blob([write.next]).size - new Blob([write.value]).size, 0);
+    if (bytes > LIBRARY_MAX_BYTES) throw new Error("Library full. Use shorter notes or a shorter title, or remove a recording.");
+    const touched = [];
+    try {
+      for (const write of writes) {
+        if (GM_getValue(write.key, null) !== write.value) throw new Error("This recording changed in another tab. Refresh the list.");
+        touched.push(write);
+        GM_setValue(write.key, write.next);
+      }
+      verifyLibraryCapacity();
+    } catch (error) {
+      let failed = false;
+      for (const write of touched.reverse()) {
+        try {
+          if (GM_getValue(write.key, null) === write.next) GM_setValue(write.key, write.value);
+        } catch (rollbackError) {
+          failed = true;
+        }
+      }
+      if (failed) throw new Error("Some recording edits could not be undone. Refresh the library before retrying.");
+      throw error;
+    }
+  }
+
+  // src/automatic-library.js
+  var checkpointInterval = 6e4;
+  var reader = createLibraryReader();
+  var checkpoint = { room: "", identity: "", signature: "", phase: "", attemptedAt: null, savedAt: null, error: "" };
+  function automaticLibraryStatus(room) {
+    return checkpoint.room === room && checkpoint.identity === room + ":" + runtime.sessionStartedAt + ":" + runtime.activeRoomEpoch ? __spreadValues({}, checkpoint) : { savedAt: null, error: "" };
+  }
+  function automaticLibraryWarning(room) {
+    const state = automaticLibraryStatus(room);
+    return state.error ? {
+      saveWarning: true,
+      text: "Library save pending",
+      color: "var(--panel-warning)",
+      title: "Automatic Library keeping could not finish. Live data remains in this tab. Open Library to retry or download a session file. " + state.error
+    } : null;
+  }
+  function clearAutomaticLibraryStatus(room) {
+    if (checkpoint.room === room) checkpoint = { room, identity: "", signature: "", phase: "", attemptedAt: null, savedAt: null, error: "" };
+    reader.clear();
+  }
+  function keepFavoriteSession(room, force = false) {
+    if (!room || room === "unknown" || !runtime.history.timestamps.length) return;
+    try {
+      const key = getStorageKey(room);
+      if (runtime.activeSessionStorageKey !== key) return;
+      const identity = room + ":" + runtime.sessionStartedAt + ":" + runtime.activeRoomEpoch;
+      if (checkpoint.identity !== identity) checkpoint = { room, identity, signature: "", phase: "", attemptedAt: null, savedAt: null, error: "" };
+      const preference = readModelFavorite(room);
+      if (!preference.autoKeep) {
+        clearAutomaticLibraryStatus(room);
+        return;
+      }
+      if (getRoomEpoch(key) !== runtime.activeRoomEpoch) return;
+      const history = runtime.history;
+      const signature = [
+        history.timestamps[0],
+        history.timestamps.at(-1),
+        history.timestamps.length,
+        runtime.isPaused,
+        runtime.isStopped,
+        runtime.stoppedAt
+      ].join(":");
+      const phase = [runtime.isPaused, runtime.isStopped, runtime.stoppedAt].join(":");
+      const transition = checkpoint.phase && checkpoint.phase !== phase;
+      if (!force && (signature === checkpoint.signature && !checkpoint.error || !transition && checkpoint.attemptedAt !== null && Date.now() - checkpoint.attemptedAt < checkpointInterval)) return;
+      checkpoint.attemptedAt = Date.now();
+      checkpoint.phase = phase;
+      const archive = captureLiveSessionFile(room);
+      const result = keepSessionInLibrary(archive, "", reader);
+      checkpoint.signature = signature;
+      checkpoint.savedAt = Date.now();
+      checkpoint.error = "";
+      return result;
+    } catch (error) {
+      checkpoint.room = room;
+      checkpoint.error = error.message || String(error);
+      return { error: checkpoint.error };
+    }
+  }
+
+  // src/presentation-health.js
+  var presentationFailure = null;
+  function notePresentationFailure(history, generation, url, error) {
+    presentationFailure = { history, generation, url, error: String(error && error.message || error) };
+  }
+  function getPresentationFailure(history, generation, url) {
+    if (presentationFailure && (presentationFailure.history !== history || presentationFailure.generation !== generation || presentationFailure.url !== url)) presentationFailure = null;
+    return presentationFailure ? presentationFailure.error : "";
+  }
+  function clearPresentationFailure(history, generation, url) {
+    getPresentationFailure(history, generation, url);
+    presentationFailure = null;
+  }
+  function presentationWarningModel(history, generation, url) {
+    const error = getPresentationFailure(history, generation, url);
+    return error ? {
+      saveWarning: true,
+      text: "Display needs refresh",
+      color: "var(--panel-warning)",
+      title: "Recorded data is retained in this tab. Drawing will retry automatically; saving is handled separately. " + error
+    } : null;
+  }
+
+  // src/session-health.js
+  var sessionSaveStates = /* @__PURE__ */ new Map();
+  function noteSessionSave(room, error = "") {
+    const previous = sessionSaveStates.get(room);
+    sessionSaveStates.set(room, { savedAt: error ? previous ? previous.savedAt : null : Date.now(), error });
+  }
+  function getSessionSaveState(room) {
+    return sessionSaveStates.get(room) || { savedAt: null, error: "" };
+  }
+  function sessionSaveWarningModel(state) {
+    return state.error ? {
+      saveWarning: true,
+      text: "Session not saved",
+      title: "The latest session data is only in this tab. Keep it open and use Save to download a session file. Saving will retry on the next scan. " + state.error,
+      color: "var(--panel-warning)"
+    } : null;
+  }
+
+  // src/status-model.js
+  function buildAcquisitionStatusModel() {
+    var model = { text: "", title: "", color: null, saveWarning: false };
+    var warning = sessionSaveWarningModel(getSessionSaveState(getModelName())) || automaticLibraryWarning(getModelName()) || presentationWarningModel(runtime.history, runtime.initGuard, location.href);
+    if (warning) return warning;
+    if (runtime.isStopped) {
+      model.text = "Stopped";
+      model.title = stopDescription() + " at " + new Date(runtime.stoppedAt).toLocaleString() + ". History and elapsed time are frozen.";
+      return model;
+    }
+    if (runtime.sessionStorageNotice) {
+      model.text = "Local only • room reset";
+      model.title = runtime.sessionStorageNotice;
+      return model;
+    }
+    var policyMessage = requestPolicyMessage(readRequestPolicy());
+    if (policyMessage) {
+      var sample = runtime.lastAcceptedAcquisition || runtime.restoredDisplayFrame;
+      model.text = policyMessage;
+      model.title = policyMessage + (sample ? ". Last sample: " + new Date(sample.timestamp).toISOString() : ". No accepted sample.");
+      return model;
+    }
+    if (isAbsencePaused()) {
+      model.text = "Auto-paused • return checks";
+      model.title = absencePauseDescription();
+      return model;
+    }
+    if (!runtime.lastAcceptedAcquisition) {
+      if (runtime.restoredDisplayFrame) {
+        model.text = "Saved • " + formatSampleAge(runtime.restoredDisplayFrame.timestamp);
+        model.title = "Saved sample recorded at: " + new Date(runtime.restoredDisplayFrame.timestamp).toISOString() + ". Age is measured from the sample time, not the session save time. Waiting for the first fresh sample since restore.";
+      } else {
+        model.text = "No sample";
+        model.title = "No accepted sample in this page session";
+      }
+      return model;
+    }
+    model.text = runtime.lastAcceptedAcquisition.source + " • " + formatSampleAge(runtime.lastAcceptedAcquisition.timestamp);
+    model.title = "Last accepted sample: " + new Date(runtime.lastAcceptedAcquisition.timestamp).toISOString() + ". TierScope and the USERS tab refresh independently.";
+    return model;
+  }
+  function buildFreshnessModel() {
+    var model = { text: "", title: "", color: null, saveWarning: false };
+    var warning = sessionSaveWarningModel(getSessionSaveState(getModelName())) || automaticLibraryWarning(getModelName()) || presentationWarningModel(runtime.history, runtime.initGuard, location.href);
+    if (warning) return warning;
+    if (runtime.isStopped) {
+      model.text = "Stopped";
+      model.title = stopDescription() + ". Start begins a new session.";
+      model.color = "var(--panel-muted)";
+      return model;
+    }
+    if (isAbsencePaused() && !runtime.sessionStorageNotice) {
+      var waitingPolicy = requestPolicyMessage(readRequestPolicy());
+      model.text = waitingPolicy || "Auto-paused";
+      model.title = absencePauseDescription() + (waitingPolicy ? " " + waitingPolicy + "." : " Next return check: " + runtime.countdownSeconds + "s.");
+      model.color = "var(--panel-warning)";
+      return model;
+    }
+    var sample = runtime.lastAcceptedAcquisition || runtime.restoredDisplayFrame;
+    var source = runtime.lastAcceptedAcquisition ? runtime.lastAcceptedAcquisition.source : sample ? "Saved" : "No sample";
+    model.text = runtime.sessionStorageNotice ? "Local only" : (runtime.isAutoRefreshOn ? source : "Paused") + (sample ? " · " + formatSampleAge(sample.timestamp) : "");
+    model.color = runtime.sessionStorageNotice ? "var(--panel-warning)" : runtime.isAutoRefreshOn ? "var(--panel-muted)" : "var(--panel-paused)";
+    var policyMessage = requestPolicyMessage(readRequestPolicy());
+    if (policyMessage && !runtime.sessionStorageNotice) {
+      model.text = policyMessage;
+      model.color = "var(--panel-warning)";
+    }
+    if (!policyMessage && runtime.isAutoRefreshOn && getEffectiveScanIntervalSeconds() > runtime.scanIntervalSeconds) {
+      model.text = "Reduced · " + getEffectiveScanIntervalSeconds() / 60 + "m";
+    }
+    model.title = runtime.sessionStorageNotice || (policyMessage ? policyMessage + ". " : "") + source + (sample ? ": " + new Date(sample.timestamp).toISOString() : "") + ". Age of the last accepted sample. " + (runtime.isAutoRefreshOn ? "Next attempt: " + runtime.countdownSeconds + "s." : "Automatic scans paused.");
+    return model;
+  }
+
+  // src/theme-values.js
+  function themeColor(token) {
+    return runtime.PANEL_THEME_COLORS[token][runtime.isDarkMode ? 0 : 1];
+  }
+  function setThemeVariables(element) {
+    if (!element) return;
+    Object.keys(runtime.PANEL_THEME_COLORS).forEach(function(token) {
+      element.style.setProperty("--panel-" + token, themeColor(token));
+    });
+    element.style.colorScheme = runtime.isDarkMode ? "dark" : "light";
+  }
+
+  // src/display-model.js
+  function buildLiveDisplayFrame() {
+    return runtime.restoredDisplayFrame || liveDisplayData(runtime, Object.keys(runtime.TIERS));
+  }
+  function buildPanelDisplayModel(frame) {
+    const displayHighs = {};
+    const highlights = __spreadValues({}, frame.isPlayback || frame.isRestored ? frame.playbackNewHighTiers : runtime.newHighTiers);
+    if (runtime.highMode === "ath") for (const key of Object.keys(highlights)) delete highlights[key];
+    for (const key of runtime.ALL_TIME_SERIES) {
+      const value = key === "roomTotal" ? frame.fullRoomTotal : key === "withTokens" ? frame.withTokens : key === "total" ? frame.total : key === "anonymous" ? frame.anonymousCount : frame.counts[key];
+      const high = getDisplayHigh(frame, key, value);
+      displayHighs[key] = __spreadProps(__spreadValues({}, high), { label: highLabel(high), shortLabel: highLabel(high, true), description: highDescription(high) });
+      if (runtime.highMode === "ath" && high.source && value > 0 && value >= high.value) highlights[key] = true;
+    }
+    const comparison = !frame.isRestored && runtime.hasTrendBaseline ? getComparisonCounts().counts : null;
+    const modelName = frame.isPlayback && runtime.playback && runtime.playback.archive ? runtime.playback.archive.room : getModelName();
+    let favorite = { favorite: false, autoKeep: false };
+    if (modelName !== "unknown") {
+      try {
+        favorite = readModelFavorite(modelName);
+      } catch (error) {
+        favorite = __spreadProps(__spreadValues({}, favorite), { error: "Favorite unavailable. Open Library and refresh to retry." });
+      }
+    }
+    if (runtime.highMode !== "ath" && frame.fullRoomTotal > 0 && frame.fullRoomTotal >= frame.roomTotalHigh) highlights.roomTotal = true;
+    return freezeRecordingData({
+      counts: __spreadValues({}, frame.counts),
+      total: frame.total,
+      withTokens: frame.withTokens,
+      anonymousCount: frame.anonymousCount,
+      fullRoomTotal: frame.fullRoomTotal,
+      roomTotalHigh: frame.roomTotalHigh,
+      history: captureDisplayHistory(frame.history),
+      historyEndIndex: frame.historyEndIndex,
+      isPlayback: frame.isPlayback === true,
+      isRestored: frame.isRestored === true,
+      displayHighs,
+      highlights,
+      stopped: runtime.isStopped,
+      minimized: runtime.isMinimized,
+      replayRoom: frame.isPlayback && runtime.playback && runtime.playback.archive ? runtime.playback.archive.room : "",
+      imported: !!(frame.isPlayback && runtime.playback && runtime.playback.imported),
+      tierKeys: Object.keys(runtime.TIERS),
+      rows: runtime.PANEL_ROWS.map((row) => __spreadValues({}, row)),
+      roomName: getModelName(),
+      modelName,
+      favorite,
+      miniMetric: runtime.miniMetric,
+      highMode: runtime.highMode,
+      textColor: themeColor("text"),
+      comparison: comparison ? __spreadValues({}, comparison) : null,
+      comparisonLabel: runtime.trendComparisonMode === "last" ? "previous sample" : runtime.trendComparisonMode === "start" ? "first retained sample" : runtime.trendComparisonMode,
+      freshness: runtime.isMinimized ? buildFreshnessModel() : null
+    });
+  }
+  function buildTrendDisplayModel() {
+    const frame = buildLiveDisplayFrame(), comparison = getComparisonCounts();
+    return freezeRecordingData({
+      isPlayback: runtime.presentationMode === "PLAYBACK",
+      isRestored: !!runtime.restoredDisplayFrame,
+      stopped: runtime.isStopped,
+      hasTrendBaseline: runtime.hasTrendBaseline,
+      counts: __spreadValues({}, frame.counts),
+      total: frame.total,
+      withTokens: frame.withTokens,
+      anonymousCount: frame.anonymousCount,
+      historyLength: runtime.history.timestamps.length,
+      comparison: __spreadProps(__spreadValues({}, comparison), { counts: comparison.counts ? __spreadValues({}, comparison.counts) : null }),
+      tierMarkers: Object.fromEntries(Object.keys(runtime.TIERS).map((key) => [key, getTierMarker(key)]))
+    });
+  }
+
+  // src/chart-view.js
+  var chartSampleCache = /* @__PURE__ */ new WeakMap();
+  function chartSamples(values) {
+    if (!values || !Object.isFrozen(values)) return values;
+    let cached = chartSampleCache.get(values);
+    if (!cached) {
+      cached = Array.from(values);
+      chartSampleCache.set(values, cached);
+    }
+    return cached;
+  }
+  function buildChartPlot(values, times, breaks, width, lastIndex, windowMs, replayProgress) {
+    values = chartSamples(values);
+    breaks = chartSamples(breaks);
+    var end = Math.min(values.length, times.length) - 1;
+    if (Number.isInteger(lastIndex)) end = Math.min(end, lastIndex);
+    if (end < 0) return { points: [], min: 0, max: 0, end: -1 };
+    var axis = getChartTimes(times);
+    var progress = end + 1 < Math.min(values.length, times.length) && Number.isFinite(replayProgress) ? Math.max(0, Math.min(1, replayProgress)) : 0;
+    var endTime = axis[end] + (progress ? (axis[end + 1] - axis[end]) * progress : 0);
+    var startTime = windowMs ? Math.max(axis[0], endTime - windowMs) : axis[0];
+    var start = 0;
+    while (start < end && axis[start] < startTime) start++;
+    var firstDrawn = start > 0 && axis[start] > startTime ? start - 1 : start, span = endTime - startTime;
+    var min = Infinity, max = -Infinity, points = [], bucket = null, breakNext = true;
+    function flush() {
+      if (!bucket) return;
+      var indices = [bucket.first, bucket.low, bucket.high, bucket.last].sort(function(a, b) {
+        return a - b;
+      });
+      indices.forEach(function(index, j) {
+        if (j && index === indices[j - 1]) return;
+        points.push({
+          index,
+          x: span ? (axis[index] - startTime) / span * width : width / 2,
+          value: values[index],
+          move: breakNext
+        });
+        breakNext = false;
+      });
+      bucket = null;
+    }
+    for (var i = firstDrawn; i <= end; i++) {
+      var value = values[i];
+      min = Math.min(min, value);
+      max = Math.max(max, value);
+      var column = span ? Math.floor((axis[i] - startTime) / span * width) : 0;
+      if (breaks && breaks[i]) {
+        flush();
+        breakNext = true;
+      }
+      if (!bucket || bucket.column !== column) {
+        flush();
+        bucket = { column, first: i, last: i, low: i, high: i };
+      } else {
+        bucket.last = i;
+        if (value < values[bucket.low]) bucket.low = i;
+        if (value > values[bucket.high]) bucket.high = i;
+      }
+    }
+    flush();
+    var continuation = progress ? {
+      fromX: span ? (axis[end] - startTime) / span * width : width / 2,
+      toX: span ? width : width / 2,
+      fromValue: values[end],
+      value: values[end] + (values[end + 1] - values[end]) * progress,
+      gap: !!(breaks && breaks[end + 1]),
+      progress
+    } : null;
+    return {
+      points,
+      min,
+      max,
+      start,
+      end,
+      startTime,
+      endTime,
+      continuation
+    };
+  }
+  function hideChartTooltip() {
+    var tooltip = document.getElementById("tierscope-chart-tooltip");
+    if (tooltip) tooltip.style.display = "none";
+  }
+  function nearestChartSample(times, end, target) {
+    var low = 0, high = end + 1;
+    while (low < high) {
+      var middle = Math.floor((low + high) / 2);
+      if (times[middle] <= target) low = middle + 1;
+      else high = middle;
+    }
+    if (low === 0) return 0;
+    if (low > end) return end;
+    return target - times[low - 1] <= times[low] - target ? low - 1 : low;
+  }
+  function showChartTooltip(canvas, index, clientX, clientY, gapIndex) {
+    var model = canvas._tierScopeChart;
+    if (!model || model.plot.end < 0) return;
+    var firstIndex = model.firstIndex || 0;
+    index = Math.max(firstIndex, Math.min(model.plot.end, index));
+    canvas._tierScopeIndex = index;
+    var tooltip = document.getElementById("tierscope-chart-tooltip");
+    if (!tooltip) {
+      tooltip = document.createElement("div");
+      tooltip.id = "tierscope-chart-tooltip";
+      tooltip.setAttribute("role", "tooltip");
+      tooltip.style.cssText = "position:fixed;z-index:2147483647;pointer-events:none;max-width:310px;padding:7px 9px;background:var(--panel-tooltip);color:var(--panel-text);border:1px solid #a36acb;border-radius:5px;font:12px/1.5 Arial,sans-serif;white-space:pre-line;box-shadow:0 3px 12px #0008;";
+      document.body.appendChild(tooltip);
+    }
+    setThemeVariables(tooltip);
+    tooltip.textContent = gapIndex > 0 ? model.label + "\nNo samples recorded during this interval.\n" + new Date(model.times[gapIndex - 1]).toLocaleString() + " – " + new Date(model.times[gapIndex]).toLocaleString() + "\nOrange dashes connect recorded endpoints only." : model.label + " · " + model.values[index].toLocaleString() + "\n" + new Date(model.times[index]).toLocaleString() + "\nRange: " + model.plot.min.toLocaleString() + "–" + model.plot.max.toLocaleString() + " · Sample " + (index - firstIndex + 1) + "/" + (model.plot.end - firstIndex + 1);
+    tooltip.style.display = "block";
+    var rect = tooltip.getBoundingClientRect();
+    tooltip.style.left = Math.max(4, Math.min(clientX + 12, window.innerWidth - rect.width - 4)) + "px";
+    tooltip.style.top = Math.max(4, Math.min(clientY + 12, window.innerHeight - rect.height - 4)) + "px";
+  }
+  function bindChartInspection(canvas, model) {
+    canvas._tierScopeChart = model;
+    canvas.setAttribute("tabindex", "0");
+    canvas.setAttribute("role", "img");
+    canvas.setAttribute("aria-describedby", "tierscope-chart-tooltip");
+    canvas.setAttribute("aria-label", model.label + " history. " + (model.plot.end < 0 ? "No samples." : "Range " + model.plot.min + " to " + model.plot.max + ". " + (model.plot.end - (model.firstIndex || 0) + 1) + " samples. Orange dashes mark intervals with no recorded samples. Use Left and Right arrows to inspect samples; Home and End to jump; Escape to close."));
+    if (canvas._tierScopeBound) return;
+    canvas._tierScopeBound = true;
+    canvas.addEventListener("pointermove", function(event) {
+      var m = canvas._tierScopeChart;
+      if (m.plot.end < 0) return;
+      var rect = canvas.getBoundingClientRect();
+      var fraction = Math.max(0, Math.min(1, ((event.clientX - rect.left) / rect.width * m.width - 2) / (m.width - 4)));
+      var time = m.plot.startTime + fraction * (m.plot.endTime - m.plot.startTime);
+      var axis = getChartTimes(m.times), index = nearestChartSample(axis, m.plot.end, time);
+      var next = axis[index] > time ? index : index + 1;
+      var gapEnd = m.plot.end + (m.plot.continuation ? 1 : 0);
+      var gap = next > 0 && next <= gapEnd && m.breaks[next] && time > axis[next - 1] && time < axis[next];
+      showChartTooltip(canvas, index, event.clientX, event.clientY, gap ? next : 0);
+    });
+    canvas.addEventListener("pointerleave", hideChartTooltip);
+    canvas.addEventListener("blur", hideChartTooltip);
+    canvas.addEventListener("focus", function() {
+      var rect = canvas.getBoundingClientRect();
+      showChartTooltip(canvas, canvas._tierScopeChart.plot.end, rect.left + rect.width / 2, rect.top + rect.height, false);
+    });
+    canvas.addEventListener("keydown", function(event) {
+      if (event.key === "Escape") {
+        hideChartTooltip();
+        event.stopPropagation();
+        return;
+      }
+      var end = canvas._tierScopeChart.plot.end, index = canvas._tierScopeIndex === void 0 ? end : canvas._tierScopeIndex;
+      if (event.key === "ArrowLeft") index--;
+      else if (event.key === "ArrowRight") index++;
+      else if (event.key === "Home") index = 0;
+      else if (event.key === "End") index = end;
+      else return;
+      event.preventDefault();
+      event.stopPropagation();
+      var rect = canvas.getBoundingClientRect();
+      showChartTooltip(canvas, index, rect.left + rect.width / 2, rect.top + rect.height, false);
+    });
+  }
+  function drawCanvasChart(ctx, points, color) {
+    ctx.save();
+    ctx.strokeStyle = themeColor("gap");
+    ctx.lineWidth = 1.5;
+    ctx.lineCap = "butt";
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    points.forEach(function(point, i) {
+      if (i && point.move) {
+        ctx.moveTo(points[i - 1].x, points[i - 1].y);
+        ctx.lineTo(point.x, point.y);
+      }
+    });
+    ctx.stroke();
+    ctx.restore();
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = 2;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    points.forEach(function(point, i) {
+      if (point.move) ctx.moveTo(point.x, point.y);
+      else ctx.lineTo(point.x, point.y);
+      if (point.move && (i === points.length - 1 || points[i + 1].move)) ctx.fillRect(point.x - 1.5, point.y - 1.5, 3, 3);
+    });
+    ctx.stroke();
+  }
+  function drawSparkline(canvasId, data, color, customHeight, times, breaks, lastIndex, label, replayProgress) {
+    var canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    var ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    var scale = Math.max(1, (runtime.currentScale || 1) * (window.devicePixelRatio || 1));
+    var height = customHeight || 28;
+    canvas.style.width = "105px";
+    canvas.style.minWidth = "0";
+    canvas.style.height = height + "px";
+    var width = canvas.clientWidth || 105;
+    canvas.width = Math.ceil(width * scale);
+    canvas.height = Math.ceil(height * scale);
+    ctx.scale(scale, scale);
+    ctx.clearRect(0, 0, width, height);
+    var plot = buildChartPlot(data, times, breaks, Math.max(1, width - 4), lastIndex, runtime.CHART_WINDOWS[runtime.chartWindowMode], replayProgress);
+    bindChartInspection(canvas, { values: data, times, breaks, firstIndex: plot.start || 0, plot, width, label });
+    var continuation = plot.continuation;
+    var min = continuation ? Math.min(plot.min, continuation.value) : plot.min;
+    var max = continuation ? Math.max(plot.max, continuation.value) : plot.max;
+    function y(value) {
+      return max === min ? height / 2 : height - 2 - (value - min) / (max - min) * (height - 4);
+    }
+    ctx.strokeStyle = color;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(2, 0, width - 2, height);
+    ctx.clip();
+    drawCanvasChart(ctx, plot.points.map(function(point) {
+      return {
+        x: 2 + point.x,
+        y: y(point.value),
+        move: point.move
+      };
+    }), color);
+    if (continuation) {
+      ctx.save();
+      ctx.strokeStyle = continuation.gap ? themeColor("gap") : color;
+      ctx.lineWidth = continuation.gap ? 1.5 : 2;
+      ctx.setLineDash(continuation.gap ? [4, 3] : []);
+      ctx.lineDashOffset = continuation.gap ? -continuation.progress * 14 : 0;
+      ctx.beginPath();
+      ctx.moveTo(2 + continuation.fromX, y(continuation.fromValue));
+      ctx.lineTo(2 + continuation.toX, y(continuation.value));
+      ctx.stroke();
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  // src/display-values.js
+  function displayHigh(frame, key) {
+    return frame.displayHighs[key];
+  }
+  function displayHighLabel(high, compact) {
+    return compact ? high.shortLabel : high.label;
+  }
+  function displayHighDescription(high) {
+    return high.description;
+  }
+
+  // src/status-view.js
+  function renderStatus(element, model) {
+    if (!element) return;
+    if (model.saveWarning) element.dataset.sessionSaveWarning = "true";
+    else if (element.dataset.sessionSaveWarning) {
+      element.style.color = "";
+      delete element.dataset.sessionSaveWarning;
+    }
+    element.textContent = model.text;
+    element.title = model.title;
+    if (model.color !== null) element.style.color = model.color;
+  }
+
+  // src/compact-view.js
+  function updateCompactDashboard(frame) {
+    if (!frame.minimized) return;
+    var comparison = frame.comparison;
+    var mode = frame.comparisonLabel;
+    function delta(id, value, old) {
+      var el = document.getElementById(id);
+      if (!el) return "";
+      var change = comparison ? value - old : null;
+      var text = change === null ? "" : change > 0 ? "+" + compactNumber(change) : change < 0 ? "−" + compactNumber(-change) : "0";
+      el.textContent = text;
+      el.style.color = change > 0 ? "var(--panel-delta-up)" : change < 0 ? "var(--panel-delta-down)" : "var(--panel-warning)";
+      el.title = change === null ? "Waiting for a fresh sample and comparison history" : "Change versus " + mode + ": " + change;
+      return text;
+    }
+    delta("mini-withtokens-change", frame.withTokens, comparison && comparison.withTokens);
+    delta("mini-total-change", frame.total, comparison && comparison.total);
+    var roomChange = delta("mini-room-change", frame.fullRoomTotal, comparison && comparison.total + comparison.anonymous);
+    var roomCount = document.getElementById("mini-room-count");
+    if (roomCount) {
+      roomCount.textContent = compactNumber(frame.fullRoomTotal);
+      roomCount.title = frame.roomName + " — Room total: " + frame.fullRoomTotal.toLocaleString() + "; " + displayHighDescription(displayHigh(frame, "roomTotal", frame.fullRoomTotal)) + (roomChange ? "; change: " + roomChange + " versus " + mode : "");
+    }
+    ["withtokens", "total"].forEach(function(key) {
+      var el = document.getElementById("mini-" + key);
+      var value = key === "total" ? frame.total : frame.withTokens;
+      if (el) {
+        el.textContent = compactNumber(value);
+        el.title = value.toLocaleString() + (key === "total" ? " registered users" : " users in token-classified tiers");
+      }
+    });
+    var label = document.getElementById("mini-metric");
+    var names = { room: "Room total", withTokens: "With Tokens", total: "Registered" };
+    if (label) {
+      label.textContent = (frame.miniMetric === "room" ? "Room total" : frame.miniMetric === "withTokens" ? "💎" : "📊") + " ▾";
+      label.setAttribute("aria-label", names[frame.miniMetric] + " chart. Activate to change metric.");
+      label.title = "Click to cycle Room total, With Tokens, and Registered. Showing the last 15 recorded minutes.";
+    }
+    var high = document.getElementById("mini-high");
+    var peak = displayHigh(
+      frame,
+      frame.miniMetric === "room" ? "roomTotal" : frame.miniMetric,
+      frame.miniMetric === "room" ? frame.fullRoomTotal : frame[frame.miniMetric]
+    );
+    if (high) {
+      high.textContent = displayHighLabel(peak, true);
+      high.title = displayHighDescription(peak) + ". Click to switch SH/ATH.";
+      high.setAttribute("aria-label", high.title);
+      high.setAttribute("aria-pressed", String(frame.highMode === "ath"));
+    }
+    var canvas = document.getElementById("mini-chart");
+    if (!canvas) return;
+    var ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    var width = 140, height = 36, scale = window.devicePixelRatio || 1;
+    canvas.width = Math.ceil(width * scale);
+    canvas.height = Math.ceil(height * scale);
+    ctx.scale(scale, scale);
+    ctx.clearRect(0, 0, width, height);
+    var times = frame.history.timestamps;
+    canvas.title = names[frame.miniMetric] + " — last 15 recorded minutes; vertical scale fits the plotted values";
+    if (!times.length) {
+      bindChartInspection(canvas, { values: [], times: [], breaks: [], plot: { end: -1 }, width, label: names[frame.miniMetric] });
+      return;
+    }
+    var end = times[times.length - 1], start = end - 15 * 6e4;
+    var breaks = getHistoryBreaks(frame.history);
+    var points = [], firstVisible = times.findIndex(function(time) {
+      return time >= start;
+    });
+    var firstDrawn = firstVisible > 0 && breaks[firstVisible] ? firstVisible - 1 : firstVisible;
+    times.forEach(function(time, i) {
+      if (i >= firstDrawn && time <= end) points.push({ time, move: breaks[i], value: frame.miniMetric === "room" ? frame.history.total[i] + frame.history.anonymous[i] : frame.history[frame.miniMetric][i] });
+    });
+    var values = points.map(function(p) {
+      return p.value;
+    });
+    var firstIndex = points[0].time < start ? 1 : 0;
+    var visibleValues = values.slice(firstIndex);
+    var min = Math.min.apply(null, values), max = Math.max.apply(null, values);
+    canvas.title += "; range " + min + "–" + max + "; " + visibleValues.length + " samples through " + new Date(end).toISOString() + ". Orange dashes: no samples recorded during the interval.";
+    bindChartInspection(canvas, {
+      values,
+      times: points.map(function(p) {
+        return p.time;
+      }),
+      breaks: points.map(function(p) {
+        return p.move;
+      }),
+      firstIndex,
+      plot: { min, max, end: points.length - 1, startTime: start, endTime: end },
+      width,
+      label: names[frame.miniMetric]
+    });
+    points.forEach(function(point, i) {
+      point.x = 2 + (point.time - start) / (15 * 6e4) * (width - 4);
+      point.y = max === min ? height / 2 : height - 3 - (point.value - min) / (max - min) * (height - 6);
+      point.move = i === 0 || point.move;
+    });
+    var color = frame.miniMetric === "withTokens" ? "#ff69b4" : frame.miniMetric === "total" ? frame.textColor : "#69BE45";
+    ctx.strokeStyle = color;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(2, 0, width - 2, height);
+    ctx.clip();
+    drawCanvasChart(ctx, points, color);
+    ctx.restore();
+    renderStatus(document.getElementById("mini-freshness"), frame.freshness);
+  }
+
+  // src/favorite-view.js
+  function paintFavoriteButton(button, room, state) {
+    button.dataset.favoriteRoom = room;
+    button.textContent = state.favorite ? "★" : "☆";
+    button.disabled = room === "unknown" || !!state.error;
+    button.setAttribute("aria-pressed", String(!!state.favorite));
+    button.setAttribute("aria-label", (state.favorite ? "Remove favorite " : "Favorite ") + room);
+    button.title = state.error || (state.favorite ? state.autoKeep ? "Favorite · automatic keeping on. Click to remove favorite." : "Favorite · automatic keeping off. Enable in Library, or click to remove favorite." : "Favorite this model and automatically keep live sessions in Library. Asks for confirmation.");
+    button.style.color = state.favorite ? "var(--panel-accent)" : "var(--panel-muted)";
+  }
+
+  // src/panel-view.js
+  function paintPanelFrame(frame) {
+    var counts = frame.counts;
+    var total = frame.total;
+    var withTokens = frame.withTokens;
+    var anonymousCount = frame.anonymousCount;
+    var fullRoomTotal = frame.fullRoomTotal;
+    var roomTotalHigh = frame.roomTotalHigh;
+    var displayHistory = frame.history;
+    var highlights = frame.highlights;
+    updateCollapsedRowStatus(frame, highlights);
+    var withTokensPct = total > 0 ? Math.round(withTokens / total * 100) + "%" : "0%";
+    var registeredPct = fullRoomTotal > 0 ? Math.round(total / fullRoomTotal * 100) + "%" : "0%";
+    var headerText = document.getElementById("header-text");
+    if (headerText) {
+      headerText.textContent = frame.modelName === "unknown" ? "TierScope" : frame.modelName;
+      headerText.title = (frame.isPlayback ? "Replay: " : frame.stopped ? "Stopped session: " : frame.isRestored ? "Saved session: " : "Live room: ") + frame.modelName;
+    }
+    var favorite = document.getElementById("btn-model-favorite");
+    if (favorite) paintFavoriteButton(favorite, frame.modelName, frame.favorite);
+    var miniWithTokens = document.getElementById("mini-withtokens");
+    var miniWithTokensPct = document.getElementById("mini-withtokens-pct");
+    var miniTotal = document.getElementById("mini-total");
+    var miniTotalPct = document.getElementById("mini-total-pct");
+    if (miniWithTokens) miniWithTokens.textContent = withTokens;
+    if (miniWithTokensPct) miniWithTokensPct.textContent = withTokensPct;
+    if (miniTotal) miniTotal.textContent = total;
+    if (miniTotalPct) miniTotalPct.textContent = registeredPct;
+    var miniChange = document.getElementById("mini-room-change");
+    if (miniChange) miniChange.style.display = frame.minimized ? "inline" : "none";
+    if (miniWithTokens) miniWithTokens.parentElement && (miniWithTokens.parentElement.title = "With Tokens: " + withTokens.toLocaleString() + " (" + withTokensPct + " of registered users)");
+    if (miniTotal) miniTotal.parentElement && (miniTotal.parentElement.title = "Registered: " + total.toLocaleString() + " (" + registeredPct + " of room total)");
+    updateCompactDashboard(frame);
+    if (!frame.minimized) {
+      var roomCount = document.getElementById("count-roomTotal"), roomHigh = document.getElementById("high-roomTotal");
+      var roomRow = document.getElementById("tier-row-roomTotal"), roomResult = displayHigh(frame, "roomTotal");
+      if (roomCount) {
+        roomCount.textContent = fullRoomTotal.toLocaleString();
+        roomCount.style.fontSize = fullRoomTotal >= 1e5 ? "9px" : fullRoomTotal >= 1e4 ? "11px" : "14px";
+      }
+      if (roomHigh) {
+        roomHigh.textContent = displayHighLabel(roomResult, true);
+        roomHigh.title = displayHighDescription(roomResult);
+      }
+      if (roomRow) roomRow.style.background = highlights.roomTotal ? "rgba(50, 205, 50, 0.22)" : "rgba(255,212,59,.08)";
+      frame.tierKeys.forEach(function(tier) {
+        var countEl = document.getElementById("count-" + tier);
+        var highEl = document.getElementById("high-" + tier);
+        var rowEl = document.getElementById("tier-row-" + tier);
+        var currentVal = counts[tier];
+        var highResult = displayHigh(frame, tier, currentVal);
+        if (countEl) countEl.textContent = currentVal;
+        if (highEl) {
+          highEl.textContent = displayHighLabel(highResult, true);
+          highEl.title = displayHighDescription(highResult);
+        }
+        if (rowEl) {
+          if (highlights && highlights[tier]) {
+            rowEl.style.background = "rgba(50, 205, 50, 0.22)";
+          } else {
+            rowEl.style.background = "rgba(var(--panel-row-rgb),calc(0.05 * var(--tier-background-scale, 1)))";
+          }
+        }
+      });
+      var withTokensCountEl = document.getElementById("count-withtokens");
+      var withTokensPctEl = document.getElementById("pct-withtokens");
+      var withTokensHighEl = document.getElementById("high-withtokens");
+      var withTokensRowEl = document.getElementById("tier-row-withtokens");
+      var withTokensResult = displayHigh(frame, "withTokens", withTokens);
+      if (withTokensCountEl) withTokensCountEl.textContent = withTokens;
+      if (withTokensPctEl) withTokensPctEl.textContent = withTokensPct;
+      if (withTokensHighEl) {
+        withTokensHighEl.textContent = displayHighLabel(withTokensResult, true);
+        withTokensHighEl.title = displayHighDescription(withTokensResult);
+      }
+      if (withTokensRowEl) {
+        if (highlights && highlights["withTokens"]) {
+          withTokensRowEl.style.background = "rgba(50, 205, 50, 0.22)";
+        } else {
+          withTokensRowEl.style.background = "rgba(255,105,180,0.15)";
+        }
+      }
+      var totalEl = document.getElementById("count-total");
+      var totalHighEl = document.getElementById("high-total");
+      var totalRowEl = document.getElementById("tier-row-total");
+      var totalResult = displayHigh(frame, "total", total);
+      if (totalEl) totalEl.textContent = total;
+      if (totalHighEl) {
+        totalHighEl.textContent = displayHighLabel(totalResult, true);
+        totalHighEl.title = displayHighDescription(totalResult);
+      }
+      if (totalRowEl) {
+        if (highlights && highlights["total"]) {
+          totalRowEl.style.background = "rgba(50, 205, 50, 0.22)";
+        } else {
+          totalRowEl.style.background = "rgba(var(--panel-row-rgb),0.1)";
+        }
+      }
+      var fullAnonText = document.getElementById("anon-ratio-full");
+      var anonHighEl = document.getElementById("high-anon");
+      var anonRowEl = document.getElementById("tier-row-anon");
+      var anonResult = displayHigh(frame, "anonymous", anonymousCount);
+      if (fullAnonText) {
+        var anonLabel = anonymousCount > 0 ? anonymousCount.toLocaleString() : "0";
+        var digits = String(Math.abs(anonymousCount)).length;
+        fullAnonText.textContent = anonLabel;
+        fullAnonText.style.fontSize = digits >= 6 ? "9px" : digits === 5 ? "11px" : "13px";
+      }
+      if (anonHighEl) {
+        anonHighEl.textContent = displayHighLabel(anonResult, true);
+        anonHighEl.title = displayHighDescription(anonResult);
+      }
+      if (anonRowEl) {
+        if (highlights && highlights["anonymous"]) {
+          anonRowEl.style.background = "rgba(50, 205, 50, 0.22)";
+        } else {
+          anonRowEl.style.background = "rgba(136,136,136,0.15)";
+        }
+      }
+    }
+  }
+  function updateCollapsedRowStatus(frame, highlights) {
+    frame.rows.forEach(function(row) {
+      var button = document.getElementById("restore-row-" + row.key);
+      if (!button) return;
+      var value = row.key === "withtokens" ? frame.withTokens : row.key === "total" ? frame.total : row.key === "anon" ? frame.anonymousCount : row.key === "roomTotal" ? frame.fullRoomTotal : frame.counts[row.key];
+      var historyKey = row.key === "withtokens" ? "withTokens" : row.key === "anon" ? "anonymous" : row.key;
+      var high = displayHigh(frame, historyKey, value);
+      var context = frame.isPlayback ? "Replay" : frame.isRestored ? "Saved sample" : "Latest sample";
+      button.title = row.label + ": " + value.toLocaleString() + " (" + displayHighLabel(high) + "). " + displayHighDescription(high) + ". " + context + ". Click to restore row.";
+      button.setAttribute("aria-label", "Restore " + row.label + " row. " + context + ": " + value.toLocaleString());
+      button.style.background = highlights && highlights[historyKey] ? "rgba(50, 205, 50, 0.22)" : "rgba(var(--panel-row-rgb),calc(0.05 * var(--tier-background-scale, 1)))";
+    });
+  }
+
+  // src/trend-view.js
+  function renderTrendDisplay(model) {
+    if (model.isPlayback) return;
+    var trendContainer = document.getElementById("trend-container");
+    var trendHeaderLabel = document.getElementById("trend-header-label");
+    if (!trendContainer) return;
+    if (model.isRestored) {
+      trendContainer.innerHTML = '<div style="font-size:8px;color:var(--panel-muted);text-align:center;padding:8px;">' + (model.stopped ? "Session stopped — history remains available in Replay." : "Saved snapshot — trends resume after a new sample.") + "</div>";
+      if (trendHeaderLabel) trendHeaderLabel.textContent = "📈 TREND";
+      return;
+    }
+    if (!model.hasTrendBaseline) {
+      trendContainer.innerHTML = '<div style="font-size:8px;color:var(--panel-faint);text-align:center;padding:8px;">Waiting for scan...</div>';
+      if (trendHeaderLabel) trendHeaderLabel.textContent = "📈 TREND";
+      return;
+    }
+    var counts = model.counts, total = model.total, withTokens = model.withTokens, anonymousCount = model.anonymousCount;
+    var comparison = model.comparison;
+    var comparisonCounts = comparison.counts;
+    var shortSession = comparison.short;
+    var actualMinutes = comparison.actualMinutes;
+    if (!comparisonCounts) {
+      var waitingText = model.historyLength === 1 ? "Waiting for second scan..." : "Waiting for scan...";
+      trendContainer.innerHTML = '<div style="font-size:8px;color:var(--panel-faint);text-align:center;padding:8px;">' + waitingText + "</div>";
+      if (trendHeaderLabel) trendHeaderLabel.textContent = "📈 TREND";
+      return;
+    }
+    var getShortLabel = function() {
+      if (!shortSession || actualMinutes <= 0) return "";
+      if (actualMinutes < 60) return " vs " + actualMinutes + "m";
+      var hours = Math.floor(actualMinutes / 60);
+      var mins = actualMinutes % 60;
+      return " vs " + hours + "h" + (mins > 0 ? mins : "");
+    };
+    function buildTrendItem(name, current, prev, isSpecial, isLarge) {
+      var diff = current - prev;
+      var deltaText = diff !== 0 ? diff > 0 ? "+" + diff : diff : "";
+      var deltaColor = diff > 0 ? "var(--panel-positive)" : "var(--panel-negative)";
+      var bgStyle;
+      if (diff > 0) {
+        bgStyle = "background:rgba(50, 205, 50, 0.22);";
+      } else if (diff < 0) {
+        bgStyle = "background:rgba(255, 85, 85, 0.15);";
+      } else {
+        bgStyle = "background:rgba(255, 215, 0, 0.15);";
+      }
+      if (isSpecial) bgStyle += "border:1px solid #ff69b4;";
+      var padding = isLarge ? "6px 12px" : "2px 6px";
+      var fontSize = isLarge ? "12px" : "10px";
+      var deltaFont = fontSize;
+      if (deltaText) {
+        var dlen = String(Math.abs(diff)).length;
+        if (dlen >= 4) deltaFont = "8px";
+        else if (dlen === 3) deltaFont = "10px";
+      }
+      return '<div style="display:flex;align-items:center;gap:4px;' + bgStyle + "padding:" + padding + ';border-radius:4px;"><span style="font-size:' + fontSize + ';">' + name + "</span>" + (deltaText ? '<span style="font-size:' + deltaFont + ";font-weight:bold;color:" + deltaColor + ';">' + deltaText + "</span>" : "") + "</div>";
+    }
+    var headerLabel = "📈 TREND";
+    var shortLabel = getShortLabel();
+    var html = '<div style="display:flex;justify-content:center;gap:6px;padding:4px 0;">';
+    html += buildTrendItem(model.tierMarkers["red"], counts["red"] || 0, comparisonCounts["red"] || 0, false, false);
+    html += buildTrendItem(model.tierMarkers["green"], counts["green"] || 0, comparisonCounts["green"] || 0, false, false);
+    html += buildTrendItem(model.tierMarkers["purple"], counts["purple"] || 0, comparisonCounts["purple"] || 0, false, false);
+    html += buildTrendItem(model.tierMarkers["pink"], counts["pink"] || 0, comparisonCounts["pink"] || 0, false, false);
+    html += "</div>";
+    html += '<div style="display:flex;justify-content:center;gap:6px;padding:4px 0;">';
+    html += buildTrendItem(model.tierMarkers["dark-blue"], counts["dark-blue"] || 0, comparisonCounts["dark-blue"] || 0, false, false);
+    html += buildTrendItem(model.tierMarkers["light-blue"], counts["light-blue"] || 0, comparisonCounts["light-blue"] || 0, false, false);
+    html += buildTrendItem(model.tierMarkers["gray"], counts["gray"] || 0, comparisonCounts["gray"] || 0, false, false);
+    html += buildTrendItem(model.tierMarkers["female-trans"], counts["female-trans"] || 0, comparisonCounts["female-trans"] || 0, false, false);
+    html += "</div>";
+    html += '<div style="display:flex;justify-content:center;gap:8px;padding:4px 0;">';
+    html += buildTrendItem("💎", withTokens || 0, comparisonCounts.withTokens || 0, true, true);
+    html += buildTrendItem("📊", total || 0, comparisonCounts.total || 0, false, true);
+    html += buildTrendItem("👻", anonymousCount || 0, comparisonCounts.anonymous || 0, false, true);
+    html += "</div>";
+    trendContainer.innerHTML = html;
+    if (trendHeaderLabel) {
+      trendHeaderLabel.textContent = headerLabel + shortLabel;
+    }
+  }
+
+  // src/presentation.js
+  var presentationEffects;
+  function initializePresentation(effects) {
+    presentationEffects = effects;
+  }
+  function updateDisplay() {
+    presentationEffects.refreshReplayAvailability();
+    if (runtime.presentationMode !== "PLAYBACK") renderDisplayFrame(buildLiveDisplayFrame());
+  }
+  function renderDisplayFrame(frame) {
+    presentationEffects.refreshOptions();
+    paintPanelFrame(buildPanelDisplayModel(frame));
+  }
+  function updateTrendDisplay() {
+    if (runtime.presentationMode === "PLAYBACK") return;
+    renderTrendDisplay(buildTrendDisplayModel());
+  }
+  function refreshPanelOptions() {
+    presentationEffects.refreshOptions();
+  }
+  function refreshScanCountdown() {
+    presentationEffects.refreshCountdown();
+  }
+
+  // src/row-layout.js
+  function panelRowMarker(row) {
+    return row.icon || getTierMarker(row.key);
+  }
+  function collapseMarkerHtml(key) {
+    var row = runtime.PANEL_ROWS.find(function(item) {
+      return item.key === key;
+    });
+    return '<button type="button" class="tier-collapse-marker" id="collapse-row-' + key + '" aria-controls="tier-row-' + key + '" aria-expanded="true" aria-label="Collapse ' + row.label + ' row" title="Collapse ' + row.label + ' row" style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:24px;padding:0;border:0;border-radius:3px;background:transparent;color:inherit;font-size:14px;line-height:1;cursor:pointer;">' + panelRowMarker(row) + "</button>";
+  }
+  function collapsedTrayHtml() {
+    return '<div id="collapsed-tier-tray" role="group" aria-label="Collapsed rows. Click an icon to restore its row." style="display:none;flex-wrap:wrap;align-items:center;gap:3px;margin-bottom:4px;">' + runtime.PANEL_ROWS.map(function(row) {
+      return '<button type="button" id="restore-row-' + row.key + '" aria-controls="tier-row-' + row.key + '" aria-expanded="false" aria-label="Restore ' + row.label + ' row" title="Restore ' + row.label + ' row" style="display:none;align-items:center;justify-content:center;flex:0 0 22px;width:22px;height:22px;box-sizing:border-box;padding:0;border:1px solid ' + (row.key === "total" ? "var(--panel-text)" : row.color) + ';border-radius:3px;background:rgba(var(--panel-row-rgb),0.05);color:var(--panel-text);font-size:12px;line-height:1;cursor:pointer;">' + panelRowMarker(row) + "</button>";
+    }).join("") + "</div>";
+  }
+  function applyRowLayout() {
+    runtime.chartLayoutRevision++;
+    var region = document.getElementById("tier-chart-region");
+    var tray = document.getElementById("collapsed-tier-tray");
+    var group = document.getElementById("summary-tier-rows");
+    var measurable = region && region.offsetHeight > 0;
+    var visibleCount = runtime.PANEL_ROWS.length - runtime.collapsedRows.size;
+    if (region) region.style.height = "auto";
+    runtime.PANEL_ROWS.forEach(function(row) {
+      runtime.panelChartHeights[row.key] = row.height;
+      var canvas = document.getElementById("spark-" + row.key);
+      if (canvas) canvas.style.height = row.height + "px";
+      var element = document.getElementById("tier-row-" + row.key);
+      if (measurable && element) element.style.display = row.display;
+    });
+    if (measurable && tray) tray.style.display = "none";
+    if (measurable && group) group.style.display = "block";
+    if (measurable) {
+      runtime.PANEL_ROWS.forEach(function(row) {
+        var canvas = document.getElementById("spark-" + row.key);
+        if (!canvas) return;
+        var parent = canvas.parentElement;
+        var style = window.getComputedStyle(parent);
+        var minimum = parent.clientHeight - (parseFloat(style.paddingTop) || 0) - (parseFloat(style.paddingBottom) || 0);
+        runtime.panelChartHeights[row.key] = Math.max(row.height, minimum);
+        canvas.style.height = runtime.panelChartHeights[row.key] + "px";
+      });
+      if (runtime.panelChartRegionHeight === null) runtime.panelChartRegionHeight = region.offsetHeight;
+    }
+    if (tray) tray.style.display = runtime.collapsedRows.size ? "flex" : "none";
+    runtime.PANEL_ROWS.forEach(function(row) {
+      var collapsed = runtime.collapsedRows.has(row.key);
+      var element = document.getElementById("tier-row-" + row.key);
+      if (element) element.style.display = collapsed ? "none" : row.display;
+      var restore = document.getElementById("restore-row-" + row.key);
+      if (restore) restore.style.display = collapsed ? "inline-flex" : "none";
+      var collapse = document.getElementById("collapse-row-" + row.key);
+      if (collapse) collapse.setAttribute("aria-expanded", String(!collapsed));
+    });
+    if (group) group.style.display = runtime.collapsedRows.has("withtokens") && runtime.collapsedRows.has("total") ? "none" : "block";
+    var extra = measurable && visibleCount ? Math.max(0, runtime.panelChartRegionHeight - region.offsetHeight) / visibleCount : 0;
+    runtime.PANEL_ROWS.forEach(function(row) {
+      if (runtime.collapsedRows.has(row.key)) return;
+      runtime.panelChartHeights[row.key] += extra;
+      var canvas = document.getElementById("spark-" + row.key);
+      if (canvas) canvas.style.height = runtime.panelChartHeights[row.key] + "px";
+    });
+    if (region && visibleCount && runtime.panelChartRegionHeight !== null) {
+      region.style.height = runtime.panelChartRegionHeight + "px";
+    }
+    runtime.rowLayoutNeedsMeasure = !measurable;
+  }
+
+  // src/room-total-series.js
+  var roomSeries = /* @__PURE__ */ new WeakMap();
+  function roomTotalSeries(history) {
+    if (roomSeries.has(history)) return roomSeries.get(history);
+    const values = history.total.map((value, index) => value + history.anonymous[index]);
+    if (Object.isFrozen(history) && Object.isFrozen(history.total) && Object.isFrozen(history.anonymous)) {
+      Object.freeze(values);
+      roomSeries.set(history, values);
+    }
+    return values;
+  }
+
+  // src/charts.js
+  function drawAllSparklines() {
+    if (runtime.presentationMode === "PLAYBACK") return;
+    drawHistorySparklines(runtime.history);
+  }
+  function drawHistorySparklines(displayHistory, lastIndex, replayProgress) {
+    hideChartTooltip();
+    if (runtime.rowLayoutNeedsMeasure) applyRowLayout();
+    var breaks = getHistoryBreaks(displayHistory);
+    runtime.PANEL_ROWS.forEach(function(row) {
+      if (runtime.collapsedRows.has(row.key)) return;
+      var key = row.key === "withtokens" ? "withTokens" : row.key === "anon" ? "anonymous" : row.key;
+      drawSparkline(
+        "spark-" + row.key,
+        key === "roomTotal" ? roomTotalSeries(displayHistory) : displayHistory[key],
+        row.key === "total" ? themeColor("text") : row.key === "roomTotal" ? themeColor("warning") : row.color,
+        runtime.panelChartHeights[row.key] || row.height,
+        displayHistory.timestamps,
+        breaks,
+        lastIndex,
+        row.label,
+        replayProgress
+      );
+    });
+  }
+
   // src/gif.js
   var import_omggif = __toESM(require_omggif(), 1);
   function createGifSurface(palette) {
@@ -3506,6 +3983,8 @@ underlying system, so should run in the browser, Node, or Plask.
   async function generateGifFromHistory(recording) {
     if (runtime.gifExportJob) return;
     var button = document.getElementById("btn-export-gif");
+    var buttons = Array.from(document.querySelectorAll("[data-gif]"));
+    if (button && !buttons.includes(button)) buttons.push(button);
     var status = document.getElementById("gif-export-status");
     var cancel = document.getElementById("btn-cancel-gif");
     var progress = document.getElementById("gif-export-controls");
@@ -3516,7 +3995,9 @@ underlying system, so should run in the browser, Node, or Plask.
       key: runtime.activeSessionStorageKey
     };
     runtime.gifExportJob = job;
-    if (button) button.disabled = true;
+    buttons.forEach((control) => {
+      control.disabled = true;
+    });
     if (progress) progress.style.display = "flex";
     if (cancel) cancel.hidden = false;
     if (status) status.textContent = "Preparing GIF…";
@@ -3585,7 +4066,9 @@ underlying system, so should run in the browser, Node, or Plask.
       log("GIF export: " + error.message);
       if (!job.cancelled && location.href === job.url && runtime.initGuard === job.generation) alert(error.message);
     } finally {
-      if (button) button.disabled = button.dataset.currentAvailable === "false";
+      buttons.forEach((control) => {
+        control.disabled = control.dataset.currentAvailable === "false";
+      });
       if (cancel) cancel.hidden = true;
       if (progress) progress.style.display = "none";
       if (button && status) button.title = status.textContent;
@@ -3602,48 +4085,6 @@ underlying system, so should run in the browser, Node, or Plask.
     updateMiniFreshness();
     var element = document.getElementById("acquisition-status");
     if (element) renderStatus(element, buildAcquisitionStatusModel());
-  }
-
-  // src/session-capture.js
-  function captureSessionFile() {
-    if (isPlaybackCurrent(runtime.playback) && runtime.playback.archive) return runtime.playback.archive;
-    if (!runtime.history.timestamps.length || runtime.activeSessionStorageKey !== getStorageKey(getModelName()) || location.href !== runtime.lastUrl) {
-      throw new Error("No recorded session to save yet.");
-    }
-    var now = Date.now();
-    var data = {
-      schemaVersion: runtime.STORAGE_SCHEMA_VERSION,
-      timestamp: now,
-      history: { timestamps: runtime.history.timestamps.slice(), breaks: getHistoryBreaks(runtime.history).slice() },
-      sessionStartedAt: runtime.sessionStartedAt,
-      sessionStartEstimated: runtime.sessionStartEstimated,
-      sessionHighs: {},
-      roomTotalHigh: runtime.roomTotalHigh,
-      roomTotalHighTime: runtime.roomTotalHighTime,
-      pausedElapsedTime: runtime.isPaused ? runtime.pausedElapsedTime : runtime.trackingStartTime ? Math.max(0, now - runtime.trackingStartTime) : 0,
-      isPaused: runtime.isPaused,
-      isStopped: runtime.isStopped,
-      stoppedAt: runtime.stoppedAt,
-      stopReason: runtime.stopReason
-    };
-    runtime.STORAGE_HISTORY_SERIES.forEach(function(key) {
-      data.history[key] = runtime.history[key].slice();
-      data.sessionHighs[key] = getSessionHigh(key, 0);
-    });
-    runtime.history.timestamps.forEach(function(time, i) {
-      var total = runtime.history.total[i] + runtime.history.anonymous[i];
-      if (total > data.roomTotalHigh) {
-        data.roomTotalHigh = total;
-        data.roomTotalHighTime = time;
-      }
-    });
-    return validateSessionFile({
-      format: runtime.SESSION_FILE_FORMAT,
-      formatVersion: runtime.SESSION_FILE_VERSION,
-      producerVersion: runtime.TIERSCOPE_VERSION,
-      room: getModelName(),
-      session: data
-    });
   }
 
   // src/replay.js
@@ -4035,7 +4476,7 @@ underlying system, so should run in the browser, Node, or Plask.
     } catch (error) {
       log("Could not restore row preferences: " + error.message);
     }
-    return /* @__PURE__ */ new Set(["red", "green"]);
+    return /* @__PURE__ */ new Set(["red", "green", "female-trans"]);
   }
   function setRowCollapsed(key, collapsed) {
     cancelHighPulse(key);
@@ -4335,6 +4776,20 @@ underlying system, so should run in the browser, Node, or Plask.
     }
   }
 
+  // src/favorite-controls.js
+  function changeModelFavorite(room, enableOnly = false) {
+    const previous = readModelFavorite(room);
+    if (previous.favorite && !enableOnly) {
+      setModelFavorite(room, false);
+      clearAutomaticLibraryStatus(room);
+      return true;
+    }
+    if (!confirm("Favorite " + room + " and automatically keep their live sessions?\n\nWhile TierScope is recording this model, sessions will be kept in this browser’s Library. The same session is updated as it grows, at most once per minute as samples arrive, and on pause, Stop or leaving the room. The current live session will be kept too. Replay files are never added automatically.\n\nLibrary limits still apply (500 sessions / 25 MB). Nothing is deleted automatically. Removing the star stops automatic keeping; sessions already kept remain.")) return false;
+    setModelFavorite(room, true, true);
+    keepFavoriteSession(room, true);
+    return true;
+  }
+
   // src/session-analysis.js
   var ANALYSIS_METRICS = Object.freeze({
     room: "Room audience",
@@ -4481,315 +4936,6 @@ underlying system, so should run in the browser, Node, or Plask.
         value.summaryThresholds
       )].sort((a, b) => a - b))
     });
-  }
-
-  // src/session-library.js
-  var LIBRARY_PREFIX = "tierscope:library:v1:";
-  var LIBRARY_MAX_COUNT = 500;
-  var LIBRARY_MAX_BYTES = 25 * 1024 * 1024;
-  function libraryRecordKey(id) {
-    if (typeof id !== "string" || !/^[a-z0-9_-]{1,100}$/i.test(id)) throw new Error("Invalid library record.");
-    return LIBRARY_PREFIX + id;
-  }
-  function libraryTitle(title) {
-    if (typeof title !== "string" || title.length > 80 || /[\x00-\x1f]/.test(title)) throw new Error("Use a title of up to 80 characters.");
-    return title.trim();
-  }
-  function libraryMetadata(value) {
-    const favorite = value.favorite === void 0 ? false : value.favorite, notes = value.notes === void 0 ? "" : value.notes;
-    if (typeof favorite !== "boolean" || typeof notes !== "string" || notes.length > 2e3 || /[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(notes)) {
-      throw new Error("Recording notes must be plain text of up to 2,000 characters; favorite must be true or false.");
-    }
-    return __spreadProps(__spreadValues({}, value.favorite === void 0 ? {} : { favorite }), { notes });
-  }
-  function libraryIdentity(archive) {
-    return JSON.stringify({ room: archive.room.toLowerCase(), session: __spreadProps(__spreadValues({}, archive.session), { timestamp: 0 }) });
-  }
-  function librarySessionKey(archive) {
-    var _a;
-    return archive.room.toLowerCase() + ":" + ((_a = archive.session.sessionStartedAt) != null ? _a : archive.session.history.timestamps[0]);
-  }
-  function compareLibrarySessions(existing, incoming) {
-    if (librarySessionKey(existing) !== librarySessionKey(incoming)) return null;
-    if (libraryIdentity(existing) === libraryIdentity(incoming)) return 0;
-    const a = existing.session, b = incoming.session, ah = a.history, bh = b.history;
-    const at = ah.timestamps, bt = bh.timestamps;
-    let ai = at.indexOf(bt[0]), bi = 0;
-    if (ai < 0) {
-      ai = 0;
-      bi = bt.indexOf(at[0]);
-    }
-    if (bi < 0) {
-      if (a.sessionStartEstimated || b.sessionStartEstimated || !(at.at(-1) < bt[0] || bt.at(-1) < at[0])) return null;
-    } else {
-      const series = Object.keys(ah).filter((key) => key !== "timestamps" && key !== "breaks");
-      for (; ai < at.length && bi < bt.length; ai++, bi++) {
-        if (at[ai] !== bt[bi] || series.some((key) => ah[key][ai] !== bh[key][bi]) || ai > 0 && bi > 0 && ah.breaks[ai] !== bh.breaks[bi]) return null;
-      }
-    }
-    const dominates = (left, right) => left.history.timestamps.length >= right.history.timestamps.length && left.history.timestamps.at(-1) >= right.history.timestamps.at(-1) && left.roomTotalHigh >= right.roomTotalHigh && Object.keys(right.sessionHighs).every((key) => left.sessionHighs[key].value >= right.sessionHighs[key].value);
-    const newer = dominates(b, a), older = dominates(a, b);
-    if (newer && older) return b.timestamp > a.timestamp ? 1 : -1;
-    return newer ? 1 : older ? -1 : null;
-  }
-  function createLibraryReader() {
-    const cache = /* @__PURE__ */ new Map();
-    return { read: () => readSessionLibrary(cache), clear: () => cache.clear() };
-  }
-  function readSessionLibrary(cache = null) {
-    const entries = [], damaged = [], unavailable = [], sessions = /* @__PURE__ */ new Map();
-    let bytes = 0, cachedBytes = 0, cachedCount = 0;
-    let keys;
-    try {
-      keys = GM_listValues().filter((key) => key.startsWith(LIBRARY_PREFIX));
-    } catch (error) {
-      if (cache) cache.clear();
-      throw error;
-    }
-    if (cache) {
-      const present = new Set(keys);
-      for (const key of cache.keys()) if (!present.has(key)) cache.delete(key);
-    }
-    for (const key of keys) {
-      let raw;
-      try {
-        raw = GM_getValue(key, void 0);
-      } catch (error) {
-        if (cache) cache.delete(key);
-        damaged.push(key);
-        unavailable.push(key);
-        continue;
-      }
-      let cached = cache && cache.get(key);
-      if (cached && cached.raw !== raw) {
-        cache.delete(key);
-        cached = null;
-      }
-      if (raw === void 0) {
-        if (cache) cache.delete(key);
-        continue;
-      }
-      let recordBytes;
-      try {
-        recordBytes = cached ? cached.bytes : new TextEncoder().encode(typeof raw === "string" ? raw : JSON.stringify(raw)).byteLength;
-        bytes += recordBytes;
-      } catch (error) {
-        if (cache) cache.delete(key);
-        damaged.push(key);
-        unavailable.push(key);
-        continue;
-      }
-      try {
-        const id = key.slice(LIBRARY_PREFIX.length);
-        let data = cached && cached.data;
-        if (!data) {
-          const record = JSON.parse(raw);
-          if (record.schemaVersion !== 1 || !Number.isSafeInteger(record.addedAt) || record.addedAt < 0) throw new Error("Invalid library record.");
-          libraryRecordKey(id);
-          data = __spreadProps(__spreadValues({ title: libraryTitle(record.title) }, libraryMetadata(record)), { addedAt: record.addedAt, archive: validateSessionFile(record.archive) });
-        }
-        if (cache) {
-          if (typeof raw === "string" && cachedCount < LIBRARY_MAX_COUNT && cachedBytes + recordBytes <= LIBRARY_MAX_BYTES) {
-            if (!cached) {
-              for (const values of Object.values(data.archive.session.history)) Object.freeze(values);
-              cache.set(key, { raw, bytes: recordBytes, data: freezeRecordingData(data) });
-            }
-            cachedBytes += recordBytes;
-            cachedCount++;
-          } else cache.delete(key);
-        }
-        const entry = __spreadProps(__spreadValues({ id }, data), { records: [{ key, value: raw }] });
-        const sessionKey = librarySessionKey(entry.archive), siblings = sessions.get(sessionKey) || [];
-        const previous = siblings.find((other) => compareLibrarySessions(other.archive, entry.archive) !== null);
-        if (previous) {
-          const records = previous.records.concat(entry.records), addedAt = Math.min(previous.addedAt, entry.addedAt);
-          if (compareLibrarySessions(previous.archive, entry.archive) === 1) Object.assign(previous, entry);
-          previous.records = records;
-          previous.addedAt = addedAt;
-        } else {
-          entries.push(entry);
-          siblings.push(entry);
-          sessions.set(sessionKey, siblings);
-        }
-      } catch (error) {
-        if (cache) cache.delete(key);
-        damaged.push(key);
-      }
-    }
-    entries.sort((a, b) => b.archive.session.history.timestamps[0] - a.archive.session.history.timestamps[0] || b.addedAt - a.addedAt || a.id.localeCompare(b.id));
-    return { entries, damaged, unavailable, bytes, count: entries.length + damaged.length };
-  }
-  function planLibraryAdditions(incoming, library = readSessionLibrary()) {
-    if (library.unavailable && library.unavailable.length) throw new Error("Some library records could not be read. Refresh the list before saving more recordings.");
-    const entries = library.entries.slice(), writes = [];
-    let bytes = library.bytes;
-    for (const entry of incoming) {
-      const archive = validateSessionFile(entry.archive);
-      const index = entries.findIndex((saved) => compareLibrarySessions(saved.archive, archive) !== null);
-      const previous = index >= 0 ? entries[index] : null;
-      if (previous && compareLibrarySessions(previous.archive, archive) !== 1) continue;
-      const title = previous ? previous.title : libraryTitle(entry.title || archive.room);
-      const metadata = libraryMetadata(previous || entry);
-      const id = makeStorageId();
-      const addedAt = previous ? previous.addedAt : Date.now();
-      const raw = JSON.stringify(__spreadProps(__spreadValues({ schemaVersion: 1, addedAt, title }, metadata), { archive })), key = libraryRecordKey(id);
-      bytes += new Blob([raw]).size;
-      writes.push({ key, value: raw, id, updated: !!previous, replaces: previous ? previous.records : [] });
-      const next = __spreadProps(__spreadValues({ id, title }, metadata), { addedAt, archive, records: [{ key, value: raw }] });
-      if (previous) entries[index] = next;
-      else entries.push(next);
-    }
-    if (library.count - library.entries.length + entries.length > LIBRARY_MAX_COUNT || bytes > LIBRARY_MAX_BYTES) {
-      throw new Error("Library full (" + LIBRARY_MAX_COUNT + " recordings / " + LIBRARY_MAX_BYTES / 1024 / 1024 + " MB). Export and remove recordings before adding more.");
-    }
-    return writes;
-  }
-  function finalizeLibraryWrites(writes) {
-    for (const write of writes) for (const old of write.replaces) {
-      try {
-        if (GM_getValue(old.key, null) === old.value) GM_deleteValue(old.key);
-      } catch (error) {
-      }
-    }
-  }
-  function keepSessionInLibrary(archive, title = "") {
-    const library = readSessionLibrary(), clean = validateSessionFile(archive);
-    const writes = planLibraryAdditions([{ archive: clean, title }], library);
-    if (!writes.length) return {
-      added: false,
-      updated: false,
-      id: library.entries.find((entry) => compareLibrarySessions(entry.archive, clean) !== null).id
-    };
-    try {
-      GM_setValue(writes[0].key, writes[0].value);
-      verifyLibraryCapacity();
-    } catch (error) {
-      try {
-        if (GM_getValue(writes[0].key, null) === writes[0].value) GM_deleteValue(writes[0].key);
-      } catch (cleanupError) {
-        throw new Error("Library save could not be completed or undone. Refresh the list before retrying.");
-      }
-      throw error;
-    }
-    finalizeLibraryWrites(writes);
-    return { added: !writes[0].updated, updated: writes[0].updated, id: writes[0].id };
-  }
-  function verifyLibraryCapacity() {
-    const state = readSessionLibrary();
-    if (state.unavailable.length) throw new Error("Library capacity could not be checked because some records could not be read.");
-    if (state.count > LIBRARY_MAX_COUNT || state.bytes > LIBRARY_MAX_BYTES) throw new Error("Library limit reached, possibly by another tab. Refresh the list and remove recordings before retrying.");
-  }
-  function removeLibrarySession(id) {
-    const key = libraryRecordKey(id), state = readSessionLibrary();
-    const entry = state.entries.find((entry2) => entry2.records.some((record) => record.key === key));
-    if (!entry) {
-      if (state.damaged.includes(key)) GM_deleteValue(key);
-      return;
-    }
-    for (const record of entry.records) if (GM_getValue(record.key, null) === record.value) GM_deleteValue(record.key);
-  }
-  function renameLibrarySession(id, title) {
-    return updateLibraryMetadata(id, { title });
-  }
-  function updateLibraryMetadata(id, patch) {
-    if (!patch || Object.keys(patch).some((key2) => !["title", "notes"].includes(key2))) throw new Error("Invalid recording metadata.");
-    const key = libraryRecordKey(id), state = readSessionLibrary();
-    if (state.unavailable.length) throw new Error("Some library records could not be read. Refresh the list before editing.");
-    const entry = state.entries.find((entry2) => entry2.records.some((record) => record.key === key));
-    if (!entry) throw new Error("This recording changed in another tab. Refresh the list.");
-    const clean = __spreadProps(__spreadValues({}, libraryMetadata(__spreadValues(__spreadValues({}, entry), patch))), { title: libraryTitle(patch.title === void 0 ? entry.title : patch.title) });
-    const writes = entry.records.map((record) => __spreadProps(__spreadValues({}, record), { next: JSON.stringify(__spreadValues(__spreadValues({}, JSON.parse(record.value)), clean)) }));
-    const bytes = state.bytes + writes.reduce((total, write) => total + new Blob([write.next]).size - new Blob([write.value]).size, 0);
-    if (bytes > LIBRARY_MAX_BYTES) throw new Error("Library full. Use shorter notes or a shorter title, or remove a recording.");
-    const touched = [];
-    try {
-      for (const write of writes) {
-        if (GM_getValue(write.key, null) !== write.value) throw new Error("This recording changed in another tab. Refresh the list.");
-        touched.push(write);
-        GM_setValue(write.key, write.next);
-      }
-      verifyLibraryCapacity();
-    } catch (error) {
-      let failed = false;
-      for (const write of touched.reverse()) {
-        try {
-          if (GM_getValue(write.key, null) === write.next) GM_setValue(write.key, write.value);
-        } catch (rollbackError) {
-          failed = true;
-        }
-      }
-      if (failed) throw new Error("Some recording edits could not be undone. Refresh the library before retrying.");
-      throw error;
-    }
-  }
-
-  // src/library-models.js
-  var MODEL_FAVORITE_PREFIX = "tierscope:library-model:v1:";
-  function modelFavoriteKey(room) {
-    const normalized = allTimeRoom(room);
-    if (!normalized) throw new Error("Invalid favorite model.");
-    return MODEL_FAVORITE_PREFIX + normalized;
-  }
-  function validateFavoriteModels(value) {
-    if (!Array.isArray(value) || value.length > 1e4 || value.some((room) => !allTimeRoom(room))) throw new Error("Invalid favorite models.");
-    return [...new Set(value.map(allTimeRoom))].sort();
-  }
-  function readModelFavorites(entries = []) {
-    const favorites = new Set(entries.filter((entry) => entry.favorite).map((entry) => entry.archive.room.toLowerCase()));
-    const errors = [];
-    for (const key of GM_listValues().filter((key2) => key2.startsWith(MODEL_FAVORITE_PREFIX))) {
-      const room = key.slice(MODEL_FAVORITE_PREFIX.length);
-      try {
-        if (modelFavoriteKey(room) !== key) throw new Error("Invalid favorite model key.");
-        const raw = GM_getValue(key, void 0);
-        if (raw === void 0) continue;
-        const record = JSON.parse(raw);
-        if (record.schemaVersion !== 1 || record.room !== room || typeof record.favorite !== "boolean") throw new Error("Invalid favorite model record.");
-        if (record.favorite) favorites.add(room);
-        else favorites.delete(room);
-      } catch (error) {
-        favorites.delete(room);
-        errors.push(room);
-      }
-    }
-    return { favorites, errors };
-  }
-  function planModelFavoriteWrites(rooms) {
-    const writes = [];
-    for (const room of validateFavoriteModels(rooms)) {
-      const key = modelFavoriteKey(room);
-      if (GM_getValue(key, void 0) === void 0) writes.push({
-        key,
-        expectedBefore: void 0,
-        value: JSON.stringify({ schemaVersion: 1, room, favorite: true })
-      });
-    }
-    return writes;
-  }
-  function setModelFavorite(room, favorite) {
-    const key = modelFavoriteKey(room);
-    if (typeof favorite !== "boolean") throw new Error("Invalid favorite model choice.");
-    const before = GM_getValue(key, void 0), value = JSON.stringify({ schemaVersion: 1, room: allTimeRoom(room), favorite });
-    try {
-      GM_setValue(key, value);
-      if (GM_getValue(key, void 0) !== value) throw new Error("Favorite changed in another tab. Refresh the library.");
-    } catch (error) {
-      try {
-        if (GM_getValue(key, void 0) === value) {
-          if (before === void 0) GM_deleteValue(key);
-          else GM_setValue(key, before);
-        }
-      } catch (rollbackError) {
-        throw new Error("The favorite could not be saved or restored. Refresh the library before retrying.");
-      }
-      throw error;
-    }
-  }
-  function migrateRecordingFavorites(entries) {
-    const rooms = entries.filter((entry) => entry.favorite).map((entry) => entry.archive.room);
-    for (const write of planModelFavoriteWrites(rooms)) {
-      if (GM_getValue(write.key, void 0) === void 0) setModelFavorite(write.key.slice(MODEL_FAVORITE_PREFIX.length), true);
-    }
   }
 
   // src/backup.js
@@ -5148,9 +5294,29 @@ underlying system, so should run in the browser, Node, or Plask.
 #tierscope-session-tools label{display:inline-flex;gap:5px;align-items:center;flex-wrap:wrap;min-width:0;max-width:100%}
 #tierscope-session-tools select{width:auto;max-width:100%}
 #tools-source-a,#tools-source-b{width:100%}
-#tierscope-session-tools .tools-filters{display:flex;flex-wrap:wrap;gap:6px;padding:7px 0;border-bottom:1px solid var(--panel-divider)}
-#tierscope-session-tools .tools-filters input[type=date]{width:130px}
-#tierscope-session-tools .tools-filters select{max-width:205px}
+#tierscope-session-tools .tools-filters{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px;padding:9px 0;border-block:1px solid var(--panel-divider);margin-top:8px}
+#tierscope-session-tools .tools-model-filters{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,.8fr);gap:6px 10px;align-items:end}
+#tierscope-session-tools .tools-model-filter,#tierscope-session-tools .tools-sort-filter{display:grid;gap:3px;color:var(--panel-muted)}
+#tierscope-session-tools .tools-favorites-filter{grid-column:1/-1;font-size:.95em}
+#tierscope-session-tools .tools-date-filters{grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+#tierscope-session-tools .tools-date-filters label{display:flex;flex-wrap:nowrap;gap:4px;font-size:.9em}
+#tierscope-session-tools .tools-date-filters input[type=date]{width:100%;min-width:0;flex:1;padding:4px 2px}
+#tierscope-session-tools .tools-current[hidden]{display:none}
+#tierscope-session-tools [data-card-enable][hidden],#tierscope-session-tools [data-card-retry][hidden]{display:none}
+#tierscope-session-tools .tools-model-name{display:flex;align-items:center;gap:5px;margin-bottom:4px}
+#tierscope-session-tools .tools-model-name strong{min-width:0}
+#tierscope-session-tools [data-card-star]{font-size:1.5em;padding:0 3px;border:0;background:transparent;line-height:1.2}
+#tierscope-session-tools .tools-exports{gap:4px;margin:5px 0 8px}
+#tierscope-session-tools .tools-exports button{padding:2px 5px;font-size:.9em}
+#tierscope-session-tools .tools-history-shortcut button{color:var(--panel-accent)}
+#tierscope-session-tools #session-save-info{font-size:.85em;margin-top:4px}
+#tierscope-session-tools .tools-library-bulk{gap:4px;font-size:.9em}
+#tierscope-session-tools .tools-library-bulk button{padding:3px 5px}
+#tools-library-selected{flex-basis:100%}
+#tools-library-selection{margin-top:8px}
+#tools-library-selection>summary{font-size:.9em;background:transparent;color:var(--panel-muted)}
+
+#tierscope-session-tools .tools-filters select{width:100%}
 #tierscope-session-tools .tools-filters .tools-search{margin:0}
 #tierscope-session-tools .tools-search input{flex:1;width:100%}
 #tierscope-session-tools textarea{display:block;width:100%;resize:vertical}
@@ -5165,8 +5331,8 @@ underlying system, so should run in the browser, Node, or Plask.
 #tools-review-notes[hidden]{display:none}
 #gif-export-controls{padding:8px 12px;gap:6px;align-items:center;flex-shrink:0;border-bottom:1px solid var(--panel-divider)}
 </style>
-<div class="tools-head"><div><h2 id="tools-title">LIBRARY</h2><div class="tools-subtitle">Recordings &amp; session tools</div></div><button id="tools-close" type="button" aria-label="Close library" title="Close library (Escape)">×</button></div>
-<nav aria-label="Session tools"><button data-tools-tab="library">Recordings</button><button data-tools-tab="summary">Summary</button><button data-tools-tab="compare">Compare</button><button data-tools-tab="backup">Backup</button></nav>
+<div class="tools-head"><div><h2 id="tools-title">Library</h2><div class="tools-subtitle">Session Storage and Analysis</div></div><button id="tools-close" type="button" aria-label="Close library" title="Close library (Escape)">×</button></div>
+<nav aria-label="Session tools"><button data-tools-tab="library">Sessions</button><button data-tools-tab="summary">Summary</button><button data-tools-tab="compare">Compare</button><button data-tools-tab="backup">Backup</button></nav>
 <button id="tools-review-notes" type="button" hidden></button>
 <div id="tools-message" role="status" aria-live="polite"></div>
 <div id="gif-export-controls" style="display:none"><span id="gif-export-status" role="status"></span><button id="btn-cancel-gif" hidden type="button">Cancel</button></div>
@@ -5176,16 +5342,21 @@ underlying system, so should run in the browser, Node, or Plask.
   // src/library-drafts.js
   function createLibraryDrafts() {
     const drafts = /* @__PURE__ */ new Map();
+    function find(entry) {
+      return drafts.get(entry.id) || (entry.lineage ? [...drafts.values()].find((draft) => draft.lineage === entry.lineage) : null);
+    }
     function read(entry) {
-      const draft = drafts.get(entry.id);
+      const draft = find(entry);
       return draft ? __spreadProps(__spreadValues({}, draft), { conflict: draft.base !== (entry.notes || "") }) : { id: entry.id, value: entry.notes || "", base: entry.notes || "", dirty: false, conflict: false };
     }
     function edit(entry, value) {
-      const previous = drafts.get(entry.id);
+      const previous = find(entry);
+      if (previous) drafts.delete(previous.id);
       if (value === (entry.notes || "")) drafts.delete(entry.id);
       else drafts.set(entry.id, __spreadProps(__spreadValues({}, previous), {
         id: entry.id,
         title: entry.title || entry.archive.room,
+        lineage: entry.lineage || entry.id,
         room: entry.archive.room,
         time: entry.archive.session.history.timestamps[0],
         base: previous ? previous.base : entry.notes || "",
@@ -5197,7 +5368,7 @@ underlying system, so should run in the browser, Node, or Plask.
       for (const [id, draft] of drafts) {
         const entry = entries.find((entry2) => {
           var _a;
-          return entry2.id === id || ((_a = entry2.records) == null ? void 0 : _a.some((record) => record.key === "tierscope:library:v1:" + id));
+          return entry2.id === id || draft.lineage && entry2.lineage === draft.lineage || ((_a = entry2.records) == null ? void 0 : _a.some((record) => record.key === "tierscope:library:v1:" + id));
         });
         if (!entry) continue;
         if (entry.notes === draft.value) {
@@ -5266,10 +5437,11 @@ underlying system, so should run in the browser, Node, or Plask.
   }
   function recordingFilters(parent, entries, state, prefix, changed, organization = false) {
     const controls = toolNode(parent, "div", void 0, "tools-filters");
-    const label = toolNode(controls, "label", "Model "), model = toolNode(label, "select");
+    const modelRow = toolNode(controls, "div", void 0, "tools-model-filters");
+    const label = toolNode(modelRow, "label", "Model ", "tools-model-filter"), model = toolNode(label, "select");
     model.id = prefix + "-model";
     const rooms = [...new Set(entries.map((entry) => entry.archive.room.toLowerCase()))].sort();
-    for (const [value, name] of [["", organization ? "All models (folders)" : "All models"], ...organization ? [["*", "All recordings"]] : [], ...rooms.map((room) => [room, room])]) {
+    for (const [value, name] of [["", organization ? "All models (folders)" : "All models"], ...organization ? [["*", "All sessions"]] : [], ...rooms.map((room) => [room, room])]) {
       const option = toolNode(model, "option", name);
       option.value = value;
     }
@@ -5279,8 +5451,32 @@ underlying system, so should run in the browser, Node, or Plask.
       state.room = model.value;
       changed();
     };
+    if (organization) {
+      const label2 = toolNode(modelRow, "label", "Sort ", "tools-sort-filter"), sort = toolNode(label2, "select");
+      sort.id = prefix + "-sort";
+      for (const [value, name] of [["newest", "Newest first"], ["oldest", "Oldest first"], ["title", "Title"], ["model", "Model"], ["favorites", "Favorite models first"]]) {
+        const option = toolNode(sort, "option", name);
+        option.value = value;
+      }
+      sort.value = state.sort || "newest";
+      sort.onchange = () => {
+        state.sort = sort.value;
+        changed();
+      };
+      const favoriteLabel = toolNode(modelRow, "label", void 0, "tools-favorites-filter"), favorite = toolNode(favoriteLabel, "input");
+      favorite.type = "checkbox";
+      favorite.id = prefix + "-favorites";
+      favorite.checked = !!state.favorites;
+      toolNode(favoriteLabel, "span", "Favorites only");
+      favorite.onchange = () => {
+        state.favorites = favorite.checked;
+        changed();
+      };
+    }
+    const dates = toolNode(controls, "div", void 0, "tools-date-filters");
+    dates.title = "First retained sample, in your browser’s local timezone. Through includes the whole day.";
     for (const [key, name] of [["from", "From"], ["to", "Through"]]) {
-      const label2 = toolNode(controls, "label", name + " "), input = toolNode(label2, "input");
+      const label2 = toolNode(dates, "label", name + " "), input = toolNode(label2, "input");
       input.type = "date";
       input.id = prefix + "-" + key;
       input.value = state[key] || "";
@@ -5298,28 +5494,6 @@ underlying system, so should run in the browser, Node, or Plask.
       state.query = search.value;
       changed();
     };
-    if (organization) {
-      const label2 = toolNode(controls, "label", "Sort "), sort = toolNode(label2, "select");
-      sort.id = prefix + "-sort";
-      for (const [value, name] of [["newest", "Newest first"], ["oldest", "Oldest first"], ["title", "Title"], ["model", "Model"], ["favorites", "Favorite models first"]]) {
-        const option = toolNode(sort, "option", name);
-        option.value = value;
-      }
-      sort.value = state.sort || "newest";
-      sort.onchange = () => {
-        state.sort = sort.value;
-        changed();
-      };
-      const favoriteLabel = toolNode(controls, "label"), favorite = toolNode(favoriteLabel, "input");
-      favorite.type = "checkbox";
-      favorite.id = prefix + "-favorites";
-      favorite.checked = !!state.favorites;
-      toolNode(favoriteLabel, "span", "Favorite models only");
-      favorite.onchange = () => {
-        state.favorites = favorite.checked;
-        changed();
-      };
-    }
     toolButton(controls, "Clear filters", () => {
       Object.assign(state, { room: "", from: "", to: "", query: "", favorites: false, sort: "newest" });
       model.value = "";
@@ -5333,7 +5507,6 @@ underlying system, so should run in the browser, Node, or Plask.
       }
       changed();
     }, prefix + "-clear");
-    toolNode(parent, "p", "Dates use the first retained sample in your browser’s local timezone; “Through” includes that whole day.", "tools-muted");
     return { model, search };
   }
 
@@ -5347,19 +5520,23 @@ underlying system, so should run in the browser, Node, or Plask.
       actions.room(filters.room);
       rows();
     }, true);
-    const bulk = toolNode(parent, "div", void 0, "tools-actions"), selection = toolNode(bulk, "span");
+    const selectionTools = toolNode(parent, "details");
+    selectionTools.id = "tools-library-selection";
+    selectionTools.open = selected.size > 0;
+    toolNode(selectionTools, "summary", "Select sessions for Compare or export");
+    const bulk = toolNode(selectionTools, "div", void 0, "tools-actions tools-library-bulk"), selection = toolNode(bulk, "span");
     selection.id = "tools-library-selected";
     let matching = [];
     toolButton(bulk, "Select matching", () => {
       matching.forEach((entry) => selected.add(entry.id));
       updateSelection();
     }, "tools-select-matching");
-    toolButton(bulk, "Clear selection", () => {
+    toolButton(bulk, "Clear", () => {
       selected.clear();
       updateSelection();
     }, "tools-clear-selection");
-    const compare = toolButton(bulk, "Compare selected", () => actions.compare([...selected]), "tools-compare-selected");
-    const download = toolButton(bulk, "Export selected", () => actions.export([...selected]), "tools-export-selected");
+    const compare = toolButton(bulk, "Compare", () => actions.compare([...selected]), "tools-compare-selected");
+    const download = toolButton(bulk, "Export", () => actions.export([...selected]), "tools-export-selected");
     download.title = "Download one library bundle, including titles, notes and favorite models";
     const list = toolNode(parent, "div");
     list.id = "tools-library-list";
@@ -5370,9 +5547,13 @@ underlying system, so should run in the browser, Node, or Plask.
       control.setAttribute("aria-label", (active ? "Unfavorite " : "Favorite ") + room);
       control.title = (active ? "Unfavorite model " : "Favorite model ") + room;
       if (active) control.className = "tools-primary";
+      if (active && !compact && !entries.some((entry) => entry.archive.room.toLowerCase() === room && entry.autoKeep)) {
+        toolButton(parent2, "Enable automatic keeping…", () => actions.enableAutomatic(room), "tools-model-enable-" + room);
+      }
     }
     function updateSelection() {
-      selection.textContent = selected.size + " selected (including hidden recordings)";
+      if (selected.size) selectionTools.open = true;
+      selection.textContent = selected.size + " selected" + ([...selected].some((id) => !matching.some((entry) => entry.id === id)) ? " · includes hidden sessions" : "");
       compare.disabled = selected.size < 2 || selected.size > 6;
       compare.title = "Select 2–6 recordings to compare";
       download.disabled = !selected.size;
@@ -6525,19 +6706,15 @@ underlying system, so should run in the browser, Node, or Plask.
   }
   var closeSessionTools = null;
   var refreshSessionTools = null;
-  function updateSessionToolsStatus() {
-    if (refreshSessionTools) refreshSessionTools();
+  function updateSessionToolsStatus(reload = false) {
+    if (refreshSessionTools) refreshSessionTools(reload);
     const element = document.getElementById("session-save-info");
     if (!element) return;
-    if (isPlaybackCurrent(runtime.playback)) {
-      element.textContent = "Replay snapshot — use Keep in library to retain it here.";
-      element.style.color = "var(--panel-muted)";
-      return;
-    }
     const state = getSessionSaveState(getModelName());
     const warning = state.error || runtime.sessionStorageNotice;
     element.textContent = warning ? "Session saving unavailable. Keep this tab open or download a session file." : state.savedAt ? "Session saved in this browser at " + new Date(state.savedAt).toLocaleTimeString() + "." : "No session saved in this tab yet.";
     element.style.color = warning ? "var(--panel-warning)" : "var(--panel-muted)";
+    element.hidden = !warning;
   }
   function bindSessionTools() {
     for (const id of ["btn-control-library", "btn-playback-library"]) {
@@ -6673,12 +6850,16 @@ underlying system, so should run in the browser, Node, or Plask.
       try {
         const models = readModelFavorites(library.entries);
         library.favoriteModels = models.favorites;
+        library.automaticModels = models.automatic;
         library.favoriteError = migrationError || (models.errors.length ? "Some model favorites could not be read. Refresh to retry; recordings remain available." : "");
       } catch (error) {
         library.favoriteModels = /* @__PURE__ */ new Set();
         library.favoriteError = "Model favorites could not be read. Refresh to retry; recordings remain available.";
       }
-      library.entries = library.entries.map((entry) => __spreadProps(__spreadValues({}, entry), { modelFavorite: library.favoriteModels.has(entry.archive.room.toLowerCase()) }));
+      library.entries = library.entries.map((entry) => {
+        var _a;
+        return __spreadProps(__spreadValues({}, entry), { modelFavorite: library.favoriteModels.has(entry.archive.room.toLowerCase()), autoKeep: ((_a = library.automaticModels) == null ? void 0 : _a.has(entry.archive.room.toLowerCase())) || false });
+      });
       noteDrafts.reconcile(library.entries);
       updateDraftNotice();
       return library;
@@ -6696,7 +6877,7 @@ underlying system, so should run in the browser, Node, or Plask.
         updateDraftNotice();
       },
       discardNote: (entry) => {
-        noteDrafts.discard(entry.id);
+        noteDrafts.discard(noteDrafts.read(entry).id);
         updateDraftNotice();
         render(tab);
       },
@@ -6704,11 +6885,11 @@ underlying system, so should run in the browser, Node, or Plask.
         const draft = noteDrafts.read(entry);
         if (!draft.dirty) return;
         const fresh = libraryReader.read();
-        const latest = fresh.entries.find((item) => item.id === entry.id || item.records.some((record) => record.key === LIBRARY_PREFIX + entry.id));
+        const latest = fresh.entries.find((item) => item.id === draft.id || draft.lineage && item.lineage === draft.lineage || item.records.some((record) => record.key === LIBRARY_PREFIX + draft.id));
         if (!latest) throw new Error("This recording changed or is unavailable. Your draft is kept in Review unsaved notes.");
         if ((latest.notes || "") !== draft.base && latest.notes !== draft.value && !confirm("Saved notes for this recording changed in another tab. Replace them with your draft?")) return;
         updateLibraryMetadata(latest.id, { notes: draft.value });
-        noteDrafts.discard(entry.id);
+        noteDrafts.discard(draft.id);
         updateDraftNotice();
         render(tab);
         tell("Recording notes saved.");
@@ -6716,7 +6897,7 @@ underlying system, so should run in the browser, Node, or Plask.
     };
     function renderDrafts() {
       const state = readLibrary();
-      button(content, "‹ Recordings", () => render("library"), "tools-drafts-back");
+      button(content, "‹ Sessions", () => render("library"), "tools-drafts-back");
       node(content, "h3", "Unsaved notes");
       node(content, "p", "Drafts stay in this tab when Library closes. Save them before refreshing or leaving the site.", "tools-muted");
       if (!noteDrafts.size) node(content, "p", "All notes are saved or discarded.", "tools-muted");
@@ -6779,7 +6960,10 @@ underlying system, so should run in the browser, Node, or Plask.
       const room = playback ? source.room : getModelName();
       const available = history.timestamps.length > 0 && (playback || runtime.activeSessionStorageKey === getStorageKey(room) && runtime.lastUrl === location.href);
       const signature = [room, !!playback, history.timestamps.length, history.timestamps.at(-1), runtime.isPaused, runtime.isStopped].join(":");
-      if (source === observedSource && signature === observedSignature) return;
+      if (source === observedSource && signature === observedSignature) {
+        refreshCards();
+        return;
+      }
       const replaced = source !== observedSource;
       observedSource = source;
       observedSignature = signature;
@@ -6790,69 +6974,134 @@ underlying system, so should run in the browser, Node, or Plask.
           currentArchive = null;
         }
       }
-      const title = dialog.querySelector("#tools-current-room"), meta = dialog.querySelector("#tools-current-meta"), label = dialog.querySelector("#tools-current-kind");
-      if (title) title.textContent = room === "unknown" ? "No room session" : room;
-      if (label) label.textContent = playback ? playback.imported ? "File / library replay" : "Replay snapshot" : runtime.isStopped ? "Stopped session" : runtime.isPaused ? "Paused session" : "Current live session";
-      if (meta) meta.textContent = available ? history.timestamps.length.toLocaleString() + " samples · " + new Date(history.timestamps[0]).toLocaleString() : "Record a sample or open a saved session to get started.";
-      dialog.querySelectorAll("[data-current-action]").forEach((button2) => {
-        button2.dataset.currentAvailable = String(!!available);
-        button2.disabled = !available || button2.id === "btn-export-gif" && !!runtime.gifExportJob;
-      });
+      refreshCards();
       if (replaced && (tab === "summary" && selectedA === "current" || tab === "compare" && [selectedA, selectedB, ...selectedExtra].includes("current"))) render(tab);
     }
-    function currentCard() {
+    function favoriteAction(room, enableOnly = false) {
+      if (!changeModelFavorite(room, enableOnly)) return;
+      const state = readModelFavorite(room);
+      document.querySelectorAll("[data-favorite-room]").forEach((button2) => {
+        if (button2.dataset.favoriteRoom === room) paintFavoriteButton(button2, room, state);
+      });
+      render("library");
+      const pending = automaticLibraryStatus(room).error;
+      tell(pending ? "Favorite saved; Library save pending. " + pending : state.autoKeep ? "Favorite saved. Automatic keeping is on for " + room + "." : "Favorite removed. Kept sessions remain in Library.", !!pending);
+    }
+    function refreshCards() {
+      for (const replay of [false, true]) {
+        const suffix = replay ? "-replay" : "", card = dialog.querySelector("#tools-current-card" + suffix);
+        if (!card) continue;
+        const playback = isPlaybackCurrent(runtime.playback) ? runtime.playback : null;
+        card.hidden = replay && !playback;
+        if (card.hidden) continue;
+        const room = replay ? playback.archive.room : getModelName();
+        const history = replay ? playback.archive.session.history : runtime.history;
+        const available = !!history.timestamps.length && (replay || runtime.activeSessionStorageKey === getStorageKey(room) && runtime.lastUrl === location.href);
+        card.querySelector("[data-card-kind]").textContent = replay ? playback.imported ? "File / Library Replay" : "Replay Snapshot" : "Current Live Session";
+        card.querySelector("[data-card-room]").textContent = room === "unknown" ? "Open a model’s room" : room;
+        card.querySelector("[data-card-meta]").textContent = (replay ? "" : runtime.isStopped ? "Stopped · " : runtime.isPaused ? "Paused · " : "") + (available ? history.timestamps.length.toLocaleString() + " samples · " + new Date(history.timestamps[0]).toLocaleString() : "Waiting for the first recorded sample.");
+        card.querySelectorAll("[data-current-action]").forEach((button2) => {
+          button2.dataset.currentAvailable = String(available);
+          button2.disabled = !available || button2.dataset.gif === "true" && !!runtime.gifExportJob;
+        });
+        const star = card.querySelector("[data-card-star]"), info = card.querySelector("[data-card-auto]"), enable = card.querySelector("[data-card-enable]");
+        let preference = { favorite: false, autoKeep: false };
+        try {
+          if (room !== "unknown") preference = readModelFavorite(room);
+        } catch (error) {
+          preference.error = "Favorites unavailable. Refresh to retry.";
+        }
+        paintFavoriteButton(star, room, preference);
+        const status = automaticLibraryStatus(room);
+        info.textContent = replay ? "Replay is a snapshot. Keep it explicitly to add or update it in Library." : preference.error || (status.error ? "Automatic keep pending: " + status.error : preference.autoKeep ? status.savedAt ? "Automatically kept at " + new Date(status.savedAt).toLocaleTimeString() + ". Updates as you record." : "Automatic keeping on · waiting for a recorded sample." : preference.favorite ? "Favorite · automatic keeping is off until you confirm." : "Star this model to automatically keep its live sessions.");
+        info.style.color = !replay && status.error ? "var(--panel-warning)" : "var(--panel-muted)";
+        enable.hidden = replay || !preference.favorite || preference.autoKeep;
+        enable.disabled = !!preference.error;
+        const retry = card.querySelector("[data-card-retry]");
+        retry.hidden = replay || !status.error;
+        const historyButton = card.querySelector("[data-card-history]");
+        historyButton.disabled = room === "unknown";
+        historyButton.parentElement.hidden = room === "unknown";
+        const count = (library == null ? void 0 : library.entries.filter((entry) => entry.archive.room.toLowerCase() === room.toLowerCase()).length) || 0;
+        historyButton.textContent = "History · " + count;
+        historyButton.title = count + " saved sessions for " + room;
+      }
+    }
+    function currentCard(replay = false) {
+      const suffix = replay ? "-replay" : "";
       const card = node(content, "section", void 0, "tools-current");
-      card.setAttribute("aria-label", "Current or replayed recording");
-      node(card, "div", "", "tools-eyebrow").id = "tools-current-kind";
-      node(card, "strong", "").id = "tools-current-room";
-      node(card, "div", "", "tools-muted").id = "tools-current-meta";
+      card.id = "tools-current-card" + suffix;
+      card.setAttribute("aria-label", replay ? "Replayed session" : "Current Live Session");
+      const kind = node(card, "div", "", "tools-eyebrow");
+      kind.id = "tools-current-kind" + suffix;
+      kind.dataset.cardKind = "";
+      const name = node(card, "div", void 0, "tools-model-name");
+      const title = node(name, "strong", "");
+      title.id = "tools-current-room" + suffix;
+      title.dataset.cardRoom = "";
+      const star = button(name, "☆", () => favoriteAction(star.dataset.favoriteRoom), "tools-current-favorite" + suffix);
+      star.dataset.cardStar = "";
+      const meta = node(card, "div", "", "tools-muted");
+      meta.id = "tools-current-meta" + suffix;
+      meta.dataset.cardMeta = "";
+      const capture = replay ? () => {
+        if (!isPlaybackCurrent(runtime.playback)) throw new Error("Replay has closed.");
+        return runtime.playback.archive;
+      } : () => captureLiveSessionFile();
       const actions = node(card, "div", void 0, "tools-actions");
       function currentButton(parent, text, fn, id) {
-        const control = button(parent, text, () => fn(captureSessionFile()), id);
+        const control = button(parent, text, () => fn(capture()), id + suffix);
         control.dataset.currentAction = "true";
         return control;
       }
-      currentButton(actions, "Keep in library", (archive) => {
+      currentButton(actions, "Keep in Library", (archive) => {
         const result = keepSessionInLibrary(archive);
-        currentArchive = archive;
         libraryRoom = archive.room.toLowerCase();
         Object.assign(libraryFilters, { room: libraryRoom, query: "", from: "", to: "", favorites: false });
         render("library");
-        tell(result.added ? "Recording kept in the library." : result.updated ? "Library recording updated; its name was preserved." : "An equal or fuller recording is already in the library.");
+        tell(result.added ? "Session kept in the library." : result.updated ? "Library session updated; its name and notes were preserved." : "An equal or fuller session is already in the library.");
       }, "tools-keep").className = "tools-primary";
       currentButton(actions, "Save file", (archive) => downloadDataFile(archive, archiveName(archive)), "tools-save-session");
-      const exports = node(card, "div", void 0, "tools-actions");
-      currentButton(exports, "TXT", (archive) => {
-        if (isPlaybackCurrent(runtime.playback)) downloadRecording(archive, "txt");
-        else downloadTrackingReport();
-      }, "tools-export-txt").title = "Download a text report for this recording";
+      const shortcuts = node(actions, "span", void 0, "tools-history-shortcut");
+      shortcuts.id = "tools-room-shortcuts" + suffix;
+      const history = button(shortcuts, "History · 0", () => openHistory(star.dataset.favoriteRoom.toLowerCase()), "tools-room-history" + suffix);
+      history.dataset.cardHistory = "";
+      const exports = node(card, "div", void 0, "tools-actions tools-exports");
+      node(exports, "span", "Download", "tools-muted");
+      currentButton(exports, "TXT", (archive) => downloadRecording(archive, "txt"), "tools-export-txt").title = "Download a text report for this session";
       currentButton(exports, "CSV", (archive) => downloadRecording(archive, "csv"), "tools-export-csv").title = "Download every retained sample with its real timestamp";
-      currentButton(exports, "GIF", (archive) => generateGifFromHistory(archive), "btn-export-gif").title = "Download an animated GIF of the full recording";
-      currentButton(exports, "Add to all-time highs", addArchiveHighs, "tools-add-all-time");
-      const status = node(card, "div", "", "tools-muted");
-      status.id = "session-save-info";
-      status.setAttribute("role", "status");
-      observedSignature = "";
-      refreshCurrent();
-      updateSessionToolsStatus();
+      const gif = currentButton(exports, "GIF", (archive) => generateGifFromHistory(archive), "btn-export-gif");
+      gif.dataset.gif = "true";
+      currentButton(exports, "Add to ATH", addArchiveHighs, "tools-add-all-time").title = "Add this session’s highs to all-time highs";
+      const automatic = node(card, "div", "", "tools-muted");
+      automatic.dataset.cardAuto = "";
+      automatic.setAttribute("role", "status");
+      const enable = button(card, "Enable automatic keeping…", () => favoriteAction(star.dataset.favoriteRoom, true), "tools-enable-automatic" + suffix);
+      enable.dataset.cardEnable = "";
+      const retry = button(card, "Retry keeping", () => {
+        keepFavoriteSession(star.dataset.favoriteRoom, true);
+        render("library");
+      }, "tools-retry-automatic" + suffix);
+      retry.dataset.cardRetry = "";
+      if (!replay) {
+        const status = node(card, "div", "", "tools-muted");
+        status.id = "session-save-info";
+        status.setAttribute("role", "status");
+      }
     }
     function openHistory(room) {
+      readLibrary();
       libraryRoom = room;
       render("history");
       dialog.querySelector("#tools-history-back").focus();
     }
     function renderLibrary() {
       const state = readLibrary();
-      const pageRoom = getModelName();
-      if (pageRoom !== "unknown") {
-        const shortcuts = node(content, "div", void 0, "tools-actions");
-        shortcuts.id = "tools-room-shortcuts";
-        button(shortcuts, "History · " + pageRoom, () => openHistory(pageRoom.toLowerCase()), "tools-room-history").className = "tools-primary";
-        const count = state.entries.filter((entry) => entry.archive.room.toLowerCase() === pageRoom.toLowerCase()).length;
-        node(shortcuts, "span", count + " saved " + (count === 1 ? "recording" : "recordings"), "tools-muted");
-        shortcuts.setAttribute("aria-label", "History for the model on this page");
-      }
       currentCard();
+      currentCard(true);
+      observedSignature = "";
+      refreshCurrent();
+      updateSessionToolsStatus();
       const actions = node(content, "div", void 0, "tools-actions");
       button(actions, "Open saved file…", () => chooseFile(runtime.SESSION_FILE_MAX_BYTES, (value) => {
         openSessionReplay(validateSessionFile(value));
@@ -6867,9 +7116,9 @@ underlying system, so should run in the browser, Node, or Plask.
         Object.assign(libraryFilters, { room: libraryRoom, query: "", from: "", to: "", favorites: false });
         render("library");
         tell("Imported: " + result.recordings + " new, " + result.updatedRecordings + " updated, " + result.favoriteModels + " favorite models added; existing recordings and model choices were preserved.");
-      }, true), "tools-import-session").title = "Import one or more session files or library bundles; saving is explicit";
+      }, true), "tools-import-session").title = "Import session files or Library bundles. Imported favorites need confirmation before automatic keeping.";
       button(actions, "Refresh", () => render("library"), "tools-refresh-library").title = "Refresh list from this browser";
-      node(content, "p", state.count + " / " + LIBRARY_MAX_COUNT + " recordings · " + (state.bytes / 1024 / 1024).toFixed(2) + " / " + LIBRARY_MAX_BYTES / 1024 / 1024 + " MB · Kept until you delete them.", "tools-muted");
+      node(content, "p", state.count + " / " + LIBRARY_MAX_COUNT + " sessions · " + (state.bytes / 1024 / 1024).toFixed(2) + " / " + LIBRARY_MAX_BYTES / 1024 / 1024 + " MB · Kept until you delete them.", "tools-muted");
       if (state.favoriteError) node(content, "p", state.favoriteError, "tools-muted");
       libraryFilters.room = libraryRoom || "";
       if (libraryRoom && libraryRoom !== "*" && !state.entries.some((entry) => entry.archive.room.toLowerCase() === libraryRoom)) libraryFilters.room = libraryRoom = "";
@@ -6891,10 +7140,9 @@ underlying system, so should run in the browser, Node, or Plask.
         },
         favoriteModel: (room) => {
           if (state.favoriteError) throw new Error("Model favorites are not fully available. Refresh before changing them.");
-          setModelFavorite(room, !state.favoriteModels.has(room));
-          render("library");
-          tell("Model favorite saved.");
+          favoriteAction(room);
         },
+        enableAutomatic: (room) => favoriteAction(room, true),
         replay: (entry) => {
           openSessionReplay(entry.archive);
           observedSignature = "";
@@ -7062,7 +7310,7 @@ underlying system, so should run in the browser, Node, or Plask.
     function renderHistory() {
       if (!library) readLibrary();
       const heading = node(content, "div", void 0, "tools-actions");
-      button(heading, "‹ Recordings", () => {
+      button(heading, "‹ Sessions", () => {
         render("library");
         (dialog.querySelector("#tools-model-history") || dialog.querySelector("#tools-library-search")).focus();
       }, "tools-history-back");
@@ -7402,7 +7650,10 @@ underlying system, so should run in the browser, Node, or Plask.
       }
     }
     closeSessionTools = close;
-    refreshSessionTools = refreshCurrent;
+    refreshSessionTools = (reload) => {
+      if (reload && tab === "library") render("library");
+      else refreshCurrent();
+    };
     document.addEventListener("keydown", escape);
     dialog.querySelector("#btn-cancel-gif").onclick = cancelGifExport;
     for (const id of ["btn-control-library", "btn-playback-library"]) {
@@ -7549,7 +7800,7 @@ underlying system, so should run in the browser, Node, or Plask.
     restoreScheduledInterval(getEffectiveScanIntervalSeconds());
     restoreTrendPreferences(data.trendComparisonMode, data.autoTrendEscalation);
   }
-  function saveSession(model) {
+  function saveSession(model, flushLibrary = false) {
     if (!model || model === "unknown") return;
     try {
       var result = getSessionWriteStatus(model);
@@ -7601,6 +7852,14 @@ underlying system, so should run in the browser, Node, or Plask.
       noteSessionSave(model, e.message || String(e));
       log("Failed to save session: " + e);
       return { status: "failed", error: e.message || String(e) };
+    } finally {
+      keepFavoriteSession(model, flushLibrary);
+      try {
+        updateAcquisitionStatus();
+        refreshPanelOptions();
+      } catch (error) {
+        log("Save feedback unavailable: " + error.message);
+      }
     }
   }
   function loadSession(model) {
@@ -7799,6 +8058,7 @@ underlying system, so should run in the browser, Node, or Plask.
   function resetTrackingData(deleteSaved) {
     var modelName = getModelName();
     if (modelName === "unknown") return;
+    saveSession(modelName, true);
     leavePlayback(false);
     cancelGifExport();
     log("Performing main reset...");
@@ -8626,12 +8886,12 @@ underlying system, so should run in the browser, Node, or Plask.
     if (existing) existing.remove();
     var div = document.createElement("div");
     div.id = "cb-tier-tracker";
-    var html = '<div id="tracker-container" style="position:fixed;top:80px;right:20px;background:rgba(20,20,30,0.95);color:var(--panel-text);padding:5px;border-radius:6px;font-family:Arial,sans-serif;font-size:9px;z-index:999999;width:' + runtime.BASE_WIDTH_MINI + 'px;border:1px solid #ff69b4;transition:width 0.3s ease;cursor:default;user-select:none;"><div id="drag-handle" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;border-bottom:1px solid #ff69b4;padding-bottom:3px;cursor:move;"><span id="header-text" style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:bold;color:var(--panel-accent);font-size:10px;">USERS: 0 (SH:0)</span><span id="mini-room-change" style="font-size:8px;margin:0 3px;display:none;"></span><div style="display:flex;align-items:center;gap:3px;flex-shrink:0;"><button type="button" id="btn-high-mode" aria-pressed="false" aria-label="Session highs. Switch to all-time highs" style="display:none;min-width:29px;background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;">SH</button><button type="button" id="btn-panel-options" aria-label="Chart window and highs" aria-expanded="false" aria-controls="panel-options" style="display:none;background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;white-space:nowrap;">Full ▾</button><button type="button" id="btn-standard-size" title="Restore standard panel size (100%)" aria-label="Restore standard panel size" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;">100%</button><button id="btn-toggle" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:9px;padding:1px 4px;flex-shrink:0;">+</button></div></div><div id="panel-options" role="group" aria-label="Chart and high options" style="display:none;position:absolute;right:5px;top:29px;width:190px;max-width:calc(100% - 10px);box-sizing:border-box;z-index:5;padding:8px;background:var(--panel-solid);color:var(--panel-text);border:1px solid #ff69b4;border-radius:4px;font-size:11px;box-shadow:0 3px 12px #0008;"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;"><strong>Charts &amp; highs</strong><button type="button" id="panel-options-close" aria-label="Close chart and high options" style="background:var(--panel-button);color:var(--panel-text);border:0;border-radius:3px;cursor:pointer;">×</button></div><label for="chart-window-select">Chart window</label><select id="chart-window-select" style="display:block;width:100%;margin:4px 0 6px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);font-size:11px;"><option value="full">Full history</option><option value="fourHours">Last 4 hours</option><option value="twoHours">Last 2 hours</option><option value="hour">Last hour</option><option value="halfHour">Last 30 minutes</option><option value="quarter">Last 15 minutes</option></select><div style="font-size:10px;color:var(--panel-muted);line-height:1.4;margin-bottom:8px;">Charts only. Downloads keep the full retained history.</div><input type="file" id="session-file-input" accept=".json,application/json" style="display:none;"><div id="session-file-info" style="display:none;margin-top:7px;font-size:10px;line-height:1.4;white-space:pre-line;overflow-wrap:anywhere;color:var(--panel-secondary);"></div><div style="border-top:1px solid var(--panel-divider);margin-top:8px;padding-top:6px;"><strong>All-time highs</strong><div id="all-time-info" style="font-size:10px;line-height:1.4;margin:4px 0;color:var(--panel-secondary);"></div><button type="button" id="btn-add-all-time" style="display:none;width:100%;margin:4px 0;padding:4px;background:#4169E1;color:#fff;border:0;border-radius:3px;cursor:pointer;">Add to all-time highs</button><button type="button" id="btn-clear-all-time" style="display:block;width:100%;margin:4px 0;padding:4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:3px;cursor:pointer;">Clear all-time highs…</button><div id="all-time-action-status" role="status" style="font-size:10px;line-height:1.4;overflow-wrap:anywhere;color:var(--panel-secondary);"></div></div></div><div id="minimized-view" style="display:block;position:relative;"><div style="display:flex;align-items:center;justify-content:space-between;gap:3px;"><button type="button" id="mini-metric" style="background:transparent;border:0;color:var(--panel-secondary);font:inherit;cursor:pointer;padding:2px 0;" aria-label="Cycle chart metric">Room total ▾</button><button type="button" id="mini-high" style="background:transparent;border:0;padding:0;color:var(--panel-subtle);font-size:8px;cursor:pointer;"></button></div><canvas id="mini-chart" width="140" height="36" style="display:block;width:100%;height:36px;" role="img" aria-label="Recent audience history"></canvas><div style="display:flex;justify-content:space-between;gap:4px;margin:3px 0;"><span title="With Tokens">💎 <span id="mini-withtokens">0</span> <span id="mini-withtokens-change"></span></span><span title="Registered">📊 <span id="mini-total">0</span> <span id="mini-total-change"></span></span></div><div style="display:flex;align-items:center;gap:3px;"><span id="mini-freshness" style="flex:1;min-width:0;font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">No sample</span><button type="button" id="btn-auto" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;cursor:pointer;" title="Pause or resume scans">⏸</button><button type="button" id="mini-settings-toggle" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;cursor:pointer;" aria-label="Scan interval settings" title="Scan interval settings — adjust how often TierScope scans" aria-expanded="false" aria-controls="mini-settings">◷</button><button type="button" id="btn-expand" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;font-size:9px;cursor:pointer;" title="Expand panel" aria-label="Expand panel">↗</button></div><div id="mini-settings" style="display:none;position:absolute;left:0;right:0;top:17px;background:var(--panel-settings);border:1px solid #ff69b4;border-radius:4px;padding:5px;z-index:2;" role="group" aria-label="Scan interval"><div style="display:flex;justify-content:space-between;align-items:center;font-size:9px;color:var(--panel-secondary);">Scan interval <button type="button" id="mini-settings-close" aria-label="Close scan interval settings" title="Close (Escape)" style="background:var(--panel-button);color:var(--panel-text);border:0;border-radius:3px;cursor:pointer;padding:1px 5px;font-size:13px;">×</button></div><div style="display:flex;align-items:center;justify-content:center;gap:3px;margin:3px 0;padding:2px;background:rgba(var(--panel-row-rgb),0.05);border-radius:3px;"><button id="btn-timer-down" style="background:var(--panel-button-strong);border:none;color:var(--panel-text);border-radius:2px;cursor:pointer;font-size:9px;padding:1px 4px;font-weight:bold;">−</button><span id="timer-display" style="font-size:11px;color:var(--panel-warning);font-weight:bold;min-width:28px;">60s</span><button id="btn-timer-up" style="background:var(--panel-button-strong);border:none;color:var(--panel-text);border-radius:2px;cursor:pointer;font-size:9px;padding:1px 4px;font-weight:bold;">+</button></div><div style="display:flex;gap:2px;justify-content:center;margin-top:3px;"><button class="timer-preset" data-time="30" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">30s</button><button class="timer-preset" data-time="60" style="background:#ff69b4;border:1px solid #ff69b4;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">60s</button><button class="timer-preset" data-time="120" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">2m</button><button class="timer-preset" data-time="300" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">5m</button></div><div id="auto-status" style="margin-top:3px;font-size:8px;color:var(--panel-muted);">Starting...</div></div></div><div id="full-view" style="display:none;"><div id="tier-chart-region" style="display:flow-root;">' + collapsedTrayHtml();
+    var html = '<div id="tracker-container" style="position:fixed;top:80px;right:20px;background:rgba(20,20,30,0.95);color:var(--panel-text);padding:5px;border-radius:6px;font-family:Arial,sans-serif;font-size:9px;z-index:999999;width:' + runtime.BASE_WIDTH_MINI + 'px;border:1px solid #ff69b4;transition:width 0.3s ease;cursor:default;user-select:none;"><div id="drag-handle" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;border-bottom:1px solid #ff69b4;padding-bottom:3px;cursor:move;"><div id="header-model" style="display:flex;flex:1;min-width:0;align-items:center;gap:3px;margin-right:4px;"><span id="header-text" style="flex:0 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:bold;color:var(--panel-accent);font-size:13px;line-height:18px;">TierScope</span><button type="button" id="btn-model-favorite" aria-label="Favorite model" style="flex:0 0 18px;padding:0;border:0;background:transparent;color:var(--panel-muted);font-size:14px;line-height:18px;cursor:pointer;">☆</button></div><div style="display:flex;align-items:center;gap:3px;flex-shrink:0;"><button type="button" id="btn-high-mode" aria-pressed="false" aria-label="Session highs. Switch to all-time highs" style="display:none;min-width:29px;background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;">SH</button><button type="button" id="btn-panel-options" aria-label="Chart window and highs" aria-expanded="false" aria-controls="panel-options" style="display:none;background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;white-space:nowrap;">Full ▾</button><button type="button" id="btn-standard-size" title="Restore standard panel size (100%)" aria-label="Restore standard panel size" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;">100%</button><button id="btn-toggle" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:9px;padding:1px 4px;flex-shrink:0;">+</button></div></div><div id="panel-options" role="group" aria-label="Chart and high options" style="display:none;position:absolute;right:5px;top:29px;width:190px;max-width:calc(100% - 10px);box-sizing:border-box;z-index:5;padding:8px;background:var(--panel-solid);color:var(--panel-text);border:1px solid #ff69b4;border-radius:4px;font-size:11px;box-shadow:0 3px 12px #0008;"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;"><strong>Charts &amp; highs</strong><button type="button" id="panel-options-close" aria-label="Close chart and high options" style="background:var(--panel-button);color:var(--panel-text);border:0;border-radius:3px;cursor:pointer;">×</button></div><label for="chart-window-select">Chart window</label><select id="chart-window-select" style="display:block;width:100%;margin:4px 0 6px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);font-size:11px;"><option value="full">Full history</option><option value="fourHours">Last 4 hours</option><option value="twoHours">Last 2 hours</option><option value="hour">Last hour</option><option value="halfHour">Last 30 minutes</option><option value="quarter">Last 15 minutes</option></select><div style="font-size:10px;color:var(--panel-muted);line-height:1.4;margin-bottom:8px;">Charts only. Downloads keep the full retained history.</div><input type="file" id="session-file-input" accept=".json,application/json" style="display:none;"><div id="session-file-info" style="display:none;margin-top:7px;font-size:10px;line-height:1.4;white-space:pre-line;overflow-wrap:anywhere;color:var(--panel-secondary);"></div><div style="border-top:1px solid var(--panel-divider);margin-top:8px;padding-top:6px;"><strong>All-time highs</strong><div id="all-time-info" style="font-size:10px;line-height:1.4;margin:4px 0;color:var(--panel-secondary);"></div><button type="button" id="btn-add-all-time" style="display:none;width:100%;margin:4px 0;padding:4px;background:#4169E1;color:#fff;border:0;border-radius:3px;cursor:pointer;">Add to all-time highs</button><button type="button" id="btn-clear-all-time" style="display:block;width:100%;margin:4px 0;padding:4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:3px;cursor:pointer;">Clear all-time highs…</button><div id="all-time-action-status" role="status" style="font-size:10px;line-height:1.4;overflow-wrap:anywhere;color:var(--panel-secondary);"></div></div></div><div id="minimized-view" style="display:block;position:relative;"><div style="display:flex;gap:4px;align-items:center;margin-bottom:3px;"><strong id="mini-room-count" style="color:var(--panel-accent);font-size:13px;">0</strong><span style="color:var(--panel-muted);font-size:8px;">in room</span><span id="mini-room-change" style="margin-left:auto;font-size:8px;"></span></div><div style="display:flex;align-items:center;justify-content:space-between;gap:3px;"><button type="button" id="mini-metric" style="background:transparent;border:0;color:var(--panel-secondary);font:inherit;cursor:pointer;padding:2px 0;" aria-label="Cycle chart metric">Room total ▾</button><button type="button" id="mini-high" style="background:transparent;border:0;padding:0;color:var(--panel-subtle);font-size:8px;cursor:pointer;"></button></div><canvas id="mini-chart" width="140" height="36" style="display:block;width:100%;height:36px;" role="img" aria-label="Recent audience history"></canvas><div style="display:flex;justify-content:space-between;gap:4px;margin:3px 0;"><span title="With Tokens">💎 <span id="mini-withtokens">0</span> <span id="mini-withtokens-change"></span></span><span title="Registered">📊 <span id="mini-total">0</span> <span id="mini-total-change"></span></span></div><div style="display:flex;align-items:center;gap:3px;"><span id="mini-freshness" style="flex:1;min-width:0;font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">No sample</span><button type="button" id="btn-auto" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;cursor:pointer;" title="Pause or resume scans">⏸</button><button type="button" id="mini-settings-toggle" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;cursor:pointer;" aria-label="Scan interval settings" title="Scan interval settings — adjust how often TierScope scans" aria-expanded="false" aria-controls="mini-settings">◷</button><button type="button" id="btn-expand" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;font-size:9px;cursor:pointer;" title="Expand panel" aria-label="Expand panel">↗</button></div><div id="mini-settings" style="display:none;position:absolute;left:0;right:0;top:17px;background:var(--panel-settings);border:1px solid #ff69b4;border-radius:4px;padding:5px;z-index:2;" role="group" aria-label="Scan interval"><div style="display:flex;justify-content:space-between;align-items:center;font-size:9px;color:var(--panel-secondary);">Scan interval <button type="button" id="mini-settings-close" aria-label="Close scan interval settings" title="Close (Escape)" style="background:var(--panel-button);color:var(--panel-text);border:0;border-radius:3px;cursor:pointer;padding:1px 5px;font-size:13px;">×</button></div><div style="display:flex;align-items:center;justify-content:center;gap:3px;margin:3px 0;padding:2px;background:rgba(var(--panel-row-rgb),0.05);border-radius:3px;"><button id="btn-timer-down" style="background:var(--panel-button-strong);border:none;color:var(--panel-text);border-radius:2px;cursor:pointer;font-size:9px;padding:1px 4px;font-weight:bold;">−</button><span id="timer-display" style="font-size:11px;color:var(--panel-warning);font-weight:bold;min-width:28px;">60s</span><button id="btn-timer-up" style="background:var(--panel-button-strong);border:none;color:var(--panel-text);border-radius:2px;cursor:pointer;font-size:9px;padding:1px 4px;font-weight:bold;">+</button></div><div style="display:flex;gap:2px;justify-content:center;margin-top:3px;"><button class="timer-preset" data-time="30" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">30s</button><button class="timer-preset" data-time="60" style="background:#ff69b4;border:1px solid #ff69b4;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">60s</button><button class="timer-preset" data-time="120" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">2m</button><button class="timer-preset" data-time="300" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">5m</button></div><div id="auto-status" style="margin-top:3px;font-size:8px;color:var(--panel-muted);">Starting...</div></div></div><div id="full-view" style="display:none;"><div id="tier-chart-region" style="display:flow-root;">' + collapsedTrayHtml();
     Object.keys(runtime.TIERS).forEach(function(key) {
       var t = runtime.TIERS[key];
       html += '<div id="tier-row-' + key + '" data-tier="' + key + '" style="display:flex;align-items:center;padding:1px 3px;margin:1px 0;background:rgba(var(--panel-row-rgb),calc(0.05 * var(--tier-background-scale, 1)));border-radius:3px;border-left:3px solid ' + t.color + ';"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml(key) + '</div><canvas id="spark-' + key + '" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-' + key + '" style="font-weight:bold;color:' + t.color + ';font-size:14px;">0</span><div id="high-' + key + '" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div>';
     });
-    html += '<div id="summary-tier-rows" style="border-top:1px solid var(--panel-divider);margin-top:4px;padding-top:4px;"><div id="tier-row-withtokens" data-tier="withtokens" style="display:flex;align-items:center;padding:2px 3px;background:rgba(255,105,180,0.15);border-radius:3px;border:1px solid #ff69b4;margin-bottom:3px;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("withtokens") + '</div><canvas id="spark-withtokens" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-withtokens" style="font-weight:bold;color:#ff69b4;font-size:14px;">0</span><span id="pct-withtokens" style="font-size:8px;color:#ff69b4;margin-left:2px;">0%</span><div id="high-withtokens" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div><div id="tier-row-total" data-tier="total" style="display:flex;align-items:center;padding:2px 3px;background:rgba(var(--panel-row-rgb),0.1);border-radius:3px;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("total") + '</div><canvas id="spark-total" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-total" style="font-weight:bold;color:var(--panel-text);font-size:14px;">0</span><div id="high-total" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div></div><div id="tier-row-anon" data-tier="anonymous" style="margin-top:5px;padding:5px;background:rgba(136,136,136,0.15);border-radius:3px;border:1px solid #888;"><div style="display:flex;align-items:center;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("anon") + '</div><canvas id="spark-anon" width="105" height="50" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="anon-ratio-full" style="font-size:13px;font-weight:bold;color:#ff69b4;">--</span><div id="high-anon" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div></div></div><div id="trend-section" style="position:relative;border-top:1px solid #4169E1;margin-top:5px;padding-top:5px;"><div id="live-trend"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;flex-wrap:wrap;gap:2px;"><span id="trend-header-label" style="font-size:9px;font-weight:bold;color:#4169E1;">📈 TREND</span><div style="display:flex;gap:2px;flex-wrap:wrap;"><button class="trend-preset-btn" data-mode="last" style="background:#4169E1;border:1px solid #4169E1;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Last</button><button class="trend-preset-btn" data-mode="5min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">5m</button><button class="trend-preset-btn" data-mode="15min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">15m</button><button class="trend-preset-btn" data-mode="30min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">30m</button><button class="trend-preset-btn" data-mode="1hour" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">1h</button><button class="trend-preset-btn" data-mode="start" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Start</button><button id="btn-trend-auto" style="background:#32CD32;border:1px solid #32CD32;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;" title="Auto-escalation ON - Click to disable">AUTO</button></div></div><div id="trend-container" style="min-height:30px;"><div style="font-size:8px;color:var(--panel-faint);text-align:center;padding:8px;">Waiting for scan...</div></div></div><div id="playback-controls" style="display:none;position:absolute;top:5px;left:0;right:0;bottom:0;padding:0 2px;box-sizing:border-box;grid-template-rows:minmax(14px,1fr) 14px 12px;gap:2px;" aria-label="Playback controls"><div style="display:flex;flex-direction:column;justify-content:center;gap:4px;min-width:0;"><div id="playback-file-controls" style="display:none;align-items:center;gap:4px;min-width:0;"><div id="playback-room" style="display:none;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;line-height:12px;font-weight:bold;color:var(--panel-text);"></div></div><div style="display:flex;align-items:center;justify-content:space-between;gap:3px;"><strong id="playback-label" style="font-size:9px;color:var(--panel-warning);">PLAYBACK</strong><button id="playback-play" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#4169E1;color:white;border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Pause</button><select id="playback-speed" aria-label="Playback speed" style="font-size:8px;height:15px;margin:0;padding:0;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select><button type="button" id="btn-playback-library" aria-label="Open session library" aria-expanded="false" aria-controls="tierscope-session-tools" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-accent);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Library</button><button id="playback-return" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Return to Live</button></div></div><div style="display:flex;align-items:center;gap:4px;min-width:0;"><button type="button" id="playback-previous" title="Previous recorded sample (pauses Replay)" aria-label="Previous recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">|&#9664;</button><input id="playback-scrubber" type="range" min="0" max="0" value="0" step="any" aria-label="Playback timeline" style="flex:1;min-width:0;width:100%;height:12px;margin:0;accent-color:var(--panel-warning);cursor:pointer;"><button type="button" id="playback-next" title="Next recorded sample (pauses Replay)" aria-label="Next recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">&#9654;|</button></div><div id="playback-file-actions" style="display:flex;justify-content:center;min-width:0;"><div id="playback-position" style="font-size:9px;line-height:12px;text-align:center;white-space:nowrap;color:var(--panel-secondary);font-family:monospace;">00:00:00 / 00:00:00</div></div></div></div><div id="control-field" style="margin-top:5px;padding:4px;background:rgba(65,105,225,0.15);border-radius:3px;border:1px solid #4169E1;"><div id="control-session-row" style="display:grid;grid-template-columns:max-content max-content minmax(0,1fr);align-items:center;gap:3px;margin-bottom:4px;white-space:nowrap;"><span style="font-size:9px;font-weight:bold;color:#4169E1;">🎛️ CONTROLS</span><span style="font-size:12px;color:var(--panel-warning);font-family:monospace;font-weight:bold;width:9ch;text-align:center;font-variant-numeric:tabular-nums;" id="control-tracking-timer">00:00:00</span><span style="min-width:0;text-align:right;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums;font-size:11px;color:var(--panel-positive);font-weight:bold;" id="control-next-scan">Next: 60s</span></div><div id="control-action-row" style="display:grid;grid-template-columns:minmax(max-content,1fr) auto minmax(0,1fr);align-items:center;gap:3px;"><div id="control-session-buttons" style="display:flex;gap:2px;align-items:center;"><button type="button" id="btn-control-library" aria-expanded="false" aria-controls="tierscope-session-tools" aria-label="Open session library" title="Open model folders, session summaries, comparisons and backups" style="font-size:8px;line-height:10px;height:14px;min-width:38px;box-sizing:border-box;margin:0;padding:2px 3px;background:var(--panel-button);color:var(--panel-accent);border:none;border-radius:3px;cursor:pointer;">Library</button><button id="btn-replay" style="font-size:8px;line-height:10px;height:14px;min-width:38px;box-sizing:border-box;margin:0;padding:2px 3px;background:var(--panel-button);color:var(--panel-warning);border:none;border-radius:3px;cursor:pointer;" title="Replay recorded history">Replay</button></div><div id="control-action-buttons" style="display:flex;gap:2px;align-items:center;"><button id="btn-control-auto" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#32CD32;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 4px;min-width:24px;" title="Auto-Refresh ON">⏸</button><button type="button" id="btn-control-stop" aria-label="Stop this session" title="Stop this session and freeze its history and elapsed time" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;white-space:nowrap;">■ Stop</button><button id="btn-main-reset" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Reset all tracking data"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12"/><path d="M3 3v9h9"/></svg>Reset</button></div><style>#dark-mode-control #dark-mode-track{position:relative;display:block;flex:0 0 22px;width:22px;height:12px;box-sizing:border-box;border:1px solid #9b701d;border-radius:7px;background:#e8b444;transition:background-color .16s ease;}#dark-mode-control #dark-mode-thumb{position:absolute;left:1px;top:1px;width:8px;height:8px;border-radius:50%;background:#4c3300;transform:translateX(10px);transition:transform .16s ease,background-color .16s ease;}#dark-mode-control #dark-mode-moon{color:var(--panel-muted);opacity:.55;}#dark-mode-control #dark-mode-sun{color:#825d00;}#dark-mode-control #dark-mode-toggle:checked~#dark-mode-track{background:#4169e1;border-color:#8ca8ff;}#dark-mode-control #dark-mode-toggle:checked~#dark-mode-track #dark-mode-thumb{transform:translateX(0);background:#fff;}#dark-mode-control #dark-mode-toggle:checked~#dark-mode-moon{color:#b4c5ff;opacity:1;}#dark-mode-control #dark-mode-toggle:checked~#dark-mode-sun{color:var(--panel-muted);opacity:.55;}#dark-mode-control #dark-mode-toggle:focus-visible~#dark-mode-track{outline:2px solid var(--panel-accent);outline-offset:2px;}@media(prefers-reduced-motion:reduce){#dark-mode-control #dark-mode-track,#dark-mode-control #dark-mode-thumb{transition:none;}}</style><label id="dark-mode-control" style="position:relative;justify-self:end;display:inline-flex;align-items:center;gap:2px;height:14px;cursor:pointer;line-height:1;"><input type="checkbox" role="switch" id="dark-mode-toggle" checked aria-label="Dark mode" style="position:absolute;inset:0;z-index:1;width:100%;height:100%;box-sizing:border-box;margin:0;padding:0;border:0;opacity:0;cursor:pointer;"><svg id="dark-mode-moon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" style="flex:none;"><path d="M21 13a9 9 0 0 1-10-10 9 9 0 1 0 10 10Z"/></svg><span id="dark-mode-track" aria-hidden="true"><span id="dark-mode-thumb"></span></span><svg id="dark-mode-sun" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" style="flex:none;"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg></label></div></div><div id="tracker-footer" style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:4px;margin-top:5px;min-height:14px;"><div id="acquisition-status" style="max-width:80px;font-size:7px;color:var(--panel-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="No accepted sample yet">No sample</div><div id="background-slider-controls" style="display:flex;align-items:center;gap:3px;min-width:0;"><svg width="11" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--panel-warning)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink:0;"><path d="M9 18h6M10 22h4M8 14a6 6 0 1 1 8 0c-1 1-1 2-1 4H9c0-2 0-3-1-4Z"/></svg><input type="range" id="opacity-slider" min="30" max="100" value="95" aria-label="Background opacity" style="flex:1;min-width:0;width:100%;height:12px;margin:0;cursor:pointer;accent-color:#ff69b4;" title="Main and standard tier background opacity"><span id="opacity-value" style="font-size:8px;color:var(--panel-secondary);min-width:23px;">95%</span></div><div id="tierscope-logo" style="justify-self:end;display:flex;flex-direction:column;align-items:center;gap:0;white-space:nowrap;opacity:0.6;transition:opacity 0.2s;" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0.6"><div style="display:flex;align-items:center;gap:3px;height:8px;"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#ff69b4" stroke-width="2" style="flex-shrink:0;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="2" x2="12" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/></svg><span title="TierScope ' + runtime.TIERSCOPE_VERSION + `" style="font-size:7px;line-height:8px;font-family:'Courier New',monospace;font-weight:bold;color:var(--panel-accent);letter-spacing:1px;">TIERSCOPE</span></div><span id="tierscope-version" style="font:5px/6px Arial,sans-serif;letter-spacing:.15px;color:var(--panel-muted);">` + runtime.TIERSCOPE_VERSION + "</span></div></div></div>";
+    html += '<div id="summary-tier-rows" style="border-top:1px solid var(--panel-divider);margin-top:4px;padding-top:4px;"><div id="tier-row-withtokens" data-tier="withtokens" style="display:flex;align-items:center;padding:2px 3px;background:rgba(255,105,180,0.15);border-radius:3px;border:1px solid #ff69b4;margin-bottom:3px;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("withtokens") + '</div><canvas id="spark-withtokens" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-withtokens" style="font-weight:bold;color:#ff69b4;font-size:14px;">0</span><span id="pct-withtokens" style="font-size:8px;color:#ff69b4;margin-left:2px;">0%</span><div id="high-withtokens" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div><div id="tier-row-total" data-tier="total" style="display:flex;align-items:center;padding:2px 3px;background:rgba(var(--panel-row-rgb),0.1);border-radius:3px;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("total") + '</div><canvas id="spark-total" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-total" style="font-weight:bold;color:var(--panel-text);font-size:14px;">0</span><div id="high-total" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div></div><div id="tier-row-anon" data-tier="anonymous" style="margin-top:5px;padding:5px;background:rgba(136,136,136,0.15);border-radius:3px;border:1px solid #888;"><div style="display:flex;align-items:center;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("anon") + '</div><canvas id="spark-anon" width="105" height="50" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="anon-ratio-full" style="font-size:13px;font-weight:bold;color:#ff69b4;">--</span><div id="high-anon" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div></div><div id="tier-row-roomTotal" data-tier="roomTotal" style="display:flex;align-items:center;padding:2px 3px;margin-top:3px;border:1px solid var(--panel-warning);border-radius:3px;background:rgba(255,212,59,.08);"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("roomTotal") + '</div><canvas id="spark-roomTotal" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-roomTotal" style="font-weight:bold;color:var(--panel-warning);font-size:14px;">0</span><div id="high-roomTotal" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div></div><div id="trend-section" style="position:relative;border-top:1px solid #4169E1;margin-top:5px;padding-top:5px;"><div id="live-trend"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;flex-wrap:wrap;gap:2px;"><span id="trend-header-label" style="font-size:9px;font-weight:bold;color:#4169E1;">📈 TREND</span><div style="display:flex;gap:2px;flex-wrap:wrap;"><button class="trend-preset-btn" data-mode="last" style="background:#4169E1;border:1px solid #4169E1;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Last</button><button class="trend-preset-btn" data-mode="5min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">5m</button><button class="trend-preset-btn" data-mode="15min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">15m</button><button class="trend-preset-btn" data-mode="30min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">30m</button><button class="trend-preset-btn" data-mode="1hour" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">1h</button><button class="trend-preset-btn" data-mode="start" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Start</button><button id="btn-trend-auto" style="background:#32CD32;border:1px solid #32CD32;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;" title="Auto-escalation ON - Click to disable">AUTO</button></div></div><div id="trend-container" style="min-height:30px;"><div style="font-size:8px;color:var(--panel-faint);text-align:center;padding:8px;">Waiting for scan...</div></div></div><div id="playback-controls" style="display:none;position:absolute;top:5px;left:0;right:0;bottom:0;padding:0 2px;box-sizing:border-box;grid-template-rows:minmax(14px,1fr) 14px 12px;gap:2px;" aria-label="Playback controls"><div style="display:flex;flex-direction:column;justify-content:center;gap:4px;min-width:0;"><div id="playback-file-controls" style="display:none;align-items:center;gap:4px;min-width:0;"><div id="playback-room" style="display:none;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;line-height:12px;font-weight:bold;color:var(--panel-text);"></div></div><div style="display:flex;align-items:center;justify-content:space-between;gap:3px;"><strong id="playback-label" style="font-size:9px;color:var(--panel-warning);">PLAYBACK</strong><button id="playback-play" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#4169E1;color:white;border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Pause</button><select id="playback-speed" aria-label="Playback speed" style="font-size:8px;height:15px;margin:0;padding:0;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select><button type="button" id="btn-playback-library" aria-label="Open session library" aria-expanded="false" aria-controls="tierscope-session-tools" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-accent);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Library</button><button id="playback-return" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Return to Live</button></div></div><div style="display:flex;align-items:center;gap:4px;min-width:0;"><button type="button" id="playback-previous" title="Previous recorded sample (pauses Replay)" aria-label="Previous recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">|&#9664;</button><input id="playback-scrubber" type="range" min="0" max="0" value="0" step="any" aria-label="Playback timeline" style="flex:1;min-width:0;width:100%;height:12px;margin:0;accent-color:var(--panel-warning);cursor:pointer;"><button type="button" id="playback-next" title="Next recorded sample (pauses Replay)" aria-label="Next recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">&#9654;|</button></div><div id="playback-file-actions" style="display:flex;justify-content:center;min-width:0;"><div id="playback-position" style="font-size:9px;line-height:12px;text-align:center;white-space:nowrap;color:var(--panel-secondary);font-family:monospace;">00:00:00 / 00:00:00</div></div></div></div><div id="control-field" style="margin-top:5px;padding:4px;background:rgba(65,105,225,0.15);border-radius:3px;border:1px solid #4169E1;"><div id="control-session-row" style="display:grid;grid-template-columns:max-content max-content minmax(0,1fr);align-items:center;gap:3px;margin-bottom:4px;white-space:nowrap;"><span style="font-size:9px;font-weight:bold;color:#4169E1;">🎛️ CONTROLS</span><span style="font-size:12px;color:var(--panel-warning);font-family:monospace;font-weight:bold;width:9ch;text-align:center;font-variant-numeric:tabular-nums;" id="control-tracking-timer">00:00:00</span><span style="min-width:0;text-align:right;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums;font-size:11px;color:var(--panel-positive);font-weight:bold;" id="control-next-scan">Next: 60s</span></div><div id="control-action-row" style="display:grid;grid-template-columns:minmax(max-content,1fr) auto minmax(0,1fr);align-items:center;gap:3px;"><div id="control-session-buttons" style="display:flex;gap:2px;align-items:center;"><button type="button" id="btn-control-library" aria-expanded="false" aria-controls="tierscope-session-tools" aria-label="Open session library" title="Open model folders, session summaries, comparisons and backups" style="font-size:8px;line-height:10px;height:14px;min-width:38px;box-sizing:border-box;margin:0;padding:2px 3px;background:var(--panel-button);color:var(--panel-accent);border:none;border-radius:3px;cursor:pointer;">Library</button><button id="btn-replay" style="font-size:8px;line-height:10px;height:14px;min-width:38px;box-sizing:border-box;margin:0;padding:2px 3px;background:var(--panel-button);color:var(--panel-warning);border:none;border-radius:3px;cursor:pointer;" title="Replay recorded history">Replay</button></div><div id="control-action-buttons" style="display:flex;gap:2px;align-items:center;"><button id="btn-control-auto" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#32CD32;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 4px;min-width:24px;" title="Auto-Refresh ON">⏸</button><button type="button" id="btn-control-stop" aria-label="Stop this session" title="Stop this session and freeze its history and elapsed time" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;white-space:nowrap;">■ Stop</button><button id="btn-main-reset" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Reset all tracking data"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12"/><path d="M3 3v9h9"/></svg>Reset</button></div><style>#dark-mode-control #dark-mode-track{position:relative;display:block;flex:0 0 22px;width:22px;height:12px;box-sizing:border-box;border:1px solid #9b701d;border-radius:7px;background:#e8b444;transition:background-color .16s ease;}#dark-mode-control #dark-mode-thumb{position:absolute;left:1px;top:1px;width:8px;height:8px;border-radius:50%;background:#4c3300;transform:translateX(10px);transition:transform .16s ease,background-color .16s ease;}#dark-mode-control #dark-mode-moon{color:var(--panel-muted);opacity:.55;}#dark-mode-control #dark-mode-sun{color:#825d00;}#dark-mode-control #dark-mode-toggle:checked~#dark-mode-track{background:#4169e1;border-color:#8ca8ff;}#dark-mode-control #dark-mode-toggle:checked~#dark-mode-track #dark-mode-thumb{transform:translateX(0);background:#fff;}#dark-mode-control #dark-mode-toggle:checked~#dark-mode-moon{color:#b4c5ff;opacity:1;}#dark-mode-control #dark-mode-toggle:checked~#dark-mode-sun{color:var(--panel-muted);opacity:.55;}#dark-mode-control #dark-mode-toggle:focus-visible~#dark-mode-track{outline:2px solid var(--panel-accent);outline-offset:2px;}@media(prefers-reduced-motion:reduce){#dark-mode-control #dark-mode-track,#dark-mode-control #dark-mode-thumb{transition:none;}}</style><label id="dark-mode-control" style="position:relative;justify-self:end;display:inline-flex;align-items:center;gap:2px;height:14px;cursor:pointer;line-height:1;"><input type="checkbox" role="switch" id="dark-mode-toggle" checked aria-label="Dark mode" style="position:absolute;inset:0;z-index:1;width:100%;height:100%;box-sizing:border-box;margin:0;padding:0;border:0;opacity:0;cursor:pointer;"><svg id="dark-mode-moon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" style="flex:none;"><path d="M21 13a9 9 0 0 1-10-10 9 9 0 1 0 10 10Z"/></svg><span id="dark-mode-track" aria-hidden="true"><span id="dark-mode-thumb"></span></span><svg id="dark-mode-sun" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" style="flex:none;"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg></label></div></div><div id="tracker-footer" style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:4px;margin-top:5px;min-height:18px;"><div id="acquisition-status" style="max-width:80px;font-size:7px;color:var(--panel-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="No accepted sample yet">No sample</div><div id="background-slider-controls" style="display:flex;align-items:center;gap:3px;min-width:0;"><svg width="11" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--panel-warning)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink:0;"><path d="M9 18h6M10 22h4M8 14a6 6 0 1 1 8 0c-1 1-1 2-1 4H9c0-2 0-3-1-4Z"/></svg><input type="range" id="opacity-slider" min="30" max="100" value="95" aria-label="Background opacity" style="flex:1;min-width:0;width:100%;height:12px;margin:0;cursor:pointer;accent-color:#ff69b4;" title="Main and standard tier background opacity"><span id="opacity-value" style="font-size:8px;color:var(--panel-secondary);min-width:23px;">95%</span></div><div id="tierscope-logo" style="justify-self:end;display:flex;flex-direction:column;align-items:center;gap:0;white-space:nowrap;" onmouseenter="this.firstElementChild.style.opacity=1" onmouseleave="this.firstElementChild.style.opacity=0.6"><div style="display:flex;align-items:center;gap:3px;height:8px;opacity:0.6;transition:opacity 0.2s;"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#ff69b4" stroke-width="2" style="flex-shrink:0;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="2" x2="12" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/></svg><span title="TierScope ' + runtime.TIERSCOPE_VERSION + `" style="font-size:7px;line-height:8px;font-family:'Courier New',monospace;font-weight:bold;color:var(--panel-accent);letter-spacing:1px;">TIERSCOPE</span></div><span id="tierscope-version" style="font:bold 8px/10px Arial,sans-serif;letter-spacing:.15px;color:var(--panel-secondary);">` + runtime.TIERSCOPE_VERSION + "</span></div></div></div>";
     div.innerHTML = html;
     document.body.appendChild(div);
     applyPanelTheme(false);
@@ -8670,6 +8930,22 @@ underlying system, so should run in the browser, Node, or Plask.
         updateContainerOpacity(this.value);
       });
     }
+    const modelFavorite = document.getElementById("btn-model-favorite");
+    modelFavorite.onmousedown = (event) => event.stopPropagation();
+    modelFavorite.onclick = (event) => {
+      event.stopPropagation();
+      const room = modelFavorite.dataset.favoriteRoom;
+      try {
+        if (room && room !== "unknown" && changeModelFavorite(room)) {
+          document.querySelectorAll("[data-favorite-room]").forEach((button) => {
+            if (button.dataset.favoriteRoom === room) paintFavoriteButton(button, room, readModelFavorite(room));
+          });
+          updateSessionToolsStatus(true);
+        }
+      } catch (error) {
+        alert("Favorite could not be changed: " + error.message);
+      }
+    };
     bindPanelOptions();
     bindPlaybackControls();
     bindRowControls();
@@ -8925,10 +9201,10 @@ underlying system, so should run in the browser, Node, or Plask.
       }
       leavePlayback(false);
       var oldModel = getModelNameFromUrl(runtime.lastUrl);
-      runtime.lastUrl = location.href;
       if (oldModel && oldModel !== "unknown") {
-        saveSession(oldModel);
+        saveSession(oldModel, true);
       }
+      runtime.lastUrl = location.href;
       runtime.activeSessionStorageKey = null;
       stopCountdown();
       resetAcquisitionForRoom();
@@ -8949,7 +9225,7 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/bootstrap.js
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.15.0";
+    runtime.TIERSCOPE_VERSION = "3.16.0";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;
@@ -9198,7 +9474,8 @@ underlying system, so should run in the browser, Node, or Plask.
     }).concat([
       { key: "withtokens", label: "With Tokens", icon: "💎", color: "#ff69b4", height: 28, display: "flex" },
       { key: "total", label: "Registered", icon: "📊", color: "#ffffff", height: 28, display: "flex" },
-      { key: "anon", label: "Anonymous", icon: "👻", color: "#888888", height: 50, display: "block" }
+      { key: "anon", label: "Anonymous", icon: "👻", color: "#888888", height: 50, display: "block" },
+      { key: "roomTotal", label: "Room Total", icon: "👥", color: "var(--panel-warning)", height: 28, display: "flex" }
     ]);
     runtime.collapsedRows = loadCollapsedRows();
     runtime.panelChartHeights = {};
@@ -9302,7 +9579,7 @@ underlying system, so should run in the browser, Node, or Plask.
       leavePlayback(false);
       var modelName = getModelName();
       if (modelName && modelName !== "unknown") {
-        saveSession(modelName);
+        saveSession(modelName, true);
       }
     });
     if (document.readyState === "loading") {

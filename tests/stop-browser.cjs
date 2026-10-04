@@ -48,14 +48,14 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   await page.getByRole('button',{name:'Stop this session'}).click();
   assert.equal(dialogs.length,2);assert.deepEqual(dialogs[1],dialogs[0]);
   assert.equal(await page.locator('#control-next-scan').textContent(),'Stopped');assert.equal(await page.locator('#btn-control-auto').textContent(),'Start');
-  assert.match(await page.locator('#header-text').textContent(),/^STOPPED:/);assert(await page.locator('#btn-control-stop').isDisabled());
+  assert.match(await page.locator('#header-text').getAttribute('title'),/^Stopped session:/);assert(await page.locator('#btn-control-stop').isDisabled());
   assert.deepEqual(await panel.boundingBox(),before,'Stop adds no panel height');
   const stopped=await page.evaluate(()=>ViewerTracker.__stop.state()),n=requests;
   await page.evaluate(()=>ViewerTracker.__stop.tick());await page.evaluate(()=>ViewerTracker.__stop.scan());await page.evaluate(()=>ViewerTracker.__stop.draw());
   assert.equal(requests,n);assert.deepEqual(await page.evaluate(()=>ViewerTracker.__stop.state()),stopped);
   assert.equal(await page.locator('#spark-light-blue').evaluate(c=>c.toDataURL()),frozen,'stopped chart keeps exactly the same pixels');
   await page.click('#btn-replay');await page.evaluate(()=>ViewerTracker.__stop.pauseReplay());await page.click('#btn-playback-library');assert(await page.locator('#btn-export-gif').isVisible());await page.click('#playback-return');
-  assert.match(await page.locator('#header-text').textContent(),/^STOPPED:/);
+  assert.match(await page.locator('#header-text').getAttribute('title'),/^Stopped session:/);
   const downloadPromise=page.waitForEvent('download');await page.click('#tools-export-csv');const download=await downloadPromise;assert(download.suggestedFilename().endsWith('.csv'));
   await page.reload();await page.addScriptTag({content:instrument(source)});await page.evaluate(()=>ViewerTracker.__stop.init());
   assert.equal(requests,n);assert((await page.evaluate(()=>ViewerTracker.__stop.state())).stopped);

@@ -2,6 +2,7 @@ import { drawSparkline, hideChartTooltip } from './chart-view.js';
 import { getHistoryBreaks } from './history-data.js';
 import { applyRowLayout } from './row-layout.js';
 import { runtime } from './runtime.js';
+import { roomTotalSeries } from './room-total-series.js';
 import { themeColor } from './theme-values.js';
 
 // Preserve first/last and extrema in each pixel column, in sample order.
@@ -19,7 +20,7 @@ export function drawHistorySparklines(displayHistory, lastIndex, replayProgress)
     runtime.PANEL_ROWS.forEach(function(row) {
         if (runtime.collapsedRows.has(row.key)) return;
         var key = row.key === 'withtokens' ? 'withTokens' : row.key === 'anon' ? 'anonymous' : row.key;
-        drawSparkline('spark-' + row.key, displayHistory[key], row.key === 'total' ? themeColor('text') : row.color,
+        drawSparkline('spark-' + row.key, key === 'roomTotal' ? roomTotalSeries(displayHistory) : displayHistory[key], row.key === 'total' ? themeColor('text') : row.key === 'roomTotal' ? themeColor('warning') : row.color,
             runtime.panelChartHeights[row.key] || row.height, displayHistory.timestamps, breaks, lastIndex, row.label, replayProgress);
     });
 }

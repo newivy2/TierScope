@@ -26,11 +26,18 @@ export function pulseAcceptedHighs(priorState) {
             var key = row.key === 'withtokens' ? 'withTokens' : row.key === 'anon' ? 'anonymous' : row.key;
             var atHigh = runtime.newHighTiers[key], wasAtHigh = priorState.newHighTiers[key];
             var previousHigh = priorState.sessionHighs[key];
-            var raisedHigh = runtime.sessionHighs[key].value > (previousHigh ? previousHigh.value : 0);
+            var raisedHigh = key === 'roomTotal' ? runtime.roomTotalHigh > priorState.roomTotalHigh :
+                runtime.sessionHighs[key].value > (previousHigh ? previousHigh.value : 0);
+            if (key === 'roomTotal') {
+                var currentRoom = runtime.history.total.at(-1) + runtime.history.anonymous.at(-1);
+                var previousRoom = priorState.history.total.at(-1) + priorState.history.anonymous.at(-1);
+                atHigh = currentRoom > 0 && currentRoom >= runtime.roomTotalHigh;
+                wasAtHigh = previousRoom > 0 && previousRoom >= priorState.roomTotalHigh;
+            }
             if (runtime.highMode === 'ath') {
                 var high = displayedAllTimeState().highs[key], before = priorState.allTimeHighs[key];
-                var current = runtime.history[key][runtime.history[key].length - 1];
-                var oldValue = priorState.history[key][priorState.history[key].length - 1];
+                var current = key === 'roomTotal' ? currentRoom : runtime.history[key].at(-1);
+                var oldValue = key === 'roomTotal' ? previousRoom : priorState.history[key].at(-1);
                 atHigh = high.source && current > 0 && current >= high.value;
                 wasAtHigh = priorState.lastAcceptedAcquisition && before.source && oldValue > 0 && oldValue >= before.value;
                 raisedHigh = high.value > before.value;

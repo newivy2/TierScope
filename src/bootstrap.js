@@ -228,7 +228,8 @@ export function initializeRuntime() {
     }).concat([
         { key: 'withtokens', label: 'With Tokens', icon: '💎', color: '#ff69b4', height: 28, display: 'flex' },
         { key: 'total', label: 'Registered', icon: '📊', color: '#ffffff', height: 28, display: 'flex' },
-        { key: 'anon', label: 'Anonymous', icon: '👻', color: '#888888', height: 50, display: 'block' }
+        { key: 'anon', label: 'Anonymous', icon: '👻', color: '#888888', height: 50, display: 'block' },
+        { key: 'roomTotal', label: 'Room Total', icon: '👥', color: 'var(--panel-warning)', height: 28, display: 'flex' }
     ]);
     runtime.collapsedRows = loadCollapsedRows();
     runtime.panelChartHeights = {};
@@ -314,7 +315,7 @@ export function initializeRuntime() {
         leavePlayback(false);
         var modelName = getModelName();
         if (modelName && modelName !== 'unknown') {
-            saveSession(modelName);
+            saveSession(modelName, true);
         }
     });
     if (document.readyState === 'loading') {

@@ -61,7 +61,7 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
       separate:slider.right<=logo.left,footerHeight:document.getElementById('tracker-footer').clientHeight};
   });
   assert(versionLayout.inside&&versionLayout.separate,'version fits below the logo without touching the opacity controls');
-  assert.equal(versionLayout.footerHeight,14,'version fits the existing footer height');
+  assert.equal(versionLayout.footerHeight,18,'readable version fits its footer without overlapping controls');
   const dark=await styles();assert.equal(dark.panel,'rgba(20, 20, 30, 0.95)');assert.equal(dark.totalLine,'#ffffff');
   const controls=await page.locator('#control-field').boundingBox(),toggle=await page.locator('#dark-mode-control').boundingBox(),actions=await page.locator('#control-action-buttons').boundingBox();
   assert(toggle.x>=actions.x+actions.width,'toggle does not overlap centered action buttons');

@@ -31,3 +31,12 @@ test('redundant snapshot aliases follow the representative without merging indep
  drafts.edit(entry(),'Second');drafts.reconcile([next]);assert.equal(drafts.size,2);
  drafts.discard('two');assert.equal(drafts.list()[0].value,'Second');
 });
+
+test('proven automatic updates carry drafts forward; deletion and reimport do not claim them',async()=>{
+ const {createLibraryDrafts}=await owner,drafts=createLibraryDrafts(),first={...entry('one'),lineage:'original'};
+ drafts.edit(first,'Draft while recording');const updated={...entry('two'),lineage:'original'};
+ drafts.reconcile([updated]);assert.equal(drafts.read(updated).value,'Draft while recording');assert.equal(drafts.read(first).id,'two');
+ drafts.edit(first,'Still editing the open card');assert.equal(drafts.size,1);drafts.reconcile([updated]);
+ assert.equal(drafts.read(updated).value,'Still editing the open card');
+ const imported={...entry('three'),lineage:'new-import'};drafts.reconcile([imported]);assert.equal(drafts.read(imported).dirty,false);assert.equal(drafts.size,1);
+});

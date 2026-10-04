@@ -1,0 +1,442 @@
+{
+  "version": "3.16.0-beta.1",
+  "date": "2026-10-04",
+  "userscriptSha256": "c8503928dc39b5ffc15693f5bcc1b3cc7b90bcff6ff5fed55cf18005f73b343e",
+  "method": "Three Chromium runs per case at 1x and 4x CPU throttle; in-memory GM storage; checkpoint calls without an open Library. No timing pass/fail gate.",
+  "runs": [
+    {
+      "source": "tierscope.user.js",
+      "historyMode": false,
+      "compareMode": false,
+      "automaticMode": true,
+      "cpuThrottle": 1,
+      "rounds": 3,
+      "cases": [
+        {
+          "label": "small",
+          "version": "3.16.0-beta.1",
+          "recordings": 12,
+          "samplesPerRecording": 300,
+          "bytes": 208430,
+          "measurements": [
+            {
+              "firstCheckpoint": {
+                "ms": 6,
+                "storageReads": 12
+              },
+              "cachedCheckpoint": {
+                "ms": 3.2000000029802322,
+                "storageReads": 29
+              },
+              "unchangedSave": {
+                "ms": 0,
+                "storageReads": 0
+              },
+              "backupRecordings": 12,
+              "heap": {
+                "before": 2113984,
+                "open": 2287924,
+                "closed": 2287924
+              }
+            },
+            {
+              "firstCheckpoint": {
+                "ms": 4.700000002980232,
+                "storageReads": 12
+              },
+              "cachedCheckpoint": {
+                "ms": 3.100000001490116,
+                "storageReads": 29
+              },
+              "unchangedSave": {
+                "ms": 0,
+                "storageReads": 0
+              },
+              "backupRecordings": 12,
+              "heap": {
+                "before": 2113984,
+                "open": 2287924,
+                "closed": 2287924
+              }
+            },
+            {
+              "firstCheckpoint": {
+                "ms": 4.800000000745058,
+                "storageReads": 12
+              },
+              "cachedCheckpoint": {
+                "ms": 3.099999997764826,
+                "storageReads": 29
+              },
+              "unchangedSave": {
+                "ms": 0,
+                "storageReads": 0
+              },
+              "backupRecordings": 12,
+              "heap": {
+                "before": 2113984,
+                "open": 2287924,
+                "closed": 2287924
+              }
+            }
+          ]
+        },
+        {
+          "label": "many",
+          "version": "3.16.0-beta.1",
+          "recordings": 500,
+          "samplesPerRecording": 500,
+          "bytes": 14102890,
+          "measurements": [
+            {
+              "firstCheckpoint": {
+                "ms": 121.19999999925494,
+                "storageReads": 500
+              },
+              "cachedCheckpoint": {
+                "ms": 6.800000000745058,
+                "storageReads": 1005
+              },
+              "unchangedSave": {
+                "ms": 0.10000000149011612,
+                "storageReads": 0
+              },
+              "backupRecordings": 500,
+              "heap": {
+                "before": 16182404,
+                "open": 18811640,
+                "closed": 18811640
+              }
+            },
+            {
+              "firstCheckpoint": {
+                "ms": 124.29999999701977,
+                "storageReads": 500
+              },
+              "cachedCheckpoint": {
+                "ms": 8.100000001490116,
+                "storageReads": 1005
+              },
+              "unchangedSave": {
+                "ms": 0.09999999776482582,
+                "storageReads": 0
+              },
+              "backupRecordings": 500,
+              "heap": {
+                "before": 16182404,
+                "open": 18811376,
+                "closed": 18811376
+              }
+            },
+            {
+              "firstCheckpoint": {
+                "ms": 126.69999999925494,
+                "storageReads": 500
+              },
+              "cachedCheckpoint": {
+                "ms": 7.400000002235174,
+                "storageReads": 1005
+              },
+              "unchangedSave": {
+                "ms": 0.19999999925494194,
+                "storageReads": 0
+              },
+              "backupRecordings": 500,
+              "heap": {
+                "before": 16182404,
+                "open": 18811664,
+                "closed": 18811664
+              }
+            }
+          ]
+        },
+        {
+          "label": "long",
+          "version": "3.16.0-beta.1",
+          "recordings": 36,
+          "samplesPerRecording": 10000,
+          "bytes": 19543058,
+          "measurements": [
+            {
+              "firstCheckpoint": {
+                "ms": 200.79999999701977,
+                "storageReads": 36
+              },
+              "cachedCheckpoint": {
+                "ms": 72,
+                "storageReads": 77
+              },
+              "unchangedSave": {
+                "ms": 0.09999999776482582,
+                "storageReads": 0
+              },
+              "backupRecordings": 36,
+              "heap": {
+                "before": 23691588,
+                "open": 28248844,
+                "closed": 28248844
+              }
+            },
+            {
+              "firstCheckpoint": {
+                "ms": 192.60000000149012,
+                "storageReads": 36
+              },
+              "cachedCheckpoint": {
+                "ms": 63.20000000298023,
+                "storageReads": 77
+              },
+              "unchangedSave": {
+                "ms": 0,
+                "storageReads": 0
+              },
+              "backupRecordings": 36,
+              "heap": {
+                "before": 23691296,
+                "open": 28248432,
+                "closed": 28248432
+              }
+            },
+            {
+              "firstCheckpoint": {
+                "ms": 191.5,
+                "storageReads": 36
+              },
+              "cachedCheckpoint": {
+                "ms": 60.400000002235174,
+                "storageReads": 77
+              },
+              "unchangedSave": {
+                "ms": 0,
+                "storageReads": 0
+              },
+              "backupRecordings": 36,
+              "heap": {
+                "before": 23691336,
+                "open": 28248472,
+                "closed": 28248472
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "source": "tierscope.user.js",
+      "historyMode": false,
+      "compareMode": false,
+      "automaticMode": true,
+      "cpuThrottle": 4,
+      "rounds": 3,
+      "cases": [
+        {
+          "label": "small",
+          "version": "3.16.0-beta.1",
+          "recordings": 12,
+          "samplesPerRecording": 300,
+          "bytes": 208430,
+          "measurements": [
+            {
+              "firstCheckpoint": {
+                "ms": 42.100000001490116,
+                "storageReads": 12
+              },
+              "cachedCheckpoint": {
+                "ms": 14.200000002980232,
+                "storageReads": 29
+              },
+              "unchangedSave": {
+                "ms": 0,
+                "storageReads": 0
+              },
+              "backupRecordings": 12,
+              "heap": {
+                "before": 2113984,
+                "open": 2287924,
+                "closed": 2287924
+              }
+            },
+            {
+              "firstCheckpoint": {
+                "ms": 24.699999999254942,
+                "storageReads": 12
+              },
+              "cachedCheckpoint": {
+                "ms": 15.300000000745058,
+                "storageReads": 29
+              },
+              "unchangedSave": {
+                "ms": 0.09999999776482582,
+                "storageReads": 0
+              },
+              "backupRecordings": 12,
+              "heap": {
+                "before": 2113984,
+                "open": 2287924,
+                "closed": 2287924
+              }
+            },
+            {
+              "firstCheckpoint": {
+                "ms": 24.899999998509884,
+                "storageReads": 12
+              },
+              "cachedCheckpoint": {
+                "ms": 14.100000001490116,
+                "storageReads": 29
+              },
+              "unchangedSave": {
+                "ms": 0.10000000149011612,
+                "storageReads": 0
+              },
+              "backupRecordings": 12,
+              "heap": {
+                "before": 2113984,
+                "open": 2287924,
+                "closed": 2287924
+              }
+            }
+          ]
+        },
+        {
+          "label": "many",
+          "version": "3.16.0-beta.1",
+          "recordings": 500,
+          "samplesPerRecording": 500,
+          "bytes": 14102890,
+          "measurements": [
+            {
+              "firstCheckpoint": {
+                "ms": 553.2999999970198,
+                "storageReads": 500
+              },
+              "cachedCheckpoint": {
+                "ms": 30.300000000745058,
+                "storageReads": 1005
+              },
+              "unchangedSave": {
+                "ms": 0.10000000149011612,
+                "storageReads": 0
+              },
+              "backupRecordings": 500,
+              "heap": {
+                "before": 16182404,
+                "open": 18810936,
+                "closed": 18810936
+              }
+            },
+            {
+              "firstCheckpoint": {
+                "ms": 529.8999999985099,
+                "storageReads": 500
+              },
+              "cachedCheckpoint": {
+                "ms": 33.69999999925494,
+                "storageReads": 1005
+              },
+              "unchangedSave": {
+                "ms": 0.19999999925494194,
+                "storageReads": 0
+              },
+              "backupRecordings": 500,
+              "heap": {
+                "before": 16182404,
+                "open": 18810936,
+                "closed": 18810936
+              }
+            },
+            {
+              "firstCheckpoint": {
+                "ms": 585.3000000007451,
+                "storageReads": 500
+              },
+              "cachedCheckpoint": {
+                "ms": 32,
+                "storageReads": 1005
+              },
+              "unchangedSave": {
+                "ms": 0.09999999776482582,
+                "storageReads": 0
+              },
+              "backupRecordings": 500,
+              "heap": {
+                "before": 16182404,
+                "open": 18810936,
+                "closed": 18810936
+              }
+            }
+          ]
+        },
+        {
+          "label": "long",
+          "version": "3.16.0-beta.1",
+          "recordings": 36,
+          "samplesPerRecording": 10000,
+          "bytes": 19543058,
+          "measurements": [
+            {
+              "firstCheckpoint": {
+                "ms": 963.8999999985099,
+                "storageReads": 36
+              },
+              "cachedCheckpoint": {
+                "ms": 280.19999999925494,
+                "storageReads": 77
+              },
+              "unchangedSave": {
+                "ms": 0.19999999925494194,
+                "storageReads": 0
+              },
+              "backupRecordings": 36,
+              "heap": {
+                "before": 23691588,
+                "open": 28265136,
+                "closed": 28265136
+              }
+            },
+            {
+              "firstCheckpoint": {
+                "ms": 868.8999999985099,
+                "storageReads": 36
+              },
+              "cachedCheckpoint": {
+                "ms": 306.8999999985099,
+                "storageReads": 77
+              },
+              "unchangedSave": {
+                "ms": 0.5,
+                "storageReads": 0
+              },
+              "backupRecordings": 36,
+              "heap": {
+                "before": 23691296,
+                "open": 28248432,
+                "closed": 28248432
+              }
+            },
+            {
+              "firstCheckpoint": {
+                "ms": 914.7999999970198,
+                "storageReads": 36
+              },
+              "cachedCheckpoint": {
+                "ms": 295.0999999977648,
+                "storageReads": 77
+              },
+              "unchangedSave": {
+                "ms": 0,
+                "storageReads": 0
+              },
+              "backupRecordings": 36,
+              "heap": {
+                "before": 23691324,
+                "open": 28248488,
+                "closed": 28248488
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

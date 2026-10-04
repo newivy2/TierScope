@@ -47,12 +47,12 @@ async function download(page,action){const [d]=await Promise.all([page.waitForEv
  const picker=page.waitForEvent('filechooser');await page.click('#tools-open-session');
  await(await picker).setFiles({name:'delayed.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify({...saved,room:'late_file'}))});
  await page.waitForFunction(()=>typeof window.finishRead==='function');
- await row.getByRole('button',{name:'Replay',exact:true}).click();assert.equal(await library.count(),1);assert.equal(await page.locator('#tools-current-room').textContent(),'another_model');
+ await row.getByRole('button',{name:'Replay',exact:true}).click();assert.equal(await library.count(),1);assert.equal(await page.locator('#tools-current-room-replay').textContent(),'another_model');
  await page.evaluate(async()=>{window.restoreRead();window.finishRead();await new Promise(resolve=>setTimeout(resolve,0));});
  assert.equal((await page.evaluate(()=>ViewerTracker.__book.state())).playback.room,'another_model','a late file cannot replace a newer replay selection');
  await page.click('#tools-close');assert.equal(await page.evaluate(()=>document.activeElement.id),'btn-playback-library','closing after live-to-file switches focus to the visible Library button');await page.click('#btn-playback-library');
  await page.click('#playback-next');const replay=await page.evaluate(()=>ViewerTracker.__book.state());
- const full=await download(page,()=>page.click('#tools-export-csv'));assert.equal(full.bytes.toString().trim().split('\r\n').length,5);
+ const full=await download(page,()=>page.click('#tools-export-csv-replay'));assert.equal(full.bytes.toString().trim().split('\r\n').length,5);
  assert.deepEqual(await page.evaluate(()=>ViewerTracker.__book.state()),replay,'exports preserve replay cursor');
  await page.click('#playback-return');assert.equal(await page.locator('#tools-current-room').textContent(),'testroom');
  await page.click('#tools-close');assert.deepEqual(await panel.boundingBox(),bounds);assert.equal(await page.locator('#btn-control-library').getAttribute('aria-expanded'),'false');

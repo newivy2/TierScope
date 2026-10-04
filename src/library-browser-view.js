@@ -6,12 +6,14 @@ export function renderLibraryBrowser(parent, entries, filters, selected, actions
     for (const id of selected) if (!present.has(id)) selected.delete(id);
     let shown = 50;
     const inputs = recordingFilters(parent, entries, filters, 'tools-library', () => { shown = 50; actions.room(filters.room); rows(); }, true);
-    const bulk = node(parent, 'div', undefined, 'tools-actions'), selection = node(bulk, 'span'); selection.id = 'tools-library-selected';
+    const selectionTools = node(parent, 'details'); selectionTools.id = 'tools-library-selection'; selectionTools.open = selected.size > 0;
+    node(selectionTools, 'summary', 'Select sessions for Compare or export');
+    const bulk = node(selectionTools, 'div', undefined, 'tools-actions tools-library-bulk'), selection = node(bulk, 'span'); selection.id = 'tools-library-selected';
     let matching = [];
     button(bulk, 'Select matching', () => { matching.forEach(entry => selected.add(entry.id)); updateSelection(); }, 'tools-select-matching');
-    button(bulk, 'Clear selection', () => { selected.clear(); updateSelection(); }, 'tools-clear-selection');
-    const compare = button(bulk, 'Compare selected', () => actions.compare([...selected]), 'tools-compare-selected');
-    const download = button(bulk, 'Export selected', () => actions.export([...selected]), 'tools-export-selected');
+    button(bulk, 'Clear', () => { selected.clear(); updateSelection(); }, 'tools-clear-selection');
+    const compare = button(bulk, 'Compare', () => actions.compare([...selected]), 'tools-compare-selected');
+    const download = button(bulk, 'Export', () => actions.export([...selected]), 'tools-export-selected');
     download.title = 'Download one library bundle, including titles, notes and favorite models';
     const list = node(parent, 'div'); list.id = 'tools-library-list';
     function favoriteButton(parent, room, compact = false) {
@@ -20,9 +22,13 @@ export function renderLibraryBrowser(parent, entries, filters, selected, actions
         control.setAttribute('aria-pressed', String(active)); control.setAttribute('aria-label', (active ? 'Unfavorite ' : 'Favorite ') + room);
         control.title = (active ? 'Unfavorite model ' : 'Favorite model ') + room;
         if (active) control.className = 'tools-primary';
+        if (active && !compact && !entries.some(entry => entry.archive.room.toLowerCase() === room && entry.autoKeep)) {
+            button(parent, 'Enable automatic keeping…', () => actions.enableAutomatic(room), 'tools-model-enable-' + room);
+        }
     }
     function updateSelection() {
-        selection.textContent = selected.size + ' selected (including hidden recordings)';
+        if (selected.size) selectionTools.open = true;
+        selection.textContent = selected.size + ' selected' + ([...selected].some(id => !matching.some(entry => entry.id === id)) ? ' · includes hidden sessions' : '');
         compare.disabled = selected.size < 2 || selected.size > 6; compare.title = 'Select 2–6 recordings to compare'; download.disabled = !selected.size;
         for (const row of list.querySelectorAll('[data-library-id]')) row.querySelector('input[type=checkbox]').checked = selected.has(row.dataset.libraryId);
     }

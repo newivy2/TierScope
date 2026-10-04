@@ -156,13 +156,15 @@ export function cancelGifExport() {
 export async function generateGifFromHistory(recording) {
     if (runtime.gifExportJob) return;
     var button = document.getElementById('btn-export-gif');
+    var buttons = Array.from(document.querySelectorAll('[data-gif]'));
+    if (button && !buttons.includes(button)) buttons.push(button);
     var status = document.getElementById('gif-export-status');
     var cancel = document.getElementById('btn-cancel-gif');
     var progress = document.getElementById('gif-export-controls');
     var job = { cancelled: false, url: location.href, generation: runtime.initGuard,
         key: runtime.activeSessionStorageKey };
     runtime.gifExportJob = job;
-    if (button) button.disabled = true;
+    buttons.forEach(control => { control.disabled = true; });
     if (progress) progress.style.display = 'flex';
     if (cancel) cancel.hidden = false;
     if (status) status.textContent = 'Preparing GIF…';
@@ -229,7 +231,7 @@ export async function generateGifFromHistory(recording) {
         log('GIF export: ' + error.message);
         if (!job.cancelled && location.href === job.url && runtime.initGuard === job.generation) alert(error.message);
     } finally {
-        if (button) button.disabled = button.dataset.currentAvailable === 'false';
+        buttons.forEach(control => { control.disabled = control.dataset.currentAvailable === 'false'; });
         if (cancel) cancel.hidden = true;
         if (progress) progress.style.display = 'none';
         if (button && status) button.title = status.textContent;

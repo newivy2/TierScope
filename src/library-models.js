@@ -13,23 +13,31 @@ export function validateFavoriteModels(value) {
     return [...new Set(value.map(allTimeRoom))].sort();
 }
 
+export function readModelFavorite(room) {
+    const key = modelFavoriteKey(room), normalized = allTimeRoom(room), raw = GM_getValue(key, undefined);
+    if (raw === undefined) return {favorite: false, autoKeep: false};
+    const record = JSON.parse(raw);
+    if (record.schemaVersion !== 1 || record.room !== normalized || typeof record.favorite !== 'boolean' ||
+        record.autoKeep !== undefined && typeof record.autoKeep !== 'boolean') throw new Error('Invalid favorite model record.');
+    // Old stars and imported favorites never imply consent to automatic storage.
+    return {favorite: record.favorite, autoKeep: record.favorite && record.autoKeep === true};
+}
+
 // Beta 1's recording stars seed model favorites until an explicit model choice
 // exists. False is a durable choice, so imports/migration cannot re-star it.
 export function readModelFavorites(entries = []) {
     const favorites = new Set(entries.filter(entry => entry.favorite).map(entry => entry.archive.room.toLowerCase()));
-    const errors = [];
+    const errors = [], automatic = new Set();
     for (const key of GM_listValues().filter(key => key.startsWith(MODEL_FAVORITE_PREFIX))) {
         const room = key.slice(MODEL_FAVORITE_PREFIX.length);
         try {
             if (modelFavoriteKey(room) !== key) throw new Error('Invalid favorite model key.');
-            const raw = GM_getValue(key, undefined);
-            if (raw === undefined) continue;
-            const record = JSON.parse(raw);
-            if (record.schemaVersion !== 1 || record.room !== room || typeof record.favorite !== 'boolean') throw new Error('Invalid favorite model record.');
+            const record = readModelFavorite(room);
             if (record.favorite) favorites.add(room); else favorites.delete(room);
+            if (record.autoKeep) automatic.add(room);
         } catch (error) { favorites.delete(room); errors.push(room); }
     }
-    return {favorites, errors};
+    return {favorites, automatic, errors};
 }
 
 export function planModelFavoriteWrites(rooms) {
@@ -42,10 +50,10 @@ export function planModelFavoriteWrites(rooms) {
     return writes;
 }
 
-export function setModelFavorite(room, favorite) {
+export function setModelFavorite(room, favorite, autoKeep = false) {
     const key = modelFavoriteKey(room);
-    if (typeof favorite !== 'boolean') throw new Error('Invalid favorite model choice.');
-    const before = GM_getValue(key, undefined), value = JSON.stringify({schemaVersion: 1, room: allTimeRoom(room), favorite});
+    if (typeof favorite !== 'boolean' || typeof autoKeep !== 'boolean' || autoKeep && !favorite) throw new Error('Invalid favorite model choice.');
+    const before = GM_getValue(key, undefined), value = JSON.stringify({schemaVersion: 1, room: allTimeRoom(room), favorite, autoKeep});
     try {
         GM_setValue(key, value);
         if (GM_getValue(key, undefined) !== value) throw new Error('Favorite changed in another tab. Refresh the library.');

@@ -15,6 +15,8 @@ const modules = fs.readdirSync(path.join(root, 'src')).filter(file => file.endsW
 // Deliberate fixes and features have behavioral coverage; keep the original baseline
 // untouched so every other function still proves the extraction preserved it.
 const reviewedChanges = new Set([
+  // Model-first Library + automatic favorite checkpoints: favorite-sessions and model-library browser tests.
+  'loadCollapsedRows', 'drawHistorySparklines', 'pulseAcceptedHighs', 'captureSessionFile',
   // Acquisition/preference ownership and controller wiring: control-ownership.test.cjs,
   // request-policy, startup, absence, session, and both browser suites.
   'buildChartPlot', // cached immutable samples: chart-cache.test.cjs and charts/replay browser fixtures
@@ -70,8 +72,8 @@ const reviewedChanges = new Set([
   'pauseAutoRefresh', 'toggleAutoRefresh', 'updateDisplay', 'checkBroadcasterReturn',
   'acceptRoomSnapshot', 'init', 'checkUrlChange', 'restoreSessionState', 'loadSession',
 ]);
-const featureModules = new Set(['library-drafts.js', 'library-models.js', 'library-query.js', 'library-transfer.js', 'library-browser-view.js', 'tools-view-helpers.js', 'analysis-chart-data.js', 'analysis-chart-view.js', 'model-history.js', 'model-history-view.js', 'presentation-health.js', 'sample-presentation.js', 'analysis-preference-data.js', 'analysis-preferences.js', 'acquisition-state.js', 'panel-preferences.js', 'library-dock.js', 'library-shell.js', 'recording-export-data.js', 'recording-exports.js', 'display-model.js', 'display-values.js', 'immutable-data.js', 'presentation-data.js', 'status-model.js', 'status-view.js', 'trend-view.js', 'playback-state.js', 'live-session.js', 'diagnostics.js', 'room-context.js', 'backup.js', 'data-io.js', 'session-analysis.js', 'session-health.js', 'session-library.js', 'session-tools.js']);
-const addedFunctions = new Set(['initializeLifecycle', 'refreshPanelOptions', 'refreshScanCountdown', 'getSessionSamplePolicy', 'initializePresentation', 'paintPanelFrame', 'getSessionWriteStatus', 'writeSessionRecord']); // shared history-gap policy; session/ownership tests
+const featureModules = new Set(['automatic-library.js', 'favorite-controls.js', 'favorite-view.js', 'room-total-series.js', 'library-drafts.js', 'library-models.js', 'library-query.js', 'library-transfer.js', 'library-browser-view.js', 'tools-view-helpers.js', 'analysis-chart-data.js', 'analysis-chart-view.js', 'model-history.js', 'model-history-view.js', 'presentation-health.js', 'sample-presentation.js', 'analysis-preference-data.js', 'analysis-preferences.js', 'acquisition-state.js', 'panel-preferences.js', 'library-dock.js', 'library-shell.js', 'recording-export-data.js', 'recording-exports.js', 'display-model.js', 'display-values.js', 'immutable-data.js', 'presentation-data.js', 'status-model.js', 'status-view.js', 'trend-view.js', 'playback-state.js', 'live-session.js', 'diagnostics.js', 'room-context.js', 'backup.js', 'data-io.js', 'session-analysis.js', 'session-health.js', 'session-library.js', 'session-tools.js']);
+const addedFunctions = new Set(['captureLiveSessionFile', 'initializeLifecycle', 'refreshPanelOptions', 'refreshScanCountdown', 'getSessionSamplePolicy', 'initializePresentation', 'paintPanelFrame', 'getSessionWriteStatus', 'writeSessionRecord']); // shared history-gap policy; session/ownership tests
 
 test('unchanged extracted functions preserve 3.4.0; reviewed changes have behavior coverage', () => {
   const actual = {};
@@ -119,7 +121,16 @@ test('runtime initialization preserves preference loading and startup order', ()
   assert.equal(body[index + 6].expression.left.property.name, 'urlCheckInterval');
   // Preserve every original default, preference read and effect in order.
   const ownerBindings = new Set([bindings[0], playbackBinding, acquisitionBinding, preferenceBinding, lifecycleBinding, presentationBinding]);
-  assert.equal(hash(body.filter(n => !ownerBindings.has(n)), baseline.stateNames), baseline.initialization);
+  const unchanged = structuredClone(body.filter(n => !ownerBindings.has(n)));
+  const rows = unchanged.find(n => n.expression?.left?.property?.name === 'PANEL_ROWS').expression.right.arguments[0].elements;
+  const roomRow = rows.pop();
+  assert.deepEqual(roomRow.properties.map(p => [p.key.name, p.value.value]),
+    [['key','roomTotal'],['label','Room Total'],['icon','👥'],['color','var(--panel-warning)'],['height',28],['display','flex']]);
+  const unload = unchanged.find(n => n.expression?.arguments?.[0]?.value === 'beforeunload');
+  const flush = unload.expression.arguments[1].body.body.at(-1).consequent.body[0].expression;
+  assert.equal(flush.callee.name, 'saveSession'); assert.equal(flush.arguments.length, 2);
+  assert.equal(flush.arguments.pop().value, true, 'flush favorite Library checkpoint when leaving');
+  assert.equal(hash(unchanged, baseline.stateNames), baseline.initialization);
 });
 
 test('module dependencies are explicit and the built script preserves userscript permissions', () => {

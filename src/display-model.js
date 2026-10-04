@@ -1,5 +1,6 @@
 import { getDisplayHigh, highDescription, highLabel } from './high-selectors.js';
 import { freezeRecordingData } from './immutable-data.js';
+import { readModelFavorite } from './library-models.js';
 import { captureDisplayHistory, liveDisplayData } from './presentation-data.js';
 import { runtime } from './runtime.js';
 import { getComparisonCounts } from './session-selectors.js';
@@ -25,6 +26,13 @@ export function buildPanelDisplayModel(frame) {
         if (runtime.highMode === 'ath' && high.source && value > 0 && value >= high.value) highlights[key] = true;
     }
     const comparison = !frame.isRestored && runtime.hasTrendBaseline ? getComparisonCounts().counts : null;
+    const modelName = frame.isPlayback && runtime.playback && runtime.playback.archive ? runtime.playback.archive.room : getModelName();
+    let favorite = {favorite: false, autoKeep: false};
+    if (modelName !== 'unknown') {
+        try { favorite = readModelFavorite(modelName); }
+        catch (error) { favorite = {...favorite, error: 'Favorite unavailable. Open Library and refresh to retry.'}; }
+    }
+    if (runtime.highMode !== 'ath' && frame.fullRoomTotal > 0 && frame.fullRoomTotal >= frame.roomTotalHigh) highlights.roomTotal = true;
     return freezeRecordingData({counts: {...frame.counts}, total: frame.total, withTokens: frame.withTokens,
         anonymousCount: frame.anonymousCount, fullRoomTotal: frame.fullRoomTotal, roomTotalHigh: frame.roomTotalHigh,
         history: captureDisplayHistory(frame.history), historyEndIndex: frame.historyEndIndex,
@@ -33,7 +41,7 @@ export function buildPanelDisplayModel(frame) {
         replayRoom: frame.isPlayback && runtime.playback && runtime.playback.archive ? runtime.playback.archive.room : '',
         imported: !!(frame.isPlayback && runtime.playback && runtime.playback.imported),
         tierKeys: Object.keys(runtime.TIERS), rows: runtime.PANEL_ROWS.map(row => ({...row})),
-        roomName: getModelName(), miniMetric: runtime.miniMetric, highMode: runtime.highMode, textColor: themeColor('text'),
+        roomName: getModelName(), modelName, favorite, miniMetric: runtime.miniMetric, highMode: runtime.highMode, textColor: themeColor('text'),
         comparison: comparison ? {...comparison} : null,
         comparisonLabel: runtime.trendComparisonMode === 'last' ? 'previous sample' : runtime.trendComparisonMode === 'start' ? 'first retained sample' : runtime.trendComparisonMode,
         freshness: runtime.isMinimized ? buildFreshnessModel() : null});

@@ -58,14 +58,14 @@ test('invalid, empty, oversized and future-version files preserve the current Re
 
 test('live scans continue behind imported Replay; closing returns to the latest room data',async()=>{
  const h=populated(),f=h.api.__files,archive=clean(f.captureSessionFile());archive.room='anotherroom';f.openSessionReplay(archive);h.t.stepPlayback(1);
- const replay=JSON.stringify(f.state().playback);assert.match(h.e('header-text').textContent,/^FILE:/);
+ const replay=JSON.stringify(f.state().playback);assert.match(h.e('header-text').title,/^Replay:/);
  assert.equal(h.e('playback-room').textContent,'Room: anotherroom');assert.equal(h.e('playback-room').style.display,'block');
  h.advance(60000);h.setResponse('5,testroom|o|f|0,viewer|t|m|0');await h.t.performScanThenReturn();
  assert.equal(h.t.state().history.timestamps.length,4);assert.equal(JSON.stringify(f.state().playback),replay);
- assert.match(h.e('header-text').textContent,/^FILE:/);assert.equal(h.e('playback-room').textContent,'Room: anotherroom');
+ assert.match(h.e('header-text').title,/^Replay:/);assert.equal(h.e('playback-room').textContent,'Room: anotherroom');
  const replacement=clean(archive);replacement.room='different_archive';f.openSessionReplay(replacement);
  assert.equal(h.e('playback-room').textContent,'Room: different_archive');
- h.t.leavePlayback(true);assert.match(h.e('header-text').textContent,/^USERS:/);
+ h.t.leavePlayback(true);assert.match(h.e('header-text').title,/^Live room:/);
  assert.equal(h.t.state().users.length,2);assert.equal(h.t.state().isAutoRefreshOn,true);
  assert(h.t.enterPlayback());assert.equal(h.e('playback-room').textContent,'');assert.equal(h.e('playback-room').style.display,'none');
 });
@@ -85,7 +85,7 @@ test('pause, reload, failed acquisition, Stop, file Replay and close preserve se
  assert.equal(archived.session.pausedElapsedTime,elapsed);assert.equal(archived.session.isStopped,true);
  f.openSessionReplay(archived);f.setChartWindow('hour');h.t.stepPlayback(1);h.t.leavePlayback(true);
  assert.equal(h.t.state().isStopped,true);assert.equal(h.t.state().pausedElapsedTime,elapsed);assert.equal(h.t.state().history.timestamps.length,samples);
- assert.match(h.e('header-text').textContent,/^STOPPED:/);assert.equal(h.e('btn-control-auto').innerHTML,'Start');
+ assert.match(h.e('header-text').title,/^Stopped session:/);assert.equal(h.e('btn-control-auto').innerHTML,'Start');
 });
 
 test('Reset, navigation, closing Replay and a newer file cancel an older asynchronous file read',async()=>{
@@ -108,7 +108,7 @@ test('Stop during an in-flight scan cannot append into live history or an import
  h.t.stopTracking('manual');const stopped=live(h);
  resolve({ok:true,text:async()=> '5,testroom|o|f|0,viewer|t|m|0'});await pending;
  assert.deepEqual(live(h),stopped);assert.equal(JSON.stringify(f.state().playback),replay);
- h.t.leavePlayback(true);assert.match(h.e('header-text').textContent,/^STOPPED:/);
+ h.t.leavePlayback(true);assert.match(h.e('header-text').title,/^Stopped session:/);
 });
 
 test('chart windows retain all stored samples and use only samples through the Replay frame',()=>{

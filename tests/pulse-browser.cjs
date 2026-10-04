@@ -48,7 +48,7 @@ const injected=source.replaceAll('scheduleInit(2000);','/* fixture startup */').
   await page.click('#collapse-row-purple');await page.click('#restore-row-purple');assert.equal((await calls()).length,events.length);
   assert.equal(await page.locator('#tier-row-purple').evaluate(e=>e.getAnimations().length),0);
   assert.equal((await scan(1)).length,0,'a plateau must not retrigger');
-  events=await scan(2);assert(events.some(e=>e.id==='restore-row-red'));assert(!events.some(e=>e.id==='tier-row-purple'));
+  events=await scan(2);assert(events.some(e=>e.id==='tier-row-roomTotal'));assert(events.some(e=>e.id==='restore-row-red'));assert(!events.some(e=>e.id==='tier-row-purple'));
   await page.click('#restore-row-red');assert.equal(await page.locator('#tier-row-red').evaluate(e=>e.getAnimations().length),0);
   assert.equal((await scan(1)).length,0,'a dip must not pulse');
   events=await scan(2);assert(events.some(e=>e.id==='tier-row-red'),'returning to the high must pulse the expanded row');

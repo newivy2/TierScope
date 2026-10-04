@@ -1,6 +1,9 @@
 import { selectScanInterval } from './acquisition-state.js';
 import { hideChartTooltip } from './chart-view.js';
 import { bindPanelOptions } from './files.js';
+import { changeModelFavorite } from './favorite-controls.js';
+import { paintFavoriteButton } from './favorite-view.js';
+import { readModelFavorite } from './library-models.js';
 import { cancelGifExport } from './gif.js';
 import { bindRowControls, cleanupDragListeners, restoreStandardSize, setupDraggable, setupResizable, setupResizeHandler, toggleView } from './layout.js';
 import { adjustTimer, resetAllTracking, resetCountdown, startCountdown, stopCountdown, stopTracking, toggleAutoRefresh, updateCountdownDisplay, updateStopControls } from './lifecycle.js';
@@ -9,6 +12,7 @@ import { updateDisplay } from './presentation.js';
 import { bindPlaybackControls, leavePlayback, updateReplayAvailability } from './replay.js';
 import { collapseMarkerHtml, collapsedTrayHtml } from './row-layout.js';
 import { runtime } from './runtime.js';
+import { updateSessionToolsStatus } from './session-tools.js';
 import { applyPanelTheme, updateContainerOpacity } from './theme.js';
 import { setTrendComparisonMode, toggleAutoTrendEscalation, updateAutoTrendButton, updateTrendPresetButtons } from './trends.js';
 import { log } from './utils.js';
@@ -47,8 +51,10 @@ export function createPanel() {
                 'display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;' +
                 'border-bottom:1px solid #ff69b4;padding-bottom:3px;cursor:move;' +
             '">' +
-                '<span id="header-text" style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:bold;color:var(--panel-accent);font-size:10px;">USERS: 0 (SH:0)</span>' +
-                '<span id="mini-room-change" style="font-size:8px;margin:0 3px;display:none;"></span>' +
+                '<div id="header-model" style="display:flex;flex:1;min-width:0;align-items:center;gap:3px;margin-right:4px;">' +
+                    '<span id="header-text" style="flex:0 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:bold;color:var(--panel-accent);font-size:13px;line-height:18px;">TierScope</span>' +
+                    '<button type="button" id="btn-model-favorite" aria-label="Favorite model" style="flex:0 0 18px;padding:0;border:0;background:transparent;color:var(--panel-muted);font-size:14px;line-height:18px;cursor:pointer;">☆</button>' +
+                '</div>' +
                 '<div style="display:flex;align-items:center;gap:3px;flex-shrink:0;">' +
                     '<button type="button" id="btn-high-mode" aria-pressed="false" aria-label="Session highs. Switch to all-time highs" style="display:none;min-width:29px;background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;">SH</button>' +
                     '<button type="button" id="btn-panel-options" aria-label="Chart window and highs" aria-expanded="false" aria-controls="panel-options" style="display:none;background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;white-space:nowrap;">Full ▾</button>' +
@@ -72,6 +78,7 @@ export function createPanel() {
                 '</div>' +
             '</div>' +
             '<div id="minimized-view" style="display:block;position:relative;">' +
+                '<div style="display:flex;gap:4px;align-items:center;margin-bottom:3px;"><strong id="mini-room-count" style="color:var(--panel-accent);font-size:13px;">0</strong><span style="color:var(--panel-muted);font-size:8px;">in room</span><span id="mini-room-change" style="margin-left:auto;font-size:8px;"></span></div>' +
                 '<div style="display:flex;align-items:center;justify-content:space-between;gap:3px;">' +
                     '<button type="button" id="mini-metric" style="background:transparent;border:0;color:var(--panel-secondary);font:inherit;cursor:pointer;padding:2px 0;" aria-label="Cycle chart metric">Room total ▾</button>' +
                     '<button type="button" id="mini-high" style="background:transparent;border:0;padding:0;color:var(--panel-subtle);font-size:8px;cursor:pointer;"></button>' +
@@ -162,6 +169,15 @@ export function createPanel() {
                 '</div>' +
             '</div>' +
 
+            '<div id="tier-row-roomTotal" data-tier="roomTotal" style="display:flex;align-items:center;padding:2px 3px;margin-top:3px;border:1px solid var(--panel-warning);border-radius:3px;background:rgba(255,212,59,.08);">' +
+                '<div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml('roomTotal') + '</div>' +
+                '<canvas id="spark-roomTotal" width="105" height="28" style="flex:1;margin:0 4px;"></canvas>' +
+                '<div style="text-align:right;width:48px;flex-shrink:0;">' +
+                    '<span id="count-roomTotal" style="font-weight:bold;color:var(--panel-warning);font-size:14px;">0</span>' +
+                    '<div id="high-roomTotal" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div>' +
+                '</div>' +
+            '</div>' +
+
             '</div>' +
             '<div id="trend-section" style="position:relative;border-top:1px solid #4169E1;margin-top:5px;padding-top:5px;">' +
                 '<div id="live-trend">' +
@@ -247,22 +263,22 @@ export function createPanel() {
                 '</div>' +
             '</div>' +
 
-            '<div id="tracker-footer" style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:4px;margin-top:5px;min-height:14px;">' +
+            '<div id="tracker-footer" style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:4px;margin-top:5px;min-height:18px;">' +
                 '<div id="acquisition-status" style="max-width:80px;font-size:7px;color:var(--panel-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="No accepted sample yet">No sample</div>' +
                 '<div id="background-slider-controls" style="display:flex;align-items:center;gap:3px;min-width:0;">' +
                     '<svg width="11" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--panel-warning)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink:0;"><path d="M9 18h6M10 22h4M8 14a6 6 0 1 1 8 0c-1 1-1 2-1 4H9c0-2 0-3-1-4Z"/></svg>' +
                     '<input type="range" id="opacity-slider" min="30" max="100" value="95" aria-label="Background opacity" style="flex:1;min-width:0;width:100%;height:12px;margin:0;cursor:pointer;accent-color:#ff69b4;" title="Main and standard tier background opacity">' +
                     '<span id="opacity-value" style="font-size:8px;color:var(--panel-secondary);min-width:23px;">95%</span>' +
                 '</div>' +
-                '<div id="tierscope-logo" style="justify-self:end;display:flex;flex-direction:column;align-items:center;gap:0;white-space:nowrap;opacity:0.6;transition:opacity 0.2s;" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0.6">' +
-                '<div style="display:flex;align-items:center;gap:3px;height:8px;">' +
+                '<div id="tierscope-logo" style="justify-self:end;display:flex;flex-direction:column;align-items:center;gap:0;white-space:nowrap;" onmouseenter="this.firstElementChild.style.opacity=1" onmouseleave="this.firstElementChild.style.opacity=0.6">' +
+                '<div style="display:flex;align-items:center;gap:3px;height:8px;opacity:0.6;transition:opacity 0.2s;">' +
                 '<svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#ff69b4" stroke-width="2" style="flex-shrink:0;">' +
                     '<circle cx="12" cy="12" r="10"/>' +
                     '<line x1="12" y1="2" x2="12" y2="22"/>' +
                     '<line x1="2" y1="12" x2="22" y2="12"/>' +
                 '</svg>' +
                 '<span title="TierScope ' + runtime.TIERSCOPE_VERSION + '" style="font-size:7px;line-height:8px;font-family:\'Courier New\',monospace;font-weight:bold;color:var(--panel-accent);letter-spacing:1px;">TIERSCOPE</span></div>' +
-                '<span id="tierscope-version" style="font:5px/6px Arial,sans-serif;letter-spacing:.15px;color:var(--panel-muted);">' + runtime.TIERSCOPE_VERSION + '</span>' +
+                '<span id="tierscope-version" style="font:bold 8px/10px Arial,sans-serif;letter-spacing:.15px;color:var(--panel-secondary);">' + runtime.TIERSCOPE_VERSION + '</span>' +
                 '</div>' +
             '</div>' +
         '</div>';
@@ -300,6 +316,21 @@ export function createPanel() {
         });
     }
 
+    const modelFavorite = document.getElementById('btn-model-favorite');
+    modelFavorite.onmousedown = event => event.stopPropagation();
+    modelFavorite.onclick = event => {
+        event.stopPropagation();
+        const room = modelFavorite.dataset.favoriteRoom;
+        try {
+            if (room && room !== 'unknown' && changeModelFavorite(room)) {
+                // Also refresh any current-session star already visible in Library.
+                document.querySelectorAll('[data-favorite-room]').forEach(button => {
+                    if (button.dataset.favoriteRoom === room) paintFavoriteButton(button, room, readModelFavorite(room));
+                });
+                updateSessionToolsStatus(true);
+            }
+        } catch (error) { alert('Favorite could not be changed: ' + error.message); }
+    };
     bindPanelOptions();
     bindPlaybackControls();
     bindRowControls();

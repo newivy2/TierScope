@@ -4,11 +4,19 @@ import { isPlaybackCurrent } from './playback-data.js';
 import { getStorageKey } from './record-validation.js';
 import { runtime } from './runtime.js';
 import { validateSessionFile } from './session-file-format.js';
-import { getModelName } from './utils.js';
+import { getModelName, getModelNameFromUrl } from './utils.js';
 
 export function captureSessionFile() {
     if (isPlaybackCurrent(runtime.playback) && runtime.playback.archive) return runtime.playback.archive;
-    if (!runtime.history.timestamps.length || runtime.activeSessionStorageKey !== getStorageKey(getModelName()) || location.href !== runtime.lastUrl) {
+    if (location.href !== runtime.lastUrl) throw new Error('No recorded session to save yet.');
+    return captureLiveSessionFile();
+}
+
+// Explicit room permits a final checkpoint of the departing room, before its
+// owner is reset. Playback never supplies data to automatic Library keeping.
+export function captureLiveSessionFile(room = getModelName()) {
+    if (!runtime.history.timestamps.length || room === 'unknown' || runtime.activeSessionStorageKey !== getStorageKey(room) ||
+        room !== getModelNameFromUrl(runtime.lastUrl)) {
         throw new Error('No recorded session to save yet.');
     }
     var now = Date.now();
@@ -29,5 +37,5 @@ export function captureSessionFile() {
         if (total > data.roomTotalHigh) { data.roomTotalHigh = total; data.roomTotalHighTime = time; }
     });
     return validateSessionFile({ format: runtime.SESSION_FILE_FORMAT, formatVersion: runtime.SESSION_FILE_VERSION,
-        producerVersion: runtime.TIERSCOPE_VERSION, room: getModelName(), session: data });
+        producerVersion: runtime.TIERSCOPE_VERSION, room, session: data });
 }

@@ -21,10 +21,10 @@ export function updateCompactDashboard(frame) {
     delta('mini-withtokens-change', frame.withTokens, comparison && comparison.withTokens);
     delta('mini-total-change', frame.total, comparison && comparison.total);
     var roomChange = delta('mini-room-change', frame.fullRoomTotal, comparison && comparison.total + comparison.anonymous);
-    var header = document.getElementById('header-text');
-    if (header) {
-        header.textContent = (frame.stopped ? 'STOPPED: ' : frame.isRestored ? 'SAVED: ' : '') + compactNumber(frame.fullRoomTotal);
-        header.title = frame.roomName + ' — Room total: ' + frame.fullRoomTotal.toLocaleString() +
+    var roomCount = document.getElementById('mini-room-count');
+    if (roomCount) {
+        roomCount.textContent = compactNumber(frame.fullRoomTotal);
+        roomCount.title = frame.roomName + ' — Room total: ' + frame.fullRoomTotal.toLocaleString() +
             '; ' + displayHighDescription(displayHigh(frame, 'roomTotal', frame.fullRoomTotal)) + (roomChange ? '; change: ' + roomChange + ' versus ' + mode : '');
     }
     ['withtokens', 'total'].forEach(function(key) {
