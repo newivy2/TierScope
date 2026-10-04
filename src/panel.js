@@ -85,7 +85,7 @@ export function createPanel() {
                 '</div>' +
                 '<canvas id="mini-chart" width="140" height="36" style="display:block;width:100%;height:36px;" role="img" aria-label="Recent audience history"></canvas>' +
                 '<div style="display:flex;justify-content:space-between;gap:4px;margin:3px 0;">' +
-                    '<span title="With Tokens">💎 <span id="mini-withtokens">0</span> <span id="mini-withtokens-change"></span></span>' +
+                    '<span title="With Tokens">💎 <span id="mini-withtokens" style="color:var(--panel-warning);">0</span> <span id="mini-withtokens-change"></span></span>' +
                     '<span title="Registered">📊 <span id="mini-total">0</span> <span id="mini-total-change"></span></span>' +
                 '</div>' +
                 '<div style="display:flex;align-items:center;gap:3px;">' +
@@ -133,14 +133,14 @@ export function createPanel() {
 
     html +=
             '<div id="summary-tier-rows" style="border-top:1px solid var(--panel-divider);margin-top:4px;padding-top:4px;">' +
-                '<div id="tier-row-withtokens" data-tier="withtokens" style="display:flex;align-items:center;padding:2px 3px;background:rgba(255,105,180,0.15);border-radius:3px;border:1px solid #ff69b4;margin-bottom:3px;">' +
+                '<div id="tier-row-withtokens" data-tier="withtokens" style="display:flex;align-items:center;padding:2px 3px;background:rgba(255,212,59,0.15);border-radius:3px;border:1px solid var(--panel-warning);margin-bottom:3px;">' +
                     '<div style="width:30px;flex-shrink:0;text-align:center;">' +
                         collapseMarkerHtml('withtokens') +
                     '</div>' +
                     '<canvas id="spark-withtokens" width="105" height="28" style="flex:1;margin:0 4px;"></canvas>' +
                     '<div style="text-align:right;width:48px;flex-shrink:0;">' +
-                        '<span id="count-withtokens" style="font-weight:bold;color:#ff69b4;font-size:14px;">0</span>' +
-                        '<span id="pct-withtokens" style="font-size:8px;color:#ff69b4;margin-left:2px;">0%</span>' +
+                        '<span id="count-withtokens" style="font-weight:bold;color:var(--panel-warning);font-size:14px;">0</span>' +
+                        '<span id="pct-withtokens" style="font-size:8px;color:var(--panel-warning);margin-left:2px;">0%</span>' +
                         '<div id="high-withtokens" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div>' +
                     '</div>' +
                 '</div>' +
@@ -169,11 +169,11 @@ export function createPanel() {
                 '</div>' +
             '</div>' +
 
-            '<div id="tier-row-roomTotal" data-tier="roomTotal" style="display:flex;align-items:center;padding:2px 3px;margin-top:3px;border:1px solid var(--panel-warning);border-radius:3px;background:rgba(255,212,59,.08);">' +
+            '<div id="tier-row-roomTotal" data-tier="roomTotal" style="display:flex;align-items:center;padding:2px 3px;margin-top:3px;border:1px solid var(--panel-accent);border-radius:3px;background:rgba(255,105,180,.08);">' +
                 '<div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml('roomTotal') + '</div>' +
                 '<canvas id="spark-roomTotal" width="105" height="28" style="flex:1;margin:0 4px;"></canvas>' +
                 '<div style="text-align:right;width:48px;flex-shrink:0;">' +
-                    '<span id="count-roomTotal" style="font-weight:bold;color:var(--panel-warning);font-size:14px;">0</span>' +
+                    '<span id="count-roomTotal" style="font-weight:bold;color:var(--panel-accent);font-size:14px;">0</span>' +
                     '<div id="high-roomTotal" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div>' +
                 '</div>' +
             '</div>' +

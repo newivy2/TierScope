@@ -125,7 +125,12 @@ test('runtime initialization preserves preference loading and startup order', ()
   const rows = unchanged.find(n => n.expression?.left?.property?.name === 'PANEL_ROWS').expression.right.arguments[0].elements;
   const roomRow = rows.pop();
   assert.deepEqual(roomRow.properties.map(p => [p.key.name, p.value.value]),
-    [['key','roomTotal'],['label','Room Total'],['icon','👥'],['color','var(--panel-warning)'],['height',28],['display','flex']]);
+    [['key','roomTotal'],['label','Room Total'],['icon','👥'],['color','var(--panel-accent)'],['height',28],['display','flex']]);
+  // 3.16.1 makes With Tokens yellow; preserve the rest of its original row metadata.
+  const tokenColor = rows[0].properties.find(p => p.key.name === 'color').value;
+  assert.equal(tokenColor.value, 'var(--panel-warning)');
+  tokenColor.value = '#ff69b4';
+  tokenColor.raw = "'#ff69b4'";
   const unload = unchanged.find(n => n.expression?.arguments?.[0]?.value === 'beforeunload');
   const flush = unload.expression.arguments[1].body.body.at(-1).consequent.body[0].expression;
   assert.equal(flush.callee.name, 'saveSession'); assert.equal(flush.arguments.length, 2);

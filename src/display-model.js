@@ -42,6 +42,7 @@ export function buildPanelDisplayModel(frame) {
         imported: !!(frame.isPlayback && runtime.playback && runtime.playback.imported),
         tierKeys: Object.keys(runtime.TIERS), rows: runtime.PANEL_ROWS.map(row => ({...row})),
         roomName: getModelName(), modelName, favorite, miniMetric: runtime.miniMetric, highMode: runtime.highMode, textColor: themeColor('text'),
+        withTokensColor: themeColor('warning'), roomTotalColor: themeColor('accent'),
         comparison: comparison ? {...comparison} : null,
         comparisonLabel: runtime.trendComparisonMode === 'last' ? 'previous sample' : runtime.trendComparisonMode === 'start' ? 'first retained sample' : runtime.trendComparisonMode,
         freshness: runtime.isMinimized ? buildFreshnessModel() : null});

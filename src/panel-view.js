@@ -42,7 +42,7 @@ export function paintPanelFrame(frame) {
             roomCount.style.fontSize = fullRoomTotal >= 100000 ? '9px' : fullRoomTotal >= 10000 ? '11px' : '14px';
         }
         if (roomHigh) { roomHigh.textContent = displayHighLabel(roomResult, true); roomHigh.title = displayHighDescription(roomResult); }
-        if (roomRow) roomRow.style.background = highlights.roomTotal ? 'rgba(50, 205, 50, 0.22)' : 'rgba(255,212,59,.08)';
+        if (roomRow) roomRow.style.background = highlights.roomTotal ? 'rgba(50, 205, 50, 0.22)' : 'rgba(255,105,180,.08)';
         frame.tierKeys.forEach(function(tier) {
             var countEl = document.getElementById('count-' + tier);
             var highEl = document.getElementById('high-' + tier);
@@ -72,7 +72,7 @@ export function paintPanelFrame(frame) {
             if (highlights && highlights['withTokens']) {
                 withTokensRowEl.style.background = 'rgba(50, 205, 50, 0.22)';
             } else {
-                withTokensRowEl.style.background = 'rgba(255,105,180,0.15)';
+                withTokensRowEl.style.background = 'rgba(255,212,59,0.15)';
             }
         }
         
