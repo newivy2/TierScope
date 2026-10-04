@@ -2,7 +2,20 @@ import { getChartTimes } from './history-data.js';
 import { runtime } from './runtime.js';
 import { setThemeVariables, themeColor } from './theme-values.js';
 
+// Dense renderer-only copies avoid repeated indexed reads from frozen arrays.
+// Weak keys release the cache with its recording; mutable live arrays bypass it.
+// Inspection and exports continue to receive the original immutable samples.
+const chartSampleCache = new WeakMap();
+function chartSamples(values) {
+    if (!values || !Object.isFrozen(values)) return values;
+    let cached = chartSampleCache.get(values);
+    if (!cached) { cached = Array.from(values); chartSampleCache.set(values, cached); }
+    return cached;
+}
+
 export function buildChartPlot(values, times, breaks, width, lastIndex, windowMs, replayProgress) {
+    values = chartSamples(values);
+    breaks = chartSamples(breaks);
     var end = Math.min(values.length, times.length) - 1;
     if (Number.isInteger(lastIndex)) end = Math.min(end, lastIndex);
     if (end < 0) return { points: [], min: 0, max: 0, end: -1 };

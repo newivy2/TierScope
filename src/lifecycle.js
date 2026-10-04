@@ -1,14 +1,16 @@
+import { isAcquisitionCurrent } from './acquisition-context.js';
+import { clearAcquisitionDeadline, clearDOMFailures, invalidateAcquisition, noteAcquisitionSource, refreshAcquisitionCountdown, scheduleNextAcquisition, schedulePresenceAcquisition, selectScanInterval, startAcquisitionClock, stopAcquisitionClock } from './acquisition-state.js';
 import { drawAllSparklines } from './charts.js';
 import { cancelGifExport } from './gif.js';
-import { cancelHighPulses } from './highs.js';
+import { cancelHighPulses } from './high-pulses.js';
 import { nextSessionAbsence, pauseSessionClock, pauseSessionForAbsence, pauseSessionRecording, resetLiveSession, resumeSessionRecording, startSessionClock, stopLiveSession } from './live-session.js';
+import { resetTrendPreferences } from './panel-preferences.js';
 import { updateAcquisitionStatus, updateMiniFreshness } from './presentation-status.js';
 import { updateDisplay, updateTrendDisplay } from './presentation.js';
 import { getStorageKey } from './record-validation.js';
 import { leavePlayback } from './replay.js';
 import { getDOMFallbackWaitSeconds, readRequestPolicy, requestPolicyMessage, writeRequestPolicy } from './request-policy.js';
 import { runtime } from './runtime.js';
-import { isAcquisitionCurrent, pauseForAccessRestriction, performScanThenReturn } from './scanning.js';
 import { saveSession } from './session-persistence.js';
 import { absencePauseDescription, getEffectiveScanIntervalSeconds, isAbsencePaused, stopDescription } from './session-selectors.js';
 import { deleteSession } from './storage.js';
@@ -22,12 +24,11 @@ export function nextBroadcasterAbsence(snapshot) {
 export function checkAbsenceStop() {
     if (runtime.isStopped || !runtime.isAutoRefreshOn || runtime.absenceOverrideActive) return false;
     if (pauseSessionForAbsence(Date.now(), runtime.ABSENCE_PAUSE_MS)) {
-        runtime.scanEpoch++;
-        runtime.isScanning = false;
+        invalidateAcquisition();
         stopTrackingTimer();
         cancelHighPulses();
         // The next attempt checks presence only; it cannot record absent-room counts.
-        runtime.nextScanAt = Math.max(Date.now(), readRequestPolicy().until);
+        schedulePresenceAcquisition(Date.now(), readRequestPolicy().until);
         updateTrackingTimer();
         updateStopControls();
         updateAcquisitionStatus();
@@ -64,10 +65,9 @@ export function updateStopControls() {
 export function stopTracking(reason) {
     if (!stopLiveSession(reason, Date.now(), runtime.ABSENCE_STOP_MS)) return;
     // Invalidate pending API/DOM work before freezing the session's effects.
-    runtime.scanEpoch++;
-    runtime.isScanning = false;
+    invalidateAcquisition();
     stopCountdown();
-    runtime.nextScanAt = 0;
+    clearAcquisitionDeadline();
     stopTrackingTimer();
     cancelHighPulses();
     updateTrackingTimer();
@@ -106,31 +106,21 @@ export function updateTrackingTimer() {
 
 export function startTrackingTimer() {
     if (!startSessionClock(Date.now())) return;
-    if (runtime.trackingTimerInterval) {
-        clearInterval(runtime.trackingTimerInterval);
-        runtime.trackingTimerInterval = null;
-    }
-    runtime.trackingTimerInterval = setInterval(updateTrackingTimer, 1000);
+    startAcquisitionClock('trackingTimerInterval', updateTrackingTimer, 1000);
     updateTrackingTimer();
     saveSession(getModelName());
 }
 
 export function pauseTrackingTimer() {
     if (!pauseSessionClock(Date.now())) return;
-    if (runtime.trackingTimerInterval) {
-        clearInterval(runtime.trackingTimerInterval);
-        runtime.trackingTimerInterval = null;
-    }
+    stopAcquisitionClock('trackingTimerInterval');
     updateTrackingTimer();
     saveSession(getModelName());
 }
 
 export function stopTrackingTimer() {
     // Cancel the browser clock only. Reset/navigation own session data clearing.
-    if (runtime.trackingTimerInterval) {
-        clearInterval(runtime.trackingTimerInterval);
-        runtime.trackingTimerInterval = null;
-    }
+    stopAcquisitionClock('trackingTimerInterval');
 }
 
 export function resetAllTracking() {
@@ -149,15 +139,13 @@ export function resetTrackingData(deleteSaved) {
     log('Performing main reset...');
     if (deleteSaved) deleteSession(modelName);
     runtime.activeSessionStorageKey = getStorageKey(modelName);
-    runtime.scanEpoch++;
-    runtime.isScanning = false;
+    invalidateAcquisition();
     stopCountdown();
     stopTrackingTimer();
     resetLiveSession(deleteSaved ? 'reset' : 'start');
-    runtime.lastAcquisitionAttemptSource = 'API';
-    runtime.domHealthStatus.consecutiveFailures = 0;
-    runtime.trendComparisonMode = 'last';
-    runtime.autoTrendEscalation = true;
+    noteAcquisitionSource('API');
+    clearDOMFailures();
+    resetTrendPreferences();
     updateAcquisitionStatus();
     resetCountdown();
     updateDisplay();
@@ -173,7 +161,7 @@ export function resetTrackingData(deleteSaved) {
     saveSession(modelName);
     var resetContext = { epoch: runtime.scanEpoch, generation: runtime.initGuard, url: location.href };
     setTimeout(function() {
-        if (isAcquisitionCurrent(resetContext)) performScanThenReturn(true);
+        if (isAcquisitionCurrent(resetContext)) lifecycleEffects.scan(true);
     }, 500);
     updateTrendPresetButtons();
     updateAutoTrendButton();
@@ -182,9 +170,7 @@ export function resetTrackingData(deleteSaved) {
 }
 
 export function resetCountdown() {
-    runtime.lastScheduledIntervalSeconds = getEffectiveScanIntervalSeconds();
-    runtime.countdownSeconds = runtime.lastScheduledIntervalSeconds;
-    runtime.nextScanAt = runtime.isStopped ? 0 : Math.max(Date.now() + runtime.lastScheduledIntervalSeconds * 1000, readRequestPolicy().until);
+    scheduleNextAcquisition(getEffectiveScanIntervalSeconds(), Date.now(), readRequestPolicy().until, runtime.isStopped);
     updateCountdownDisplay();
 }
 
@@ -193,11 +179,8 @@ export function updateCountdownDisplay() {
     var policy = readRequestPolicy();
     if (policy.blocked && runtime.isAutoRefreshOn) pauseForAccessRestriction();
     var policyMessage = requestPolicyMessage(policy);
-    if (runtime.isAutoRefreshOn && policy.until > runtime.nextScanAt) runtime.nextScanAt = policy.until;
+    refreshAcquisitionCountdown(Date.now(), policy.until, runtime.isAutoRefreshOn);
     updateMiniFreshness();
-    if (runtime.isAutoRefreshOn && !runtime.isScanning && runtime.nextScanAt) {
-        runtime.countdownSeconds = Math.max(0, Math.ceil((runtime.nextScanAt - Date.now()) / 1000));
-    }
     var fallbackWait = getDOMFallbackWaitSeconds(getModelName());
     var timingTitle = 'Next API attempt after the countdown. ' + (fallbackWait > 0 ?
         'DOM fallback eligible in ' + fallbackWait + 's if the API fails.' :
@@ -284,9 +267,7 @@ export function updateCountdownDisplay() {
 
 export function adjustTimer(delta) {
     var newValue = runtime.scanIntervalSeconds + delta;
-    if (newValue < 30) runtime.scanIntervalSeconds = 30;
-    else if (newValue > 300) runtime.scanIntervalSeconds = 300;
-    else runtime.scanIntervalSeconds = newValue;
+    selectScanInterval(newValue);
     if (runtime.isAutoRefreshOn) {
         stopCountdown();
         resetCountdown();
@@ -303,32 +284,26 @@ export function adjustTimer(delta) {
 
 export function startCountdown() {
     if (runtime.isStopped) return;
-    if (runtime.countdownInterval) {
-        clearInterval(runtime.countdownInterval);
-        runtime.countdownInterval = null;
-    }
+    stopAcquisitionClock('countdownInterval');
     if (!runtime.nextScanAt) resetCountdown();
     updateCountdownDisplay();
     if (runtime.isStopped) return;
-    runtime.countdownInterval = setInterval(function() {
+    startAcquisitionClock('countdownInterval', function() {
         if (!runtime.isAutoRefreshOn || runtime.isScanning) return;
         updateCountdownDisplay();
         if (runtime.countdownSeconds <= 0) {
-            performScanThenReturn(true);
+            lifecycleEffects.scan(true);
         }
     }, 1000);
 }
 
 export function stopCountdown() {
-    if (runtime.countdownInterval) {
-        clearInterval(runtime.countdownInterval);
-        runtime.countdownInterval = null;
-    }
+    stopAcquisitionClock('countdownInterval');
 }
 
 export function pauseAutoRefresh() {
     if (runtime.isStopped) return;
-    if (isAbsencePaused()) { runtime.scanEpoch++; runtime.isScanning = false; }
+    if (isAbsencePaused()) { invalidateAcquisition(); }
     pauseSessionRecording(Date.now());
     stopCountdown();
     stopTrackingTimer();
@@ -347,8 +322,7 @@ export function toggleAutoRefresh() {
     if (overridingAbsence) {
         // Discard a pending presence check before starting a normal scan.
         // Only an observed API owner re-arms automation for this session.
-        runtime.scanEpoch++;
-        runtime.isScanning = false;
+        invalidateAcquisition();
     }
     // Only an explicit Resume clears access denial. Internal failure paths
     // call pauseAutoRefresh directly and cannot activate this override.
@@ -359,8 +333,15 @@ export function toggleAutoRefresh() {
     resumeSessionRecording(Date.now(), overridingAbsence);
     startTrackingTimer();
     startCountdown();
-    performScanThenReturn(true);
+    lifecycleEffects.scan(true);
     updateStopControls();
     updateAcquisitionStatus();
     saveSession(getModelName());
 }
+export function pauseForAccessRestriction() {
+    pauseAutoRefresh();
+}
+
+// The scan action is wired by bootstrap, keeping scheduling independent of acquisition controllers.
+let lifecycleEffects;
+export function initializeLifecycle(effects) { lifecycleEffects = effects; }

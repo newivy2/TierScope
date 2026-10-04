@@ -1,10 +1,13 @@
+import { isAcquisitionCurrent } from './acquisition-context.js';
+import { beginAcquisition, clearDOMFailures, deferDOMFallback, finishAcquisition, noteAcquisitionSource } from './acquisition-state.js';
 import { drawAllSparklines } from './charts.js';
 import { diagnostic } from './diagnostics.js';
 import { findTab, isScanValid, scanUsers } from './dom.js';
+import { pulseAcceptedHighs } from './high-pulses.js';
 import { readAllTimeHighs } from './highs-store.js';
-import { pulseAcceptedHighs, recordAcceptedAllTimeHighs } from './highs.js';
+import { recordAcceptedAllTimeHighs } from './highs.js';
 import { getSessionSamplePolicy } from './history.js';
-import { checkAbsenceStop, pauseAutoRefresh, resetCountdown, startTrackingTimer, updateCountdownDisplay, updateStopControls } from './lifecycle.js';
+import { checkAbsenceStop, pauseForAccessRestriction, resetCountdown, startTrackingTimer, updateCountdownDisplay, updateStopControls } from './lifecycle.js';
 import { abortAcceptedSample, beginAcceptedSample, commitAcceptedSample, markSessionGap, observeSessionPresence, resumeSessionForOwnerReturn } from './live-session.js';
 import { updateAcquisitionStatus } from './presentation-status.js';
 import { updateDisplay, updateTrendDisplay } from './presentation.js';
@@ -13,10 +16,6 @@ import { runtime } from './runtime.js';
 import { saveSession } from './session-persistence.js';
 import { isAbsencePaused } from './session-selectors.js';
 import { getModelName, log } from './utils.js';
-
-export function pauseForAccessRestriction() {
-    pauseAutoRefresh();
-}
 
 export function parseGetChatUserListResponse(text) {
     if (typeof text !== 'string' || !text.trim()) throw new Error('Empty API response');
@@ -56,11 +55,6 @@ export function parseGetChatUserListResponse(text) {
     return { anonymousCount: anonymousCount, registeredCount: registeredCount,
         totalUsers: totalUsers, users: parsedUsers,
         diagnostics: { unknownClasses: unknownClasses, unknownGenders: unknownGenders } };
-}
-
-export function isAcquisitionCurrent(context) {
-    return context.epoch === runtime.scanEpoch && context.generation === runtime.initGuard &&
-        context.url === location.href;
 }
 
 export function validateRoomSnapshot(snapshot) {
@@ -160,7 +154,7 @@ export async function acquireDOMSnapshot(context, returnToChat) {
 }
 
 export async function checkBroadcasterReturn(context) {
-    runtime.lastAcquisitionAttemptSource = 'API';
+    noteAcquisitionSource('API');
     try {
         var snapshot = await acquireAPISnapshot(context);
         if (!isAcquisitionCurrent(context) || checkAbsenceStop() || !isAbsencePaused()) return null;
@@ -186,7 +180,7 @@ export async function checkBroadcasterReturn(context) {
 }
 
 export async function acquireRoomSnapshot(context, returnToChat) {
-    runtime.lastAcquisitionAttemptSource = 'API';
+    noteAcquisitionSource('API');
     try {
         var snapshot = await acquireAPISnapshot(context);
         if (!isAcquisitionCurrent(context)) return null;
@@ -196,7 +190,7 @@ export async function acquireRoomSnapshot(context, returnToChat) {
         observeSessionPresence(snapshot, Date.now());
         if (checkAbsenceStop() || !isAcquisitionCurrent(context)) return null;
         validateRoomSnapshot(snapshot);
-        runtime.domHealthStatus.consecutiveFailures = 0;
+        clearDOMFailures();
         clearRequestFailures(context.policyRevision);
         return snapshot;
     } catch (err) {
@@ -207,7 +201,7 @@ export async function acquireRoomSnapshot(context, returnToChat) {
         // Do not switch acquisition routes around a rate limit or explicit server wait.
         if (err.status === 429 || err.retryAt > Date.now()) return null;
     }
-    runtime.lastAcquisitionAttemptSource = 'DOM';
+    noteAcquisitionSource('DOM');
     var fallbackWait = getDOMFallbackWaitSeconds(context.room);
     if (fallbackWait > 0) {
         log('DOM fallback deferred for ' + fallbackWait + 's; retaining previous valid data (no history point)');
@@ -215,7 +209,7 @@ export async function acquireRoomSnapshot(context, returnToChat) {
     }
     var roomKey = context.room.toLowerCase();
     var fallbackIntervalMs = Math.max(runtime.DOM_FALLBACK_INTERVAL_SECONDS, runtime.scanIntervalSeconds) * 1000;
-    runtime.domFallbackReadyAtByRoom.set(roomKey, Date.now() + fallbackIntervalMs);
+    deferDOMFallback(roomKey, Date.now() + fallbackIntervalMs);
     log('Attempting DOM fallback; room=' + context.room);
     try {
         var fallback = await acquireDOMSnapshot(context, returnToChat);
@@ -229,8 +223,7 @@ export async function acquireRoomSnapshot(context, returnToChat) {
             '; retaining previous valid data (no history point)');
         return null;
     } finally {
-        runtime.domFallbackReadyAtByRoom.set(roomKey, Math.max(runtime.domFallbackReadyAtByRoom.get(roomKey) || 0,
-            Date.now() + fallbackIntervalMs));
+        deferDOMFallback(roomKey, Date.now() + fallbackIntervalMs);
     }
 }
 
@@ -245,8 +238,8 @@ export async function performScanThenReturn(returnToChat) {
     var policy = readRequestPolicy();
     if (policy.blocked) { pauseForAccessRestriction(); updateCountdownDisplay(); return; }
     if (policy.until > Date.now()) { updateCountdownDisplay(); return; }
-    runtime.isScanning = true;
-    var context = { epoch: ++runtime.scanEpoch, generation: runtime.initGuard, url: location.href, room: getModelName(), policyRevision: policy.revision };
+    var context = beginAcquisition(location.href, getModelName(), policy, Date.now(), runtime.isStopped);
+    if (!context) return;
     var priorState = null;
     var sampleCommitted = false;
     var sampleReceipt = null;
@@ -309,8 +302,7 @@ export async function performScanThenReturn(returnToChat) {
             pulseAcceptedHighs(priorState);
             if (diagnostics) diagnostic('log', 'API scan accepted', diagnostics);
         }
-        if (isAcquisitionCurrent(context)) {
-            runtime.isScanning = false;
+        if (finishAcquisition(context, location.href)) {
             resetCountdown();
             updateAcquisitionStatus();
             if (checkingReturn || (!priorState && priorAbsence !== runtime.broadcasterAbsence)) saveSession(context.room);

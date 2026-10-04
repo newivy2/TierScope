@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.9.0
+// @version      3.10.0
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -657,6 +657,187 @@ underlying system, so should run in the browser, Node, or Plask.
     }
   });
 
+  // src/acquisition-state.js
+  var ACQUISITION_FIELDS = Object.freeze([
+    "scanEpoch",
+    "initGuard",
+    "isScanning",
+    "lastAcquisitionAttemptSource",
+    "domHealthStatus",
+    "domFallbackReadyAtByRoom",
+    "requestPolicyCache",
+    "requestPolicyUnsaved",
+    "scanIntervalSeconds",
+    "countdownSeconds",
+    "lastScheduledIntervalSeconds",
+    "nextScanAt",
+    "countdownInterval",
+    "trackingTimerInterval",
+    "healthCheckInterval"
+  ]);
+  var acquisitionState;
+  var acquisitionClockEffects;
+  var acquisitionClockVersions = /* @__PURE__ */ new Map();
+  function initializeAcquisitionState(target, effects) {
+    acquisitionState = __spreadProps(__spreadValues(
+      {},
+      /** @type {AcquisitionState} */
+      Object.fromEntries(ACQUISITION_FIELDS.map((key) => [key, target[key]]))
+    ), {
+      domHealthStatus: __spreadValues({}, target.domHealthStatus),
+      requestPolicyCache: __spreadValues({}, target.requestPolicyCache),
+      domFallbackReadyAtByRoom: new Map(target.domFallbackReadyAtByRoom)
+    });
+    acquisitionClockEffects = effects;
+    acquisitionClockVersions.clear();
+    const fallbackView = Object.freeze({
+      get: (room) => acquisitionState.domFallbackReadyAtByRoom.get(room),
+      has: (room) => acquisitionState.domFallbackReadyAtByRoom.has(room),
+      get size() {
+        return acquisitionState.domFallbackReadyAtByRoom.size;
+      },
+      [Symbol.iterator]: () => acquisitionState.domFallbackReadyAtByRoom[Symbol.iterator]()
+    });
+    for (const key of ACQUISITION_FIELDS) Object.defineProperty(target, key, {
+      enumerable: true,
+      configurable: false,
+      get: () => key === "domFallbackReadyAtByRoom" ? fallbackView : key === "domHealthStatus" || key === "requestPolicyCache" ? Object.freeze(__spreadValues({}, acquisitionState[key])) : acquisitionState[key]
+    });
+  }
+  function invalidateAcquisition() {
+    acquisitionState.scanEpoch++;
+    acquisitionState.isScanning = false;
+  }
+  function beginAcquisitionGeneration() {
+    acquisitionState.initGuard++;
+    invalidateAcquisition();
+    return acquisitionState.initGuard;
+  }
+  function beginAcquisition(url, room, policy, now, stopped) {
+    if (acquisitionState.isScanning || stopped || policy.blocked || policy.until > now) return null;
+    acquisitionState.isScanning = true;
+    return Object.freeze({ epoch: ++acquisitionState.scanEpoch, generation: acquisitionState.initGuard, url, room, policyRevision: policy.revision });
+  }
+  function acquisitionContextIsCurrent(context, url) {
+    return context.epoch === acquisitionState.scanEpoch && context.generation === acquisitionState.initGuard && context.url === url;
+  }
+  function finishAcquisition(context, url) {
+    if (!acquisitionContextIsCurrent(context, url)) return false;
+    acquisitionState.isScanning = false;
+    return true;
+  }
+  function noteAcquisitionSource(source) {
+    acquisitionState.lastAcquisitionAttemptSource = source;
+  }
+  function clearDOMFailures() {
+    acquisitionState.domHealthStatus.consecutiveFailures = 0;
+  }
+  function noteDOMHealth(now, hasUserList, hasNames) {
+    const health = acquisitionState.domHealthStatus;
+    health.isHealthy = hasUserList && hasNames;
+    health.lastCheck = now;
+    health.userListTabFound = hasUserList;
+    if (!health.isHealthy) health.consecutiveFailures++;
+  }
+  function deferDOMFallback(room, readyAt) {
+    const key = room.toLowerCase();
+    acquisitionState.domFallbackReadyAtByRoom.set(key, Math.max(acquisitionState.domFallbackReadyAtByRoom.get(key) || 0, readyAt));
+  }
+  function selectScanInterval(seconds) {
+    if (Number.isFinite(seconds)) acquisitionState.scanIntervalSeconds = Math.max(30, Math.min(300, seconds));
+  }
+  function restoreScheduledInterval(seconds) {
+    acquisitionState.lastScheduledIntervalSeconds = seconds;
+  }
+  function scheduleNextAcquisition(seconds, now, restrictedUntil, stopped) {
+    acquisitionState.lastScheduledIntervalSeconds = seconds;
+    acquisitionState.countdownSeconds = seconds;
+    acquisitionState.nextScanAt = stopped ? 0 : Math.max(now + seconds * 1e3, restrictedUntil);
+  }
+  function schedulePresenceAcquisition(now, restrictedUntil) {
+    acquisitionState.nextScanAt = Math.max(now, restrictedUntil);
+  }
+  function clearAcquisitionDeadline() {
+    acquisitionState.nextScanAt = 0;
+  }
+  function resetAcquisitionForRoom() {
+    beginAcquisitionGeneration();
+    clearAcquisitionDeadline();
+    acquisitionState.countdownSeconds = acquisitionState.scanIntervalSeconds;
+    noteAcquisitionSource("API");
+    clearDOMFailures();
+    stopAcquisitionClock("healthCheckInterval");
+  }
+  function refreshAcquisitionCountdown(now, restrictedUntil, automatic) {
+    if (!automatic) return;
+    acquisitionState.nextScanAt = Math.max(acquisitionState.nextScanAt, restrictedUntil);
+    if (!acquisitionState.isScanning && acquisitionState.nextScanAt) {
+      acquisitionState.countdownSeconds = Math.max(0, Math.ceil((acquisitionState.nextScanAt - now) / 1e3));
+    }
+  }
+  function stopAcquisitionClock(name) {
+    acquisitionClockVersions.set(name, (acquisitionClockVersions.get(name) || 0) + 1);
+    const handle = acquisitionState[name];
+    acquisitionState[name] = null;
+    if (handle !== null) acquisitionClockEffects.stop(handle);
+  }
+  function startAcquisitionClock(name, tick, delay) {
+    stopAcquisitionClock(name);
+    const version = acquisitionClockVersions.get(name);
+    acquisitionState[name] = acquisitionClockEffects.start(() => {
+      if (acquisitionClockVersions.get(name) === version) tick();
+    }, delay);
+  }
+  function emptyRequestPolicy() {
+    return { until: 0, failures: 0, blocked: 0, status: 0, revision: "" };
+  }
+  function reconcileRequestPolicy(value) {
+    if (value === null) {
+      if (!acquisitionState.requestPolicyUnsaved) acquisitionState.requestPolicyCache = emptyRequestPolicy();
+      return;
+    }
+    const local = acquisitionState.requestPolicyCache;
+    acquisitionState.requestPolicyCache = acquisitionState.requestPolicyUnsaved ? __spreadProps(__spreadValues({}, value), {
+      until: Math.max(value.until, local.until),
+      serverUntil: Math.max(value.serverUntil || 0, local.serverUntil || 0),
+      failures: Math.max(value.failures, local.failures),
+      blocked: local.blocked || value.blocked,
+      status: local.until >= value.until ? local.status : value.status,
+      revision: local.revision
+    }) : __spreadValues({}, value);
+  }
+  function stageRequestPolicy(policy) {
+    acquisitionState.requestPolicyCache = __spreadValues({}, policy);
+    acquisitionState.requestPolicyUnsaved = true;
+  }
+  function confirmRequestPolicySaved(revision) {
+    if (acquisitionState.requestPolicyCache.revision === revision) acquisitionState.requestPolicyUnsaved = false;
+  }
+  function clearOwnedRequestFailures(revision) {
+    const current = acquisitionState.requestPolicyCache;
+    if (current.revision !== revision || current.blocked || !current.failures) return false;
+    acquisitionState.requestPolicyCache = emptyRequestPolicy();
+    acquisitionState.requestPolicyUnsaved = false;
+    return true;
+  }
+
+  // src/high-feedback.js
+  function setAllTimeActionStatus(message, replayLabel) {
+    var status = document.getElementById("all-time-action-status");
+    if (status) status.textContent = message;
+    var button = document.getElementById("btn-playback-add-all-time");
+    if (button) {
+      button.textContent = replayLabel || "Add to all-time highs";
+      button.title = message || "Add this file's highs to the room named beside this button";
+      button.setAttribute("aria-label", replayLabel ? replayLabel + ". " + message : "Add to all-time highs");
+    }
+  }
+
+  // src/format.js
+  function compactNumber(value) {
+    return value >= 1e6 ? (value / 1e6).toFixed(1).replace(/\.0$/, "") + "m" : value >= 1e4 ? (value / 1e3).toFixed(1).replace(/\.0$/, "") + "k" : String(value);
+  }
+
   // src/runtime.js
   var runtime = {};
 
@@ -797,11 +978,6 @@ underlying system, so should run in the browser, Node, or Plask.
       }
     });
     return highs;
-  }
-
-  // src/format.js
-  function compactNumber(value) {
-    return value >= 1e6 ? (value / 1e6).toFixed(1).replace(/\.0$/, "") + "m" : value >= 1e4 ? (value / 1e3).toFixed(1).replace(/\.0$/, "") + "k" : String(value);
   }
 
   // src/live-session.js
@@ -1393,6 +1569,149 @@ underlying system, so should run in the browser, Node, or Plask.
     return { value: newHigh, isNew: false };
   }
 
+  // src/high-pulses.js
+  function cancelHighPulse(key) {
+    var animation = runtime.highPulseAnimations.get(key);
+    runtime.highPulseAnimations.delete(key);
+    if (animation) {
+      try {
+        animation.cancel();
+      } catch (error) {
+      }
+    }
+  }
+  function cancelHighPulses() {
+    Array.from(runtime.highPulseAnimations.keys()).forEach(cancelHighPulse);
+  }
+  function pulseAcceptedHighs(priorState) {
+    try {
+      if (runtime.presentationMode !== "LIVE" || runtime.isMinimized || runtime.restoredDisplayFrame || document.visibilityState === "hidden" || runtime.highPulseMotion && runtime.highPulseMotion.matches) {
+        cancelHighPulses();
+        return;
+      }
+      runtime.PANEL_ROWS.forEach(function(row) {
+        var key = row.key === "withtokens" ? "withTokens" : row.key === "anon" ? "anonymous" : row.key;
+        var atHigh = runtime.newHighTiers[key], wasAtHigh = priorState.newHighTiers[key];
+        var previousHigh = priorState.sessionHighs[key];
+        var raisedHigh = runtime.sessionHighs[key].value > (previousHigh ? previousHigh.value : 0);
+        if (runtime.highMode === "ath") {
+          var high = displayedAllTimeState().highs[key], before = priorState.allTimeHighs[key];
+          var current = runtime.history[key][runtime.history[key].length - 1];
+          var oldValue = priorState.history[key][priorState.history[key].length - 1];
+          atHigh = high.source && current > 0 && current >= high.value;
+          wasAtHigh = priorState.lastAcceptedAcquisition && before.source && oldValue > 0 && oldValue >= before.value;
+          raisedHigh = high.value > before.value;
+        }
+        if (!atHigh) {
+          cancelHighPulse(row.key);
+          return;
+        }
+        if (wasAtHigh && !raisedHigh) return;
+        var target = document.getElementById((runtime.collapsedRows.has(row.key) ? "restore-row-" : "tier-row-") + row.key);
+        if (!target || typeof target.animate !== "function") return;
+        cancelHighPulse(row.key);
+        var animation = target.animate([
+          { backgroundColor: "rgba(50, 205, 50, 0.22)", boxShadow: "inset 0 0 0 1px rgba(105, 190, 69, 0)", offset: 0 },
+          { backgroundColor: "rgba(50, 205, 50, 0.40)", boxShadow: "inset 0 0 0 1px rgba(105, 190, 69, 0.75)", offset: 0.5 },
+          { backgroundColor: "rgba(50, 205, 50, 0.22)", boxShadow: "inset 0 0 0 1px rgba(105, 190, 69, 0)", offset: 1 }
+        ], { duration: 850, iterations: 2, easing: "ease-in-out", fill: "none" });
+        runtime.highPulseAnimations.set(row.key, animation);
+        animation.onfinish = animation.oncancel = function() {
+          if (runtime.highPulseAnimations.get(row.key) === animation) runtime.highPulseAnimations.delete(row.key);
+        };
+      });
+    } catch (error) {
+      log("High pulse unavailable: " + error.message);
+    }
+  }
+
+  // src/panel-preferences.js
+  var PANEL_PREFERENCE_FIELDS = Object.freeze([
+    "highMode",
+    "panelGeometry",
+    "isDarkMode",
+    "miniMetric",
+    "collapsedRows",
+    "chartWindowMode",
+    "currentScale",
+    "panelBackgroundPercent",
+    "isMinimized",
+    "trendComparisonMode",
+    "autoTrendEscalation"
+  ]);
+  var panelPreferenceState;
+  var preferenceChoices;
+  function initializePanelPreferences(target) {
+    panelPreferenceState = __spreadProps(__spreadValues(
+      {},
+      /** @type {PanelPreferences} */
+      Object.fromEntries(PANEL_PREFERENCE_FIELDS.map((key) => [key, target[key]]))
+    ), {
+      collapsedRows: new Set(target.collapsedRows),
+      panelGeometry: target.panelGeometry ? __spreadValues({}, target.panelGeometry) : null
+    });
+    preferenceChoices = {
+      rows: new Set(target.PANEL_ROWS.map((row) => row.key)),
+      metrics: target.MINI_METRICS.slice(),
+      windows: new Set(Object.keys(target.CHART_WINDOWS)),
+      trends: new Set(Object.keys(target.TREND_PRESETS))
+    };
+    const rowsView = Object.freeze({
+      has: (key) => panelPreferenceState.collapsedRows.has(key),
+      get size() {
+        return panelPreferenceState.collapsedRows.size;
+      },
+      [Symbol.iterator]: () => panelPreferenceState.collapsedRows[Symbol.iterator]()
+    });
+    for (const key of PANEL_PREFERENCE_FIELDS) Object.defineProperty(target, key, {
+      enumerable: true,
+      configurable: false,
+      get: () => key === "collapsedRows" ? rowsView : key === "panelGeometry" && panelPreferenceState.panelGeometry ? Object.freeze(__spreadValues({}, panelPreferenceState.panelGeometry)) : panelPreferenceState[key]
+    });
+  }
+  function switchHighPreference() {
+    panelPreferenceState.highMode = panelPreferenceState.highMode === "sh" ? "ath" : "sh";
+  }
+  function selectPanelTheme(dark) {
+    panelPreferenceState.isDarkMode = !!dark;
+  }
+  function cycleMiniMetric() {
+    panelPreferenceState.miniMetric = preferenceChoices.metrics[(preferenceChoices.metrics.indexOf(panelPreferenceState.miniMetric) + 1) % preferenceChoices.metrics.length];
+  }
+  function selectCollapsedRow(key, collapsed) {
+    if (!preferenceChoices.rows.has(key)) return;
+    if (collapsed) panelPreferenceState.collapsedRows.add(key);
+    else panelPreferenceState.collapsedRows.delete(key);
+  }
+  function selectChartWindow(mode) {
+    if (preferenceChoices.windows.has(mode)) panelPreferenceState.chartWindowMode = mode;
+  }
+  function selectPanelScale(scale) {
+    if (Number.isFinite(scale) && scale > 0) panelPreferenceState.currentScale = scale;
+  }
+  function rememberPanelGeometry(geometry) {
+    panelPreferenceState.panelGeometry = __spreadValues({}, geometry);
+  }
+  function selectPanelOpacity(percent) {
+    if (Number.isFinite(percent)) panelPreferenceState.panelBackgroundPercent = Math.max(30, Math.min(100, percent));
+  }
+  function selectPanelMinimized(minimized) {
+    panelPreferenceState.isMinimized = !!minimized;
+  }
+  function selectTrendMode(mode) {
+    if (preferenceChoices.trends.has(mode)) panelPreferenceState.trendComparisonMode = mode;
+  }
+  function selectAutomaticTrends(automatic) {
+    panelPreferenceState.autoTrendEscalation = !!automatic;
+  }
+  function restoreTrendPreferences(mode, automatic) {
+    selectTrendMode(mode);
+    selectAutomaticTrends(automatic);
+  }
+  function resetTrendPreferences() {
+    restoreTrendPreferences("last", true);
+  }
+
   // src/playback-state.js
   var PLAYBACK_FIELDS = Object.freeze(["playback", "presentationMode", "sessionFileLoadGeneration"]);
   var playbackState;
@@ -1705,21 +2024,11 @@ underlying system, so should run in the browser, Node, or Plask.
   function readRequestPolicy() {
     try {
       var raw = GM_getValue(runtime.REQUEST_POLICY_KEY, null);
-      if (raw === null && !runtime.requestPolicyUnsaved) runtime.requestPolicyCache = { until: 0, failures: 0, blocked: 0, status: 0, revision: "" };
-      else if (raw !== null) {
+      if (raw === null) reconcileRequestPolicy(null);
+      else {
         var value = JSON.parse(raw);
         if (value && Number.isFinite(value.until) && value.until >= 0 && Number.isInteger(value.failures) && value.failures >= 0 && (value.blocked === 0 || value.blocked === 401 || value.blocked === 403) && Number.isInteger(value.status) && (!value.serverUntil || isStorageTimestamp(value.serverUntil)) && typeof value.revision === "string") {
-          if (runtime.requestPolicyUnsaved) {
-            value = Object.assign({}, value, {
-              until: Math.max(value.until, runtime.requestPolicyCache.until),
-              serverUntil: Math.max(value.serverUntil || 0, runtime.requestPolicyCache.serverUntil || 0),
-              failures: Math.max(value.failures, runtime.requestPolicyCache.failures),
-              blocked: runtime.requestPolicyCache.blocked || value.blocked,
-              status: runtime.requestPolicyCache.until >= value.until ? runtime.requestPolicyCache.status : value.status,
-              revision: runtime.requestPolicyCache.revision
-            });
-          }
-          runtime.requestPolicyCache = value;
+          reconcileRequestPolicy(value);
         }
       }
     } catch (error) {
@@ -1728,11 +2037,10 @@ underlying system, so should run in the browser, Node, or Plask.
   }
   function writeRequestPolicy(policy) {
     policy.revision = makeStorageId();
-    runtime.requestPolicyCache = policy;
-    runtime.requestPolicyUnsaved = true;
+    stageRequestPolicy(policy);
     try {
       GM_setValue(runtime.REQUEST_POLICY_KEY, JSON.stringify(policy));
-      runtime.requestPolicyUnsaved = false;
+      confirmRequestPolicySaved(policy.revision);
     } catch (error) {
       log("Request restriction is local to this tab: " + error.message);
     }
@@ -1764,10 +2072,8 @@ underlying system, so should run in the browser, Node, or Plask.
     return policy;
   }
   function clearRequestFailures(revision) {
-    var current = readRequestPolicy();
-    if (current.revision !== revision || current.blocked || !current.failures) return;
-    runtime.requestPolicyCache = { until: 0, failures: 0, blocked: 0, status: 0, revision: "" };
-    runtime.requestPolicyUnsaved = false;
+    readRequestPolicy();
+    if (!clearOwnedRequestFailures(revision)) return;
     try {
       GM_deleteValue(runtime.REQUEST_POLICY_KEY);
     } catch (error) {
@@ -1949,7 +2255,19 @@ underlying system, so should run in the browser, Node, or Plask.
   }
 
   // src/chart-view.js
+  var chartSampleCache = /* @__PURE__ */ new WeakMap();
+  function chartSamples(values) {
+    if (!values || !Object.isFrozen(values)) return values;
+    let cached = chartSampleCache.get(values);
+    if (!cached) {
+      cached = Array.from(values);
+      chartSampleCache.set(values, cached);
+    }
+    return cached;
+  }
   function buildChartPlot(values, times, breaks, width, lastIndex, windowMs, replayProgress) {
+    values = chartSamples(values);
+    breaks = chartSamples(breaks);
     var end = Math.min(values.length, times.length) - 1;
     if (Number.isInteger(lastIndex)) end = Math.min(end, lastIndex);
     if (end < 0) return { points: [], min: 0, max: 0, end: -1 };
@@ -2538,25 +2856,14 @@ underlying system, so should run in the browser, Node, or Plask.
     if (runtime.presentationMode === "PLAYBACK") return;
     renderTrendDisplay(buildTrendDisplayModel());
   }
-
-  // src/layout.js
-  function loadCollapsedRows() {
-    try {
-      var raw = GM_getValue(runtime.COLLAPSED_ROWS_KEY, null);
-      if (raw !== null && typeof raw !== "undefined") {
-        var saved = JSON.parse(raw);
-        if (!Array.isArray(saved) || !saved.every(function(key) {
-          return runtime.PANEL_ROWS.some(function(row) {
-            return row.key === key;
-          });
-        })) throw new Error("Invalid collapsed-row preferences");
-        return new Set(saved);
-      }
-    } catch (error) {
-      log("Could not restore row preferences: " + error.message);
-    }
-    return /* @__PURE__ */ new Set(["red", "green"]);
+  function refreshPanelOptions() {
+    presentationEffects.refreshOptions();
   }
+  function refreshScanCountdown() {
+    presentationEffects.refreshCountdown();
+  }
+
+  // src/row-layout.js
   function panelRowMarker(row) {
     return row.icon || getTierMarker(row.key);
   }
@@ -2622,268 +2929,6 @@ underlying system, so should run in the browser, Node, or Plask.
       region.style.height = runtime.panelChartRegionHeight + "px";
     }
     runtime.rowLayoutNeedsMeasure = !measurable;
-  }
-  function setRowCollapsed(key, collapsed) {
-    cancelHighPulse(key);
-    if (!runtime.PANEL_ROWS.some(function(row) {
-      return row.key === key;
-    })) return;
-    if (collapsed) runtime.collapsedRows.add(key);
-    else runtime.collapsedRows.delete(key);
-    try {
-      GM_setValue(runtime.COLLAPSED_ROWS_KEY, JSON.stringify(Array.from(runtime.collapsedRows)));
-    } catch (error) {
-      log("Could not save row preferences: " + error.message);
-    }
-    applyRowLayout();
-    if (runtime.presentationMode === "PLAYBACK") {
-      paintPlayback(runtime.playback);
-    } else {
-      updateDisplay();
-      drawAllSparklines();
-    }
-    constrainPanelPosition();
-    var target = document.getElementById((collapsed ? "restore-row-" : "collapse-row-") + key);
-    if (target) target.focus({ preventScroll: true });
-  }
-  function bindRowControls() {
-    runtime.panelChartRegionHeight = null;
-    runtime.PANEL_ROWS.forEach(function(row) {
-      [false, true].forEach(function(collapsed) {
-        var button = document.getElementById((collapsed ? "collapse-row-" : "restore-row-") + row.key);
-        if (button) button.onclick = function(event) {
-          event.stopPropagation();
-          setRowCollapsed(row.key, collapsed);
-        };
-      });
-    });
-    var container = document.getElementById("tracker-container");
-    if (container) container.addEventListener("transitionend", function(event) {
-      if (event.target === container && event.propertyName === "width") {
-        redrawPanelCharts();
-        constrainPanelPosition();
-      }
-    });
-    applyRowLayout();
-  }
-  function redrawPanelCharts() {
-    if (runtime.isMinimized) return;
-    runtime.chartLayoutRevision++;
-    if (runtime.presentationMode === "PLAYBACK") paintPlayback(runtime.playback);
-    else drawAllSparklines();
-  }
-  function cleanupDragListeners() {
-    for (var i = 0; i < runtime.dragListeners.length; i++) {
-      var listener = runtime.dragListeners[i];
-      document.removeEventListener(listener.type, listener.fn, listener.options);
-    }
-    runtime.dragListeners = [];
-  }
-  function addDragListener(type, fn, options) {
-    document.addEventListener(type, fn, options);
-    runtime.dragListeners.push({ type, fn, options });
-  }
-  function loadPanelGeometry() {
-    try {
-      var raw = GM_getValue(runtime.PANEL_GEOMETRY_KEY, null);
-      if (raw === null) return null;
-      var data = JSON.parse(raw);
-      if (!data || !Number.isFinite(data.left) || !Number.isFinite(data.top) || !Number.isFinite(data.scale) || data.scale < 0.5 || data.scale > 3) return null;
-      return { left: data.left, top: data.top, scale: data.scale };
-    } catch (error) {
-      return null;
-    }
-  }
-  function constrainPanelPosition() {
-    var container = document.getElementById("tracker-container");
-    if (!container) return;
-    var rect = container.getBoundingClientRect();
-    container.style.left = Math.max(0, Math.min(rect.left, Math.max(0, window.innerWidth - rect.width))) + "px";
-    container.style.top = Math.max(0, Math.min(rect.top, Math.max(0, window.innerHeight - rect.height))) + "px";
-    container.style.right = "auto";
-  }
-  function savePanelGeometry() {
-    var container = document.getElementById("tracker-container");
-    if (!container) return;
-    var rect = container.getBoundingClientRect();
-    runtime.panelGeometry = { left: rect.left, top: rect.top, scale: runtime.currentScale };
-    try {
-      GM_setValue(runtime.PANEL_GEOMETRY_KEY, JSON.stringify(runtime.panelGeometry));
-    } catch (error) {
-      log("Could not save panel position/scale: " + error.message);
-    }
-  }
-  function restorePanelGeometry() {
-    var container = document.getElementById("tracker-container");
-    if (!container) return;
-    if (runtime.panelGeometry) {
-      container.style.left = runtime.panelGeometry.left + "px";
-      container.style.top = runtime.panelGeometry.top + "px";
-      container.style.right = "auto";
-      applyScale(runtime.panelGeometry.scale);
-    } else applyScale(runtime.currentScale);
-    constrainPanelPosition();
-    redrawPanelCharts();
-  }
-  function restoreStandardSize() {
-    applyScale(1);
-    redrawPanelCharts();
-    constrainPanelPosition();
-    savePanelGeometry();
-  }
-  function applyScale(scale) {
-    runtime.currentScale = scale;
-    var container = document.getElementById("tracker-container");
-    if (!container) return;
-    container.style.transform = "scale(" + scale + ")";
-    container.style.transformOrigin = "top left";
-    container.dataset.scale = scale;
-  }
-  function setupResizable() {
-    var container = document.getElementById("tracker-container");
-    if (!container) return;
-    var resizeHandle = document.createElement("div");
-    resizeHandle.id = "resize-handle";
-    resizeHandle.style.cssText = "position:absolute;top:0;left:0;width:16px;height:16px;background:linear-gradient(135deg, #ff69b4 50%, transparent 50%);cursor:nw-resize;z-index:999999;border-top-left-radius:6px;opacity:0.8;transition:opacity 0.2s;";
-    resizeHandle.addEventListener("mouseenter", function() {
-      this.style.opacity = "1";
-    });
-    resizeHandle.addEventListener("mouseleave", function() {
-      this.style.opacity = "0.8";
-    });
-    container.appendChild(resizeHandle);
-    var startResize = function(e) {
-      if (runtime.isDragging) return;
-      runtime.isResizing = true;
-      runtime.resizeStartX = e.clientX;
-      runtime.resizeStartY = e.clientY;
-      var rect = container.getBoundingClientRect();
-      runtime.resizeStartWidth = rect.width;
-      runtime.resizeStartHeight = rect.height;
-      e.preventDefault();
-      e.stopPropagation();
-    };
-    var doResize = function(e) {
-      if (!runtime.isResizing) return;
-      var deltaX = runtime.resizeStartX - e.clientX;
-      var deltaY = runtime.resizeStartY - e.clientY;
-      var newWidth = runtime.resizeStartWidth + deltaX;
-      var baseWidth = container.offsetWidth;
-      var newScale = Math.max(0.5, Math.min(3, newWidth / baseWidth));
-      applyScale(newScale);
-    };
-    var stopResize = function() {
-      if (!runtime.isResizing) return;
-      runtime.isResizing = false;
-      redrawPanelCharts();
-      constrainPanelPosition();
-      savePanelGeometry();
-    };
-    resizeHandle.addEventListener("mousedown", startResize);
-    document.addEventListener("mousemove", doResize);
-    document.addEventListener("mouseup", stopResize);
-    window._trackerResizeCleanup = function() {
-      resizeHandle.removeEventListener("mousedown", startResize);
-      document.removeEventListener("mousemove", doResize);
-      document.removeEventListener("mouseup", stopResize);
-    };
-  }
-  function setupResizeHandler() {
-    if (runtime.windowResizeHandler) {
-      window.removeEventListener("resize", runtime.windowResizeHandler);
-      runtime.windowResizeHandler = null;
-    }
-    var resizeTimeout;
-    runtime.windowResizeHandler = function() {
-      clearTimeout(resizeTimeout);
-      resizeTimeout = setTimeout(function() {
-        constrainPanelPosition();
-        redrawPanelCharts();
-      }, 100);
-    };
-    window.addEventListener("resize", runtime.windowResizeHandler);
-  }
-  function setupDraggable() {
-    var container = document.getElementById("tracker-container");
-    var dragHandle = document.getElementById("drag-handle");
-    if (!container || !dragHandle) return;
-    var startDrag = function(e) {
-      if (runtime.isResizing || e.target.closest && e.target.closest("button, input, select, a")) return;
-      runtime.isDragging = true;
-      var rect = container.getBoundingClientRect();
-      var scale = runtime.currentScale || 1;
-      runtime.dragOffsetX = (e.clientX - rect.left) / scale;
-      runtime.dragOffsetY = (e.clientY - rect.top) / scale;
-      if (container.style.right !== "auto") {
-        container.style.left = rect.left + "px";
-        container.style.right = "auto";
-      }
-      addDragListener("mousemove", doDrag, false);
-      addDragListener("mouseup", stopDrag, false);
-      e.preventDefault();
-    };
-    var doDrag = function(e) {
-      if (!runtime.isDragging) return;
-      var scale = runtime.currentScale || 1;
-      var newX = e.clientX - runtime.dragOffsetX * scale;
-      var newY = e.clientY - runtime.dragOffsetY * scale;
-      var maxX = window.innerWidth - container.offsetWidth * scale;
-      var maxY = window.innerHeight - container.offsetHeight * scale;
-      newX = Math.max(0, Math.min(newX, maxX));
-      newY = Math.max(0, Math.min(newY, maxY));
-      container.style.left = newX + "px";
-      container.style.top = newY + "px";
-    };
-    var stopDrag = function() {
-      runtime.isDragging = false;
-      cleanupDragListeners();
-      savePanelGeometry();
-    };
-    dragHandle.addEventListener("mousedown", startDrag, false);
-  }
-  function toggleView() {
-    hideChartTooltip();
-    if (runtime.presentationMode === "PLAYBACK") return;
-    cancelHighPulses();
-    runtime.isMinimized = !runtime.isMinimized;
-    var fullView = document.getElementById("full-view");
-    var miniView = document.getElementById("minimized-view");
-    var toggleBtn = document.getElementById("btn-toggle");
-    var container = document.getElementById("tracker-container");
-    var headerText = document.getElementById("header-text");
-    var resizeHandle = document.getElementById("resize-handle");
-    var anonymousCount = getAnonymousCount();
-    var previousTransition = container ? container.style.transition : "";
-    if (container) container.style.transition = "none";
-    if (runtime.isMinimized) {
-      if (fullView) fullView.style.display = "none";
-      if (miniView) miniView.style.display = "block";
-      if (toggleBtn) toggleBtn.textContent = "+";
-      if (container) container.style.width = runtime.BASE_WIDTH_MINI + "px";
-      if (resizeHandle) resizeHandle.style.display = "none";
-      if (runtime.isResizing) runtime.isResizing = false;
-      var currentTotal = runtime.roomTotal > 0 ? runtime.roomTotal : runtime.users.size + anonymousCount;
-      if (headerText) headerText.textContent = currentTotal.toLocaleString() + " (H:" + runtime.roomTotalHigh.toLocaleString() + ")";
-    } else {
-      if (fullView) fullView.style.display = "block";
-      if (miniView) miniView.style.display = "none";
-      if (toggleBtn) toggleBtn.textContent = "−";
-      if (container) container.style.width = runtime.BASE_WIDTH_FULL + "px";
-      if (resizeHandle) resizeHandle.style.display = "block";
-      var currentTotal = runtime.roomTotal > 0 ? runtime.roomTotal : runtime.users.size + anonymousCount;
-      if (headerText) headerText.textContent = "USERS: " + currentTotal.toLocaleString() + " (H:" + runtime.roomTotalHigh.toLocaleString() + ")";
-    }
-    var settings = document.getElementById("mini-settings");
-    if (settings) settings.style.display = "none";
-    var settingsButton = document.getElementById("mini-settings-toggle");
-    if (settingsButton) settingsButton.setAttribute("aria-expanded", "false");
-    updateDisplay();
-    if (!runtime.isMinimized) {
-      drawAllSparklines();
-      constrainPanelPosition();
-    }
-    constrainPanelPosition();
-    if (container) container.style.transition = previousTransition;
   }
 
   // src/charts.js
@@ -3536,1029 +3581,6 @@ underlying system, so should run in the browser, Node, or Plask.
     if (element) renderStatus(element, buildAcquisitionStatusModel());
   }
 
-  // src/dom.js
-  function validateDOMHealth() {
-    const now = Date.now();
-    const container = document.getElementById("tracker-container");
-    const userListTab = document.querySelector(runtime.DOM_SELECTORS.userListTab);
-    const hasUserList = !!userListTab;
-    let hasUsernameElements = false;
-    for (let i = 0; i < runtime.DOM_SELECTORS.usernameElements.length; i++) {
-      if (document.querySelector(runtime.DOM_SELECTORS.usernameElements[i])) {
-        hasUsernameElements = true;
-        break;
-      }
-    }
-    const health = {
-      timestamp: now,
-      userListTab: hasUserList,
-      usernameElements: hasUsernameElements,
-      container: !!container,
-      roomTotalSelectors: runtime.DOM_SELECTORS.roomTotal.some((sel) => !!document.querySelector(sel))
-    };
-    const wasHealthy = runtime.domHealthStatus.isHealthy;
-    runtime.domHealthStatus.isHealthy = health.userListTab && health.usernameElements;
-    runtime.domHealthStatus.lastCheck = now;
-    runtime.domHealthStatus.userListTabFound = hasUserList;
-    if (!runtime.domHealthStatus.isHealthy) {
-      runtime.domHealthStatus.consecutiveFailures++;
-      if (runtime.domHealthStatus.consecutiveFailures === 1 || runtime.domHealthStatus.consecutiveFailures % 10 === 0) {
-        diagnostic("warn", "DOM health check failed:", health);
-        if (container) {
-          const statusEl = document.getElementById("auto-status");
-          if (statusEl) {
-            statusEl.textContent = "DOM mismatch - check console";
-            statusEl.style.color = "var(--panel-negative)";
-          }
-        }
-      }
-      if (runtime.domHealthStatus.consecutiveFailures > 5 && runtime.isAutoRefreshOn) {
-        diagnostic("warn", "Auto-pausing due to DOM health issues");
-        pauseAutoRefresh();
-      }
-    } else {
-      if (!wasHealthy && runtime.domHealthStatus.consecutiveFailures > 0) {
-        log("DOM health restored");
-        const statusEl = document.getElementById("auto-status");
-        if (statusEl && runtime.isAutoRefreshOn) {
-          statusEl.textContent = "Next: " + runtime.countdownSeconds + "s";
-          statusEl.style.color = "var(--panel-positive)";
-        }
-      }
-      runtime.domHealthStatus.consecutiveFailures = 0;
-    }
-    return health;
-  }
-  function getTierFromClassList(classList) {
-    for (var i = 0; i < classList.length; i++) {
-      var className = classList[i];
-      var lower = className.toLowerCase();
-      if (className === "tippedTonsRecently" || lower === "tippedtonsrecently") return "purple";
-      if (className === "tippedALotRecently" || lower === "tippedalotrecently") return "pink";
-      if (className === "tippedRecently" || lower === "tippedrecently") return "dark-blue";
-      if (className === "inFanClub" || lower === "infanclub") return "green";
-      if (className === "mod" || lower === "moderator") return "red";
-      if (className === "hasTokens" || lower === "hastokens") return "light-blue";
-      if (className === "defaultUser" || lower === "defaultuser") return "gray";
-    }
-    return null;
-  }
-  function getTierFromElement(el) {
-    var tier = getTierFromClassList(el.classList);
-    if (tier) return tier;
-    var parent = el.parentElement;
-    for (var i = 0; i < 4 && parent; i++) {
-      tier = getTierFromClassList(parent.classList);
-      if (tier) return tier;
-      parent = parent.parentElement;
-    }
-    return "gray";
-  }
-  function getGenderFromElement(el) {
-    var genderImg = el.querySelector('img[data-testid="gender-icon"], img[title="Trans"], img[title="Female"], img[title="Male"], img[title="Couple"]');
-    if (!genderImg) {
-      var parent = el.parentElement;
-      for (var i = 0; i < 3 && parent; i++) {
-        genderImg = parent.querySelector('img[data-testid="gender-icon"], img[title="Trans"], img[title="Female"], img[title="Male"], img[title="Couple"]');
-        if (genderImg) break;
-        parent = parent.parentElement;
-      }
-    }
-    if (genderImg) {
-      var src = genderImg.src || "";
-      var title = genderImg.title || "";
-      if (src.indexOf("female") !== -1 || title === "Female") return "female";
-      if (src.indexOf("trans") !== -1 || title === "Trans") return "trans";
-      if (src.indexOf("male") !== -1 || title === "Male") return "male";
-      if (src.indexOf("couple") !== -1 || title === "Couple") return "couple";
-    }
-    return "unknown";
-  }
-  function getRoomTotal() {
-    for (var i = 0; i < runtime.DOM_SELECTORS.roomTotal.length; i++) {
-      var el = document.querySelector(runtime.DOM_SELECTORS.roomTotal[i]);
-      if (el) {
-        var text = el.textContent || "";
-        var match = text.match(/USERS\s*\(?(\d[\d,]*)\)?/i);
-        if (match) return parseInt(match[1].replace(/,/g, ""));
-      }
-    }
-    return 0;
-  }
-  function extractUsername(text) {
-    if (!text) return null;
-    text = text.trim().split("\n")[0];
-    var match = text.match(/^([^\s\(\[\<\,]+)/);
-    if (match) {
-      var candidate = match[1].trim();
-      if (candidate.length >= 2 && candidate.length <= 30) {
-        var clean = candidate.replace(/[^\w\-]+$/, "");
-        if (clean.length >= 2) return clean;
-      }
-    }
-    return null;
-  }
-  function findTab(tabName) {
-    var selectors = runtime.DOM_SELECTORS.tabs[tabName.toLowerCase()] || [];
-    for (var i = 0; i < selectors.length; i++) {
-      var el = document.querySelector(selectors[i]);
-      if (el) return el;
-    }
-    var buttons = document.querySelectorAll('button, div[role="tab"]');
-    for (var j = 0; j < buttons.length; j++) {
-      var btn = buttons[j];
-      var text = (btn.textContent || "").toUpperCase();
-      if (text.indexOf(tabName.toUpperCase()) !== -1) return btn;
-    }
-    return null;
-  }
-  function isScanValid(newUserCount, newRoomTotal) {
-    if (runtime.previousRoomTotal === 0) return true;
-    if (newRoomTotal === 0 && runtime.previousRoomTotal > 0) {
-      log("Scan rejected: room total is 0 but previous was " + runtime.previousRoomTotal);
-      return false;
-    }
-    var roomTotalChange = Math.abs(newRoomTotal - runtime.previousRoomTotal) / runtime.previousRoomTotal;
-    if (roomTotalChange > 0.1) return true;
-    var userDrop = runtime.previousUserCount > 0 ? (runtime.previousUserCount - newUserCount) / runtime.previousUserCount : 0;
-    if (userDrop > 0.5) {
-      log("Scan rejected: user count dropped " + Math.round(userDrop * 100) + "% (" + runtime.previousUserCount + " -> " + newUserCount + ") while room total stable (" + runtime.previousRoomTotal + " -> " + newRoomTotal + ")");
-      return false;
-    }
-    return true;
-  }
-  function scanUsers() {
-    var userListTab = document.querySelector(runtime.DOM_SELECTORS.userListTab);
-    if (!userListTab) throw new Error("UserListTab not found");
-    var snapshotUsers = /* @__PURE__ */ new Map();
-    var snapshotRoomTotal = getRoomTotal();
-    if (!snapshotRoomTotal) throw new Error("DOM room total missing or zero");
-    var userElements = [];
-    for (var i = 0; i < runtime.DOM_SELECTORS.usernameElements.length; i++) {
-      var found = userListTab.querySelectorAll(runtime.DOM_SELECTORS.usernameElements[i]);
-      for (var j = 0; j < found.length; j++) {
-        userElements.push(found[j]);
-      }
-    }
-    for (var i = 0; i < userElements.length; i++) {
-      var el = userElements[i];
-      var rawText = (el.textContent || "").trim() || (el.getAttribute("data-username") || "").trim();
-      var username = extractUsername(rawText);
-      if (username && !snapshotUsers.has(username)) {
-        var tier = getTierFromElement(el);
-        var gender = getGenderFromElement(el);
-        snapshotUsers.set(username, {
-          username,
-          rawClass: null,
-          tier,
-          genderCode: null,
-          gender,
-          rawFlag: null,
-          isOwner: null
-        });
-      }
-    }
-    if (!snapshotUsers.size) throw new Error("DOM sample contains no readable users");
-    return {
-      source: "DOM",
-      timestamp: Date.now(),
-      roomTotal: snapshotRoomTotal,
-      users: Array.from(snapshotUsers.values())
-    };
-  }
-
-  // src/history.js
-  function getSessionSamplePolicy() {
-    return {
-      breaks: getHistoryBreaks(runtime.history),
-      intervalSeconds: runtime.scanIntervalSeconds,
-      lastIntervalSeconds: runtime.lastScheduledIntervalSeconds,
-      timeoutMs: runtime.API_TIMEOUT_MS
-    };
-  }
-  function saveToHistory() {
-    appendCurrentSessionSample(Date.now(), getSessionSamplePolicy());
-    if (!runtime.isMinimized) drawAllSparklines();
-  }
-  function syncHighTimes() {
-    synchronizeSessionHighTimes();
-  }
-
-  // src/session-persistence.js
-  function restoreSessionState(data) {
-    var snapshot = createPlaybackSnapshot(data.history);
-    restoreLiveSession(data, getPlaybackFrame(snapshot, snapshot.durationMs));
-    runtime.lastScheduledIntervalSeconds = getEffectiveScanIntervalSeconds();
-    runtime.trendComparisonMode = data.trendComparisonMode;
-    runtime.autoTrendEscalation = data.autoTrendEscalation;
-  }
-  function saveSession(model) {
-    if (!model || model === "unknown") return;
-    try {
-      var result = getSessionWriteStatus(model);
-      if (result.status === "ready") {
-        prepareSessionHighsForSave();
-        var saveData = {
-          schemaVersion: runtime.STORAGE_SCHEMA_VERSION,
-          producerVersion: runtime.TIERSCOPE_VERSION,
-          timestamp: Date.now(),
-          history: runtime.history,
-          tierHighTimes: runtime.tierHighTimes,
-          withTokensHighTime: runtime.withTokensHighTime,
-          totalHighTime: runtime.totalHighTime,
-          anonHighTime: runtime.anonHighTime,
-          femaleTransHighTime: runtime.femaleTransHighTime,
-          roomTotalHigh: runtime.roomTotalHigh,
-          roomTotalHighTime: runtime.roomTotalHighTime,
-          trackingStartTime: runtime.trackingStartTime,
-          sessionStartedAt: runtime.sessionStartedAt,
-          sessionStartEstimated: runtime.sessionStartEstimated,
-          sessionHighs: runtime.sessionHighs,
-          roomEpoch: runtime.activeRoomEpoch,
-          isPaused: runtime.isPaused,
-          isStopped: runtime.isStopped,
-          stoppedAt: runtime.stoppedAt,
-          stopReason: runtime.stopReason,
-          broadcasterAbsence: runtime.broadcasterAbsence,
-          absencePausedAt: runtime.absencePausedAt,
-          absenceOverrideActive: runtime.absenceOverrideActive,
-          pausedElapsedTime: runtime.pausedElapsedTime,
-          previousCounts: runtime.previousCounts,
-          hasTrendBaseline: runtime.hasTrendBaseline,
-          trendComparisonMode: runtime.trendComparisonMode,
-          autoTrendEscalation: runtime.autoTrendEscalation
-        };
-        result = writeSessionRecord(model, saveData);
-      }
-      if (result.status === "reset") {
-        runtime.sessionStorageNotice = result.message;
-        updateAcquisitionStatus();
-      } else if (result.status === "saved") {
-        noteSessionSave(model);
-      } else if (result.status === "failed") {
-        noteSessionSave(model, result.error);
-        log("Failed to save session: " + result.error);
-      }
-      return result;
-    } catch (e) {
-      noteSessionSave(model, e.message || String(e));
-      log("Failed to save session: " + e);
-      return { status: "failed", error: e.message || String(e) };
-    }
-  }
-  function loadSession(model) {
-    clearRestoredSessionFrame();
-    if (!model || model === "unknown") return false;
-    leavePlayback(false);
-    var key = getStorageKey(model);
-    runtime.activeSessionStorageKey = key;
-    runtime.activeRoomEpoch = getRoomEpoch(key);
-    runtime.sessionStorageNotice = "";
-    var allTime = readAllTimeHighs(model);
-    var saved = inspectStoredSession(model, true);
-    if (saved.protected || !saved.data) return false;
-    var age = Date.now() - saved.data.timestamp;
-    restoreSessionState(saved.data);
-    if (!allTime.error && allTime.epoch === "initial" && !allTime.keys.length && saved.data.history.timestamps.length) {
-      storeAllTimeHighs(model, sessionAllTimeHighs(saved.data, "saved"));
-    }
-    log("Session restored for " + model + " (" + Math.round(age / 6e4) + " min old; " + (saved.legacy ? "validated legacy schema 1" : "storage schema " + runtime.STORAGE_SCHEMA_VERSION) + "; producer " + (saved.producerVersion === null ? "unknown" : saved.producerVersion) + ")");
-    return true;
-  }
-
-  // src/scanning.js
-  function pauseForAccessRestriction() {
-    pauseAutoRefresh();
-  }
-  function parseGetChatUserListResponse(text) {
-    if (typeof text !== "string" || !text.trim()) throw new Error("Empty API response");
-    var parts = text.trim().split(",");
-    if (!/^\d+$/.test(parts[0])) throw new Error("Invalid API anonymous count");
-    var anonymousCount = Number(parts[0]);
-    if (!Number.isSafeInteger(anonymousCount)) throw new Error("Unsafe API anonymous count");
-    var classTiers = { m: "red", f: "green", l: "purple", p: "pink", tr: "dark-blue", t: "light-blue", g: "gray" };
-    var genders = { m: "male", f: "female", s: "trans", c: "couple" };
-    var seen = /* @__PURE__ */ new Set();
-    var parsedUsers = [];
-    var unknownClasses = /* @__PURE__ */ Object.create(null);
-    var unknownGenders = /* @__PURE__ */ Object.create(null);
-    for (var i = 1; i < parts.length; i++) {
-      var fields = parts[i].split("|");
-      if (fields.length !== 4 || !/^[A-Za-z0-9_-]{2,30}$/.test(fields[0]) || fields.slice(1).some(function(field) {
-        return !/^[^\s|,<>\x00-\x1f]+$/.test(field);
-      })) {
-        throw new Error("Malformed API record at index " + i);
-      }
-      var username = fields[0];
-      var key = username.toLowerCase();
-      if (seen.has(key)) throw new Error("Duplicate API username at index " + i);
-      seen.add(key);
-      var rawClass = fields[1];
-      var genderCode = fields[2];
-      var isOwner = rawClass === "o";
-      var tier = Object.prototype.hasOwnProperty.call(classTiers, rawClass) ? classTiers[rawClass] : null;
-      var gender = Object.prototype.hasOwnProperty.call(genders, genderCode) ? genders[genderCode] : "unknown";
-      if (!tier && !isOwner) unknownClasses[rawClass] = (unknownClasses[rawClass] || 0) + 1;
-      if (gender === "unknown") unknownGenders[genderCode] = (unknownGenders[genderCode] || 0) + 1;
-      parsedUsers.push({
-        username,
-        rawClass,
-        tier,
-        genderCode,
-        gender,
-        rawFlag: fields[3],
-        isOwner
-      });
-    }
-    var registeredCount = parsedUsers.length;
-    var totalUsers = anonymousCount + registeredCount;
-    if (!Number.isSafeInteger(totalUsers)) throw new Error("Unsafe API total users");
-    return {
-      anonymousCount,
-      registeredCount,
-      totalUsers,
-      users: parsedUsers,
-      diagnostics: { unknownClasses, unknownGenders }
-    };
-  }
-  function isAcquisitionCurrent(context) {
-    return context.epoch === runtime.scanEpoch && context.generation === runtime.initGuard && context.url === location.href;
-  }
-  function validateRoomSnapshot(snapshot) {
-    if (!snapshot || !Number.isSafeInteger(snapshot.roomTotal) || snapshot.roomTotal < 0 || !Array.isArray(snapshot.users)) throw new Error("Invalid room snapshot");
-    if (snapshot.source === "API" && (!Number.isSafeInteger(snapshot.anonymousCount) || snapshot.anonymousCount < 0 || snapshot.registeredCount !== snapshot.users.length || snapshot.totalUsers !== snapshot.anonymousCount + snapshot.registeredCount || snapshot.roomTotal !== snapshot.totalUsers)) {
-      throw new Error("Inconsistent API anonymous, registered, or total user counts");
-    }
-    if (!isScanValid(snapshot.users.length, snapshot.roomTotal)) {
-      throw new Error("Sample rejected by 3.0.0 scan-validity checks");
-    }
-  }
-  async function acquireAPISnapshot(context) {
-    if (!context.room || context.room === "unknown") throw new Error("No current room username");
-    var url = new URL("/api/getchatuserlist/", location.origin);
-    url.searchParams.set("roomname", context.room);
-    url.searchParams.set("private", "false");
-    url.searchParams.set("sort_by", "a");
-    url.searchParams.set("exclude_staff", "false");
-    var controller = new AbortController();
-    var timeout;
-    try {
-      var text = await Promise.race([
-        (async function() {
-          var response = await fetch(url.href, {
-            method: "GET",
-            credentials: "same-origin",
-            mode: "same-origin",
-            cache: "no-store",
-            redirect: "error",
-            signal: controller.signal
-          });
-          if (!response.ok) {
-            var error = new Error("API HTTP " + response.status);
-            error.status = response.status;
-            error.retryAt = retryAfterTime(response.headers && response.headers.get("Retry-After"), Date.now());
-            throw error;
-          }
-          return response.text();
-        })(),
-        new Promise(function(resolve, reject) {
-          timeout = setTimeout(function() {
-            reject(new Error("API request timed out after " + runtime.API_TIMEOUT_MS + " ms"));
-            controller.abort();
-          }, runtime.API_TIMEOUT_MS);
-        })
-      ]);
-      var snapshot = parseGetChatUserListResponse(text);
-      snapshot.roomTotal = snapshot.totalUsers;
-      snapshot.source = "API";
-      snapshot.timestamp = Date.now();
-      return snapshot;
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
-  async function acquireDOMSnapshot(context, returnToChat) {
-    var usersTab = findTab("users");
-    var chatTab = findTab("chat");
-    if (!usersTab) throw new Error("USERS tab not found");
-    var tabGroup = usersTab.closest('[role="tablist"]') || usersTab.parentElement;
-    var tabs = Array.from(tabGroup ? tabGroup.querySelectorAll('button, [role="tab"], [data-tab]') : []);
-    [usersTab, chatTab].forEach(function(tab) {
-      if (tab && tabs.indexOf(tab) === -1) tabs.push(tab);
-    });
-    function selectedTab() {
-      var selected = tabs.filter(function(tab) {
-        return tab.getAttribute("aria-selected") === "true" || tab.getAttribute("data-state") === "active" || tab.classList.contains("active") || tab.classList.contains("selected");
-      });
-      return selected.length === 1 ? selected[0] : null;
-    }
-    var originalTab = selectedTab();
-    if (!originalTab) throw new Error("Cannot safely identify the selected tab");
-    if (originalTab === usersTab) return scanUsers();
-    if (!returnToChat) throw new Error("DOM fallback skipped because tab restoration is disabled");
-    var openedUsers = false;
-    var userChangedTab = false;
-    function onTabClick(event) {
-      if (tabs.some(function(tab) {
-        return tab === event.target || tab.contains(event.target);
-      })) userChangedTab = true;
-    }
-    try {
-      usersTab.click();
-      openedUsers = true;
-      if (tabGroup) tabGroup.addEventListener("click", onTabClick, true);
-      await new Promise(function(resolve) {
-        setTimeout(resolve, 800);
-      });
-      if (!isAcquisitionCurrent(context) || userChangedTab || selectedTab() !== usersTab) return null;
-      return scanUsers();
-    } finally {
-      if (tabGroup) tabGroup.removeEventListener("click", onTabClick, true);
-      if (openedUsers && !userChangedTab && isAcquisitionCurrent(context) && selectedTab() === usersTab && originalTab.isConnected) {
-        try {
-          originalTab.click();
-        } catch (err) {
-          log("DOM fallback could not restore the selected tab: " + err.message);
-        }
-      }
-    }
-  }
-  async function checkBroadcasterReturn(context) {
-    runtime.lastAcquisitionAttemptSource = "API";
-    try {
-      var snapshot = await acquireAPISnapshot(context);
-      if (!isAcquisitionCurrent(context) || checkAbsenceStop() || !isAbsencePaused()) return null;
-      if (readRequestPolicy().blocked) {
-        pauseForAccessRestriction();
-        return null;
-      }
-      clearRequestFailures(context.policyRevision);
-      if (!snapshot.users.some(function(user) {
-        return user.isOwner === true;
-      })) return null;
-      resumeSessionForOwnerReturn(Date.now());
-      startTrackingTimer();
-      updateStopControls();
-      validateRoomSnapshot(snapshot);
-      return snapshot;
-    } catch (error) {
-      if (!isAcquisitionCurrent(context)) return null;
-      if (isAbsencePaused()) {
-        var policy = recordRequestFailure(error);
-        if (policy.blocked) pauseForAccessRestriction();
-      }
-      log("Return check did not record a sample: " + error.message);
-      return null;
-    }
-  }
-  async function acquireRoomSnapshot(context, returnToChat) {
-    runtime.lastAcquisitionAttemptSource = "API";
-    try {
-      var snapshot = await acquireAPISnapshot(context);
-      if (!isAcquisitionCurrent(context)) return null;
-      if (checkAbsenceStop() || !isAcquisitionCurrent(context)) return null;
-      observeSessionPresence(snapshot, Date.now());
-      if (checkAbsenceStop() || !isAcquisitionCurrent(context)) return null;
-      validateRoomSnapshot(snapshot);
-      runtime.domHealthStatus.consecutiveFailures = 0;
-      clearRequestFailures(context.policyRevision);
-      return snapshot;
-    } catch (err) {
-      if (!isAcquisitionCurrent(context)) return null;
-      diagnostic("warn", "API failed: " + err.message);
-      var policy = recordRequestFailure(err);
-      if (policy.blocked) {
-        pauseForAccessRestriction();
-        return null;
-      }
-      if (err.status === 429 || err.retryAt > Date.now()) return null;
-    }
-    runtime.lastAcquisitionAttemptSource = "DOM";
-    var fallbackWait = getDOMFallbackWaitSeconds(context.room);
-    if (fallbackWait > 0) {
-      log("DOM fallback deferred for " + fallbackWait + "s; retaining previous valid data (no history point)");
-      return null;
-    }
-    var roomKey = context.room.toLowerCase();
-    var fallbackIntervalMs = Math.max(runtime.DOM_FALLBACK_INTERVAL_SECONDS, runtime.scanIntervalSeconds) * 1e3;
-    runtime.domFallbackReadyAtByRoom.set(roomKey, Date.now() + fallbackIntervalMs);
-    log("Attempting DOM fallback; room=" + context.room);
-    try {
-      var fallback = await acquireDOMSnapshot(context, returnToChat);
-      if (!isAcquisitionCurrent(context)) return null;
-      validateRoomSnapshot(fallback);
-      log("DOM fallback succeeded; room=" + context.room + " records=" + fallback.users.length);
-      return fallback;
-    } catch (err) {
-      if (!isAcquisitionCurrent(context)) return null;
-      diagnostic("warn", "DOM fallback failed: " + err.message + "; retaining previous valid data (no history point)");
-      return null;
-    } finally {
-      runtime.domFallbackReadyAtByRoom.set(roomKey, Math.max(
-        runtime.domFallbackReadyAtByRoom.get(roomKey) || 0,
-        Date.now() + fallbackIntervalMs
-      ));
-    }
-  }
-  function acceptRoomSnapshot(snapshot, modelName) {
-    return beginAcceptedSample(snapshot, modelName, Date.now(), getSessionSamplePolicy());
-  }
-  async function performScanThenReturn(returnToChat) {
-    if (typeof returnToChat === "undefined") returnToChat = true;
-    if (checkAbsenceStop()) return;
-    if (runtime.isScanning || runtime.isStopped) return;
-    var policy = readRequestPolicy();
-    if (policy.blocked) {
-      pauseForAccessRestriction();
-      updateCountdownDisplay();
-      return;
-    }
-    if (policy.until > Date.now()) {
-      updateCountdownDisplay();
-      return;
-    }
-    runtime.isScanning = true;
-    var context = { epoch: ++runtime.scanEpoch, generation: runtime.initGuard, url: location.href, room: getModelName(), policyRevision: policy.revision };
-    var priorState = null;
-    var sampleCommitted = false;
-    var sampleReceipt = null;
-    var priorAbsence = runtime.broadcasterAbsence;
-    var checkingReturn = isAbsencePaused();
-    var statusEl = document.getElementById("auto-status");
-    updateCountdownDisplay();
-    try {
-      var snapshot = checkingReturn ? await checkBroadcasterReturn(context) : await acquireRoomSnapshot(context, returnToChat);
-      if (!isAcquisitionCurrent(context)) return;
-      if (checkAbsenceStop()) return;
-      if (checkingReturn && isAbsencePaused()) return;
-      if (!snapshot) {
-        markSessionGap();
-        if (statusEl) {
-          statusEl.textContent = "Scan skipped (unreliable)";
-          statusEl.style.color = "var(--panel-negative)";
-        }
-        return;
-      }
-      sampleReceipt = acceptRoomSnapshot(snapshot, context.room);
-      priorState = Object.assign({}, sampleReceipt.before, {
-        trendHTML: (document.getElementById("trend-container") || {}).innerHTML,
-        trendHeaderText: (document.getElementById("trend-header-label") || {}).textContent,
-        allTimeHighs: readAllTimeHighs(context.room).highs
-      });
-      var diagnostics = sampleReceipt.diagnostics;
-      if (!runtime.isMinimized) drawAllSparklines();
-      updateDisplay();
-      updateTrendDisplay();
-      updateAcquisitionStatus();
-      sampleCommitted = isAcquisitionCurrent(context) && commitAcceptedSample(sampleReceipt);
-      if (!sampleCommitted) abortAcceptedSample(sampleReceipt);
-    } catch (err) {
-      var rolledBack = sampleReceipt && abortAcceptedSample(sampleReceipt);
-      if (rolledBack && priorState) {
-        try {
-          var trendEl = document.getElementById("trend-container");
-          if (trendEl && typeof priorState.trendHTML === "string") trendEl.innerHTML = priorState.trendHTML;
-          var trendHeader = document.getElementById("trend-header-label");
-          if (trendHeader && typeof priorState.trendHeaderText === "string") trendHeader.textContent = priorState.trendHeaderText;
-          updateDisplay();
-          updateAcquisitionStatus();
-          if (!runtime.isMinimized) drawAllSparklines();
-        } catch (displayError) {
-          log("Could not repaint previous data: " + displayError.message);
-        }
-      }
-      if (isAcquisitionCurrent(context)) markSessionGap();
-      log("Error during scan; retaining previous valid data: " + err.message);
-    } finally {
-      if (sampleCommitted) {
-        try {
-          saveSession(context.room);
-        } catch (error) {
-          log("Could not save accepted sample: " + error.message);
-        }
-        try {
-          recordAcceptedAllTimeHighs(context.room);
-          updateDisplay();
-        } catch (error) {
-          log("Could not update all-time highs: " + error.message);
-        }
-        pulseAcceptedHighs(priorState);
-        if (diagnostics) diagnostic("log", "API scan accepted", diagnostics);
-      }
-      if (isAcquisitionCurrent(context)) {
-        runtime.isScanning = false;
-        resetCountdown();
-        updateAcquisitionStatus();
-        if (checkingReturn || !priorState && priorAbsence !== runtime.broadcasterAbsence) saveSession(context.room);
-      }
-    }
-  }
-
-  // src/trends.js
-  function checkTrendAutoEscalation() {
-    if (!runtime.autoTrendEscalation || !runtime.trackingStartTime) return;
-    var elapsedMs = runtime.isPaused ? runtime.pausedElapsedTime : Date.now() - runtime.trackingStartTime;
-    var elapsedMin = elapsedMs / 6e4;
-    var targetMode = "last";
-    if (elapsedMin >= 60) targetMode = "1hour";
-    else if (elapsedMin >= 30) targetMode = "30min";
-    else if (elapsedMin >= 15) targetMode = "15min";
-    else if (elapsedMin >= 5) targetMode = "5min";
-    if (targetMode !== runtime.trendComparisonMode) {
-      log("Auto-escalating trend mode: " + runtime.trendComparisonMode + " -> " + targetMode + " (" + Math.floor(elapsedMin) + " min elapsed)");
-      if (runtime.users.size === 0) {
-        runtime.trendComparisonMode = targetMode;
-        updateTrendPresetButtons();
-        updateAutoTrendButton();
-        saveSession(getModelName());
-        return;
-      }
-      setTrendComparisonMode(targetMode);
-    }
-  }
-  function toggleAutoTrendEscalation() {
-    runtime.autoTrendEscalation = !runtime.autoTrendEscalation;
-    updateAutoTrendButton();
-    log("Auto trend escalation " + (runtime.autoTrendEscalation ? "enabled" : "disabled"));
-    saveSession(getModelName());
-    if (runtime.autoTrendEscalation) {
-      checkTrendAutoEscalation();
-    }
-  }
-  function updateAutoTrendButton() {
-    var btn = document.getElementById("btn-trend-auto");
-    if (btn) {
-      if (runtime.autoTrendEscalation) {
-        btn.style.background = "#32CD32";
-        btn.style.color = "#fff";
-        btn.style.borderColor = "#32CD32";
-        btn.title = "Auto-escalation ON - Click to disable";
-      } else {
-        btn.style.background = "var(--panel-button)";
-        btn.style.color = "var(--panel-muted)";
-        btn.style.borderColor = "var(--panel-divider)";
-        btn.title = "Auto-escalation OFF - Click to enable";
-      }
-    }
-  }
-  function setTrendComparisonMode(mode) {
-    if (!runtime.TREND_PRESETS[mode] && mode !== "last") return;
-    runtime.trendComparisonMode = mode;
-    updateTrendDisplay();
-    updateTrendPresetButtons();
-    saveSession(getModelName());
-  }
-  function updateTrendPresetButtons() {
-    var buttons = document.querySelectorAll(".trend-preset-btn");
-    buttons.forEach(function(btn) {
-      var mode = btn.dataset.mode;
-      if (mode === runtime.trendComparisonMode) {
-        btn.style.background = "#4169E1";
-        btn.style.color = "#fff";
-        btn.style.borderColor = "#4169E1";
-      } else {
-        btn.style.background = "var(--panel-button)";
-        btn.style.color = "var(--panel-muted)";
-        btn.style.borderColor = "var(--panel-divider)";
-      }
-    });
-  }
-
-  // src/lifecycle.js
-  function nextBroadcasterAbsence(snapshot) {
-    return nextSessionAbsence(Object.assign({}, snapshot, { observedAt: Date.now() }));
-  }
-  function checkAbsenceStop() {
-    if (runtime.isStopped || !runtime.isAutoRefreshOn || runtime.absenceOverrideActive) return false;
-    if (pauseSessionForAbsence(Date.now(), runtime.ABSENCE_PAUSE_MS)) {
-      runtime.scanEpoch++;
-      runtime.isScanning = false;
-      stopTrackingTimer();
-      cancelHighPulses();
-      runtime.nextScanAt = Math.max(Date.now(), readRequestPolicy().until);
-      updateTrackingTimer();
-      updateStopControls();
-      updateAcquisitionStatus();
-      saveSession(getModelName());
-    }
-    if (isAbsencePaused() && Date.now() - runtime.absencePausedAt >= runtime.ABSENCE_STOP_MS) {
-      stopTracking("absence");
-      return true;
-    }
-    return false;
-  }
-  function updateStopControls() {
-    var reset = document.getElementById("btn-main-reset");
-    if (reset) {
-      reset.disabled = !isBroadcastRoom();
-      reset.style.opacity = reset.disabled ? "0.5" : "1";
-      reset.title = reset.disabled ? "Open a room to reset tracking" : "Reset all tracking data";
-    }
-    var stop = document.getElementById("btn-control-stop");
-    if (stop) {
-      stop.disabled = runtime.isStopped;
-      stop.style.opacity = runtime.isStopped ? "0.5" : "1";
-    }
-    ["btn-auto", "btn-control-auto"].forEach(function(id) {
-      var button = document.getElementById(id);
-      if (!button) return;
-      button.innerHTML = runtime.isStopped ? "Start" : runtime.isAutoRefreshOn && !isAbsencePaused() ? "⏸" : "▶";
-      button.title = runtime.isStopped ? "Start a new session (keeps this stopped record until normal cleanup)" : isAbsencePaused() ? "Resume recording now; cancel absence slowdown, automatic pause and Stop until the broadcaster returns" : runtime.isAutoRefreshOn ? "Pause scans and elapsed time" : "Resume this session";
-      button.setAttribute("aria-label", runtime.isStopped ? "Start a new session" : isAbsencePaused() ? "Resume recording" : runtime.isAutoRefreshOn ? "Pause scans" : "Resume scans");
-      button.style.background = runtime.isStopped ? "#4169E1" : isAbsencePaused() ? "#b86b00" : runtime.isAutoRefreshOn ? "#32CD32" : "#ff4444";
-    });
-  }
-  function stopTracking(reason) {
-    if (!stopLiveSession(reason, Date.now(), runtime.ABSENCE_STOP_MS)) return;
-    runtime.scanEpoch++;
-    runtime.isScanning = false;
-    stopCountdown();
-    runtime.nextScanAt = 0;
-    stopTrackingTimer();
-    cancelHighPulses();
-    updateTrackingTimer();
-    updateStopControls();
-    updateDisplay();
-    updateCountdownDisplay();
-    updateAcquisitionStatus();
-    saveSession(getModelName());
-  }
-  function startNewSession() {
-    if (!runtime.isStopped) return;
-    if (!confirm("Start a new session?\n\nThe chart and elapsed time will start from zero. Export this stopped session first if you want to keep a report, CSV or GIF. Its saved record is retained until normal storage cleanup.")) return;
-    saveSession(getModelName());
-    runtime.tabRecords.delete(getStorageKey(getModelName()));
-    resetTrackingData(false);
-  }
-  function updateTrackingTimer() {
-    var controlTimerEl = document.getElementById("control-tracking-timer");
-    var displayTime = "00:00:00";
-    var displayColor = "var(--panel-subtle)";
-    if (runtime.isPaused) {
-      displayTime = formatElapsedTime(runtime.pausedElapsedTime);
-      displayColor = "var(--panel-negative)";
-    } else if (runtime.trackingStartTime) {
-      displayTime = formatElapsedTime(Date.now() - runtime.trackingStartTime);
-      displayColor = "var(--panel-warning)";
-    }
-    if (controlTimerEl) {
-      controlTimerEl.textContent = displayTime;
-      controlTimerEl.style.color = displayColor;
-    }
-    checkTrendAutoEscalation();
-  }
-  function startTrackingTimer() {
-    if (!startSessionClock(Date.now())) return;
-    if (runtime.trackingTimerInterval) {
-      clearInterval(runtime.trackingTimerInterval);
-      runtime.trackingTimerInterval = null;
-    }
-    runtime.trackingTimerInterval = setInterval(updateTrackingTimer, 1e3);
-    updateTrackingTimer();
-    saveSession(getModelName());
-  }
-  function pauseTrackingTimer() {
-    if (!pauseSessionClock(Date.now())) return;
-    if (runtime.trackingTimerInterval) {
-      clearInterval(runtime.trackingTimerInterval);
-      runtime.trackingTimerInterval = null;
-    }
-    updateTrackingTimer();
-    saveSession(getModelName());
-  }
-  function stopTrackingTimer() {
-    if (runtime.trackingTimerInterval) {
-      clearInterval(runtime.trackingTimerInterval);
-      runtime.trackingTimerInterval = null;
-    }
-  }
-  function resetAllTracking() {
-    if (!isBroadcastRoom()) return;
-    if (!confirm("Reset all tracking data?\n\nThis will clear:\n- All session history\n- Trend tracking\n- Elapsed timer\n\nA new scan will start immediately.")) {
-      return;
-    }
-    resetTrackingData(true);
-  }
-  function resetTrackingData(deleteSaved) {
-    var modelName = getModelName();
-    if (modelName === "unknown") return;
-    leavePlayback(false);
-    cancelGifExport();
-    log("Performing main reset...");
-    if (deleteSaved) deleteSession(modelName);
-    runtime.activeSessionStorageKey = getStorageKey(modelName);
-    runtime.scanEpoch++;
-    runtime.isScanning = false;
-    stopCountdown();
-    stopTrackingTimer();
-    resetLiveSession(deleteSaved ? "reset" : "start");
-    runtime.lastAcquisitionAttemptSource = "API";
-    runtime.domHealthStatus.consecutiveFailures = 0;
-    runtime.trendComparisonMode = "last";
-    runtime.autoTrendEscalation = true;
-    updateAcquisitionStatus();
-    resetCountdown();
-    updateDisplay();
-    updateTrendDisplay();
-    updateTrackingTimer();
-    updateCountdownDisplay();
-    drawAllSparklines();
-    if (runtime.isAutoRefreshOn) {
-      startTrackingTimer();
-      startCountdown();
-    }
-    saveSession(modelName);
-    var resetContext = { epoch: runtime.scanEpoch, generation: runtime.initGuard, url: location.href };
-    setTimeout(function() {
-      if (isAcquisitionCurrent(resetContext)) performScanThenReturn(true);
-    }, 500);
-    updateTrendPresetButtons();
-    updateAutoTrendButton();
-    updateStopControls();
-    log("Reset complete - starting fresh scan (epoch: " + runtime.scanEpoch + ")");
-  }
-  function resetCountdown() {
-    runtime.lastScheduledIntervalSeconds = getEffectiveScanIntervalSeconds();
-    runtime.countdownSeconds = runtime.lastScheduledIntervalSeconds;
-    runtime.nextScanAt = runtime.isStopped ? 0 : Math.max(Date.now() + runtime.lastScheduledIntervalSeconds * 1e3, readRequestPolicy().until);
-    updateCountdownDisplay();
-  }
-  function updateCountdownDisplay() {
-    if (checkAbsenceStop()) return;
-    var policy = readRequestPolicy();
-    if (policy.blocked && runtime.isAutoRefreshOn) pauseForAccessRestriction();
-    var policyMessage = requestPolicyMessage(policy);
-    if (runtime.isAutoRefreshOn && policy.until > runtime.nextScanAt) runtime.nextScanAt = policy.until;
-    updateMiniFreshness();
-    if (runtime.isAutoRefreshOn && !runtime.isScanning && runtime.nextScanAt) {
-      runtime.countdownSeconds = Math.max(0, Math.ceil((runtime.nextScanAt - Date.now()) / 1e3));
-    }
-    var fallbackWait = getDOMFallbackWaitSeconds(getModelName());
-    var timingTitle = "Next API attempt after the countdown. " + (fallbackWait > 0 ? "DOM fallback eligible in " + fallbackWait + "s if the API fails." : "DOM fallback eligible if the API fails.");
-    var statusEl = document.getElementById("auto-status");
-    var timerDisplay = document.getElementById("timer-display");
-    var expandedCountdown = document.getElementById("expanded-countdown");
-    var controlNextScan = document.getElementById("control-next-scan");
-    if (runtime.isStopped) {
-      [statusEl, expandedCountdown, controlNextScan].forEach(function(el) {
-        if (el) {
-          el.textContent = "Stopped";
-          el.title = stopDescription();
-          el.style.color = "var(--panel-muted)";
-        }
-      });
-      updateStopControls();
-      return;
-    }
-    if (isAbsencePaused()) {
-      if (timerDisplay) timerDisplay.textContent = runtime.scanIntervalSeconds + "s";
-      [statusEl, expandedCountdown, controlNextScan].forEach(function(el) {
-        if (!el) return;
-        el.textContent = policyMessage || (el === statusEl ? "Auto-paused" : runtime.isScanning ? "Checking..." : "Check: " + runtime.countdownSeconds + "s");
-        el.title = absencePauseDescription() + (policyMessage ? " " + policyMessage + "." : " Next return check: " + runtime.countdownSeconds + "s.");
-        el.style.color = "var(--panel-warning)";
-      });
-      updateStopControls();
-      return;
-    }
-    var effectiveInterval = getEffectiveScanIntervalSeconds();
-    var reduced = effectiveInterval > runtime.scanIntervalSeconds;
-    timingTitle += " Selected interval: " + runtime.scanIntervalSeconds + "s. Effective interval: " + effectiveInterval + "s." + (reduced ? " Reduced scanning while the broadcaster is absent; auto-pause at 15 minutes, then return checks for up to 3 hours." : "") + (runtime.absenceOverrideActive ? " Absence automation manually overridden until the broadcaster is detected again." : "");
-    [statusEl, expandedCountdown, controlNextScan].forEach(function(el) {
-      if (el) el.title = runtime.isAutoRefreshOn ? timingTitle : "Automatic scans paused. An in-flight scan may finish. " + timingTitle;
-    });
-    if (timerDisplay) {
-      timerDisplay.textContent = runtime.scanIntervalSeconds + "s";
-    }
-    if (expandedCountdown) {
-      if (runtime.isScanning) {
-        expandedCountdown.textContent = "scanning...";
-        expandedCountdown.style.color = "var(--panel-warning)";
-      } else if (runtime.isAutoRefreshOn) {
-        expandedCountdown.textContent = "next: " + runtime.countdownSeconds + "s";
-        expandedCountdown.style.color = "var(--panel-positive)";
-      } else {
-        expandedCountdown.textContent = "paused";
-        expandedCountdown.style.color = "var(--panel-negative)";
-      }
-    }
-    if (controlNextScan) {
-      if (runtime.isScanning) {
-        controlNextScan.textContent = "Scanning...";
-        controlNextScan.style.color = "var(--panel-warning)";
-      } else if (runtime.isAutoRefreshOn) {
-        controlNextScan.textContent = (reduced ? "Reduced: " : "Next: ") + runtime.countdownSeconds + "s";
-        controlNextScan.style.color = "var(--panel-positive)";
-      } else {
-        controlNextScan.textContent = "Paused";
-        controlNextScan.style.color = "var(--panel-negative)";
-      }
-    }
-    if (policyMessage) {
-      [statusEl, expandedCountdown, controlNextScan].forEach(function(el) {
-        if (!el) return;
-        el.textContent = policyMessage;
-        el.style.color = "var(--panel-warning)";
-        el.title = policyMessage + (policy.blocked ? ". Automatic scans stopped. After resolving access, use Resume to retry." : ". No API or DOM acquisition before " + new Date(policy.until).toLocaleString() + ".");
-      });
-      return;
-    }
-    if (!statusEl) return;
-    if (runtime.isScanning) {
-      statusEl.textContent = "Scanning...";
-      statusEl.style.color = "var(--panel-warning)";
-    } else if (runtime.isAutoRefreshOn) {
-      statusEl.textContent = "Next: " + runtime.countdownSeconds + "s";
-      statusEl.style.color = "var(--panel-positive)";
-    } else {
-      statusEl.textContent = "Auto: OFF";
-      statusEl.style.color = "var(--panel-negative)";
-    }
-  }
-  function adjustTimer(delta) {
-    var newValue = runtime.scanIntervalSeconds + delta;
-    if (newValue < 30) runtime.scanIntervalSeconds = 30;
-    else if (newValue > 300) runtime.scanIntervalSeconds = 300;
-    else runtime.scanIntervalSeconds = newValue;
-    if (runtime.isAutoRefreshOn) {
-      stopCountdown();
-      resetCountdown();
-      startCountdown();
-    } else {
-      resetCountdown();
-      var timerDisplay = document.getElementById("timer-display");
-      if (timerDisplay) {
-        timerDisplay.textContent = runtime.scanIntervalSeconds + "s";
-      }
-    }
-    updateCountdownDisplay();
-  }
-  function startCountdown() {
-    if (runtime.isStopped) return;
-    if (runtime.countdownInterval) {
-      clearInterval(runtime.countdownInterval);
-      runtime.countdownInterval = null;
-    }
-    if (!runtime.nextScanAt) resetCountdown();
-    updateCountdownDisplay();
-    if (runtime.isStopped) return;
-    runtime.countdownInterval = setInterval(function() {
-      if (!runtime.isAutoRefreshOn || runtime.isScanning) return;
-      updateCountdownDisplay();
-      if (runtime.countdownSeconds <= 0) {
-        performScanThenReturn(true);
-      }
-    }, 1e3);
-  }
-  function stopCountdown() {
-    if (runtime.countdownInterval) {
-      clearInterval(runtime.countdownInterval);
-      runtime.countdownInterval = null;
-    }
-  }
-  function pauseAutoRefresh() {
-    if (runtime.isStopped) return;
-    if (isAbsencePaused()) {
-      runtime.scanEpoch++;
-      runtime.isScanning = false;
-    }
-    pauseSessionRecording(Date.now());
-    stopCountdown();
-    stopTrackingTimer();
-    updateTrackingTimer();
-    updateStopControls();
-    updateCountdownDisplay();
-    updateAcquisitionStatus();
-    saveSession(getModelName());
-  }
-  function toggleAutoRefresh() {
-    if (runtime.isStopped) {
-      startNewSession();
-      return;
-    }
-    if (checkAbsenceStop()) return;
-    var overridingAbsence = isAbsencePaused();
-    if (runtime.isAutoRefreshOn && !overridingAbsence) {
-      pauseAutoRefresh();
-      return;
-    }
-    if (overridingAbsence) {
-      runtime.scanEpoch++;
-      runtime.isScanning = false;
-    }
-    var policy = readRequestPolicy();
-    if (policy.blocked) {
-      writeRequestPolicy({ until: policy.serverUntil || 0, serverUntil: policy.serverUntil || 0, failures: 0, blocked: 0, status: 0, revision: "" });
-    }
-    resumeSessionRecording(Date.now(), overridingAbsence);
-    startTrackingTimer();
-    startCountdown();
-    performScanThenReturn(true);
-    updateStopControls();
-    updateAcquisitionStatus();
-    saveSession(getModelName());
-  }
-
   // src/session-capture.js
   function captureSessionFile() {
     if (isPlaybackCurrent(runtime.playback) && runtime.playback.archive) return runtime.playback.archive;
@@ -4800,7 +3822,7 @@ underlying system, so should run in the browser, Node, or Plask.
   }
   function updatePlaybackControls() {
     if (!runtime.playback) return;
-    updatePanelOptions();
+    refreshPanelOptions();
     var label = document.getElementById("playback-label");
     if (label) {
       label.textContent = runtime.playback.imported ? "FILE REPLAY" : "PLAYBACK";
@@ -4877,7 +3899,7 @@ underlying system, so should run in the browser, Node, or Plask.
     updateTrendDisplay();
     drawAllSparklines();
     updateAcquisitionStatus();
-    updateCountdownDisplay();
+    refreshScanCountdown();
   }
 
   // src/highs.js
@@ -4889,7 +3911,7 @@ underlying system, so should run in the browser, Node, or Plask.
     updateHighControls();
   }
   function toggleHighMode() {
-    runtime.highMode = runtime.highMode === "sh" ? "ath" : "sh";
+    switchHighPreference();
     var state = readAllTimeHighs(displayedHighRoom());
     if (isPlaybackCurrent(runtime.playback)) setPlaybackAllTimeState(runtime.playback, state);
     try {
@@ -4897,16 +3919,6 @@ underlying system, so should run in the browser, Node, or Plask.
     } catch (error) {
     }
     repaintHighMode();
-  }
-  function setAllTimeActionStatus(message, replayLabel) {
-    var status = document.getElementById("all-time-action-status");
-    if (status) status.textContent = message;
-    var button = document.getElementById("btn-playback-add-all-time");
-    if (button) {
-      button.textContent = replayLabel || "Add to all-time highs";
-      button.title = message || "Add this file's highs to the room named beside this button";
-      button.setAttribute("aria-label", replayLabel ? replayLabel + ". " + message : "Add to all-time highs");
-    }
   }
   function addFileToAllTimeHighs() {
     if (!isPlaybackCurrent(runtime.playback) || !runtime.playback.imported) return;
@@ -4970,60 +3982,6 @@ underlying system, so should run in the browser, Node, or Plask.
     var info = document.getElementById("all-time-info");
     if (info) info.textContent = warning || (state.skipped ? state.skipped + " unreadable all-time record(s) were skipped and retained." : "All-time highs are saved per room in this browser and survive session Reset.");
   }
-  function cancelHighPulse(key) {
-    var animation = runtime.highPulseAnimations.get(key);
-    runtime.highPulseAnimations.delete(key);
-    if (animation) {
-      try {
-        animation.cancel();
-      } catch (error) {
-      }
-    }
-  }
-  function cancelHighPulses() {
-    Array.from(runtime.highPulseAnimations.keys()).forEach(cancelHighPulse);
-  }
-  function pulseAcceptedHighs(priorState) {
-    try {
-      if (runtime.presentationMode !== "LIVE" || runtime.isMinimized || runtime.restoredDisplayFrame || document.visibilityState === "hidden" || runtime.highPulseMotion && runtime.highPulseMotion.matches) {
-        cancelHighPulses();
-        return;
-      }
-      runtime.PANEL_ROWS.forEach(function(row) {
-        var key = row.key === "withtokens" ? "withTokens" : row.key === "anon" ? "anonymous" : row.key;
-        var atHigh = runtime.newHighTiers[key], wasAtHigh = priorState.newHighTiers[key];
-        var previousHigh = priorState.sessionHighs[key];
-        var raisedHigh = runtime.sessionHighs[key].value > (previousHigh ? previousHigh.value : 0);
-        if (runtime.highMode === "ath") {
-          var high = displayedAllTimeState().highs[key], before = priorState.allTimeHighs[key];
-          var current = runtime.history[key][runtime.history[key].length - 1];
-          var oldValue = priorState.history[key][priorState.history[key].length - 1];
-          atHigh = high.source && current > 0 && current >= high.value;
-          wasAtHigh = priorState.lastAcceptedAcquisition && before.source && oldValue > 0 && oldValue >= before.value;
-          raisedHigh = high.value > before.value;
-        }
-        if (!atHigh) {
-          cancelHighPulse(row.key);
-          return;
-        }
-        if (wasAtHigh && !raisedHigh) return;
-        var target = document.getElementById((runtime.collapsedRows.has(row.key) ? "restore-row-" : "tier-row-") + row.key);
-        if (!target || typeof target.animate !== "function") return;
-        cancelHighPulse(row.key);
-        var animation = target.animate([
-          { backgroundColor: "rgba(50, 205, 50, 0.22)", boxShadow: "inset 0 0 0 1px rgba(105, 190, 69, 0)", offset: 0 },
-          { backgroundColor: "rgba(50, 205, 50, 0.40)", boxShadow: "inset 0 0 0 1px rgba(105, 190, 69, 0.75)", offset: 0.5 },
-          { backgroundColor: "rgba(50, 205, 50, 0.22)", boxShadow: "inset 0 0 0 1px rgba(105, 190, 69, 0)", offset: 1 }
-        ], { duration: 850, iterations: 2, easing: "ease-in-out", fill: "none" });
-        runtime.highPulseAnimations.set(row.key, animation);
-        animation.onfinish = animation.oncancel = function() {
-          if (runtime.highPulseAnimations.get(row.key) === animation) runtime.highPulseAnimations.delete(row.key);
-        };
-      });
-    } catch (error) {
-      log("High pulse unavailable: " + error.message);
-    }
-  }
   function recordAcceptedAllTimeHighs(room) {
     var index = runtime.history.timestamps.length - 1;
     if (index < 0) return;
@@ -5036,6 +3994,322 @@ underlying system, so should run in the browser, Node, or Plask.
       };
     });
     storeAllTimeHighs(room, incoming);
+  }
+
+  // src/layout.js
+  function loadCollapsedRows() {
+    try {
+      var raw = GM_getValue(runtime.COLLAPSED_ROWS_KEY, null);
+      if (raw !== null && typeof raw !== "undefined") {
+        var saved = JSON.parse(raw);
+        if (!Array.isArray(saved) || !saved.every(function(key) {
+          return runtime.PANEL_ROWS.some(function(row) {
+            return row.key === key;
+          });
+        })) throw new Error("Invalid collapsed-row preferences");
+        return new Set(saved);
+      }
+    } catch (error) {
+      log("Could not restore row preferences: " + error.message);
+    }
+    return /* @__PURE__ */ new Set(["red", "green"]);
+  }
+  function setRowCollapsed(key, collapsed) {
+    cancelHighPulse(key);
+    if (!runtime.PANEL_ROWS.some(function(row) {
+      return row.key === key;
+    })) return;
+    selectCollapsedRow(key, collapsed);
+    try {
+      GM_setValue(runtime.COLLAPSED_ROWS_KEY, JSON.stringify(Array.from(runtime.collapsedRows)));
+    } catch (error) {
+      log("Could not save row preferences: " + error.message);
+    }
+    applyRowLayout();
+    if (runtime.presentationMode === "PLAYBACK") {
+      paintPlayback(runtime.playback);
+    } else {
+      updateDisplay();
+      drawAllSparklines();
+    }
+    constrainPanelPosition();
+    var target = document.getElementById((collapsed ? "restore-row-" : "collapse-row-") + key);
+    if (target) target.focus({ preventScroll: true });
+  }
+  function bindRowControls() {
+    runtime.panelChartRegionHeight = null;
+    runtime.PANEL_ROWS.forEach(function(row) {
+      [false, true].forEach(function(collapsed) {
+        var button = document.getElementById((collapsed ? "collapse-row-" : "restore-row-") + row.key);
+        if (button) button.onclick = function(event) {
+          event.stopPropagation();
+          setRowCollapsed(row.key, collapsed);
+        };
+      });
+    });
+    var container = document.getElementById("tracker-container");
+    if (container) container.addEventListener("transitionend", function(event) {
+      if (event.target === container && event.propertyName === "width") {
+        redrawPanelCharts();
+        constrainPanelPosition();
+      }
+    });
+    applyRowLayout();
+  }
+  function redrawPanelCharts() {
+    if (runtime.isMinimized) return;
+    runtime.chartLayoutRevision++;
+    if (runtime.presentationMode === "PLAYBACK") paintPlayback(runtime.playback);
+    else drawAllSparklines();
+  }
+  function cleanupDragListeners() {
+    for (var i = 0; i < runtime.dragListeners.length; i++) {
+      var listener = runtime.dragListeners[i];
+      document.removeEventListener(listener.type, listener.fn, listener.options);
+    }
+    runtime.dragListeners = [];
+  }
+  function addDragListener(type, fn, options) {
+    document.addEventListener(type, fn, options);
+    runtime.dragListeners.push({ type, fn, options });
+  }
+  function loadPanelGeometry() {
+    try {
+      var raw = GM_getValue(runtime.PANEL_GEOMETRY_KEY, null);
+      if (raw === null) return null;
+      var data = JSON.parse(raw);
+      if (!data || !Number.isFinite(data.left) || !Number.isFinite(data.top) || !Number.isFinite(data.scale) || data.scale < 0.5 || data.scale > 3) return null;
+      return { left: data.left, top: data.top, scale: data.scale };
+    } catch (error) {
+      return null;
+    }
+  }
+  function constrainPanelPosition() {
+    var container = document.getElementById("tracker-container");
+    if (!container) return;
+    var rect = container.getBoundingClientRect();
+    container.style.left = Math.max(0, Math.min(rect.left, Math.max(0, window.innerWidth - rect.width))) + "px";
+    container.style.top = Math.max(0, Math.min(rect.top, Math.max(0, window.innerHeight - rect.height))) + "px";
+    container.style.right = "auto";
+  }
+  function savePanelGeometry() {
+    var container = document.getElementById("tracker-container");
+    if (!container) return;
+    var rect = container.getBoundingClientRect();
+    rememberPanelGeometry({ left: rect.left, top: rect.top, scale: runtime.currentScale });
+    try {
+      GM_setValue(runtime.PANEL_GEOMETRY_KEY, JSON.stringify(runtime.panelGeometry));
+    } catch (error) {
+      log("Could not save panel position/scale: " + error.message);
+    }
+  }
+  function restorePanelGeometry() {
+    var container = document.getElementById("tracker-container");
+    if (!container) return;
+    if (runtime.panelGeometry) {
+      container.style.left = runtime.panelGeometry.left + "px";
+      container.style.top = runtime.panelGeometry.top + "px";
+      container.style.right = "auto";
+      applyScale(runtime.panelGeometry.scale);
+    } else applyScale(runtime.currentScale);
+    constrainPanelPosition();
+    redrawPanelCharts();
+  }
+  function restoreStandardSize() {
+    applyScale(1);
+    redrawPanelCharts();
+    constrainPanelPosition();
+    savePanelGeometry();
+  }
+  function applyScale(scale) {
+    selectPanelScale(scale);
+    var container = document.getElementById("tracker-container");
+    if (!container) return;
+    container.style.transform = "scale(" + scale + ")";
+    container.style.transformOrigin = "top left";
+    container.dataset.scale = scale;
+  }
+  function setupResizable() {
+    var container = document.getElementById("tracker-container");
+    if (!container) return;
+    var resizeHandle = document.createElement("div");
+    resizeHandle.id = "resize-handle";
+    resizeHandle.style.cssText = "position:absolute;top:0;left:0;width:16px;height:16px;background:linear-gradient(135deg, #ff69b4 50%, transparent 50%);cursor:nw-resize;z-index:999999;border-top-left-radius:6px;opacity:0.8;transition:opacity 0.2s;";
+    resizeHandle.addEventListener("mouseenter", function() {
+      this.style.opacity = "1";
+    });
+    resizeHandle.addEventListener("mouseleave", function() {
+      this.style.opacity = "0.8";
+    });
+    container.appendChild(resizeHandle);
+    var startResize = function(e) {
+      if (runtime.isDragging) return;
+      runtime.isResizing = true;
+      runtime.resizeStartX = e.clientX;
+      runtime.resizeStartY = e.clientY;
+      var rect = container.getBoundingClientRect();
+      runtime.resizeStartWidth = rect.width;
+      runtime.resizeStartHeight = rect.height;
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    var doResize = function(e) {
+      if (!runtime.isResizing) return;
+      var deltaX = runtime.resizeStartX - e.clientX;
+      var deltaY = runtime.resizeStartY - e.clientY;
+      var newWidth = runtime.resizeStartWidth + deltaX;
+      var baseWidth = container.offsetWidth;
+      var newScale = Math.max(0.5, Math.min(3, newWidth / baseWidth));
+      applyScale(newScale);
+    };
+    var stopResize = function() {
+      if (!runtime.isResizing) return;
+      runtime.isResizing = false;
+      redrawPanelCharts();
+      constrainPanelPosition();
+      savePanelGeometry();
+    };
+    resizeHandle.addEventListener("mousedown", startResize);
+    document.addEventListener("mousemove", doResize);
+    document.addEventListener("mouseup", stopResize);
+    window._trackerResizeCleanup = function() {
+      resizeHandle.removeEventListener("mousedown", startResize);
+      document.removeEventListener("mousemove", doResize);
+      document.removeEventListener("mouseup", stopResize);
+    };
+  }
+  function setupResizeHandler() {
+    if (runtime.windowResizeHandler) {
+      window.removeEventListener("resize", runtime.windowResizeHandler);
+      runtime.windowResizeHandler = null;
+    }
+    var resizeTimeout;
+    runtime.windowResizeHandler = function() {
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(function() {
+        constrainPanelPosition();
+        redrawPanelCharts();
+      }, 100);
+    };
+    window.addEventListener("resize", runtime.windowResizeHandler);
+  }
+  function setupDraggable() {
+    var container = document.getElementById("tracker-container");
+    var dragHandle = document.getElementById("drag-handle");
+    if (!container || !dragHandle) return;
+    var startDrag = function(e) {
+      if (runtime.isResizing || e.target.closest && e.target.closest("button, input, select, a")) return;
+      runtime.isDragging = true;
+      var rect = container.getBoundingClientRect();
+      var scale = runtime.currentScale || 1;
+      runtime.dragOffsetX = (e.clientX - rect.left) / scale;
+      runtime.dragOffsetY = (e.clientY - rect.top) / scale;
+      if (container.style.right !== "auto") {
+        container.style.left = rect.left + "px";
+        container.style.right = "auto";
+      }
+      addDragListener("mousemove", doDrag, false);
+      addDragListener("mouseup", stopDrag, false);
+      e.preventDefault();
+    };
+    var doDrag = function(e) {
+      if (!runtime.isDragging) return;
+      var scale = runtime.currentScale || 1;
+      var newX = e.clientX - runtime.dragOffsetX * scale;
+      var newY = e.clientY - runtime.dragOffsetY * scale;
+      var maxX = window.innerWidth - container.offsetWidth * scale;
+      var maxY = window.innerHeight - container.offsetHeight * scale;
+      newX = Math.max(0, Math.min(newX, maxX));
+      newY = Math.max(0, Math.min(newY, maxY));
+      container.style.left = newX + "px";
+      container.style.top = newY + "px";
+    };
+    var stopDrag = function() {
+      runtime.isDragging = false;
+      cleanupDragListeners();
+      savePanelGeometry();
+    };
+    dragHandle.addEventListener("mousedown", startDrag, false);
+  }
+  function toggleView() {
+    hideChartTooltip();
+    if (runtime.presentationMode === "PLAYBACK") return;
+    cancelHighPulses();
+    selectPanelMinimized(!runtime.isMinimized);
+    var fullView = document.getElementById("full-view");
+    var miniView = document.getElementById("minimized-view");
+    var toggleBtn = document.getElementById("btn-toggle");
+    var container = document.getElementById("tracker-container");
+    var headerText = document.getElementById("header-text");
+    var resizeHandle = document.getElementById("resize-handle");
+    var anonymousCount = getAnonymousCount();
+    var previousTransition = container ? container.style.transition : "";
+    if (container) container.style.transition = "none";
+    if (runtime.isMinimized) {
+      if (fullView) fullView.style.display = "none";
+      if (miniView) miniView.style.display = "block";
+      if (toggleBtn) toggleBtn.textContent = "+";
+      if (container) container.style.width = runtime.BASE_WIDTH_MINI + "px";
+      if (resizeHandle) resizeHandle.style.display = "none";
+      if (runtime.isResizing) runtime.isResizing = false;
+      var currentTotal = runtime.roomTotal > 0 ? runtime.roomTotal : runtime.users.size + anonymousCount;
+      if (headerText) headerText.textContent = currentTotal.toLocaleString() + " (H:" + runtime.roomTotalHigh.toLocaleString() + ")";
+    } else {
+      if (fullView) fullView.style.display = "block";
+      if (miniView) miniView.style.display = "none";
+      if (toggleBtn) toggleBtn.textContent = "−";
+      if (container) container.style.width = runtime.BASE_WIDTH_FULL + "px";
+      if (resizeHandle) resizeHandle.style.display = "block";
+      var currentTotal = runtime.roomTotal > 0 ? runtime.roomTotal : runtime.users.size + anonymousCount;
+      if (headerText) headerText.textContent = "USERS: " + currentTotal.toLocaleString() + " (H:" + runtime.roomTotalHigh.toLocaleString() + ")";
+    }
+    var settings = document.getElementById("mini-settings");
+    if (settings) settings.style.display = "none";
+    var settingsButton = document.getElementById("mini-settings-toggle");
+    if (settingsButton) settingsButton.setAttribute("aria-expanded", "false");
+    updateDisplay();
+    if (!runtime.isMinimized) {
+      drawAllSparklines();
+      constrainPanelPosition();
+    }
+    constrainPanelPosition();
+    if (container) container.style.transition = previousTransition;
+  }
+
+  // src/session-replay.js
+  function openSessionReplay(file) {
+    var archive = validateSessionFile(file);
+    leavePlayback(false);
+    if (runtime.isMinimized) toggleView();
+    openOwnedPlayback({
+      url: location.href,
+      key: runtime.activeSessionStorageKey,
+      generation: runtime.initGuard,
+      imported: true,
+      archive,
+      snapshot: createPlaybackSnapshot(archive.session.history),
+      allTimeState: readAllTimeHighs(archive.room)
+    }, Date.now(), false);
+    cancelHighPulses();
+    setPlaybackLayout(true);
+    return paintPlayback(runtime.playback);
+  }
+  async function readSessionFile(file) {
+    if (!file) return false;
+    var request = nextSessionFileRequest(), url = location.href, generation = runtime.initGuard;
+    function current() {
+      return request === runtime.sessionFileLoadGeneration && url === location.href && generation === runtime.initGuard;
+    }
+    try {
+      if (file.size > runtime.SESSION_FILE_MAX_BYTES) throw new Error("Session files must be 8 MB or smaller.");
+      var text = await file.text();
+      if (!current()) return false;
+      if (text.length > runtime.SESSION_FILE_MAX_BYTES) throw new Error("Session file is too large.");
+      return openSessionReplay(JSON.parse(text.replace(/^\uFEFF/, "")));
+    } catch (error) {
+      if (current()) alert("Could not open session file: " + error.message);
+      return false;
+    }
   }
 
   // src/session-library.js
@@ -6623,7 +5897,7 @@ underlying system, so should run in the browser, Node, or Plask.
   // src/files.js
   function setChartWindow(value) {
     if (!hasStorageField(runtime.CHART_WINDOWS, value)) return;
-    runtime.chartWindowMode = value;
+    selectChartWindow(value);
     try {
       GM_setValue(runtime.CHART_WINDOW_KEY, value);
     } catch (error) {
@@ -6651,40 +5925,6 @@ underlying system, so should run in the browser, Node, or Plask.
       }
     } catch (error) {
       alert("Could not save session file: " + error.message);
-    }
-  }
-  function openSessionReplay(file) {
-    var archive = validateSessionFile(file);
-    leavePlayback(false);
-    if (runtime.isMinimized) toggleView();
-    openOwnedPlayback({
-      url: location.href,
-      key: runtime.activeSessionStorageKey,
-      generation: runtime.initGuard,
-      imported: true,
-      archive,
-      snapshot: createPlaybackSnapshot(archive.session.history),
-      allTimeState: readAllTimeHighs(archive.room)
-    }, Date.now(), false);
-    cancelHighPulses();
-    setPlaybackLayout(true);
-    return paintPlayback(runtime.playback);
-  }
-  async function readSessionFile(file) {
-    if (!file) return false;
-    var request = nextSessionFileRequest(), url = location.href, generation = runtime.initGuard;
-    function current() {
-      return request === runtime.sessionFileLoadGeneration && url === location.href && generation === runtime.initGuard;
-    }
-    try {
-      if (file.size > runtime.SESSION_FILE_MAX_BYTES) throw new Error("Session files must be 8 MB or smaller.");
-      var text = await file.text();
-      if (!current()) return false;
-      if (text.length > runtime.SESSION_FILE_MAX_BYTES) throw new Error("Session file is too large.");
-      return openSessionReplay(JSON.parse(text.replace(/^\uFEFF/, "")));
-    } catch (error) {
-      if (current()) alert("Could not open session file: " + error.message);
-      return false;
     }
   }
   function updatePanelOptions() {
@@ -6761,6 +6001,1000 @@ underlying system, so should run in the browser, Node, or Plask.
     updatePanelOptions();
   }
 
+  // src/acquisition-context.js
+  function isAcquisitionCurrent(context) {
+    return acquisitionContextIsCurrent(context, location.href);
+  }
+
+  // src/session-persistence.js
+  function restoreSessionState(data) {
+    var snapshot = createPlaybackSnapshot(data.history);
+    restoreLiveSession(data, getPlaybackFrame(snapshot, snapshot.durationMs));
+    restoreScheduledInterval(getEffectiveScanIntervalSeconds());
+    restoreTrendPreferences(data.trendComparisonMode, data.autoTrendEscalation);
+  }
+  function saveSession(model) {
+    if (!model || model === "unknown") return;
+    try {
+      var result = getSessionWriteStatus(model);
+      if (result.status === "ready") {
+        prepareSessionHighsForSave();
+        var saveData = {
+          schemaVersion: runtime.STORAGE_SCHEMA_VERSION,
+          producerVersion: runtime.TIERSCOPE_VERSION,
+          timestamp: Date.now(),
+          history: runtime.history,
+          tierHighTimes: runtime.tierHighTimes,
+          withTokensHighTime: runtime.withTokensHighTime,
+          totalHighTime: runtime.totalHighTime,
+          anonHighTime: runtime.anonHighTime,
+          femaleTransHighTime: runtime.femaleTransHighTime,
+          roomTotalHigh: runtime.roomTotalHigh,
+          roomTotalHighTime: runtime.roomTotalHighTime,
+          trackingStartTime: runtime.trackingStartTime,
+          sessionStartedAt: runtime.sessionStartedAt,
+          sessionStartEstimated: runtime.sessionStartEstimated,
+          sessionHighs: runtime.sessionHighs,
+          roomEpoch: runtime.activeRoomEpoch,
+          isPaused: runtime.isPaused,
+          isStopped: runtime.isStopped,
+          stoppedAt: runtime.stoppedAt,
+          stopReason: runtime.stopReason,
+          broadcasterAbsence: runtime.broadcasterAbsence,
+          absencePausedAt: runtime.absencePausedAt,
+          absenceOverrideActive: runtime.absenceOverrideActive,
+          pausedElapsedTime: runtime.pausedElapsedTime,
+          previousCounts: runtime.previousCounts,
+          hasTrendBaseline: runtime.hasTrendBaseline,
+          trendComparisonMode: runtime.trendComparisonMode,
+          autoTrendEscalation: runtime.autoTrendEscalation
+        };
+        result = writeSessionRecord(model, saveData);
+      }
+      if (result.status === "reset") {
+        runtime.sessionStorageNotice = result.message;
+        updateAcquisitionStatus();
+      } else if (result.status === "saved") {
+        noteSessionSave(model);
+      } else if (result.status === "failed") {
+        noteSessionSave(model, result.error);
+        log("Failed to save session: " + result.error);
+      }
+      return result;
+    } catch (e) {
+      noteSessionSave(model, e.message || String(e));
+      log("Failed to save session: " + e);
+      return { status: "failed", error: e.message || String(e) };
+    }
+  }
+  function loadSession(model) {
+    clearRestoredSessionFrame();
+    if (!model || model === "unknown") return false;
+    leavePlayback(false);
+    var key = getStorageKey(model);
+    runtime.activeSessionStorageKey = key;
+    runtime.activeRoomEpoch = getRoomEpoch(key);
+    runtime.sessionStorageNotice = "";
+    var allTime = readAllTimeHighs(model);
+    var saved = inspectStoredSession(model, true);
+    if (saved.protected || !saved.data) return false;
+    var age = Date.now() - saved.data.timestamp;
+    restoreSessionState(saved.data);
+    if (!allTime.error && allTime.epoch === "initial" && !allTime.keys.length && saved.data.history.timestamps.length) {
+      storeAllTimeHighs(model, sessionAllTimeHighs(saved.data, "saved"));
+    }
+    log("Session restored for " + model + " (" + Math.round(age / 6e4) + " min old; " + (saved.legacy ? "validated legacy schema 1" : "storage schema " + runtime.STORAGE_SCHEMA_VERSION) + "; producer " + (saved.producerVersion === null ? "unknown" : saved.producerVersion) + ")");
+    return true;
+  }
+
+  // src/trends.js
+  function checkTrendAutoEscalation() {
+    if (!runtime.autoTrendEscalation || !runtime.trackingStartTime) return;
+    var elapsedMs = runtime.isPaused ? runtime.pausedElapsedTime : Date.now() - runtime.trackingStartTime;
+    var elapsedMin = elapsedMs / 6e4;
+    var targetMode = "last";
+    if (elapsedMin >= 60) targetMode = "1hour";
+    else if (elapsedMin >= 30) targetMode = "30min";
+    else if (elapsedMin >= 15) targetMode = "15min";
+    else if (elapsedMin >= 5) targetMode = "5min";
+    if (targetMode !== runtime.trendComparisonMode) {
+      log("Auto-escalating trend mode: " + runtime.trendComparisonMode + " -> " + targetMode + " (" + Math.floor(elapsedMin) + " min elapsed)");
+      if (runtime.users.size === 0) {
+        selectTrendMode(targetMode);
+        updateTrendPresetButtons();
+        updateAutoTrendButton();
+        saveSession(getModelName());
+        return;
+      }
+      setTrendComparisonMode(targetMode);
+    }
+  }
+  function toggleAutoTrendEscalation() {
+    selectAutomaticTrends(!runtime.autoTrendEscalation);
+    updateAutoTrendButton();
+    log("Auto trend escalation " + (runtime.autoTrendEscalation ? "enabled" : "disabled"));
+    saveSession(getModelName());
+    if (runtime.autoTrendEscalation) {
+      checkTrendAutoEscalation();
+    }
+  }
+  function updateAutoTrendButton() {
+    var btn = document.getElementById("btn-trend-auto");
+    if (btn) {
+      if (runtime.autoTrendEscalation) {
+        btn.style.background = "#32CD32";
+        btn.style.color = "#fff";
+        btn.style.borderColor = "#32CD32";
+        btn.title = "Auto-escalation ON - Click to disable";
+      } else {
+        btn.style.background = "var(--panel-button)";
+        btn.style.color = "var(--panel-muted)";
+        btn.style.borderColor = "var(--panel-divider)";
+        btn.title = "Auto-escalation OFF - Click to enable";
+      }
+    }
+  }
+  function setTrendComparisonMode(mode) {
+    if (!runtime.TREND_PRESETS[mode] && mode !== "last") return;
+    selectTrendMode(mode);
+    updateTrendDisplay();
+    updateTrendPresetButtons();
+    saveSession(getModelName());
+  }
+  function updateTrendPresetButtons() {
+    var buttons = document.querySelectorAll(".trend-preset-btn");
+    buttons.forEach(function(btn) {
+      var mode = btn.dataset.mode;
+      if (mode === runtime.trendComparisonMode) {
+        btn.style.background = "#4169E1";
+        btn.style.color = "#fff";
+        btn.style.borderColor = "#4169E1";
+      } else {
+        btn.style.background = "var(--panel-button)";
+        btn.style.color = "var(--panel-muted)";
+        btn.style.borderColor = "var(--panel-divider)";
+      }
+    });
+  }
+
+  // src/lifecycle.js
+  function nextBroadcasterAbsence(snapshot) {
+    return nextSessionAbsence(Object.assign({}, snapshot, { observedAt: Date.now() }));
+  }
+  function checkAbsenceStop() {
+    if (runtime.isStopped || !runtime.isAutoRefreshOn || runtime.absenceOverrideActive) return false;
+    if (pauseSessionForAbsence(Date.now(), runtime.ABSENCE_PAUSE_MS)) {
+      invalidateAcquisition();
+      stopTrackingTimer();
+      cancelHighPulses();
+      schedulePresenceAcquisition(Date.now(), readRequestPolicy().until);
+      updateTrackingTimer();
+      updateStopControls();
+      updateAcquisitionStatus();
+      saveSession(getModelName());
+    }
+    if (isAbsencePaused() && Date.now() - runtime.absencePausedAt >= runtime.ABSENCE_STOP_MS) {
+      stopTracking("absence");
+      return true;
+    }
+    return false;
+  }
+  function updateStopControls() {
+    var reset = document.getElementById("btn-main-reset");
+    if (reset) {
+      reset.disabled = !isBroadcastRoom();
+      reset.style.opacity = reset.disabled ? "0.5" : "1";
+      reset.title = reset.disabled ? "Open a room to reset tracking" : "Reset all tracking data";
+    }
+    var stop = document.getElementById("btn-control-stop");
+    if (stop) {
+      stop.disabled = runtime.isStopped;
+      stop.style.opacity = runtime.isStopped ? "0.5" : "1";
+    }
+    ["btn-auto", "btn-control-auto"].forEach(function(id) {
+      var button = document.getElementById(id);
+      if (!button) return;
+      button.innerHTML = runtime.isStopped ? "Start" : runtime.isAutoRefreshOn && !isAbsencePaused() ? "⏸" : "▶";
+      button.title = runtime.isStopped ? "Start a new session (keeps this stopped record until normal cleanup)" : isAbsencePaused() ? "Resume recording now; cancel absence slowdown, automatic pause and Stop until the broadcaster returns" : runtime.isAutoRefreshOn ? "Pause scans and elapsed time" : "Resume this session";
+      button.setAttribute("aria-label", runtime.isStopped ? "Start a new session" : isAbsencePaused() ? "Resume recording" : runtime.isAutoRefreshOn ? "Pause scans" : "Resume scans");
+      button.style.background = runtime.isStopped ? "#4169E1" : isAbsencePaused() ? "#b86b00" : runtime.isAutoRefreshOn ? "#32CD32" : "#ff4444";
+    });
+  }
+  function stopTracking(reason) {
+    if (!stopLiveSession(reason, Date.now(), runtime.ABSENCE_STOP_MS)) return;
+    invalidateAcquisition();
+    stopCountdown();
+    clearAcquisitionDeadline();
+    stopTrackingTimer();
+    cancelHighPulses();
+    updateTrackingTimer();
+    updateStopControls();
+    updateDisplay();
+    updateCountdownDisplay();
+    updateAcquisitionStatus();
+    saveSession(getModelName());
+  }
+  function startNewSession() {
+    if (!runtime.isStopped) return;
+    if (!confirm("Start a new session?\n\nThe chart and elapsed time will start from zero. Export this stopped session first if you want to keep a report, CSV or GIF. Its saved record is retained until normal storage cleanup.")) return;
+    saveSession(getModelName());
+    runtime.tabRecords.delete(getStorageKey(getModelName()));
+    resetTrackingData(false);
+  }
+  function updateTrackingTimer() {
+    var controlTimerEl = document.getElementById("control-tracking-timer");
+    var displayTime = "00:00:00";
+    var displayColor = "var(--panel-subtle)";
+    if (runtime.isPaused) {
+      displayTime = formatElapsedTime(runtime.pausedElapsedTime);
+      displayColor = "var(--panel-negative)";
+    } else if (runtime.trackingStartTime) {
+      displayTime = formatElapsedTime(Date.now() - runtime.trackingStartTime);
+      displayColor = "var(--panel-warning)";
+    }
+    if (controlTimerEl) {
+      controlTimerEl.textContent = displayTime;
+      controlTimerEl.style.color = displayColor;
+    }
+    checkTrendAutoEscalation();
+  }
+  function startTrackingTimer() {
+    if (!startSessionClock(Date.now())) return;
+    startAcquisitionClock("trackingTimerInterval", updateTrackingTimer, 1e3);
+    updateTrackingTimer();
+    saveSession(getModelName());
+  }
+  function pauseTrackingTimer() {
+    if (!pauseSessionClock(Date.now())) return;
+    stopAcquisitionClock("trackingTimerInterval");
+    updateTrackingTimer();
+    saveSession(getModelName());
+  }
+  function stopTrackingTimer() {
+    stopAcquisitionClock("trackingTimerInterval");
+  }
+  function resetAllTracking() {
+    if (!isBroadcastRoom()) return;
+    if (!confirm("Reset all tracking data?\n\nThis will clear:\n- All session history\n- Trend tracking\n- Elapsed timer\n\nA new scan will start immediately.")) {
+      return;
+    }
+    resetTrackingData(true);
+  }
+  function resetTrackingData(deleteSaved) {
+    var modelName = getModelName();
+    if (modelName === "unknown") return;
+    leavePlayback(false);
+    cancelGifExport();
+    log("Performing main reset...");
+    if (deleteSaved) deleteSession(modelName);
+    runtime.activeSessionStorageKey = getStorageKey(modelName);
+    invalidateAcquisition();
+    stopCountdown();
+    stopTrackingTimer();
+    resetLiveSession(deleteSaved ? "reset" : "start");
+    noteAcquisitionSource("API");
+    clearDOMFailures();
+    resetTrendPreferences();
+    updateAcquisitionStatus();
+    resetCountdown();
+    updateDisplay();
+    updateTrendDisplay();
+    updateTrackingTimer();
+    updateCountdownDisplay();
+    drawAllSparklines();
+    if (runtime.isAutoRefreshOn) {
+      startTrackingTimer();
+      startCountdown();
+    }
+    saveSession(modelName);
+    var resetContext = { epoch: runtime.scanEpoch, generation: runtime.initGuard, url: location.href };
+    setTimeout(function() {
+      if (isAcquisitionCurrent(resetContext)) lifecycleEffects.scan(true);
+    }, 500);
+    updateTrendPresetButtons();
+    updateAutoTrendButton();
+    updateStopControls();
+    log("Reset complete - starting fresh scan (epoch: " + runtime.scanEpoch + ")");
+  }
+  function resetCountdown() {
+    scheduleNextAcquisition(getEffectiveScanIntervalSeconds(), Date.now(), readRequestPolicy().until, runtime.isStopped);
+    updateCountdownDisplay();
+  }
+  function updateCountdownDisplay() {
+    if (checkAbsenceStop()) return;
+    var policy = readRequestPolicy();
+    if (policy.blocked && runtime.isAutoRefreshOn) pauseForAccessRestriction();
+    var policyMessage = requestPolicyMessage(policy);
+    refreshAcquisitionCountdown(Date.now(), policy.until, runtime.isAutoRefreshOn);
+    updateMiniFreshness();
+    var fallbackWait = getDOMFallbackWaitSeconds(getModelName());
+    var timingTitle = "Next API attempt after the countdown. " + (fallbackWait > 0 ? "DOM fallback eligible in " + fallbackWait + "s if the API fails." : "DOM fallback eligible if the API fails.");
+    var statusEl = document.getElementById("auto-status");
+    var timerDisplay = document.getElementById("timer-display");
+    var expandedCountdown = document.getElementById("expanded-countdown");
+    var controlNextScan = document.getElementById("control-next-scan");
+    if (runtime.isStopped) {
+      [statusEl, expandedCountdown, controlNextScan].forEach(function(el) {
+        if (el) {
+          el.textContent = "Stopped";
+          el.title = stopDescription();
+          el.style.color = "var(--panel-muted)";
+        }
+      });
+      updateStopControls();
+      return;
+    }
+    if (isAbsencePaused()) {
+      if (timerDisplay) timerDisplay.textContent = runtime.scanIntervalSeconds + "s";
+      [statusEl, expandedCountdown, controlNextScan].forEach(function(el) {
+        if (!el) return;
+        el.textContent = policyMessage || (el === statusEl ? "Auto-paused" : runtime.isScanning ? "Checking..." : "Check: " + runtime.countdownSeconds + "s");
+        el.title = absencePauseDescription() + (policyMessage ? " " + policyMessage + "." : " Next return check: " + runtime.countdownSeconds + "s.");
+        el.style.color = "var(--panel-warning)";
+      });
+      updateStopControls();
+      return;
+    }
+    var effectiveInterval = getEffectiveScanIntervalSeconds();
+    var reduced = effectiveInterval > runtime.scanIntervalSeconds;
+    timingTitle += " Selected interval: " + runtime.scanIntervalSeconds + "s. Effective interval: " + effectiveInterval + "s." + (reduced ? " Reduced scanning while the broadcaster is absent; auto-pause at 15 minutes, then return checks for up to 3 hours." : "") + (runtime.absenceOverrideActive ? " Absence automation manually overridden until the broadcaster is detected again." : "");
+    [statusEl, expandedCountdown, controlNextScan].forEach(function(el) {
+      if (el) el.title = runtime.isAutoRefreshOn ? timingTitle : "Automatic scans paused. An in-flight scan may finish. " + timingTitle;
+    });
+    if (timerDisplay) {
+      timerDisplay.textContent = runtime.scanIntervalSeconds + "s";
+    }
+    if (expandedCountdown) {
+      if (runtime.isScanning) {
+        expandedCountdown.textContent = "scanning...";
+        expandedCountdown.style.color = "var(--panel-warning)";
+      } else if (runtime.isAutoRefreshOn) {
+        expandedCountdown.textContent = "next: " + runtime.countdownSeconds + "s";
+        expandedCountdown.style.color = "var(--panel-positive)";
+      } else {
+        expandedCountdown.textContent = "paused";
+        expandedCountdown.style.color = "var(--panel-negative)";
+      }
+    }
+    if (controlNextScan) {
+      if (runtime.isScanning) {
+        controlNextScan.textContent = "Scanning...";
+        controlNextScan.style.color = "var(--panel-warning)";
+      } else if (runtime.isAutoRefreshOn) {
+        controlNextScan.textContent = (reduced ? "Reduced: " : "Next: ") + runtime.countdownSeconds + "s";
+        controlNextScan.style.color = "var(--panel-positive)";
+      } else {
+        controlNextScan.textContent = "Paused";
+        controlNextScan.style.color = "var(--panel-negative)";
+      }
+    }
+    if (policyMessage) {
+      [statusEl, expandedCountdown, controlNextScan].forEach(function(el) {
+        if (!el) return;
+        el.textContent = policyMessage;
+        el.style.color = "var(--panel-warning)";
+        el.title = policyMessage + (policy.blocked ? ". Automatic scans stopped. After resolving access, use Resume to retry." : ". No API or DOM acquisition before " + new Date(policy.until).toLocaleString() + ".");
+      });
+      return;
+    }
+    if (!statusEl) return;
+    if (runtime.isScanning) {
+      statusEl.textContent = "Scanning...";
+      statusEl.style.color = "var(--panel-warning)";
+    } else if (runtime.isAutoRefreshOn) {
+      statusEl.textContent = "Next: " + runtime.countdownSeconds + "s";
+      statusEl.style.color = "var(--panel-positive)";
+    } else {
+      statusEl.textContent = "Auto: OFF";
+      statusEl.style.color = "var(--panel-negative)";
+    }
+  }
+  function adjustTimer(delta) {
+    var newValue = runtime.scanIntervalSeconds + delta;
+    selectScanInterval(newValue);
+    if (runtime.isAutoRefreshOn) {
+      stopCountdown();
+      resetCountdown();
+      startCountdown();
+    } else {
+      resetCountdown();
+      var timerDisplay = document.getElementById("timer-display");
+      if (timerDisplay) {
+        timerDisplay.textContent = runtime.scanIntervalSeconds + "s";
+      }
+    }
+    updateCountdownDisplay();
+  }
+  function startCountdown() {
+    if (runtime.isStopped) return;
+    stopAcquisitionClock("countdownInterval");
+    if (!runtime.nextScanAt) resetCountdown();
+    updateCountdownDisplay();
+    if (runtime.isStopped) return;
+    startAcquisitionClock("countdownInterval", function() {
+      if (!runtime.isAutoRefreshOn || runtime.isScanning) return;
+      updateCountdownDisplay();
+      if (runtime.countdownSeconds <= 0) {
+        lifecycleEffects.scan(true);
+      }
+    }, 1e3);
+  }
+  function stopCountdown() {
+    stopAcquisitionClock("countdownInterval");
+  }
+  function pauseAutoRefresh() {
+    if (runtime.isStopped) return;
+    if (isAbsencePaused()) {
+      invalidateAcquisition();
+    }
+    pauseSessionRecording(Date.now());
+    stopCountdown();
+    stopTrackingTimer();
+    updateTrackingTimer();
+    updateStopControls();
+    updateCountdownDisplay();
+    updateAcquisitionStatus();
+    saveSession(getModelName());
+  }
+  function toggleAutoRefresh() {
+    if (runtime.isStopped) {
+      startNewSession();
+      return;
+    }
+    if (checkAbsenceStop()) return;
+    var overridingAbsence = isAbsencePaused();
+    if (runtime.isAutoRefreshOn && !overridingAbsence) {
+      pauseAutoRefresh();
+      return;
+    }
+    if (overridingAbsence) {
+      invalidateAcquisition();
+    }
+    var policy = readRequestPolicy();
+    if (policy.blocked) {
+      writeRequestPolicy({ until: policy.serverUntil || 0, serverUntil: policy.serverUntil || 0, failures: 0, blocked: 0, status: 0, revision: "" });
+    }
+    resumeSessionRecording(Date.now(), overridingAbsence);
+    startTrackingTimer();
+    startCountdown();
+    lifecycleEffects.scan(true);
+    updateStopControls();
+    updateAcquisitionStatus();
+    saveSession(getModelName());
+  }
+  function pauseForAccessRestriction() {
+    pauseAutoRefresh();
+  }
+  var lifecycleEffects;
+  function initializeLifecycle(effects) {
+    lifecycleEffects = effects;
+  }
+
+  // src/dom.js
+  function getTierFromClassList(classList) {
+    for (var i = 0; i < classList.length; i++) {
+      var className = classList[i];
+      var lower = className.toLowerCase();
+      if (className === "tippedTonsRecently" || lower === "tippedtonsrecently") return "purple";
+      if (className === "tippedALotRecently" || lower === "tippedalotrecently") return "pink";
+      if (className === "tippedRecently" || lower === "tippedrecently") return "dark-blue";
+      if (className === "inFanClub" || lower === "infanclub") return "green";
+      if (className === "mod" || lower === "moderator") return "red";
+      if (className === "hasTokens" || lower === "hastokens") return "light-blue";
+      if (className === "defaultUser" || lower === "defaultuser") return "gray";
+    }
+    return null;
+  }
+  function getTierFromElement(el) {
+    var tier = getTierFromClassList(el.classList);
+    if (tier) return tier;
+    var parent = el.parentElement;
+    for (var i = 0; i < 4 && parent; i++) {
+      tier = getTierFromClassList(parent.classList);
+      if (tier) return tier;
+      parent = parent.parentElement;
+    }
+    return "gray";
+  }
+  function getGenderFromElement(el) {
+    var genderImg = el.querySelector('img[data-testid="gender-icon"], img[title="Trans"], img[title="Female"], img[title="Male"], img[title="Couple"]');
+    if (!genderImg) {
+      var parent = el.parentElement;
+      for (var i = 0; i < 3 && parent; i++) {
+        genderImg = parent.querySelector('img[data-testid="gender-icon"], img[title="Trans"], img[title="Female"], img[title="Male"], img[title="Couple"]');
+        if (genderImg) break;
+        parent = parent.parentElement;
+      }
+    }
+    if (genderImg) {
+      var src = genderImg.src || "";
+      var title = genderImg.title || "";
+      if (src.indexOf("female") !== -1 || title === "Female") return "female";
+      if (src.indexOf("trans") !== -1 || title === "Trans") return "trans";
+      if (src.indexOf("male") !== -1 || title === "Male") return "male";
+      if (src.indexOf("couple") !== -1 || title === "Couple") return "couple";
+    }
+    return "unknown";
+  }
+  function getRoomTotal() {
+    for (var i = 0; i < runtime.DOM_SELECTORS.roomTotal.length; i++) {
+      var el = document.querySelector(runtime.DOM_SELECTORS.roomTotal[i]);
+      if (el) {
+        var text = el.textContent || "";
+        var match = text.match(/USERS\s*\(?(\d[\d,]*)\)?/i);
+        if (match) return parseInt(match[1].replace(/,/g, ""));
+      }
+    }
+    return 0;
+  }
+  function extractUsername(text) {
+    if (!text) return null;
+    text = text.trim().split("\n")[0];
+    var match = text.match(/^([^\s\(\[\<\,]+)/);
+    if (match) {
+      var candidate = match[1].trim();
+      if (candidate.length >= 2 && candidate.length <= 30) {
+        var clean = candidate.replace(/[^\w\-]+$/, "");
+        if (clean.length >= 2) return clean;
+      }
+    }
+    return null;
+  }
+  function findTab(tabName) {
+    var selectors = runtime.DOM_SELECTORS.tabs[tabName.toLowerCase()] || [];
+    for (var i = 0; i < selectors.length; i++) {
+      var el = document.querySelector(selectors[i]);
+      if (el) return el;
+    }
+    var buttons = document.querySelectorAll('button, div[role="tab"]');
+    for (var j = 0; j < buttons.length; j++) {
+      var btn = buttons[j];
+      var text = (btn.textContent || "").toUpperCase();
+      if (text.indexOf(tabName.toUpperCase()) !== -1) return btn;
+    }
+    return null;
+  }
+  function isScanValid(newUserCount, newRoomTotal) {
+    if (runtime.previousRoomTotal === 0) return true;
+    if (newRoomTotal === 0 && runtime.previousRoomTotal > 0) {
+      log("Scan rejected: room total is 0 but previous was " + runtime.previousRoomTotal);
+      return false;
+    }
+    var roomTotalChange = Math.abs(newRoomTotal - runtime.previousRoomTotal) / runtime.previousRoomTotal;
+    if (roomTotalChange > 0.1) return true;
+    var userDrop = runtime.previousUserCount > 0 ? (runtime.previousUserCount - newUserCount) / runtime.previousUserCount : 0;
+    if (userDrop > 0.5) {
+      log("Scan rejected: user count dropped " + Math.round(userDrop * 100) + "% (" + runtime.previousUserCount + " -> " + newUserCount + ") while room total stable (" + runtime.previousRoomTotal + " -> " + newRoomTotal + ")");
+      return false;
+    }
+    return true;
+  }
+  function scanUsers() {
+    var userListTab = document.querySelector(runtime.DOM_SELECTORS.userListTab);
+    if (!userListTab) throw new Error("UserListTab not found");
+    var snapshotUsers = /* @__PURE__ */ new Map();
+    var snapshotRoomTotal = getRoomTotal();
+    if (!snapshotRoomTotal) throw new Error("DOM room total missing or zero");
+    var userElements = [];
+    for (var i = 0; i < runtime.DOM_SELECTORS.usernameElements.length; i++) {
+      var found = userListTab.querySelectorAll(runtime.DOM_SELECTORS.usernameElements[i]);
+      for (var j = 0; j < found.length; j++) {
+        userElements.push(found[j]);
+      }
+    }
+    for (var i = 0; i < userElements.length; i++) {
+      var el = userElements[i];
+      var rawText = (el.textContent || "").trim() || (el.getAttribute("data-username") || "").trim();
+      var username = extractUsername(rawText);
+      if (username && !snapshotUsers.has(username)) {
+        var tier = getTierFromElement(el);
+        var gender = getGenderFromElement(el);
+        snapshotUsers.set(username, {
+          username,
+          rawClass: null,
+          tier,
+          genderCode: null,
+          gender,
+          rawFlag: null,
+          isOwner: null
+        });
+      }
+    }
+    if (!snapshotUsers.size) throw new Error("DOM sample contains no readable users");
+    return {
+      source: "DOM",
+      timestamp: Date.now(),
+      roomTotal: snapshotRoomTotal,
+      users: Array.from(snapshotUsers.values())
+    };
+  }
+
+  // src/history.js
+  function getSessionSamplePolicy() {
+    return {
+      breaks: getHistoryBreaks(runtime.history),
+      intervalSeconds: runtime.scanIntervalSeconds,
+      lastIntervalSeconds: runtime.lastScheduledIntervalSeconds,
+      timeoutMs: runtime.API_TIMEOUT_MS
+    };
+  }
+  function saveToHistory() {
+    appendCurrentSessionSample(Date.now(), getSessionSamplePolicy());
+    if (!runtime.isMinimized) drawAllSparklines();
+  }
+  function syncHighTimes() {
+    synchronizeSessionHighTimes();
+  }
+
+  // src/scanning.js
+  function parseGetChatUserListResponse(text) {
+    if (typeof text !== "string" || !text.trim()) throw new Error("Empty API response");
+    var parts = text.trim().split(",");
+    if (!/^\d+$/.test(parts[0])) throw new Error("Invalid API anonymous count");
+    var anonymousCount = Number(parts[0]);
+    if (!Number.isSafeInteger(anonymousCount)) throw new Error("Unsafe API anonymous count");
+    var classTiers = { m: "red", f: "green", l: "purple", p: "pink", tr: "dark-blue", t: "light-blue", g: "gray" };
+    var genders = { m: "male", f: "female", s: "trans", c: "couple" };
+    var seen = /* @__PURE__ */ new Set();
+    var parsedUsers = [];
+    var unknownClasses = /* @__PURE__ */ Object.create(null);
+    var unknownGenders = /* @__PURE__ */ Object.create(null);
+    for (var i = 1; i < parts.length; i++) {
+      var fields = parts[i].split("|");
+      if (fields.length !== 4 || !/^[A-Za-z0-9_-]{2,30}$/.test(fields[0]) || fields.slice(1).some(function(field) {
+        return !/^[^\s|,<>\x00-\x1f]+$/.test(field);
+      })) {
+        throw new Error("Malformed API record at index " + i);
+      }
+      var username = fields[0];
+      var key = username.toLowerCase();
+      if (seen.has(key)) throw new Error("Duplicate API username at index " + i);
+      seen.add(key);
+      var rawClass = fields[1];
+      var genderCode = fields[2];
+      var isOwner = rawClass === "o";
+      var tier = Object.prototype.hasOwnProperty.call(classTiers, rawClass) ? classTiers[rawClass] : null;
+      var gender = Object.prototype.hasOwnProperty.call(genders, genderCode) ? genders[genderCode] : "unknown";
+      if (!tier && !isOwner) unknownClasses[rawClass] = (unknownClasses[rawClass] || 0) + 1;
+      if (gender === "unknown") unknownGenders[genderCode] = (unknownGenders[genderCode] || 0) + 1;
+      parsedUsers.push({
+        username,
+        rawClass,
+        tier,
+        genderCode,
+        gender,
+        rawFlag: fields[3],
+        isOwner
+      });
+    }
+    var registeredCount = parsedUsers.length;
+    var totalUsers = anonymousCount + registeredCount;
+    if (!Number.isSafeInteger(totalUsers)) throw new Error("Unsafe API total users");
+    return {
+      anonymousCount,
+      registeredCount,
+      totalUsers,
+      users: parsedUsers,
+      diagnostics: { unknownClasses, unknownGenders }
+    };
+  }
+  function validateRoomSnapshot(snapshot) {
+    if (!snapshot || !Number.isSafeInteger(snapshot.roomTotal) || snapshot.roomTotal < 0 || !Array.isArray(snapshot.users)) throw new Error("Invalid room snapshot");
+    if (snapshot.source === "API" && (!Number.isSafeInteger(snapshot.anonymousCount) || snapshot.anonymousCount < 0 || snapshot.registeredCount !== snapshot.users.length || snapshot.totalUsers !== snapshot.anonymousCount + snapshot.registeredCount || snapshot.roomTotal !== snapshot.totalUsers)) {
+      throw new Error("Inconsistent API anonymous, registered, or total user counts");
+    }
+    if (!isScanValid(snapshot.users.length, snapshot.roomTotal)) {
+      throw new Error("Sample rejected by 3.0.0 scan-validity checks");
+    }
+  }
+  async function acquireAPISnapshot(context) {
+    if (!context.room || context.room === "unknown") throw new Error("No current room username");
+    var url = new URL("/api/getchatuserlist/", location.origin);
+    url.searchParams.set("roomname", context.room);
+    url.searchParams.set("private", "false");
+    url.searchParams.set("sort_by", "a");
+    url.searchParams.set("exclude_staff", "false");
+    var controller = new AbortController();
+    var timeout;
+    try {
+      var text = await Promise.race([
+        (async function() {
+          var response = await fetch(url.href, {
+            method: "GET",
+            credentials: "same-origin",
+            mode: "same-origin",
+            cache: "no-store",
+            redirect: "error",
+            signal: controller.signal
+          });
+          if (!response.ok) {
+            var error = new Error("API HTTP " + response.status);
+            error.status = response.status;
+            error.retryAt = retryAfterTime(response.headers && response.headers.get("Retry-After"), Date.now());
+            throw error;
+          }
+          return response.text();
+        })(),
+        new Promise(function(resolve, reject) {
+          timeout = setTimeout(function() {
+            reject(new Error("API request timed out after " + runtime.API_TIMEOUT_MS + " ms"));
+            controller.abort();
+          }, runtime.API_TIMEOUT_MS);
+        })
+      ]);
+      var snapshot = parseGetChatUserListResponse(text);
+      snapshot.roomTotal = snapshot.totalUsers;
+      snapshot.source = "API";
+      snapshot.timestamp = Date.now();
+      return snapshot;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+  async function acquireDOMSnapshot(context, returnToChat) {
+    var usersTab = findTab("users");
+    var chatTab = findTab("chat");
+    if (!usersTab) throw new Error("USERS tab not found");
+    var tabGroup = usersTab.closest('[role="tablist"]') || usersTab.parentElement;
+    var tabs = Array.from(tabGroup ? tabGroup.querySelectorAll('button, [role="tab"], [data-tab]') : []);
+    [usersTab, chatTab].forEach(function(tab) {
+      if (tab && tabs.indexOf(tab) === -1) tabs.push(tab);
+    });
+    function selectedTab() {
+      var selected = tabs.filter(function(tab) {
+        return tab.getAttribute("aria-selected") === "true" || tab.getAttribute("data-state") === "active" || tab.classList.contains("active") || tab.classList.contains("selected");
+      });
+      return selected.length === 1 ? selected[0] : null;
+    }
+    var originalTab = selectedTab();
+    if (!originalTab) throw new Error("Cannot safely identify the selected tab");
+    if (originalTab === usersTab) return scanUsers();
+    if (!returnToChat) throw new Error("DOM fallback skipped because tab restoration is disabled");
+    var openedUsers = false;
+    var userChangedTab = false;
+    function onTabClick(event) {
+      if (tabs.some(function(tab) {
+        return tab === event.target || tab.contains(event.target);
+      })) userChangedTab = true;
+    }
+    try {
+      usersTab.click();
+      openedUsers = true;
+      if (tabGroup) tabGroup.addEventListener("click", onTabClick, true);
+      await new Promise(function(resolve) {
+        setTimeout(resolve, 800);
+      });
+      if (!isAcquisitionCurrent(context) || userChangedTab || selectedTab() !== usersTab) return null;
+      return scanUsers();
+    } finally {
+      if (tabGroup) tabGroup.removeEventListener("click", onTabClick, true);
+      if (openedUsers && !userChangedTab && isAcquisitionCurrent(context) && selectedTab() === usersTab && originalTab.isConnected) {
+        try {
+          originalTab.click();
+        } catch (err) {
+          log("DOM fallback could not restore the selected tab: " + err.message);
+        }
+      }
+    }
+  }
+  async function checkBroadcasterReturn(context) {
+    noteAcquisitionSource("API");
+    try {
+      var snapshot = await acquireAPISnapshot(context);
+      if (!isAcquisitionCurrent(context) || checkAbsenceStop() || !isAbsencePaused()) return null;
+      if (readRequestPolicy().blocked) {
+        pauseForAccessRestriction();
+        return null;
+      }
+      clearRequestFailures(context.policyRevision);
+      if (!snapshot.users.some(function(user) {
+        return user.isOwner === true;
+      })) return null;
+      resumeSessionForOwnerReturn(Date.now());
+      startTrackingTimer();
+      updateStopControls();
+      validateRoomSnapshot(snapshot);
+      return snapshot;
+    } catch (error) {
+      if (!isAcquisitionCurrent(context)) return null;
+      if (isAbsencePaused()) {
+        var policy = recordRequestFailure(error);
+        if (policy.blocked) pauseForAccessRestriction();
+      }
+      log("Return check did not record a sample: " + error.message);
+      return null;
+    }
+  }
+  async function acquireRoomSnapshot(context, returnToChat) {
+    noteAcquisitionSource("API");
+    try {
+      var snapshot = await acquireAPISnapshot(context);
+      if (!isAcquisitionCurrent(context)) return null;
+      if (checkAbsenceStop() || !isAcquisitionCurrent(context)) return null;
+      observeSessionPresence(snapshot, Date.now());
+      if (checkAbsenceStop() || !isAcquisitionCurrent(context)) return null;
+      validateRoomSnapshot(snapshot);
+      clearDOMFailures();
+      clearRequestFailures(context.policyRevision);
+      return snapshot;
+    } catch (err) {
+      if (!isAcquisitionCurrent(context)) return null;
+      diagnostic("warn", "API failed: " + err.message);
+      var policy = recordRequestFailure(err);
+      if (policy.blocked) {
+        pauseForAccessRestriction();
+        return null;
+      }
+      if (err.status === 429 || err.retryAt > Date.now()) return null;
+    }
+    noteAcquisitionSource("DOM");
+    var fallbackWait = getDOMFallbackWaitSeconds(context.room);
+    if (fallbackWait > 0) {
+      log("DOM fallback deferred for " + fallbackWait + "s; retaining previous valid data (no history point)");
+      return null;
+    }
+    var roomKey = context.room.toLowerCase();
+    var fallbackIntervalMs = Math.max(runtime.DOM_FALLBACK_INTERVAL_SECONDS, runtime.scanIntervalSeconds) * 1e3;
+    deferDOMFallback(roomKey, Date.now() + fallbackIntervalMs);
+    log("Attempting DOM fallback; room=" + context.room);
+    try {
+      var fallback = await acquireDOMSnapshot(context, returnToChat);
+      if (!isAcquisitionCurrent(context)) return null;
+      validateRoomSnapshot(fallback);
+      log("DOM fallback succeeded; room=" + context.room + " records=" + fallback.users.length);
+      return fallback;
+    } catch (err) {
+      if (!isAcquisitionCurrent(context)) return null;
+      diagnostic("warn", "DOM fallback failed: " + err.message + "; retaining previous valid data (no history point)");
+      return null;
+    } finally {
+      deferDOMFallback(roomKey, Date.now() + fallbackIntervalMs);
+    }
+  }
+  function acceptRoomSnapshot(snapshot, modelName) {
+    return beginAcceptedSample(snapshot, modelName, Date.now(), getSessionSamplePolicy());
+  }
+  async function performScanThenReturn(returnToChat) {
+    if (typeof returnToChat === "undefined") returnToChat = true;
+    if (checkAbsenceStop()) return;
+    if (runtime.isScanning || runtime.isStopped) return;
+    var policy = readRequestPolicy();
+    if (policy.blocked) {
+      pauseForAccessRestriction();
+      updateCountdownDisplay();
+      return;
+    }
+    if (policy.until > Date.now()) {
+      updateCountdownDisplay();
+      return;
+    }
+    var context = beginAcquisition(location.href, getModelName(), policy, Date.now(), runtime.isStopped);
+    if (!context) return;
+    var priorState = null;
+    var sampleCommitted = false;
+    var sampleReceipt = null;
+    var priorAbsence = runtime.broadcasterAbsence;
+    var checkingReturn = isAbsencePaused();
+    var statusEl = document.getElementById("auto-status");
+    updateCountdownDisplay();
+    try {
+      var snapshot = checkingReturn ? await checkBroadcasterReturn(context) : await acquireRoomSnapshot(context, returnToChat);
+      if (!isAcquisitionCurrent(context)) return;
+      if (checkAbsenceStop()) return;
+      if (checkingReturn && isAbsencePaused()) return;
+      if (!snapshot) {
+        markSessionGap();
+        if (statusEl) {
+          statusEl.textContent = "Scan skipped (unreliable)";
+          statusEl.style.color = "var(--panel-negative)";
+        }
+        return;
+      }
+      sampleReceipt = acceptRoomSnapshot(snapshot, context.room);
+      priorState = Object.assign({}, sampleReceipt.before, {
+        trendHTML: (document.getElementById("trend-container") || {}).innerHTML,
+        trendHeaderText: (document.getElementById("trend-header-label") || {}).textContent,
+        allTimeHighs: readAllTimeHighs(context.room).highs
+      });
+      var diagnostics = sampleReceipt.diagnostics;
+      if (!runtime.isMinimized) drawAllSparklines();
+      updateDisplay();
+      updateTrendDisplay();
+      updateAcquisitionStatus();
+      sampleCommitted = isAcquisitionCurrent(context) && commitAcceptedSample(sampleReceipt);
+      if (!sampleCommitted) abortAcceptedSample(sampleReceipt);
+    } catch (err) {
+      var rolledBack = sampleReceipt && abortAcceptedSample(sampleReceipt);
+      if (rolledBack && priorState) {
+        try {
+          var trendEl = document.getElementById("trend-container");
+          if (trendEl && typeof priorState.trendHTML === "string") trendEl.innerHTML = priorState.trendHTML;
+          var trendHeader = document.getElementById("trend-header-label");
+          if (trendHeader && typeof priorState.trendHeaderText === "string") trendHeader.textContent = priorState.trendHeaderText;
+          updateDisplay();
+          updateAcquisitionStatus();
+          if (!runtime.isMinimized) drawAllSparklines();
+        } catch (displayError) {
+          log("Could not repaint previous data: " + displayError.message);
+        }
+      }
+      if (isAcquisitionCurrent(context)) markSessionGap();
+      log("Error during scan; retaining previous valid data: " + err.message);
+    } finally {
+      if (sampleCommitted) {
+        try {
+          saveSession(context.room);
+        } catch (error) {
+          log("Could not save accepted sample: " + error.message);
+        }
+        try {
+          recordAcceptedAllTimeHighs(context.room);
+          updateDisplay();
+        } catch (error) {
+          log("Could not update all-time highs: " + error.message);
+        }
+        pulseAcceptedHighs(priorState);
+        if (diagnostics) diagnostic("log", "API scan accepted", diagnostics);
+      }
+      if (finishAcquisition(context, location.href)) {
+        resetCountdown();
+        updateAcquisitionStatus();
+        if (checkingReturn || !priorState && priorAbsence !== runtime.broadcasterAbsence) saveSession(context.room);
+      }
+    }
+  }
+
+  // src/dom-health.js
+  function validateDOMHealth() {
+    const now = Date.now();
+    const container = document.getElementById("tracker-container");
+    const userListTab = document.querySelector(runtime.DOM_SELECTORS.userListTab);
+    const hasUserList = !!userListTab;
+    let hasUsernameElements = false;
+    for (let i = 0; i < runtime.DOM_SELECTORS.usernameElements.length; i++) {
+      if (document.querySelector(runtime.DOM_SELECTORS.usernameElements[i])) {
+        hasUsernameElements = true;
+        break;
+      }
+    }
+    const health = {
+      timestamp: now,
+      userListTab: hasUserList,
+      usernameElements: hasUsernameElements,
+      container: !!container,
+      roomTotalSelectors: runtime.DOM_SELECTORS.roomTotal.some((sel) => !!document.querySelector(sel))
+    };
+    const wasHealthy = runtime.domHealthStatus.isHealthy;
+    noteDOMHealth(now, hasUserList, hasUsernameElements);
+    if (!runtime.domHealthStatus.isHealthy) {
+      if (runtime.domHealthStatus.consecutiveFailures === 1 || runtime.domHealthStatus.consecutiveFailures % 10 === 0) {
+        diagnostic("warn", "DOM health check failed:", health);
+        if (container) {
+          const statusEl = document.getElementById("auto-status");
+          if (statusEl) {
+            statusEl.textContent = "DOM mismatch - check console";
+            statusEl.style.color = "var(--panel-negative)";
+          }
+        }
+      }
+      if (runtime.domHealthStatus.consecutiveFailures > 5 && runtime.isAutoRefreshOn) {
+        diagnostic("warn", "Auto-pausing due to DOM health issues");
+        pauseAutoRefresh();
+      }
+    } else {
+      if (!wasHealthy && runtime.domHealthStatus.consecutiveFailures > 0) {
+        log("DOM health restored");
+        const statusEl = document.getElementById("auto-status");
+        if (statusEl && runtime.isAutoRefreshOn) {
+          statusEl.textContent = "Next: " + runtime.countdownSeconds + "s";
+          statusEl.style.color = "var(--panel-positive)";
+        }
+      }
+      clearDOMFailures();
+    }
+    return health;
+  }
+
   // src/theme.js
   function applyPanelTheme(redraw) {
     var container = document.getElementById("tracker-container");
@@ -6782,7 +7016,7 @@ underlying system, so should run in the browser, Node, or Plask.
   function updateContainerOpacity(value) {
     var numeric = Number(value);
     if (!Number.isFinite(numeric)) return;
-    runtime.panelBackgroundPercent = Math.max(30, Math.min(100, numeric));
+    selectPanelOpacity(numeric);
     var container = document.getElementById("tracker-container");
     if (!container) return;
     container.style.backgroundColor = "rgba(" + themeColor("rgb") + "," + runtime.panelBackgroundPercent / 100 + ")";
@@ -6827,12 +7061,12 @@ underlying system, so should run in the browser, Node, or Plask.
       var t = runtime.TIERS[key];
       html += '<div id="tier-row-' + key + '" data-tier="' + key + '" style="display:flex;align-items:center;padding:1px 3px;margin:1px 0;background:rgba(var(--panel-row-rgb),calc(0.05 * var(--tier-background-scale, 1)));border-radius:3px;border-left:3px solid ' + t.color + ';"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml(key) + '</div><canvas id="spark-' + key + '" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-' + key + '" style="font-weight:bold;color:' + t.color + ';font-size:14px;">0</span><div id="high-' + key + '" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div>';
     });
-    html += '<div id="summary-tier-rows" style="border-top:1px solid var(--panel-divider);margin-top:4px;padding-top:4px;"><div id="tier-row-withtokens" data-tier="withtokens" style="display:flex;align-items:center;padding:2px 3px;background:rgba(255,105,180,0.15);border-radius:3px;border:1px solid #ff69b4;margin-bottom:3px;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("withtokens") + '</div><canvas id="spark-withtokens" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-withtokens" style="font-weight:bold;color:#ff69b4;font-size:14px;">0</span><span id="pct-withtokens" style="font-size:8px;color:#ff69b4;margin-left:2px;">0%</span><div id="high-withtokens" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div><div id="tier-row-total" data-tier="total" style="display:flex;align-items:center;padding:2px 3px;background:rgba(var(--panel-row-rgb),0.1);border-radius:3px;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("total") + '</div><canvas id="spark-total" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-total" style="font-weight:bold;color:var(--panel-text);font-size:14px;">0</span><div id="high-total" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div></div><div id="tier-row-anon" data-tier="anonymous" style="margin-top:5px;padding:5px;background:rgba(136,136,136,0.15);border-radius:3px;border:1px solid #888;"><div style="display:flex;align-items:center;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("anon") + '</div><canvas id="spark-anon" width="105" height="50" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="anon-ratio-full" style="font-size:13px;font-weight:bold;color:#ff69b4;">--</span><div id="high-anon" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div></div></div><div id="trend-section" style="position:relative;border-top:1px solid #4169E1;margin-top:5px;padding-top:5px;"><div id="live-trend"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;flex-wrap:wrap;gap:2px;"><span id="trend-header-label" style="font-size:9px;font-weight:bold;color:#4169E1;">📈 TREND</span><div style="display:flex;gap:2px;flex-wrap:wrap;"><button class="trend-preset-btn" data-mode="last" style="background:#4169E1;border:1px solid #4169E1;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Last</button><button class="trend-preset-btn" data-mode="5min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">5m</button><button class="trend-preset-btn" data-mode="15min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">15m</button><button class="trend-preset-btn" data-mode="30min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">30m</button><button class="trend-preset-btn" data-mode="1hour" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">1h</button><button class="trend-preset-btn" data-mode="start" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Start</button><button id="btn-trend-auto" style="background:#32CD32;border:1px solid #32CD32;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;" title="Auto-escalation ON - Click to disable">AUTO</button></div></div><div id="trend-container" style="min-height:30px;"><div style="font-size:8px;color:var(--panel-faint);text-align:center;padding:8px;">Waiting for scan...</div></div></div><div id="playback-controls" style="display:none;position:absolute;top:5px;left:0;right:0;bottom:0;padding:0 2px;box-sizing:border-box;grid-template-rows:minmax(14px,1fr) 14px 12px;gap:2px;" aria-label="Playback controls"><div style="display:flex;flex-direction:column;justify-content:center;gap:4px;min-width:0;"><div id="playback-file-controls" style="display:none;align-items:center;gap:4px;min-width:0;"><div id="playback-room" style="display:none;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;line-height:12px;font-weight:bold;color:var(--panel-text);"></div></div><div style="display:flex;align-items:center;justify-content:space-between;gap:3px;"><strong id="playback-label" style="font-size:9px;color:var(--panel-warning);">PLAYBACK</strong><button id="playback-play" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#4169E1;color:white;border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Pause</button><select id="playback-speed" aria-label="Playback speed" style="font-size:8px;height:15px;margin:0;padding:0;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select><button type="button" id="btn-playback-library" aria-label="Open session library" aria-expanded="false" aria-controls="tierscope-session-tools" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-accent);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Library</button><button id="playback-return" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Return to Live</button></div></div><div style="display:flex;align-items:center;gap:4px;min-width:0;"><button type="button" id="playback-previous" title="Previous recorded sample (pauses Replay)" aria-label="Previous recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">|&#9664;</button><input id="playback-scrubber" type="range" min="0" max="0" value="0" step="any" aria-label="Playback timeline" style="flex:1;min-width:0;width:100%;height:12px;margin:0;accent-color:var(--panel-warning);cursor:pointer;"><button type="button" id="playback-next" title="Next recorded sample (pauses Replay)" aria-label="Next recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">&#9654;|</button></div><div id="playback-file-actions" style="display:flex;justify-content:center;min-width:0;"><div id="playback-position" style="font-size:9px;line-height:12px;text-align:center;white-space:nowrap;color:var(--panel-secondary);font-family:monospace;">00:00:00 / 00:00:00</div></div></div></div><div id="control-field" style="margin-top:5px;padding:4px;background:rgba(65,105,225,0.15);border-radius:3px;border:1px solid #4169E1;"><div id="control-session-row" style="display:flex;justify-content:space-between;align-items:center;gap:3px;margin-bottom:4px;white-space:nowrap;"><span style="font-size:9px;font-weight:bold;color:#4169E1;">🎛️ CONTROLS</span><div id="control-session-buttons" style="display:flex;gap:2px;align-items:center;"><button id="btn-replay" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-warning);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;" title="Replay recorded history">Replay</button><button type="button" id="btn-control-library" aria-expanded="false" aria-controls="tierscope-session-tools" aria-label="Open session library" title="Open model folders, session summaries, comparisons and backups" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Library</button></div><span style="font-size:11px;color:var(--panel-positive);font-weight:bold;" id="control-next-scan">Next: 60s</span></div><div id="control-action-row" style="display:grid;grid-template-columns:minmax(max-content,1fr) auto minmax(0,1fr);align-items:center;gap:3px;"><span style="font-size:12px;color:var(--panel-warning);font-family:monospace;font-weight:bold;flex-shrink:0;" id="control-tracking-timer">00:00:00</span><div id="control-action-buttons" style="display:flex;gap:2px;align-items:center;"><button id="btn-control-auto" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#32CD32;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 4px;min-width:24px;" title="Auto-Refresh ON">⏸</button><button type="button" id="btn-control-stop" aria-label="Stop this session" title="Stop this session and freeze its history and elapsed time" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;white-space:nowrap;">■ Stop</button><button id="btn-main-reset" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Reset all tracking data"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12"/><path d="M3 3v9h9"/></svg>Reset</button></div><label id="dark-mode-control" style="justify-self:end;display:inline-flex;align-items:center;gap:2px;cursor:pointer;color:var(--panel-secondary);line-height:1;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 13a9 9 0 0 1-10-10 9 9 0 1 0 10 10Z"/></svg><input type="checkbox" id="dark-mode-toggle" checked aria-label="Dark mode" style="appearance:auto;width:12px;height:12px;margin:0;cursor:pointer;accent-color:#4169E1;"></label></div></div><div id="tracker-footer" style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:4px;margin-top:5px;min-height:14px;"><div id="acquisition-status" style="max-width:80px;font-size:7px;color:var(--panel-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="No accepted sample yet">No sample</div><div id="background-slider-controls" style="display:flex;align-items:center;gap:3px;min-width:0;"><svg width="11" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--panel-warning)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink:0;"><path d="M9 18h6M10 22h4M8 14a6 6 0 1 1 8 0c-1 1-1 2-1 4H9c0-2 0-3-1-4Z"/></svg><input type="range" id="opacity-slider" min="30" max="100" value="95" aria-label="Background opacity" style="flex:1;min-width:0;width:100%;height:12px;margin:0;cursor:pointer;accent-color:#ff69b4;" title="Main and standard tier background opacity"><span id="opacity-value" style="font-size:8px;color:var(--panel-secondary);min-width:23px;">95%</span></div><div id="tierscope-logo" style="justify-self:end;display:flex;align-items:center;gap:3px;white-space:nowrap;opacity:0.6;transition:opacity 0.2s;" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0.6"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#ff69b4" stroke-width="2" style="flex-shrink:0;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="2" x2="12" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/></svg><span title="TierScope ' + runtime.TIERSCOPE_VERSION + `" style="font-size:7px;font-family:'Courier New',monospace;font-weight:bold;color:var(--panel-accent);letter-spacing:1px;">TIERSCOPE</span></div></div></div>`;
+    html += '<div id="summary-tier-rows" style="border-top:1px solid var(--panel-divider);margin-top:4px;padding-top:4px;"><div id="tier-row-withtokens" data-tier="withtokens" style="display:flex;align-items:center;padding:2px 3px;background:rgba(255,105,180,0.15);border-radius:3px;border:1px solid #ff69b4;margin-bottom:3px;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("withtokens") + '</div><canvas id="spark-withtokens" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-withtokens" style="font-weight:bold;color:#ff69b4;font-size:14px;">0</span><span id="pct-withtokens" style="font-size:8px;color:#ff69b4;margin-left:2px;">0%</span><div id="high-withtokens" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div><div id="tier-row-total" data-tier="total" style="display:flex;align-items:center;padding:2px 3px;background:rgba(var(--panel-row-rgb),0.1);border-radius:3px;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("total") + '</div><canvas id="spark-total" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-total" style="font-weight:bold;color:var(--panel-text);font-size:14px;">0</span><div id="high-total" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div></div><div id="tier-row-anon" data-tier="anonymous" style="margin-top:5px;padding:5px;background:rgba(136,136,136,0.15);border-radius:3px;border:1px solid #888;"><div style="display:flex;align-items:center;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("anon") + '</div><canvas id="spark-anon" width="105" height="50" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="anon-ratio-full" style="font-size:13px;font-weight:bold;color:#ff69b4;">--</span><div id="high-anon" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div></div></div><div id="trend-section" style="position:relative;border-top:1px solid #4169E1;margin-top:5px;padding-top:5px;"><div id="live-trend"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;flex-wrap:wrap;gap:2px;"><span id="trend-header-label" style="font-size:9px;font-weight:bold;color:#4169E1;">📈 TREND</span><div style="display:flex;gap:2px;flex-wrap:wrap;"><button class="trend-preset-btn" data-mode="last" style="background:#4169E1;border:1px solid #4169E1;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Last</button><button class="trend-preset-btn" data-mode="5min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">5m</button><button class="trend-preset-btn" data-mode="15min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">15m</button><button class="trend-preset-btn" data-mode="30min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">30m</button><button class="trend-preset-btn" data-mode="1hour" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">1h</button><button class="trend-preset-btn" data-mode="start" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Start</button><button id="btn-trend-auto" style="background:#32CD32;border:1px solid #32CD32;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;" title="Auto-escalation ON - Click to disable">AUTO</button></div></div><div id="trend-container" style="min-height:30px;"><div style="font-size:8px;color:var(--panel-faint);text-align:center;padding:8px;">Waiting for scan...</div></div></div><div id="playback-controls" style="display:none;position:absolute;top:5px;left:0;right:0;bottom:0;padding:0 2px;box-sizing:border-box;grid-template-rows:minmax(14px,1fr) 14px 12px;gap:2px;" aria-label="Playback controls"><div style="display:flex;flex-direction:column;justify-content:center;gap:4px;min-width:0;"><div id="playback-file-controls" style="display:none;align-items:center;gap:4px;min-width:0;"><div id="playback-room" style="display:none;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;line-height:12px;font-weight:bold;color:var(--panel-text);"></div></div><div style="display:flex;align-items:center;justify-content:space-between;gap:3px;"><strong id="playback-label" style="font-size:9px;color:var(--panel-warning);">PLAYBACK</strong><button id="playback-play" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#4169E1;color:white;border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Pause</button><select id="playback-speed" aria-label="Playback speed" style="font-size:8px;height:15px;margin:0;padding:0;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select><button type="button" id="btn-playback-library" aria-label="Open session library" aria-expanded="false" aria-controls="tierscope-session-tools" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-accent);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Library</button><button id="playback-return" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Return to Live</button></div></div><div style="display:flex;align-items:center;gap:4px;min-width:0;"><button type="button" id="playback-previous" title="Previous recorded sample (pauses Replay)" aria-label="Previous recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">|&#9664;</button><input id="playback-scrubber" type="range" min="0" max="0" value="0" step="any" aria-label="Playback timeline" style="flex:1;min-width:0;width:100%;height:12px;margin:0;accent-color:var(--panel-warning);cursor:pointer;"><button type="button" id="playback-next" title="Next recorded sample (pauses Replay)" aria-label="Next recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">&#9654;|</button></div><div id="playback-file-actions" style="display:flex;justify-content:center;min-width:0;"><div id="playback-position" style="font-size:9px;line-height:12px;text-align:center;white-space:nowrap;color:var(--panel-secondary);font-family:monospace;">00:00:00 / 00:00:00</div></div></div></div><div id="control-field" style="margin-top:5px;padding:4px;background:rgba(65,105,225,0.15);border-radius:3px;border:1px solid #4169E1;"><div id="control-session-row" style="display:grid;grid-template-columns:max-content max-content minmax(0,1fr);align-items:center;gap:3px;margin-bottom:4px;white-space:nowrap;"><span style="font-size:9px;font-weight:bold;color:#4169E1;">🎛️ CONTROLS</span><span style="font-size:12px;color:var(--panel-warning);font-family:monospace;font-weight:bold;width:9ch;text-align:center;font-variant-numeric:tabular-nums;" id="control-tracking-timer">00:00:00</span><span style="min-width:0;text-align:right;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums;font-size:11px;color:var(--panel-positive);font-weight:bold;" id="control-next-scan">Next: 60s</span></div><div id="control-action-row" style="display:grid;grid-template-columns:minmax(max-content,1fr) auto minmax(0,1fr);align-items:center;gap:3px;"><div id="control-session-buttons" style="display:flex;gap:2px;align-items:center;"><button type="button" id="btn-control-library" aria-expanded="false" aria-controls="tierscope-session-tools" aria-label="Open session library" title="Open model folders, session summaries, comparisons and backups" style="font-size:8px;line-height:10px;height:14px;min-width:38px;box-sizing:border-box;margin:0;padding:2px 3px;background:var(--panel-button);color:var(--panel-accent);border:none;border-radius:3px;cursor:pointer;">Library</button><button id="btn-replay" style="font-size:8px;line-height:10px;height:14px;min-width:38px;box-sizing:border-box;margin:0;padding:2px 3px;background:var(--panel-button);color:var(--panel-warning);border:none;border-radius:3px;cursor:pointer;" title="Replay recorded history">Replay</button></div><div id="control-action-buttons" style="display:flex;gap:2px;align-items:center;"><button id="btn-control-auto" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#32CD32;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 4px;min-width:24px;" title="Auto-Refresh ON">⏸</button><button type="button" id="btn-control-stop" aria-label="Stop this session" title="Stop this session and freeze its history and elapsed time" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;white-space:nowrap;">■ Stop</button><button id="btn-main-reset" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Reset all tracking data"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12"/><path d="M3 3v9h9"/></svg>Reset</button></div><style>#dark-mode-control #dark-mode-track{position:relative;display:block;flex:0 0 22px;width:22px;height:12px;box-sizing:border-box;border:1px solid #9b701d;border-radius:7px;background:#e8b444;transition:background-color .16s ease;}#dark-mode-control #dark-mode-thumb{position:absolute;left:1px;top:1px;width:8px;height:8px;border-radius:50%;background:#4c3300;transform:translateX(10px);transition:transform .16s ease,background-color .16s ease;}#dark-mode-control #dark-mode-moon{color:var(--panel-muted);opacity:.55;}#dark-mode-control #dark-mode-sun{color:#825d00;}#dark-mode-control #dark-mode-toggle:checked~#dark-mode-track{background:#4169e1;border-color:#8ca8ff;}#dark-mode-control #dark-mode-toggle:checked~#dark-mode-track #dark-mode-thumb{transform:translateX(0);background:#fff;}#dark-mode-control #dark-mode-toggle:checked~#dark-mode-moon{color:#b4c5ff;opacity:1;}#dark-mode-control #dark-mode-toggle:checked~#dark-mode-sun{color:var(--panel-muted);opacity:.55;}#dark-mode-control #dark-mode-toggle:focus-visible~#dark-mode-track{outline:2px solid var(--panel-accent);outline-offset:2px;}@media(prefers-reduced-motion:reduce){#dark-mode-control #dark-mode-track,#dark-mode-control #dark-mode-thumb{transition:none;}}</style><label id="dark-mode-control" style="position:relative;justify-self:end;display:inline-flex;align-items:center;gap:2px;height:14px;cursor:pointer;line-height:1;"><input type="checkbox" role="switch" id="dark-mode-toggle" checked aria-label="Dark mode" style="position:absolute;inset:0;z-index:1;width:100%;height:100%;box-sizing:border-box;margin:0;padding:0;border:0;opacity:0;cursor:pointer;"><svg id="dark-mode-moon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" style="flex:none;"><path d="M21 13a9 9 0 0 1-10-10 9 9 0 1 0 10 10Z"/></svg><span id="dark-mode-track" aria-hidden="true"><span id="dark-mode-thumb"></span></span><svg id="dark-mode-sun" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" style="flex:none;"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg></label></div></div><div id="tracker-footer" style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:4px;margin-top:5px;min-height:14px;"><div id="acquisition-status" style="max-width:80px;font-size:7px;color:var(--panel-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="No accepted sample yet">No sample</div><div id="background-slider-controls" style="display:flex;align-items:center;gap:3px;min-width:0;"><svg width="11" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--panel-warning)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink:0;"><path d="M9 18h6M10 22h4M8 14a6 6 0 1 1 8 0c-1 1-1 2-1 4H9c0-2 0-3-1-4Z"/></svg><input type="range" id="opacity-slider" min="30" max="100" value="95" aria-label="Background opacity" style="flex:1;min-width:0;width:100%;height:12px;margin:0;cursor:pointer;accent-color:#ff69b4;" title="Main and standard tier background opacity"><span id="opacity-value" style="font-size:8px;color:var(--panel-secondary);min-width:23px;">95%</span></div><div id="tierscope-logo" style="justify-self:end;display:flex;align-items:center;gap:3px;white-space:nowrap;opacity:0.6;transition:opacity 0.2s;" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0.6"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#ff69b4" stroke-width="2" style="flex-shrink:0;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="2" x2="12" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/></svg><span title="TierScope ' + runtime.TIERSCOPE_VERSION + `" style="font-size:7px;font-family:'Courier New',monospace;font-weight:bold;color:var(--panel-accent);letter-spacing:1px;">TIERSCOPE</span></div></div></div>`;
     div.innerHTML = html;
     document.body.appendChild(div);
     applyPanelTheme(false);
     document.getElementById("dark-mode-toggle").addEventListener("change", function() {
-      runtime.isDarkMode = this.checked;
+      selectPanelTheme(this.checked);
       try {
         GM_setValue(runtime.PANEL_THEME_KEY, runtime.isDarkMode ? "dark" : "bright");
       } catch (error) {
@@ -6880,7 +7114,7 @@ underlying system, so should run in the browser, Node, or Plask.
     var btnTimerUp = document.getElementById("btn-timer-up");
     var miniMetricButton = document.getElementById("mini-metric");
     if (miniMetricButton) miniMetricButton.onclick = function() {
-      runtime.miniMetric = runtime.MINI_METRICS[(runtime.MINI_METRICS.indexOf(runtime.miniMetric) + 1) % runtime.MINI_METRICS.length];
+      cycleMiniMetric();
       try {
         GM_setValue(runtime.MINI_METRIC_KEY, runtime.miniMetric);
       } catch (error) {
@@ -6929,7 +7163,7 @@ underlying system, so should run in the browser, Node, or Plask.
     for (var i = 0; i < presetBtns.length; i++) {
       presetBtns[i].onclick = function() {
         var time = parseInt(this.dataset.time);
-        runtime.scanIntervalSeconds = time;
+        selectScanInterval(time);
         if (runtime.isAutoRefreshOn) {
           stopCountdown();
           resetCountdown();
@@ -6952,7 +7186,7 @@ underlying system, so should run in the browser, Node, or Plask.
     var trendPresetBtns = document.querySelectorAll(".trend-preset-btn");
     for (var k = 0; k < trendPresetBtns.length; k++) {
       trendPresetBtns[k].onclick = function() {
-        runtime.autoTrendEscalation = false;
+        selectAutomaticTrends(false);
         updateAutoTrendButton();
         var mode = this.dataset.mode;
         setTrendComparisonMode(mode);
@@ -6977,13 +7211,9 @@ underlying system, so should run in the browser, Node, or Plask.
   }
   function init() {
     leavePlayback(false);
-    var myGeneration = ++runtime.initGuard;
-    runtime.isScanning = false;
+    var myGeneration = beginAcquisitionGeneration();
     log("Initializing... (generation " + myGeneration + ")");
-    if (runtime.healthCheckInterval) {
-      clearInterval(runtime.healthCheckInterval);
-      runtime.healthCheckInterval = null;
-    }
+    stopAcquisitionClock("healthCheckInterval");
     if (runtime.freshnessInterval) clearInterval(runtime.freshnessInterval);
     runtime.freshnessInterval = setInterval(function() {
       updateAcquisitionStatus();
@@ -6996,9 +7226,9 @@ underlying system, so should run in the browser, Node, or Plask.
       loaded = loadSession(modelName);
     }
     if (!loaded) {
-      runtime.isMinimized = !isRoom;
+      selectPanelMinimized(!isRoom);
     } else {
-      runtime.isMinimized = false;
+      selectPanelMinimized(false);
     }
     configureSessionTracking(loaded, isRoom);
     try {
@@ -7034,7 +7264,7 @@ underlying system, so should run in the browser, Node, or Plask.
       return;
     }
     if (isRoom && isAbsencePaused()) {
-      runtime.nextScanAt = Math.max(Date.now(), readRequestPolicy().until);
+      schedulePresenceAcquisition(Date.now(), readRequestPolicy().until);
       startCountdown();
       performScanThenReturn(true);
       updateTrackingTimer();
@@ -7110,7 +7340,7 @@ underlying system, so should run in the browser, Node, or Plask.
         }
       }, 1e3);
     }
-    runtime.healthCheckInterval = setInterval(function() {
+    startAcquisitionClock("healthCheckInterval", function() {
       if (myGeneration === runtime.initGuard && !runtime.isStopped && !isAbsencePaused() && runtime.lastAcquisitionAttemptSource === "DOM" && !runtime.isScanning) {
         validateDOMHealth();
       }
@@ -7130,35 +7360,25 @@ underlying system, so should run in the browser, Node, or Plask.
       }
       runtime.activeSessionStorageKey = null;
       stopCountdown();
-      runtime.nextScanAt = 0;
-      runtime.countdownSeconds = runtime.scanIntervalSeconds;
+      resetAcquisitionForRoom();
       stopTrackingTimer();
       resetLiveSession("navigate");
-      runtime.trendComparisonMode = "last";
-      runtime.autoTrendEscalation = true;
+      resetTrendPreferences();
       updateTrackingTimer();
       cleanupDragListeners();
       if (runtime.miniSettingsKeyHandler) {
         document.removeEventListener("keydown", runtime.miniSettingsKeyHandler, true);
         runtime.miniSettingsKeyHandler = null;
       }
-      runtime.isScanning = false;
-      if (runtime.healthCheckInterval) {
-        clearInterval(runtime.healthCheckInterval);
-        runtime.healthCheckInterval = null;
-      }
-      runtime.currentScale = runtime.panelGeometry ? runtime.panelGeometry.scale : runtime.currentScale;
-      runtime.lastAcquisitionAttemptSource = "API";
-      runtime.domHealthStatus.consecutiveFailures = 0;
+      selectPanelScale(runtime.panelGeometry ? runtime.panelGeometry.scale : runtime.currentScale);
       updateAcquisitionStatus();
-      runtime.initGuard++;
       scheduleInit(2002);
     }
   }
 
   // src/bootstrap.js
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.9.0";
+    runtime.TIERSCOPE_VERSION = "3.10.0";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;
@@ -7501,7 +7721,10 @@ underlying system, so should run in the browser, Node, or Plask.
     runtime.lastUrl = location.href;
     initializeLiveSession(runtime);
     initializePlaybackState(runtime, { start: (tick) => setInterval(tick, 50), stop: (handle) => clearInterval(handle) });
-    initializePresentation({ refreshOptions: updatePanelOptions, refreshReplayAvailability: updateReplayAvailability });
+    initializeAcquisitionState(runtime, { start: (tick, delay) => setInterval(tick, delay), stop: (handle) => clearInterval(handle) });
+    initializePanelPreferences(runtime);
+    initializeLifecycle({ scan: performScanThenReturn });
+    initializePresentation({ refreshOptions: updatePanelOptions, refreshReplayAvailability: updateReplayAvailability, refreshCountdown: updateCountdownDisplay });
     runtime.urlCheckInterval = setInterval(checkUrlChange, 500);
     window.addEventListener("beforeunload", function() {
       cancelGifExport();

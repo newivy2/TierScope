@@ -3,7 +3,7 @@
 TierScope is a free, open-source userscript that charts how a Chaturbate room’s audience changes over time. 
 
 ---
-**Current release: 3.9.0** · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.9.0)
+**Current stable release: 3.10.0** · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.10.0)
 ---
 
 Open **Library** beside Replay to unfold a matching left-hand page next to the chart. Save or export the current/replayed session, open a saved file, and browse recordings in model folders. Summary, Compare and Backup tabs bring the session tools into the same panel. On small windows, the library becomes a scrollable sheet. A visible warning reports failed session saves. [Build and source guide](BUILDING.md).
@@ -44,9 +44,9 @@ Charts use periodic room-data samples. Session history is stored locally through
 
 - **Reports and exports** — Download a session file, CSV data, TXT summary, or animated GIF from Library. Each stored recording has these actions under **More…**, without loading it into replay.
 
-- **Flexible layout** — Choose compact or expanded views, collapse individual rows, resize and reposition the panel, and adjust its theme and transparency.
+- **Flexible layout** — Choose compact or expanded views, collapse individual rows, resize and reposition the panel, and adjust its transparency. A moon–sun switch slides and changes color to show the active dark or bright theme.
 
-- **Session controls** — Pause, resume, stop, or reset tracking. Automatic absence detection reduces scanning when the broadcaster is away.
+- **Session controls** — Keep elapsed time and scan status above Library, Replay, play/pause, Stop, Reset and the theme switch. Reserved timer space keeps controls steady as status changes. Automatic absence detection reduces scanning when the broadcaster is away.
 
 Session history and all-time records are stored locally through your userscript manager. All-time highs remain separate for each room and survive session resets.
 

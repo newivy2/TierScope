@@ -1,3 +1,4 @@
+import { selectAutomaticTrends, selectTrendMode } from './panel-preferences.js';
 import { updateTrendDisplay } from './presentation.js';
 import { runtime } from './runtime.js';
 import { saveSession } from './session-persistence.js';
@@ -15,7 +16,7 @@ export function checkTrendAutoEscalation() {
     if (targetMode !== runtime.trendComparisonMode) {
         log('Auto-escalating trend mode: ' + runtime.trendComparisonMode + ' -> ' + targetMode + ' (' + Math.floor(elapsedMin) + ' min elapsed)');
         if (runtime.users.size === 0) {
-            runtime.trendComparisonMode = targetMode;
+            selectTrendMode(targetMode);
             updateTrendPresetButtons();
             updateAutoTrendButton();
             saveSession(getModelName());
@@ -26,7 +27,7 @@ export function checkTrendAutoEscalation() {
 }
 
 export function toggleAutoTrendEscalation() {
-    runtime.autoTrendEscalation = !runtime.autoTrendEscalation;
+    selectAutomaticTrends(!runtime.autoTrendEscalation);
     updateAutoTrendButton();
     log('Auto trend escalation ' + (runtime.autoTrendEscalation ? 'enabled' : 'disabled'));
     saveSession(getModelName());
@@ -54,7 +55,7 @@ export function updateAutoTrendButton() {
 
 export function setTrendComparisonMode(mode) {
     if (!runtime.TREND_PRESETS[mode] && mode !== 'last') return;
-    runtime.trendComparisonMode = mode;
+    selectTrendMode(mode);
     updateTrendDisplay();
     updateTrendPresetButtons();
     saveSession(getModelName());

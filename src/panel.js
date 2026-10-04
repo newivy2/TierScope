@@ -1,10 +1,13 @@
+import { selectScanInterval } from './acquisition-state.js';
 import { hideChartTooltip } from './chart-view.js';
 import { bindPanelOptions } from './files.js';
 import { cancelGifExport } from './gif.js';
-import { bindRowControls, cleanupDragListeners, collapseMarkerHtml, collapsedTrayHtml, restoreStandardSize, setupDraggable, setupResizable, setupResizeHandler, toggleView } from './layout.js';
+import { bindRowControls, cleanupDragListeners, restoreStandardSize, setupDraggable, setupResizable, setupResizeHandler, toggleView } from './layout.js';
 import { adjustTimer, resetAllTracking, resetCountdown, startCountdown, stopCountdown, stopTracking, toggleAutoRefresh, updateCountdownDisplay, updateStopControls } from './lifecycle.js';
+import { cycleMiniMetric, selectAutomaticTrends, selectPanelTheme } from './panel-preferences.js';
 import { updateDisplay } from './presentation.js';
 import { bindPlaybackControls, leavePlayback, updateReplayAvailability } from './replay.js';
+import { collapseMarkerHtml, collapsedTrayHtml } from './row-layout.js';
 import { runtime } from './runtime.js';
 import { applyPanelTheme, updateContainerOpacity } from './theme.js';
 import { setTrendComparisonMode, toggleAutoTrendEscalation, updateAutoTrendButton, updateTrendPresetButtons } from './trends.js';
@@ -202,16 +205,16 @@ export function createPanel() {
             '</div>' +
 
             '<div id="control-field" style="margin-top:5px;padding:4px;background:rgba(65,105,225,0.15);border-radius:3px;border:1px solid #4169E1;">' +
-                '<div id="control-session-row" style="display:flex;justify-content:space-between;align-items:center;gap:3px;margin-bottom:4px;white-space:nowrap;">' +
+                '<div id="control-session-row" style="display:grid;grid-template-columns:max-content max-content minmax(0,1fr);align-items:center;gap:3px;margin-bottom:4px;white-space:nowrap;">' +
                     '<span style="font-size:9px;font-weight:bold;color:#4169E1;">🎛️ CONTROLS</span>' +
-                    '<div id="control-session-buttons" style="display:flex;gap:2px;align-items:center;">' +
-                    '<button id="btn-replay" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-warning);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;" title="Replay recorded history">Replay</button>' +
-                    '<button type="button" id="btn-control-library" aria-expanded="false" aria-controls="tierscope-session-tools" aria-label="Open session library" title="Open model folders, session summaries, comparisons and backups" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Library</button>' +
-                    '</div>' +
-                    '<span style="font-size:11px;color:var(--panel-positive);font-weight:bold;" id="control-next-scan">Next: 60s</span>' +
+                    '<span style="font-size:12px;color:var(--panel-warning);font-family:monospace;font-weight:bold;width:9ch;text-align:center;font-variant-numeric:tabular-nums;" id="control-tracking-timer">00:00:00</span>' +
+                    '<span style="min-width:0;text-align:right;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums;font-size:11px;color:var(--panel-positive);font-weight:bold;" id="control-next-scan">Next: 60s</span>' +
                 '</div>' +
                 '<div id="control-action-row" style="display:grid;grid-template-columns:minmax(max-content,1fr) auto minmax(0,1fr);align-items:center;gap:3px;">' +
-                    '<span style="font-size:12px;color:var(--panel-warning);font-family:monospace;font-weight:bold;flex-shrink:0;" id="control-tracking-timer">00:00:00</span>' +
+                    '<div id="control-session-buttons" style="display:flex;gap:2px;align-items:center;">' +
+                    '<button type="button" id="btn-control-library" aria-expanded="false" aria-controls="tierscope-session-tools" aria-label="Open session library" title="Open model folders, session summaries, comparisons and backups" style="font-size:8px;line-height:10px;height:14px;min-width:38px;box-sizing:border-box;margin:0;padding:2px 3px;background:var(--panel-button);color:var(--panel-accent);border:none;border-radius:3px;cursor:pointer;">Library</button>' +
+                    '<button id="btn-replay" style="font-size:8px;line-height:10px;height:14px;min-width:38px;box-sizing:border-box;margin:0;padding:2px 3px;background:var(--panel-button);color:var(--panel-warning);border:none;border-radius:3px;cursor:pointer;" title="Replay recorded history">Replay</button>' +
+                    '</div>' +
                     '<div id="control-action-buttons" style="display:flex;gap:2px;align-items:center;">' +
                         '<button id="btn-control-auto" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#32CD32;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 4px;min-width:24px;" title="Auto-Refresh ON">⏸</button>' +
                         '<button type="button" id="btn-control-stop" aria-label="Stop this session" title="Stop this session and freeze its history and elapsed time" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;white-space:nowrap;">■ Stop</button>' +
@@ -223,9 +226,23 @@ export function createPanel() {
                             'Reset' +
                         '</button>' +
                     '</div>' +
-                    '<label id="dark-mode-control" style="justify-self:end;display:inline-flex;align-items:center;gap:2px;cursor:pointer;color:var(--panel-secondary);line-height:1;">' +
-                        '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 13a9 9 0 0 1-10-10 9 9 0 1 0 10 10Z"/></svg>' +
-                        '<input type="checkbox" id="dark-mode-toggle" checked aria-label="Dark mode" style="appearance:auto;width:12px;height:12px;margin:0;cursor:pointer;accent-color:#4169E1;">' +
+                    '<style>' +
+                        '#dark-mode-control #dark-mode-track{position:relative;display:block;flex:0 0 22px;width:22px;height:12px;box-sizing:border-box;border:1px solid #9b701d;border-radius:7px;background:#e8b444;transition:background-color .16s ease;}' +
+                        '#dark-mode-control #dark-mode-thumb{position:absolute;left:1px;top:1px;width:8px;height:8px;border-radius:50%;background:#4c3300;transform:translateX(10px);transition:transform .16s ease,background-color .16s ease;}' +
+                        '#dark-mode-control #dark-mode-moon{color:var(--panel-muted);opacity:.55;}' +
+                        '#dark-mode-control #dark-mode-sun{color:#825d00;}' +
+                        '#dark-mode-control #dark-mode-toggle:checked~#dark-mode-track{background:#4169e1;border-color:#8ca8ff;}' +
+                        '#dark-mode-control #dark-mode-toggle:checked~#dark-mode-track #dark-mode-thumb{transform:translateX(0);background:#fff;}' +
+                        '#dark-mode-control #dark-mode-toggle:checked~#dark-mode-moon{color:#b4c5ff;opacity:1;}' +
+                        '#dark-mode-control #dark-mode-toggle:checked~#dark-mode-sun{color:var(--panel-muted);opacity:.55;}' +
+                        '#dark-mode-control #dark-mode-toggle:focus-visible~#dark-mode-track{outline:2px solid var(--panel-accent);outline-offset:2px;}' +
+                        '@media(prefers-reduced-motion:reduce){#dark-mode-control #dark-mode-track,#dark-mode-control #dark-mode-thumb{transition:none;}}' +
+                    '</style>' +
+                    '<label id="dark-mode-control" style="position:relative;justify-self:end;display:inline-flex;align-items:center;gap:2px;height:14px;cursor:pointer;line-height:1;">' +
+                        '<input type="checkbox" role="switch" id="dark-mode-toggle" checked aria-label="Dark mode" style="position:absolute;inset:0;z-index:1;width:100%;height:100%;box-sizing:border-box;margin:0;padding:0;border:0;opacity:0;cursor:pointer;">' +
+                        '<svg id="dark-mode-moon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" style="flex:none;"><path d="M21 13a9 9 0 0 1-10-10 9 9 0 1 0 10 10Z"/></svg>' +
+                        '<span id="dark-mode-track" aria-hidden="true"><span id="dark-mode-thumb"></span></span>' +
+                        '<svg id="dark-mode-sun" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" style="flex:none;"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg>' +
                     '</label>' +
                 '</div>' +
             '</div>' +
@@ -252,7 +269,7 @@ export function createPanel() {
     document.body.appendChild(div);
     applyPanelTheme(false);
     document.getElementById('dark-mode-toggle').addEventListener('change', function() {
-        runtime.isDarkMode = this.checked;
+        selectPanelTheme(this.checked);
         try { GM_setValue(runtime.PANEL_THEME_KEY, runtime.isDarkMode ? 'dark' : 'bright'); }
         catch (error) { log('Could not save theme preference'); }
         applyPanelTheme(true);
@@ -297,7 +314,7 @@ export function createPanel() {
 
     var miniMetricButton = document.getElementById('mini-metric');
     if (miniMetricButton) miniMetricButton.onclick = function() {
-        runtime.miniMetric = runtime.MINI_METRICS[(runtime.MINI_METRICS.indexOf(runtime.miniMetric) + 1) % runtime.MINI_METRICS.length];
+        cycleMiniMetric();
         try { GM_setValue(runtime.MINI_METRIC_KEY, runtime.miniMetric); } catch (error) { log('Could not save compact chart preference'); }
         updateDisplay();
     };
@@ -338,7 +355,7 @@ export function createPanel() {
     for (var i = 0; i < presetBtns.length; i++) {
         presetBtns[i].onclick = function() {
             var time = parseInt(this.dataset.time);
-            runtime.scanIntervalSeconds = time;
+            selectScanInterval(time);
             if (runtime.isAutoRefreshOn) {
                 stopCountdown();
                 resetCountdown();
@@ -362,7 +379,7 @@ export function createPanel() {
     var trendPresetBtns = document.querySelectorAll('.trend-preset-btn');
     for (var k = 0; k < trendPresetBtns.length; k++) {
         trendPresetBtns[k].onclick = function() {
-            runtime.autoTrendEscalation = false;
+            selectAutomaticTrends(false);
             updateAutoTrendButton();
             var mode = this.dataset.mode;
             setTrendComparisonMode(mode);

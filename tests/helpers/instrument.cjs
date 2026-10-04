@@ -13,6 +13,13 @@ const stateNames = new Set([...fs.readFileSync(path.join(__dirname, '../../src/b
 const sessionModule = acorn.parse(fs.readFileSync(path.join(__dirname, '../../src/live-session.js'), 'utf8'), {ecmaVersion: 2022, sourceType: 'module'});
 const ownedStateNames = new Set(sessionModule.body.find(n => n.declaration?.declarations?.[0]?.id.name === 'LIVE_SESSION_FIELDS')
   .declaration.declarations[0].init.arguments[0].elements.map(n => n.value));
+const additionalOwners = [['acquisition-state.js', 'ACQUISITION_FIELDS', 'acquisitionState'],
+  ['panel-preferences.js', 'PANEL_PREFERENCE_FIELDS', 'panelPreferenceState']].map(([file, fieldName, state]) => {
+  const module = acorn.parse(fs.readFileSync(path.join(__dirname, '../../src', file), 'utf8'), {ecmaVersion: 2022, sourceType: 'module'});
+  const fields = new Set(module.body.find(n => n.declaration?.declarations?.[0]?.id.name === fieldName)
+    .declaration.declarations[0].init.arguments[0].elements.map(n => n.value));
+  return {fields, state};
+});
 const cache = new Map();
 
 // Bundlers may print shorthand properties and 2e3 instead of 2000. Restore
@@ -50,7 +57,8 @@ function instrument(source) {
     if (!stateNames.has(id.name)) continue;
     const parent = parents.get(id);
     const shorthand = parent.type === 'Property' && parent.shorthand && parent.value === id;
-    edits.set(id.start, {start: id.start, end: id.end, text: (shorthand ? id.name + ': ' : '') + (ownedStateNames.has(id.name) ? 'liveSessionState.' : 'runtime.') + id.name});
+    const owner = additionalOwners.find(owner => owner.fields.has(id.name) && new RegExp('(?:let|var) ' + owner.state + '\\b').test(source));
+    edits.set(id.start, {start: id.start, end: id.end, text: (shorthand ? id.name + ': ' : '') + (owner ? owner.state + '.' : ownedStateNames.has(id.name) ? 'liveSessionState.' : 'runtime.') + id.name});
   }
   for (const edit of [...edits.values()].sort((a,b) => b.start - a.start)) {
     source = source.slice(0, edit.start) + edit.text + source.slice(edit.end);

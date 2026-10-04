@@ -33,7 +33,7 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   for(const id of ['btn-replay','btn-control-library','btn-control-stop','control-next-scan']){
    const r=await page.locator('#'+id).boundingBox();assert(r.x>=controls.x&&r.x+r.width<=controls.x+controls.width);
   }
-  for(const row of [['btn-replay','btn-control-library'],['btn-control-auto','btn-control-stop','btn-main-reset']]){
+  for(const row of [['btn-control-library','btn-replay','btn-control-auto','btn-control-stop','btn-main-reset']]){
    const boxes=await Promise.all(row.map(id=>page.locator('#'+id).boundingBox()));
    boxes.slice(1).forEach((r,i)=>{assert(r.x>=boxes[i].x+boxes[i].width,'buttons do not overlap');assert(Math.abs(r.y-boxes[i].y)<1,'buttons stay on one row: '+JSON.stringify({row,boxes}));});
   }
@@ -65,7 +65,7 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   assert.equal(requests,n+1);assert((await page.evaluate(()=>ViewerTracker.__stop.state())).history[0]>stopped.history[0]);
   body='5,viewer|t|m|0';await page.evaluate(()=>ViewerTracker.__stop.scan());await page.evaluate(()=>ViewerTracker.__stop.scan());
   await page.evaluate(()=>ViewerTracker.__stop.away(11*60000));assert.match(await page.locator('#control-next-scan').textContent(),/Reduced: 300s/);
-  const reduced=await page.locator('#control-next-scan').boundingBox();const sessionButtons=await page.locator('#control-session-buttons').boundingBox();assert(reduced.x>=sessionButtons.x+sessionButtons.width,'reduced countdown fits beside session buttons');
+  const reduced=await page.locator('#control-next-scan').boundingBox();const sessionTimer=await page.locator('#control-tracking-timer').boundingBox();assert(reduced.x>=sessionTimer.x+sessionTimer.width,'reduced countdown fits beside elapsed time');
   const beforeAbsencePause=await panel.boundingBox();
   await page.evaluate(()=>ViewerTracker.__stop.away(15*60000));
   await page.waitForFunction(()=>ViewerTracker.__stop.state().paused);
@@ -75,7 +75,7 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   await page.evaluate(()=>ViewerTracker.__stop.scan());assert.deepEqual((await page.evaluate(()=>ViewerTracker.__stop.state())).history,autoPaused.history);
   assert.equal((await page.evaluate(()=>ViewerTracker.__stop.state())).time,autoPaused.time);
   assert.equal(await page.locator('#spark-light-blue').evaluate(c=>c.toDataURL()),pausedChart);
-  const checkBox=await page.locator('#control-next-scan').boundingBox();assert(checkBox.x>=sessionButtons.x+sessionButtons.width,'presence countdown fits');
+  const checkBox=await page.locator('#control-next-scan').boundingBox();assert(checkBox.x>=sessionTimer.x+sessionTimer.width,'presence countdown fits');
   assert.deepEqual(await panel.boundingBox(),beforeAbsencePause,'automatic pause adds no panel height');
   if(process.env.TIERSCOPE_STOP_SHOT)await panel.screenshot({path:process.env.TIERSCOPE_STOP_SHOT});
   // Return checks must continue behind FILE REPLAY without changing its frame.

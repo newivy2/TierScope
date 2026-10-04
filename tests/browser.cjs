@@ -170,7 +170,7 @@ const injected=source.replaceAll('scheduleInit(2000);','/* test controls initial
  const alignment=await page.evaluate(()=>{
    const r=document.getElementById('control-action-row').getBoundingClientRect();
    const b=document.getElementById('control-action-buttons').getBoundingClientRect();
-   const t=document.getElementById('control-tracking-timer').getBoundingClientRect();
+   const t=document.getElementById('control-session-buttons').getBoundingClientRect();
    const theme=document.getElementById('dark-mode-control').getBoundingClientRect();
    return {expectedLeft:Math.max(r.left+(r.width-b.width)/2,t.right+3),left:b.left,right:b.right,themeLeft:theme.left};
  });

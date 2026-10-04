@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const {harness, source} = require('./helpers/harness.cjs');
 const clean = value => JSON.parse(JSON.stringify(value));
 const instrumented = source.replace('downloadTrackingReport: downloadTrackingReport,', `
-  __display: {runtime, buildLiveDisplayFrame, buildPanelDisplayModel, buildTrendDisplayModel,
+  __display: {runtime, switchHighPreference, buildLiveDisplayFrame, buildPanelDisplayModel, buildTrendDisplayModel,
     paintPanelFrame, renderTrendDisplay, acceptRoomSnapshot, commitAcceptedSample, getPlaybackFrame,
     snapshot: () => Object.fromEntries(LIVE_SESSION_FIELDS.map(key => [key,
       key === 'users' ? Array.from(runtime.users.values()) : runtime[key]]))},
@@ -31,7 +31,8 @@ test('panel models are immutable snapshots and painting supplied data cannot cha
   assert.throws(() => model.history.red.push(999), {name: 'TypeError'});
   h.advance(60000); await scan(h, 7);
   const before = clean(h.d.snapshot());
-  h.d.runtime.highMode = 'ath';
+  h.d.switchHighPreference();
+  assert.equal(h.d.runtime.highMode, 'ath');
   h.d.paintPanelFrame(model); h.d.renderTrendDisplay(trend);
   assert.equal(h.e('count-red').textContent, '3', 'paint uses the supplied earlier sample');
   assert.equal(h.e('high-red').textContent, 'SH:3', 'paint uses the supplied high mode');

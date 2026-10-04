@@ -1,3 +1,4 @@
+import { clearOwnedRequestFailures, confirmRequestPolicySaved, reconcileRequestPolicy, stageRequestPolicy } from './acquisition-state.js';
 import { isStorageTimestamp, makeStorageId } from './record-validation.js';
 import { runtime } from './runtime.js';
 import { log } from './utils.js';
@@ -5,23 +6,13 @@ import { log } from './utils.js';
 export function readRequestPolicy() {
     try {
         var raw = GM_getValue(runtime.REQUEST_POLICY_KEY, null);
-        if (raw === null && !runtime.requestPolicyUnsaved) runtime.requestPolicyCache = { until: 0, failures: 0, blocked: 0, status: 0, revision: '' };
-        else if (raw !== null) {
+        if (raw === null) reconcileRequestPolicy(null);
+        else {
             var value = JSON.parse(raw);
             if (value && Number.isFinite(value.until) && value.until >= 0 && Number.isInteger(value.failures) &&
                 value.failures >= 0 && (value.blocked === 0 || value.blocked === 401 || value.blocked === 403) &&
                 Number.isInteger(value.status) && (!value.serverUntil || isStorageTimestamp(value.serverUntil)) && typeof value.revision === 'string') {
-                if (runtime.requestPolicyUnsaved) {
-                    value = Object.assign({}, value, {
-                        until: Math.max(value.until, runtime.requestPolicyCache.until),
-                        serverUntil: Math.max(value.serverUntil || 0, runtime.requestPolicyCache.serverUntil || 0),
-                        failures: Math.max(value.failures, runtime.requestPolicyCache.failures),
-                        blocked: runtime.requestPolicyCache.blocked || value.blocked,
-                        status: runtime.requestPolicyCache.until >= value.until ? runtime.requestPolicyCache.status : value.status,
-                        revision: runtime.requestPolicyCache.revision
-                    });
-                }
-                runtime.requestPolicyCache = value;
+                reconcileRequestPolicy(value);
             }
         }
     } catch (error) { /* Retain the in-memory restriction if storage cannot be read. */ }
@@ -29,9 +20,9 @@ export function readRequestPolicy() {
 }
 
 export function writeRequestPolicy(policy) {
-    policy.revision = makeStorageId(); runtime.requestPolicyCache = policy;
-    runtime.requestPolicyUnsaved = true;
-    try { GM_setValue(runtime.REQUEST_POLICY_KEY, JSON.stringify(policy)); runtime.requestPolicyUnsaved = false; }
+    policy.revision = makeStorageId();
+    stageRequestPolicy(policy);
+    try { GM_setValue(runtime.REQUEST_POLICY_KEY, JSON.stringify(policy)); confirmRequestPolicySaved(policy.revision); }
     catch (error) { log('Request restriction is local to this tab: ' + error.message); }
 }
 
@@ -59,11 +50,9 @@ export function recordRequestFailure(error) {
 }
 
 export function clearRequestFailures(revision) {
-    var current = readRequestPolicy();
+    readRequestPolicy();
     // An older in-flight request must not undo a newer restriction from another tab.
-    if (current.revision !== revision || current.blocked || !current.failures) return;
-    runtime.requestPolicyCache = { until: 0, failures: 0, blocked: 0, status: 0, revision: '' };
-    runtime.requestPolicyUnsaved = false;
+    if (!clearOwnedRequestFailures(revision)) return;
     try { GM_deleteValue(runtime.REQUEST_POLICY_KEY); } catch (error) { /* Retrying later is safe. */ }
 }
 

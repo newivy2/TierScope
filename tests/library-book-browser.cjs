@@ -21,7 +21,7 @@ async function download(page,action){const [d]=await Promise.all([page.waitForEv
  await page.evaluate(()=>{window.store=new Map();window.GM_getValue=(k,d)=>store.has(k)?store.get(k):d;window.GM_setValue=(k,v)=>store.set(k,v);window.GM_listValues=()=>[...store.keys()];window.GM_deleteValue=k=>store.delete(k);});
  await page.addScriptTag({content:instrument(source)});await page.evaluate(()=>ViewerTracker.__book.setup());await page.waitForTimeout(350);
  const panel=page.locator('#tracker-container'),library=page.locator('#tierscope-session-tools'),bounds=await panel.boundingBox(),live=await page.evaluate(()=>ViewerTracker.__book.state());
- assert.deepEqual(await page.locator('#control-session-buttons button').allTextContents(),['Replay','Library']);
+ assert.deepEqual(await page.locator('#control-session-buttons button').allTextContents(),['Library','Replay']);
  await page.click('#btn-control-library');await page.waitForTimeout(100);
  const dock=await library.boundingBox();assert(Math.abs(dock.x+dock.width-bounds.x-1)<1);assert.equal(dock.y,bounds.y);assert.equal(dock.height,bounds.height);
  assert.equal(await library.getAttribute('aria-modal'),'false');assert.equal(await library.getAttribute('data-layout'),'docked');

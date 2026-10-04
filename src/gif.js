@@ -1,10 +1,10 @@
-import { GifWriter } from 'omggif';
 import { buildChartPlot } from './chart-view.js';
 import { getHistoryBreaks } from './history-data.js';
 import { createPlaybackSnapshot, isPlaybackCurrent } from './playback-data.js';
 import { runtime } from './runtime.js';
 import { validateSessionFile } from './session-file-format.js';
 import { formatElapsedTime, getModelName, log } from './utils.js';
+import { GifWriter } from 'omggif';
 
 export function createGifSurface(palette) {
     var canvas = document.createElement('canvas');

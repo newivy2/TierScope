@@ -1,14 +1,13 @@
 import { hideChartTooltip } from './chart-view.js';
 import { drawAllSparklines, drawHistorySparklines } from './charts.js';
-import { updatePanelOptions } from './files.js';
 import { cancelGifExport } from './gif.js';
+import { setAllTimeActionStatus } from './high-feedback.js';
+import { cancelHighPulses } from './high-pulses.js';
 import { readAllTimeHighs } from './highs-store.js';
-import { cancelHighPulses, setAllTimeActionStatus } from './highs.js';
-import { updateCountdownDisplay } from './lifecycle.js';
 import { createPlaybackSnapshot, getPlaybackFrame, getPlaybackSampleIndex, isPlaybackCurrent } from './playback-data.js';
 import { advanceOwnedPlayback, changeOwnedPlaybackSpeed, closeOwnedPlayback, markPlaybackPainted, moveOwnedPlayback, nextSessionFileRequest, openOwnedPlayback, pauseOwnedPlayback, resumeOwnedPlayback, seekOwnedPlayback, startOwnedPlaybackClock, stopOwnedPlaybackClock } from './playback-state.js';
 import { updateAcquisitionStatus } from './presentation-status.js';
-import { renderDisplayFrame, updateDisplay, updateTrendDisplay } from './presentation.js';
+import { refreshPanelOptions, refreshScanCountdown, renderDisplayFrame, updateDisplay, updateTrendDisplay } from './presentation.js';
 import { getStorageKey } from './record-validation.js';
 import { runtime } from './runtime.js';
 import { captureSessionFile } from './session-capture.js';
@@ -195,7 +194,7 @@ export function setPlaybackLayout(active) {
 
 export function updatePlaybackControls() {
     if (!runtime.playback) return;
-    updatePanelOptions();
+    refreshPanelOptions();
     var label = document.getElementById('playback-label');
     if (label) { label.textContent = runtime.playback.imported ? 'FILE REPLAY' : 'PLAYBACK'; label.title = runtime.playback.archive ? runtime.playback.archive.room : ''; }
     var room = document.getElementById('playback-room');
@@ -263,5 +262,5 @@ export function repaintLivePresentation() {
     updateTrendDisplay();
     drawAllSparklines();
     updateAcquisitionStatus();
-    updateCountdownDisplay();
+    refreshScanCountdown();
 }

@@ -1,6 +1,5 @@
 import { BACKUP_MAX_BYTES, createTierScopeBackup, restoreTierScopeBackup, validateTierScopeBackup } from './backup.js';
 import { downloadDataFile, readDataFile } from './data-io.js';
-import { openSessionReplay } from './files.js';
 import { cancelGifExport, generateGifFromHistory } from './gif.js';
 import { displayedHighRoom } from './high-selectors.js';
 import { readAllTimeHighs, sessionAllTimeHighs, storeAllTimeHighs } from './highs-store.js';
@@ -18,6 +17,7 @@ import { captureSessionFile } from './session-capture.js';
 import { validateSessionFile } from './session-file-format.js';
 import { getSessionSaveState } from './session-health.js';
 import { LIBRARY_MAX_BYTES, LIBRARY_MAX_COUNT, LIBRARY_PREFIX, keepSessionInLibrary, readSessionLibrary, removeLibrarySession, renameLibrarySession } from './session-library.js';
+import { openSessionReplay } from './session-replay.js';
 import { formatElapsedTime, getModelName } from './utils.js';
 
 let closeSessionTools = null;
