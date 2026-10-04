@@ -3,14 +3,10 @@
 TierScope is a free, open-source userscript that charts how a Chaturbate room’s audience changes over time. 
 
 ---
-**Beta under review: 3.10.1-beta.2** · [Install beta](https://raw.githubusercontent.com/newivy2/TierScope/beta/library-stacking/tierscope.user.js)
-
-Library stays underneath TierScope wherever they overlap, including the sheet in narrow windows. The main panel always has priority. Positioning, scale and the sheet breakpoint are preserved.
-
-**Current stable release: 3.10.0** · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.10.0)
+**Current stable release: 3.10.1** · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.10.1)
 ---
 
-Open **Library** beside Replay to unfold a matching left-hand page next to the chart. Save or export the current/replayed session, open a saved file, and browse recordings in model folders. Summary, Compare and Backup tabs bring the session tools into the same panel. On small windows, the library becomes a scrollable sheet. A visible warning reports failed session saves. [Build and source guide](BUILDING.md).
+Open **Library** beside Replay to unfold a matching left-hand page next to the chart. Save or export the current/replayed session, open a saved file, and browse recordings in model folders. Summary, Compare and Backup tabs bring the session tools into the same panel. On small windows, the library becomes a scrollable sheet. TierScope stays above Library wherever they overlap, keeping the main panel visible and clickable. A visible warning reports failed session saves. [Build and source guide](BUILDING.md).
 
 The **SH / ATH** switch sits to the left of the chart-window menu. Session highs and all-time highs are tracked separately for each room. All-time records survive session Reset and expiry; hover a high to see the exact value and its recorded time. Opening a saved file does not change these records: use **Add to all-time highs** in Library for the selected recording or in the chart-window menu during FILE REPLAY to add that file's highs to its own room.
 
