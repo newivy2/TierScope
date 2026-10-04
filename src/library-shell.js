@@ -51,6 +51,7 @@ export function libraryShell() {
 #tierscope-session-tools .tools-history-stats dt{font-size:.9em;color:var(--panel-muted)}
 #tierscope-session-tools .tools-history-stats dd{margin:3px 0 0;font-weight:bold;color:var(--panel-secondary);overflow-wrap:anywhere}
 #tools-history-recording{width:100%}
+#tools-room-shortcuts button{overflow-wrap:anywhere;text-align:left}
 #tools-history-table button{max-width:155px;text-align:left;overflow-wrap:anywhere}
 #tools-history-table button[aria-pressed=true]{color:var(--panel-accent);border-color:var(--panel-accent)}
 #tools-history-chart{cursor:crosshair}
@@ -67,6 +68,7 @@ export function libraryShell() {
 #tierscope-session-tools .tools-chart-legend{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px}
 #tierscope-session-tools .tools-chart-legend label{flex-wrap:nowrap;min-width:0}
 #tierscope-session-tools .tools-chart-legend span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#tierscope-session-tools .tools-chart-legend .tools-series-swatch{width:13px;flex-shrink:0;border-top:2px solid currentColor}
 #tools-analysis-chart{touch-action:pan-y;cursor:crosshair}
 #tools-analysis-chart:focus-visible{outline:2px solid var(--panel-accent);outline-offset:2px}
 #gif-export-controls{padding:8px 12px;gap:6px;align-items:center;flex-shrink:0;border-bottom:1px solid var(--panel-divider)}

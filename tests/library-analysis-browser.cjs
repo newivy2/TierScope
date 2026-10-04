@@ -27,6 +27,11 @@ const file=(name,value)=>({name,mimeType:'application/json',buffer:Buffer.from(J
   await context.addInitScript(()=>{
    window.GM_listValues=()=>Object.keys(localStorage);window.GM_getValue=(k,d)=>localStorage.getItem(k)===null?d:JSON.parse(localStorage.getItem(k));
    window.GM_setValue=(k,v)=>localStorage.setItem(k,JSON.stringify(v));window.GM_deleteValue=k=>localStorage.removeItem(k);
+   window.analysisStrokes=[];const stroke=CanvasRenderingContext2D.prototype.stroke;
+   CanvasRenderingContext2D.prototype.stroke=function(...args){
+    if(!this.canvas.id&&document.getElementById('tools-analysis-chart'))window.analysisStrokes.push({color:this.strokeStyle,dash:this.getLineDash()});
+    return stroke.apply(this,args);
+   };
   });
   await page.goto('https://tierscope.test/live_room/');await page.addScriptTag({content:instrument(source)});await page.evaluate(()=>ViewerTracker.__organized.setup());await page.waitForTimeout(200);
   const before=await page.evaluate(()=>ViewerTracker.__organized.state()),bounds=await page.locator('#tracker-container').boundingBox();
@@ -63,6 +68,18 @@ const file=(name,value)=>({name,mimeType:'application/json',buffer:Buffer.from(J
   const defaultLabel=await page.locator('#tools-source-a option[value=organized_0]').textContent();assert.equal(defaultLabel.split('alpha_model').length-1,1,'default model title is not duplicated');assert.match(defaultLabel,/10\/1\/2026/);
   assert.match(await page.locator('#tools-source-a option[value=organized_1]').textContent(),/alpha_model — Recording 2 —/,'custom titles remain visible');
   assert.equal(await page.locator('#tools-summary-table thead th').count(),7);assert.equal(await page.locator('#tools-chart-inspection tbody tr').count(),6);
+  // The latest date owns the solid pink line even when it is not in slot A.
+  const firstSlot=await page.locator('#tools-source-a').inputValue(),thirdSlot=await page.locator('#tools-source-c').inputValue();
+  await page.selectOption('#tools-source-a',thirdSlot);await page.selectOption('#tools-source-c',firstSlot);
+  assert.equal(await page.locator('.tools-chart-legend label').nth(2).locator('.tools-series-swatch').evaluate(e=>e.style.borderTopStyle),'solid');
+  assert.equal(await page.locator('.tools-chart-legend label').nth(0).locator('.tools-series-swatch').evaluate(e=>e.style.borderTopStyle),'dotted');
+  assert.match(await page.locator('.tools-chart-legend label').nth(2).getAttribute('title'),/Latest recording — solid pink/);
+  await page.evaluate(()=>window.analysisStrokes=[]);await page.click('#tools-chart-reset');
+  const darkStrokes=await page.evaluate(()=>window.analysisStrokes.filter(s=>['#ff69b4','#79baff','#68d391','#ffd166','#c4a3ff','#ff987d'].includes(s.color)));
+  assert(darkStrokes.some(s=>s.color==='#ff69b4'));assert(darkStrokes.some(s=>s.color!=='#ff69b4'));
+  for(const s of darkStrokes)assert.deepEqual(s.dash,s.color==='#ff69b4'?[]:[1,4]);
+  assert.equal(darkStrokes.at(-1).color,'#ff69b4','latest solid line is painted over earlier dots');
+  await page.selectOption('#tools-source-a',firstSlot);await page.selectOption('#tools-source-c',thirdSlot);
   await page.selectOption('#tools-analysis-model','beta_model');
   assert.match(await page.locator('#tools-source-a option:checked').textContent(),/outside filters/);assert.equal(await page.locator('#tools-summary-table thead th').count(),7);
   await page.click('#tools-analysis-clear');await page.locator('#tools-analysis-from').fill('2026-10-03');await page.locator('#tools-analysis-to').fill('2026-10-03');
@@ -91,7 +108,10 @@ const file=(name,value)=>({name,mimeType:'application/json',buffer:Buffer.from(J
   assert.notEqual(await page.locator('#tools-chart-range').textContent(),'Chart window 0m – 3m · full comparison/recording range 3m');
   await page.click('#tools-chart-pan-right');await page.click('#tools-chart-reset');
   await page.locator('#tools-content').evaluate(e=>e.scrollTop=0);await page.screenshot({path:'/tmp/tierscope-314-'+engine+'-compare-dark.png'});
-  await page.evaluate(()=>ViewerTracker.__organized.theme());await page.waitForTimeout(80);await page.screenshot({path:'/tmp/tierscope-314-'+engine+'-compare-bright.png'});
+  await page.evaluate(()=>{window.analysisStrokes=[];ViewerTracker.__organized.theme();});await page.waitForTimeout(80);await page.screenshot({path:'/tmp/tierscope-314-'+engine+'-compare-bright.png'});
+  const brightStrokes=await page.evaluate(()=>window.analysisStrokes.filter(s=>['#b42370','#175db0','#176f36','#835900','#7140a6','#a23c20'].includes(s.color)));
+  assert(brightStrokes.some(s=>s.color==='#b42370'));assert(brightStrokes.some(s=>s.color!=='#b42370'));
+  for(const s of brightStrokes)assert.deepEqual(s.dash,s.color==='#b42370'?[]:[1,4]);
   assert.deepEqual(await page.locator('#tracker-container').boundingBox(),bounds,'analysis actions preserve Scope position before viewport clamping');
   await page.setViewportSize({width:380,height:740});await page.waitForTimeout(80);
   assert((await page.locator('#tierscope-session-tools').evaluate(e=>e.scrollWidth-e.clientWidth))<=1);

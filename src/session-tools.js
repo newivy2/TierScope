@@ -209,8 +209,19 @@ export function openSessionTools(focusTarget) {
         const status = node(card, 'div', '', 'tools-muted'); status.id = 'session-save-info'; status.setAttribute('role', 'status');
         observedSignature = ''; refreshCurrent(); updateSessionToolsStatus();
     }
+    function openHistory(room) {
+        libraryRoom = room; render('history'); dialog.querySelector('#tools-history-back').focus();
+    }
     function renderLibrary() {
         const state = readLibrary();
+        const pageRoom = getModelName();
+        if (pageRoom !== 'unknown') {
+            const shortcuts = node(content, 'div', undefined, 'tools-actions'); shortcuts.id = 'tools-room-shortcuts';
+            button(shortcuts, 'History · ' + pageRoom, () => openHistory(pageRoom.toLowerCase()), 'tools-room-history').className = 'tools-primary';
+            const count = state.entries.filter(entry => entry.archive.room.toLowerCase() === pageRoom.toLowerCase()).length;
+            node(shortcuts, 'span', count + ' saved ' + (count === 1 ? 'recording' : 'recordings'), 'tools-muted');
+            shortcuts.setAttribute('aria-label', 'History for the model on this page');
+        }
         currentCard();
         const actions = node(content, 'div', undefined, 'tools-actions');
         button(actions, 'Open saved file…', () => chooseFile(runtime.SESSION_FILE_MAX_BYTES, value => {
@@ -231,7 +242,7 @@ export function openSessionTools(focusTarget) {
         if (libraryRoom && libraryRoom !== '*' && !state.entries.some(entry => entry.archive.room.toLowerCase() === libraryRoom)) libraryFilters.room = libraryRoom = '';
         const callbacks = {
             room: room => { libraryRoom = room; },
-            history: room => { libraryRoom = room; render('history'); dialog.querySelector('#tools-history-back').focus(); },
+            history: openHistory,
             compare: ids => { selectedA = ids[0]; selectedB = ids[1]; selectedExtra = ids.slice(2); Object.assign(analysisFilters, {room: '', query: '', from: '', to: ''}); render('compare'); },
             export: ids => { downloadDataFile(exportLibrarySelection(ids, runtime.TIERSCOPE_VERSION), 'TierScope-library-selection-' + new Date().toISOString().slice(0, 10) + '.json'); tell('Selected recordings exported, including titles, notes and favorite models.'); },
             favoriteModel: room => {
@@ -344,7 +355,12 @@ export function openSessionTools(focusTarget) {
                 const entry = library.entries.find(entry => entry.id === id);
                 openSessionReplay(entry.archive); observedSignature = ''; refreshCurrent(); tell('Replaying ' + (entry.title || entry.archive.room) + '.');
             }),
-            compare: (a, b) => { selectedA = a; selectedB = b; selectedExtra = []; render('compare'); }
+            compare: ids => {
+                [selectedA, selectedB] = ids; selectedExtra = ids.slice(2);
+                Object.assign(analysisFilters, {room: libraryRoom, query: '', from: '', to: ''});
+                pickerOpen = false; render('compare');
+                (dialog.querySelector('#tools-analysis-chart') || dialog.querySelector('#tools-recording-picker > summary'))?.focus();
+            }
         });
         if (view) {
             chartDraw = view.draw;

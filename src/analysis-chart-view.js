@@ -18,10 +18,16 @@ export function renderAnalysisChart(parent, series, labels, axisMs, metricLabel)
     const legend = node(parent, 'div', undefined, 'tools-chart-legend');
     const dark = ['#ff69b4','#79baff','#68d391','#ffd166','#c4a3ff','#ff987d'];
     const bright = ['#b42370','#175db0','#176f36','#835900','#7140a6','#a23c20'];
-    const dashes = [[],[6,4],[2,3],[10,3,2,3],[10,4],[2,2,6,2]];
+    // Use recording dates, not slot order or evenly paced replay positions.
+    const newestFirst = series.map((s, i) => i).sort((a, b) => series[b].timestamps[0] - series[a].timestamps[0] || a - b);
+    const colorIndices = series.map((s, i) => newestFirst.indexOf(i));
+    const newest = newestFirst[0];
     const legendLabels = labels.map((label, i) => {
         const control = node(legend, 'label'), check = node(control, 'input'); check.type = 'checkbox'; check.checked = true; check.dataset.analysisSeries = String(i);
-        node(control, 'span', String.fromCharCode(65 + i) + ' · ' + label); control.title = label;
+        const swatch = node(control, 'span', '', 'tools-series-swatch'); swatch.setAttribute('aria-hidden', 'true');
+        swatch.style.borderTopStyle = i === newest ? 'solid' : 'dotted';
+        node(control, 'span', String.fromCharCode(65 + i) + (series.length > 1 && i === newest ? ' · Latest' : '') + ' · ' + label);
+        control.title = (series.length > 1 ? (i === newest ? 'Latest recording — solid pink: ' : 'Earlier recording — dotted: ') : '') + label;
         check.onchange = () => {
             if (!check.checked && hidden.size === series.length - 1) { check.checked = true; return; }
             if (check.checked) hidden.delete(i); else hidden.add(i); draw();
@@ -89,11 +95,14 @@ export function renderAnalysisChart(parent, series, labels, axisMs, metricLabel)
             ctx.textAlign = 'right';ctx.fillText(number(maximum * step / 2),left-5,y+3);
         }
         ctx.textAlign = 'left';ctx.fillText(elapsed(start),left,bottom+20);ctx.textAlign = 'right';ctx.fillText(elapsed(end),right,bottom+20);
-        series.forEach((s, j) => {
-            legendLabels[j].style.color = colors[j];
+        // Paint the newest last so its solid line stays clear over older dots.
+        for (const j of newestFirst.slice().reverse()) {
+            const color = colors[colorIndices[j]];
+            legendLabels[j].style.color = color;
             legendLabels[j].querySelector('input').disabled = hidden.size === series.length - 1 && !hidden.has(j);
-            if (hidden.has(j)) return;
-            ctx.strokeStyle = ctx.fillStyle = colors[j];ctx.lineWidth = 1.8;ctx.setLineDash(dashes[j]);ctx.beginPath();
+            if (hidden.has(j)) continue;
+            ctx.strokeStyle = ctx.fillStyle = color;ctx.lineWidth = 1.8;ctx.lineCap = j === newest ? 'butt' : 'round';
+            ctx.setLineDash(j === newest ? [] : [1,4]);ctx.beginPath();
             let previousY = 0;
             const dots = [];
             const points = plots[j].points;
@@ -104,7 +113,7 @@ export function renderAnalysisChart(parent, series, labels, axisMs, metricLabel)
                 previousY=y;
             });
             ctx.stroke();ctx.setLineDash([]);dots.forEach(([x,y])=>{ctx.beginPath();ctx.arc(x,y,2.5,0,Math.PI*2);ctx.fill();});
-        });
+        }
         range.textContent = 'Chart window ' + elapsed(start) + ' – ' + elapsed(end) + ' · full comparison/recording range ' + elapsed(axisMs);
         zoomIn.disabled = end-start <= Math.min(1000,axisMs); zoomOut.disabled = end-start >= axisMs;
         panLeft.disabled = start <= 0; panRight.disabled = end >= axisMs; inspect();

@@ -31,6 +31,22 @@ test('latest recording windows are chronological with stable ties and retain sep
   for (const limit of [0,-1,NaN,1.5]) assert.throws(()=>reader.read(entries,'model','room',limit));
   assert.throws(()=>reader.read(entries,'model','unknown'));
 });
+test('history comparisons use the selected recording and five nearest earlier recordings from the same model', async () => {
+  const {createModelHistoryReader}=await modulePromise, reader=createModelHistoryReader();
+  const entries=Array.from({length:12},(_,i)=>entry('r'+i,'Model',[i*1000,i*1000+500],[i,i+1]));
+  entries.splice(4,0,entry('other','another',[3500,3800],[999,999]));
+  const before=JSON.stringify(entries), all=reader.read(entries,'model');
+  assert.deepEqual(all.recordings[0].comparisonIds,['r0']);
+  assert.deepEqual(all.recordings[2].comparisonIds,['r2','r1','r0']);
+  assert.deepEqual(all.recordings.at(-1).comparisonIds,['r11','r10','r9','r8','r7','r6']);
+  const latest=reader.read(entries,'model','room',3);
+  assert.deepEqual(latest.recordings[0].comparisonIds,['r9','r8','r7','r6','r5','r4'],'earlier selections are not limited to the chart window');
+  latest.recordings[0].comparisonIds.length=0;
+  assert.equal(reader.read(entries,'model','room',3).recordings[0].comparisonIds.length,6);
+  assert.equal(JSON.stringify(entries),before);
+  const ties=reader.read([entry('b','model',[1],[2]),entry('a','model',[1],[1])],'model');
+  assert.deepEqual(ties.recordings[1].comparisonIds,['b','a']);
+});
 test('empty, single-sample, duplicate/backward and gap-only histories never invent duration', async () => {
   const {createModelHistoryReader} = await modulePromise, reader = createModelHistoryReader();
   const empty = reader.read([],'model'); assert.equal(empty.mean,null); assert.equal(empty.peak,null); assert.equal(empty.coveredMs,0);

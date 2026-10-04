@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.14.0-beta.2
+// @version      3.14.0-beta.3
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -5141,6 +5141,7 @@ underlying system, so should run in the browser, Node, or Plask.
 #tierscope-session-tools .tools-history-stats dt{font-size:.9em;color:var(--panel-muted)}
 #tierscope-session-tools .tools-history-stats dd{margin:3px 0 0;font-weight:bold;color:var(--panel-secondary);overflow-wrap:anywhere}
 #tools-history-recording{width:100%}
+#tools-room-shortcuts button{overflow-wrap:anywhere;text-align:left}
 #tools-history-table button{max-width:155px;text-align:left;overflow-wrap:anywhere}
 #tools-history-table button[aria-pressed=true]{color:var(--panel-accent);border-color:var(--panel-accent)}
 #tools-history-chart{cursor:crosshair}
@@ -5157,6 +5158,7 @@ underlying system, so should run in the browser, Node, or Plask.
 #tierscope-session-tools .tools-chart-legend{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px}
 #tierscope-session-tools .tools-chart-legend label{flex-wrap:nowrap;min-width:0}
 #tierscope-session-tools .tools-chart-legend span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#tierscope-session-tools .tools-chart-legend .tools-series-swatch{width:13px;flex-shrink:0;border-top:2px solid currentColor}
 #tools-analysis-chart{touch-action:pan-y;cursor:crosshair}
 #tools-analysis-chart:focus-visible{outline:2px solid var(--panel-accent);outline-offset:2px}
 #gif-export-controls{padding:8px 12px;gap:6px;align-items:center;flex-shrink:0;border-bottom:1px solid var(--panel-divider)}
@@ -5549,14 +5551,19 @@ underlying system, so should run in the browser, Node, or Plask.
     const legend = toolNode(parent, "div", void 0, "tools-chart-legend");
     const dark = ["#ff69b4", "#79baff", "#68d391", "#ffd166", "#c4a3ff", "#ff987d"];
     const bright = ["#b42370", "#175db0", "#176f36", "#835900", "#7140a6", "#a23c20"];
-    const dashes = [[], [6, 4], [2, 3], [10, 3, 2, 3], [10, 4], [2, 2, 6, 2]];
+    const newestFirst = series.map((s, i) => i).sort((a, b) => series[b].timestamps[0] - series[a].timestamps[0] || a - b);
+    const colorIndices = series.map((s, i) => newestFirst.indexOf(i));
+    const newest = newestFirst[0];
     const legendLabels = labels.map((label, i) => {
       const control = toolNode(legend, "label"), check = toolNode(control, "input");
       check.type = "checkbox";
       check.checked = true;
       check.dataset.analysisSeries = String(i);
-      toolNode(control, "span", String.fromCharCode(65 + i) + " · " + label);
-      control.title = label;
+      const swatch = toolNode(control, "span", "", "tools-series-swatch");
+      swatch.setAttribute("aria-hidden", "true");
+      swatch.style.borderTopStyle = i === newest ? "solid" : "dotted";
+      toolNode(control, "span", String.fromCharCode(65 + i) + (series.length > 1 && i === newest ? " · Latest" : "") + " · " + label);
+      control.title = (series.length > 1 ? i === newest ? "Latest recording — solid pink: " : "Earlier recording — dotted: " : "") + label;
       check.onchange = () => {
         if (!check.checked && hidden.size === series.length - 1) {
           check.checked = true;
@@ -5673,13 +5680,15 @@ underlying system, so should run in the browser, Node, or Plask.
       ctx.fillText(elapsed(start), left, bottom + 20);
       ctx.textAlign = "right";
       ctx.fillText(elapsed(end), right, bottom + 20);
-      series.forEach((s, j) => {
-        legendLabels[j].style.color = colors[j];
+      for (const j of newestFirst.slice().reverse()) {
+        const color = colors[colorIndices[j]];
+        legendLabels[j].style.color = color;
         legendLabels[j].querySelector("input").disabled = hidden.size === series.length - 1 && !hidden.has(j);
-        if (hidden.has(j)) return;
-        ctx.strokeStyle = ctx.fillStyle = colors[j];
+        if (hidden.has(j)) continue;
+        ctx.strokeStyle = ctx.fillStyle = color;
         ctx.lineWidth = 1.8;
-        ctx.setLineDash(dashes[j]);
+        ctx.lineCap = j === newest ? "butt" : "round";
+        ctx.setLineDash(j === newest ? [] : [1, 4]);
         ctx.beginPath();
         let previousY = 0;
         const dots = [];
@@ -5701,7 +5710,7 @@ underlying system, so should run in the browser, Node, or Plask.
           ctx.arc(x, y, 2.5, 0, Math.PI * 2);
           ctx.fill();
         });
-      });
+      }
       range.textContent = "Chart window " + elapsed(start) + " – " + elapsed(end) + " · full comparison/recording range " + elapsed(axisMs);
       zoomIn.disabled = end - start <= Math.min(1e3, axisMs);
       zoomOut.disabled = end - start >= axisMs;
@@ -5805,7 +5814,7 @@ underlying system, so should run in the browser, Node, or Plask.
       const selected = limit === Infinity ? matching : matching.slice(-limit);
       let coveredMs = 0, gapMs = 0, weighted = 0, registeredWeight = 0, tokenWeight = 0, latestEnd = -Infinity, overlaps = false;
       let peak = null;
-      const recordings = selected.map((entry) => {
+      const recordings = selected.map((entry, index) => {
         const stats = summary(entry.archive, metric), registered = summary(entry.archive, "total");
         const time = entry.archive.session.history.timestamps[0];
         coveredMs += stats.coveredMs;
@@ -5817,7 +5826,9 @@ underlying system, so should run in the browser, Node, or Plask.
         peak = peak === null ? stats.peak : Math.max(peak, stats.peak);
         if (time < latestEnd) overlaps = true;
         latestEnd = Math.max(latestEnd, time + stats.spanMs);
-        return __spreadValues({ id: entry.id, title: entry.title || entry.archive.room, time }, stats);
+        const position = matching.length - selected.length + index;
+        const comparisonIds = matching.slice(Math.max(0, position - MAX_COMPARE_RECORDINGS + 1), position + 1).reverse().map((record) => record.id);
+        return __spreadValues({ id: entry.id, title: entry.title || entry.archive.room, time, comparisonIds }, stats);
       });
       return {
         room: room.toLowerCase(),
@@ -5861,14 +5872,35 @@ underlying system, so should run in the browser, Node, or Plask.
       node(parent, "p", "No saved recordings for this model. Return to Recordings to keep or import one.", "tools-muted");
       return null;
     }
+    const controls = node(parent, "div", void 0, "tools-actions");
+    const label = node(controls, "label", "Recording "), select = node(label, "select");
+    select.id = "tools-history-recording";
+    for (const record of [...recordings].reverse()) {
+      const option = node(select, "option", date(record.time) + " · " + record.title);
+      option.value = record.id;
+    }
+    if (recordings.some((record) => record.id === actions.selected)) select.value = actions.selected;
+    const buttons = node(parent, "div", void 0, "tools-actions");
+    buttons.id = "tools-history-actions";
+    const selected = () => recordings.find((record) => record.id === select.value);
+    const compare = button(buttons, "Compare with previous", () => {
+      const ids = selected().comparisonIds;
+      if (ids.length > 1) actions.compare(ids);
+    }, "tools-history-compare");
+    compare.className = "tools-primary";
+    button(buttons, "Summary", () => actions.summary(select.value), "tools-history-summary");
+    button(buttons, "Replay", () => actions.replay(select.value), "tools-history-replay");
+    const comparisonHint = node(parent, "p", "", "tools-muted");
+    comparisonHint.id = "tools-history-compare-hint";
+    compare.setAttribute("aria-describedby", comparisonHint.id);
     const legend = node(parent, "p", "● Average · ◆ Peak in recording", "tools-history-legend");
     legend.id = "tools-history-legend";
     const canvas = node(parent, "canvas");
     canvas.id = "tools-history-chart";
     canvas.setAttribute("role", "img");
-    canvas.setAttribute("aria-label", actions.metricLabel + " across saved recordings, positioned by the date of their first retained sample. Select a recording below for the values.");
+    canvas.setAttribute("aria-label", actions.metricLabel + " across saved recordings, positioned by the date of their first retained sample. Use the recording selector above or the table below for the values.");
     canvas.setAttribute("aria-describedby", legend.id);
-    node(parent, "p", "One point per recording, using its first retained sample date. Averages use real covered time; gaps and time after the final sample are excluded. Select a point or use the recording selector below.", "tools-muted");
+    node(parent, "p", "One point per recording, using its first retained sample date. Averages use real covered time; gaps and time after the final sample are excluded. Select a point or use the recording selector above.", "tools-muted");
     node(parent, "h3", "Across these recordings");
     const cards = node(parent, "dl", void 0, "tools-history-stats");
     cards.id = "tools-history-stats";
@@ -5889,28 +5921,12 @@ underlying system, so should run in the browser, Node, or Plask.
       const warning = node(parent, "p", "Some recording time ranges overlap. Totals sum recordings and may count the same period more than once.", "tools-muted");
       warning.id = "tools-history-overlap";
     }
-    const controls = node(parent, "div", void 0, "tools-actions");
-    const label = node(controls, "label", "Recording "), select = node(label, "select");
-    select.id = "tools-history-recording";
-    for (const record of [...recordings].reverse()) {
-      const option = node(select, "option", date(record.time) + " · " + record.title);
-      option.value = record.id;
-    }
-    if (recordings.some((record) => record.id === actions.selected)) select.value = actions.selected;
     const detail = node(parent, "section", void 0, "tools-current");
     detail.id = "tools-history-detail";
     detail.setAttribute("aria-label", "Selected recording");
     const heading = node(detail, "strong"), meta = node(detail, "p", void 0, "tools-muted");
     const values = node(detail, "p");
     values.setAttribute("aria-live", "polite");
-    const buttons = node(detail, "div", void 0, "tools-actions");
-    const selected = () => recordings.find((record) => record.id === select.value);
-    button(buttons, "Summary", () => actions.summary(select.value), "tools-history-summary").className = "tools-primary";
-    button(buttons, "Replay", () => actions.replay(select.value), "tools-history-replay");
-    const compare = button(buttons, "Compare with previous", () => {
-      const index = recordings.indexOf(selected());
-      if (index > 0) actions.compare(recordings[index - 1].id, select.value);
-    }, "tools-history-compare");
     let positions = [], shown = 50;
     function draw() {
       const width = Math.max(240, canvas.clientWidth), height = 200, ratio = window.devicePixelRatio || 1;
@@ -5982,7 +5998,9 @@ underlying system, so should run in the browser, Node, or Plask.
       heading.textContent = record.title;
       meta.textContent = date(record.time) + " · " + record.samples.toLocaleString() + " samples";
       values.textContent = "Average " + number(record.mean) + " · Peak in recording " + number(record.peak) + " · Full-session high " + number(record.sessionPeak) + " · Token holders / registered " + percent(record.tokenShare) + " · Covered " + actions.duration(record.coveredMs) + " · Gaps " + actions.duration(record.gapMs);
-      compare.disabled = recordings.indexOf(record) === 0;
+      const previousCount = record.comparisonIds.length - 1;
+      compare.disabled = previousCount === 0;
+      comparisonHint.textContent = previousCount ? "Compare this recording with " + previousCount + " earlier " + (previousCount === 1 ? "recording" : "recordings") + " from this model (" + (previousCount + 1) + " total)." : "No earlier saved recordings for this model.";
       table.querySelectorAll("button[data-history-id]").forEach((button2) => button2.setAttribute("aria-pressed", String(button2.dataset.historyId === record.id)));
       draw();
     }
@@ -6635,8 +6653,22 @@ underlying system, so should run in the browser, Node, or Plask.
       refreshCurrent();
       updateSessionToolsStatus();
     }
+    function openHistory(room) {
+      libraryRoom = room;
+      render("history");
+      dialog.querySelector("#tools-history-back").focus();
+    }
     function renderLibrary() {
       const state = readLibrary();
+      const pageRoom = getModelName();
+      if (pageRoom !== "unknown") {
+        const shortcuts = node(content, "div", void 0, "tools-actions");
+        shortcuts.id = "tools-room-shortcuts";
+        button(shortcuts, "History · " + pageRoom, () => openHistory(pageRoom.toLowerCase()), "tools-room-history").className = "tools-primary";
+        const count = state.entries.filter((entry) => entry.archive.room.toLowerCase() === pageRoom.toLowerCase()).length;
+        node(shortcuts, "span", count + " saved " + (count === 1 ? "recording" : "recordings"), "tools-muted");
+        shortcuts.setAttribute("aria-label", "History for the model on this page");
+      }
       currentCard();
       const actions = node(content, "div", void 0, "tools-actions");
       button(actions, "Open saved file…", () => chooseFile(runtime.SESSION_FILE_MAX_BYTES, (value) => {
@@ -6662,11 +6694,7 @@ underlying system, so should run in the browser, Node, or Plask.
         room: (room) => {
           libraryRoom = room;
         },
-        history: (room) => {
-          libraryRoom = room;
-          render("history");
-          dialog.querySelector("#tools-history-back").focus();
-        },
+        history: openHistory,
         compare: (ids) => {
           selectedA = ids[0];
           selectedB = ids[1];
@@ -6906,11 +6934,14 @@ underlying system, so should run in the browser, Node, or Plask.
           refreshCurrent();
           tell("Replaying " + (entry.title || entry.archive.room) + ".");
         }),
-        compare: (a, b) => {
-          selectedA = a;
-          selectedB = b;
-          selectedExtra = [];
+        compare: (ids) => {
+          var _a;
+          [selectedA, selectedB] = ids;
+          selectedExtra = ids.slice(2);
+          Object.assign(analysisFilters, { room: libraryRoom, query: "", from: "", to: "" });
+          pickerOpen = false;
           render("compare");
+          (_a = dialog.querySelector("#tools-analysis-chart") || dialog.querySelector("#tools-recording-picker > summary")) == null ? void 0 : _a.focus();
         }
       });
       if (view) {
@@ -8708,7 +8739,7 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/bootstrap.js
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.14.0-beta.2";
+    runtime.TIERSCOPE_VERSION = "3.14.0-beta.3";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;

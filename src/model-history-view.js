@@ -19,11 +19,29 @@ export function renderModelHistoryView(parent, overview, actions) {
         node(parent, 'p', 'No saved recordings for this model. Return to Recordings to keep or import one.', 'tools-muted');
         return null;
     }
+    const controls = node(parent, 'div', undefined, 'tools-actions');
+    const label = node(controls, 'label', 'Recording '), select = node(label, 'select'); select.id = 'tools-history-recording';
+    // Newest first in the selector/table; chronological positions on the chart.
+    for (const record of [...recordings].reverse()) {
+        const option = node(select, 'option', date(record.time) + ' · ' + record.title); option.value = record.id;
+    }
+    if (recordings.some(record => record.id === actions.selected)) select.value = actions.selected;
+    const buttons = node(parent, 'div', undefined, 'tools-actions'); buttons.id = 'tools-history-actions';
+    const selected = () => recordings.find(record => record.id === select.value);
+    const compare = button(buttons, 'Compare with previous', () => {
+        const ids = selected().comparisonIds;
+        if (ids.length > 1) actions.compare(ids);
+    }, 'tools-history-compare');
+    compare.className = 'tools-primary';
+    button(buttons, 'Summary', () => actions.summary(select.value), 'tools-history-summary');
+    button(buttons, 'Replay', () => actions.replay(select.value), 'tools-history-replay');
+    const comparisonHint = node(parent, 'p', '', 'tools-muted'); comparisonHint.id = 'tools-history-compare-hint';
+    compare.setAttribute('aria-describedby', comparisonHint.id);
     const legend = node(parent, 'p', '● Average · ◆ Peak in recording', 'tools-history-legend'); legend.id = 'tools-history-legend';
     const canvas = node(parent, 'canvas'); canvas.id = 'tools-history-chart'; canvas.setAttribute('role', 'img');
-    canvas.setAttribute('aria-label', actions.metricLabel + ' across saved recordings, positioned by the date of their first retained sample. Select a recording below for the values.');
+    canvas.setAttribute('aria-label', actions.metricLabel + ' across saved recordings, positioned by the date of their first retained sample. Use the recording selector above or the table below for the values.');
     canvas.setAttribute('aria-describedby', legend.id);
-    node(parent, 'p', 'One point per recording, using its first retained sample date. Averages use real covered time; gaps and time after the final sample are excluded. Select a point or use the recording selector below.', 'tools-muted');
+    node(parent, 'p', 'One point per recording, using its first retained sample date. Averages use real covered time; gaps and time after the final sample are excluded. Select a point or use the recording selector above.', 'tools-muted');
     node(parent, 'h3', 'Across these recordings');
     const cards = node(parent, 'dl', undefined, 'tools-history-stats'); cards.id = 'tools-history-stats';
     for (const [label, value] of [
@@ -37,25 +55,10 @@ export function renderModelHistoryView(parent, overview, actions) {
         const warning = node(parent, 'p', 'Some recording time ranges overlap. Totals sum recordings and may count the same period more than once.', 'tools-muted');
         warning.id = 'tools-history-overlap';
     }
-    const controls = node(parent, 'div', undefined, 'tools-actions');
-    const label = node(controls, 'label', 'Recording '), select = node(label, 'select'); select.id = 'tools-history-recording';
-    // Newest first in the selector/table; chronological positions on the chart.
-    for (const record of [...recordings].reverse()) {
-        const option = node(select, 'option', date(record.time) + ' · ' + record.title); option.value = record.id;
-    }
-    if (recordings.some(record => record.id === actions.selected)) select.value = actions.selected;
     const detail = node(parent, 'section', undefined, 'tools-current'); detail.id = 'tools-history-detail';
     detail.setAttribute('aria-label', 'Selected recording');
     const heading = node(detail, 'strong'), meta = node(detail, 'p', undefined, 'tools-muted');
     const values = node(detail, 'p'); values.setAttribute('aria-live', 'polite');
-    const buttons = node(detail, 'div', undefined, 'tools-actions');
-    const selected = () => recordings.find(record => record.id === select.value);
-    button(buttons, 'Summary', () => actions.summary(select.value), 'tools-history-summary').className = 'tools-primary';
-    button(buttons, 'Replay', () => actions.replay(select.value), 'tools-history-replay');
-    const compare = button(buttons, 'Compare with previous', () => {
-        const index = recordings.indexOf(selected());
-        if (index > 0) actions.compare(recordings[index - 1].id, select.value);
-    }, 'tools-history-compare');
     let positions = [], shown = 50;
     function draw() {
         const width = Math.max(240, canvas.clientWidth), height = 200, ratio = window.devicePixelRatio || 1;
@@ -104,7 +107,10 @@ export function renderModelHistoryView(parent, overview, actions) {
         values.textContent = 'Average ' + number(record.mean) + ' · Peak in recording ' + number(record.peak) +
             ' · Full-session high ' + number(record.sessionPeak) + ' · Token holders / registered ' + percent(record.tokenShare) +
             ' · Covered ' + actions.duration(record.coveredMs) + ' · Gaps ' + actions.duration(record.gapMs);
-        compare.disabled = recordings.indexOf(record) === 0;
+        const previousCount = record.comparisonIds.length - 1;
+        compare.disabled = previousCount === 0;
+        comparisonHint.textContent = previousCount ? 'Compare this recording with ' + previousCount + ' earlier ' +
+            (previousCount === 1 ? 'recording' : 'recordings') + ' from this model (' + (previousCount + 1) + ' total).' : 'No earlier saved recordings for this model.';
         table.querySelectorAll('button[data-history-id]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.historyId === record.id)));
         draw();
     }
