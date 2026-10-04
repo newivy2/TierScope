@@ -1,6 +1,6 @@
 # State ownership
 
-The 3.7.0 beta defines ownership boundaries and enforces the first one: live-session data. The panel, single-script installation, file formats and storage keys stay compatible with 3.6.1. This is an incremental migration; it does not claim that every subsystem is already an independent store.
+Release 3.7.0 defines ownership boundaries and enforces the first one: live-session data. The panel, single-script installation, file formats and storage keys stay compatible with 3.6.1. This is an incremental migration; it does not claim that every subsystem is already an independent store.
 
 ## Responsibilities
 
@@ -50,4 +50,4 @@ A successful live commit remains valid if its session save fails. The existing â
 
 The new tests exercise receipt commit/rollback and invalidation, timer cancellation without data loss, delayed responses during replay across Reset/navigation/Stop, renderer-triggered Reset, and save failure/retry across pause/resume/Stop. Existing session, absence, storage, startup, replay, layout and browser fixtures remain part of the gate. Migration fingerprints keep the original 3.4.0 baseline and explicitly identify reviewed function changes.
 
-Further work can give acquisition and playback their own protected state, then replace shared collection reads with explicit presentation views. Removing the remaining rendering-time high update and reducing circular coordinator dependencies should accompany that work, with the same preservation tests. No new UI features are part of this beta.
+Further work can give acquisition and playback their own protected state, then replace shared collection reads with explicit presentation views. Removing the remaining rendering-time high update and reducing circular coordinator dependencies should accompany that work, with the same preservation tests. No new UI features are part of this release.
