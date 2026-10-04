@@ -70,9 +70,10 @@ const injected=source.replaceAll('scheduleInit(2000);','/* test controls initial
  const history=await page.evaluate(()=>ViewerTracker.__test.state().history);
  assert.equal(await page.locator('#btn-download-report,#btn-download-csv,#btn-control-save-session,#btn-control-open-session').count(),0);
  await page.click('#btn-control-library');
- assert(await page.locator('#tools-export-txt').isVisible());
+ await page.click('#tools-keep');await page.locator('[data-library-id] summary').click();
+ assert(await page.locator('[data-library-id]').getByRole('button',{name:'TXT',exact:true}).isVisible());
  if(process.env.TIERSCOPE_TRACE)console.log('TRACE before CSV');
- const csvDownload=page.waitForEvent('download');await page.click('#tools-export-csv');
+ const csvDownload=page.waitForEvent('download');await page.locator('[data-library-id]').getByRole('button',{name:'CSV',exact:true}).click();
  const downloaded=await csvDownload;if(process.env.TIERSCOPE_TRACE)console.log('TRACE CSV event',downloaded.suggestedFilename());await downloaded.saveAs(path.join(tmp,'smoke.csv'));
  const lines=fs.readFileSync(path.join(tmp,'smoke.csv'),'utf8').replace(/^\uFEFF/,'').trim().split('\r\n');
  assert.equal(lines.length,61);assert.equal(lines[0].split(',').length,16);

@@ -46,3 +46,17 @@ export function createModelHistoryReader() {
     }
     return { read, clear() { cache = new WeakMap(); } };
 }
+
+/** @typedef {{room:string, session:{sessionStartedAt?:number|null, history:{timestamps:number[]}}}} DatedArchive */
+/** @param {DatedArchive} archive */
+function recordingStart(archive) { return archive.session.sessionStartedAt ?? archive.session.history.timestamps[0]; }
+
+// Compare a live snapshot with earlier sessions by start, even after its
+// retained history rolls over. Saved copies of that live session are excluded.
+/** @param {{id:string, archive:DatedArchive}[]} entries @param {DatedArchive} archive */
+export function previousModelSessionIds(entries, archive) {
+    const start = recordingStart(archive), room = archive.room.toLowerCase();
+    return entries.filter(entry => entry.archive.room.toLowerCase() === room && recordingStart(entry.archive) < start)
+        .sort((a, b) => recordingStart(b.archive) - recordingStart(a.archive) || b.id.localeCompare(a.id))
+        .slice(0, MAX_COMPARE_RECORDINGS - 1).map(entry => entry.id);
+}

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.16.1
+// @version      3.17.0-beta.1
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -5311,11 +5311,16 @@ underlying system, so should run in the browser, Node, or Plask.
 #tierscope-session-tools .tools-exports{gap:4px;margin:5px 0 8px}
 #tierscope-session-tools .tools-exports button{padding:2px 5px;font-size:.9em}
 #tierscope-session-tools .tools-history-shortcut button{color:var(--panel-accent)}
+#tierscope-session-tools .tools-history-shortcut[hidden]{display:none}
 #tierscope-session-tools #session-save-info{font-size:.85em;margin-top:4px}
 #tierscope-session-tools .tools-library-bulk{gap:4px;font-size:.9em}
 #tierscope-session-tools .tools-library-bulk button{padding:3px 5px}
 #tools-library-selected{flex-basis:100%}
 #tools-library-selection{margin-top:8px}
+#tierscope-session-tools .tools-auto-keep{display:inline-flex;align-items:center;gap:5px;margin:0 0 0 5px;font-size:.92em}
+#tierscope-session-tools .tools-auto-keep[data-locked=true]{color:var(--panel-accent)}
+#tierscope-session-tools .tools-auto-keep input:disabled{opacity:1}
+#tierscope-session-tools .tools-library-management{border-top:1px solid var(--panel-divider);padding-top:9px;margin-top:12px}
 #tools-library-selection>summary{font-size:.9em;background:transparent;color:var(--panel-muted)}
 
 #tierscope-session-tools .tools-filters select{width:100%}
@@ -6146,6 +6151,14 @@ underlying system, so should run in the browser, Node, or Plask.
       cache = /* @__PURE__ */ new WeakMap();
     } };
   }
+  function recordingStart(archive) {
+    var _a;
+    return (_a = archive.session.sessionStartedAt) != null ? _a : archive.session.history.timestamps[0];
+  }
+  function previousModelSessionIds(entries, archive) {
+    const start = recordingStart(archive), room = archive.room.toLowerCase();
+    return entries.filter((entry) => entry.archive.room.toLowerCase() === room && recordingStart(entry.archive) < start).sort((a, b) => recordingStart(b.archive) - recordingStart(a.archive) || b.id.localeCompare(a.id)).slice(0, MAX_COMPARE_RECORDINGS - 1).map((entry) => entry.id);
+  }
 
   // src/model-history-view.js
   function renderModelHistoryView(parent, overview, actions) {
@@ -6739,11 +6752,11 @@ underlying system, so should run in the browser, Node, or Plask.
     dialog.setAttribute("aria-modal", "false");
     dialog.innerHTML = libraryShell();
     document.body.appendChild(dialog);
-    let currentArchive = null, library = null, tab = "library", fileRequest = 0, chartObserver = null;
+    let currentArchive = null, liveComparisonArchive = null, library = null, tab = "library", fileRequest = 0, chartObserver = null;
     const libraryReader = createLibraryReader();
     const modelHistoryReader = createModelHistoryReader();
     let historyLimit = Infinity, historySelected = "";
-    let optionsLibrary = null, optionsArchive = null, options = [];
+    let optionsLibrary = null, optionsArchive = null, optionsLiveArchive = null, options = [];
     const savedAnalysis = readAnalysisPreferences();
     let { metric, threshold, sharedLength, summaryThresholds } = savedAnalysis.preferences;
     let selectedA = "current", selectedB = "", selectedExtra = [], pendingBackup = null;
@@ -6917,8 +6930,9 @@ underlying system, so should run in the browser, Node, or Plask.
       }
     }
     function sourceOptions() {
-      if (optionsLibrary === library && optionsArchive === currentArchive) return options;
+      if (optionsLibrary === library && optionsArchive === currentArchive && optionsLiveArchive === liveComparisonArchive) return options;
       const items = [];
+      if (liveComparisonArchive) items.push({ id: "live", title: "Live snapshot — " + liveComparisonArchive.room, archive: liveComparisonArchive });
       if (currentArchive) items.push({ id: "current", title: "Current / replayed snapshot — " + currentArchive.room, archive: currentArchive });
       for (const entry of library.entries) {
         const title = entry.title && entry.title.trim().toLowerCase() !== entry.archive.room.toLowerCase() ? " — " + entry.title : "";
@@ -6926,6 +6940,7 @@ underlying system, so should run in the browser, Node, or Plask.
       }
       optionsLibrary = library;
       optionsArchive = currentArchive;
+      optionsLiveArchive = liveComparisonArchive;
       options = items;
       return options;
     }
@@ -6935,7 +6950,7 @@ underlying system, so should run in the browser, Node, or Plask.
       const matches = filteredSources || sourceOptions(), choices = matches.slice();
       const retained = sourceOptions().find((item) => item.id === selected);
       if (retained && !choices.some((item) => item.id === selected)) choices.unshift(__spreadProps(__spreadValues({}, retained), { title: retained.title + " (selected; outside filters)" }));
-      if (selected && selected !== "current" && !retained) choices.unshift({ id: selected, title: "Recording changed or removed — choose another" });
+      if (selected && selected !== "current" && selected !== "live" && !retained) choices.unshift({ id: selected, title: "Recording changed or removed — choose another" });
       for (const item of choices) {
         const option = node(select, "option", item.title);
         option.value = item.id;
@@ -7006,7 +7021,7 @@ underlying system, so should run in the browser, Node, or Plask.
           button2.dataset.currentAvailable = String(available);
           button2.disabled = !available || button2.dataset.gif === "true" && !!runtime.gifExportJob;
         });
-        const star = card.querySelector("[data-card-star]"), info = card.querySelector("[data-card-auto]"), enable = card.querySelector("[data-card-enable]");
+        const star = card.querySelector("[data-card-star]"), info = card.querySelector("[data-card-auto]");
         let preference = { favorite: false, autoKeep: false };
         try {
           if (room !== "unknown") preference = readModelFavorite(room);
@@ -7015,10 +7030,25 @@ underlying system, so should run in the browser, Node, or Plask.
         }
         paintFavoriteButton(star, room, preference);
         const status = automaticLibraryStatus(room);
-        info.textContent = replay ? "Replay is a snapshot. Keep it explicitly to add or update it in Library." : preference.error || (status.error ? "Automatic keep pending: " + status.error : preference.autoKeep ? status.savedAt ? "Automatically kept at " + new Date(status.savedAt).toLocaleTimeString() + ". Updates as you record." : "Automatic keeping on · waiting for a recorded sample." : preference.favorite ? "Favorite · automatic keeping is off until you confirm." : "Star this model to automatically keep its live sessions.");
+        info.textContent = replay ? "Replay is a snapshot. Keep it explicitly to add or update it in Library." : preference.error || (status.error ? "Automatic keep pending: " + status.error : preference.autoKeep ? status.savedAt ? "Automatically kept at " + new Date(status.savedAt).toLocaleTimeString() + ". Updates as you record." : "Automatic keeping on · waiting for a recorded sample." : preference.favorite ? "Favorite · automatic keeping is off until you confirm." : "Favorite this model to automatically keep their live sessions.");
         info.style.color = !replay && status.error ? "var(--panel-warning)" : "var(--panel-muted)";
-        enable.hidden = replay || !preference.favorite || preference.autoKeep;
-        enable.disabled = !!preference.error;
+        const automatic = card.querySelector("#tools-auto-keep");
+        if (automatic) {
+          automatic.checked = preference.autoKeep;
+          automatic.disabled = preference.autoKeep || room === "unknown" || !!preference.error;
+          automatic.parentElement.dataset.locked = String(preference.autoKeep);
+          automatic.parentElement.title = preference.error || (preference.autoKeep ? "Automatic keeping is on for this favorite. Remove the star to turn it off; kept sessions stay in Library." : "Favorite this model and confirm to automatically keep their live sessions.");
+          automatic.parentElement.querySelector("[data-auto-lock]").hidden = !preference.autoKeep;
+        }
+        const compare = card.querySelector("#tools-compare-previous");
+        if (compare) {
+          const previous = available ? previousModelSessionIds((library == null ? void 0 : library.entries) || [], { room, session: {
+            sessionStartedAt: runtime.sessionStartedAt,
+            history: { timestamps: history.timestamps }
+          } }) : [];
+          compare.disabled = !available || !previous.length;
+          compare.title = !available ? "Record a sample first." : previous.length ? "Compare this live snapshot with " + previous.length + " earlier saved session(s) for " + room + "." : "Keep an earlier session for this model to compare with.";
+        }
         const retry = card.querySelector("[data-card-retry]");
         retry.hidden = replay || !status.error;
         const historyButton = card.querySelector("[data-card-history]");
@@ -7063,23 +7093,42 @@ underlying system, so should run in the browser, Node, or Plask.
         render("library");
         tell(result.added ? "Session kept in the library." : result.updated ? "Library session updated; its name and notes were preserved." : "An equal or fuller session is already in the library.");
       }, "tools-keep").className = "tools-primary";
-      currentButton(actions, "Save file", (archive) => downloadDataFile(archive, archiveName(archive)), "tools-save-session");
-      const shortcuts = node(actions, "span", void 0, "tools-history-shortcut");
+      if (replay) currentButton(actions, "Save file", (archive) => downloadDataFile(archive, archiveName(archive)), "tools-save-session");
+      else {
+        const label = node(actions, "label", void 0, "tools-auto-keep"), check = node(label, "input");
+        check.type = "checkbox";
+        check.id = "tools-auto-keep";
+        node(label, "span", "Auto keeping");
+        const lock = node(label, "span", "🔒");
+        lock.dataset.autoLock = "";
+        lock.setAttribute("aria-hidden", "true");
+        check.onchange = action(() => {
+          const room = star.dataset.favoriteRoom;
+          try {
+            refreshCards();
+            if (!readModelFavorite(room).autoKeep) favoriteAction(room, true);
+          } finally {
+            refreshCards();
+          }
+        });
+      }
+      const shortcuts = node(replay ? actions : card, replay ? "span" : "div", void 0, replay ? "tools-history-shortcut" : "tools-actions tools-history-shortcut");
       shortcuts.id = "tools-room-shortcuts" + suffix;
+      if (!replay) button(shortcuts, "Compare with previous", compareLiveWithPrevious, "tools-compare-previous");
       const history = button(shortcuts, "History · 0", () => openHistory(star.dataset.favoriteRoom.toLowerCase()), "tools-room-history" + suffix);
       history.dataset.cardHistory = "";
-      const exports = node(card, "div", void 0, "tools-actions tools-exports");
-      node(exports, "span", "Download", "tools-muted");
-      currentButton(exports, "TXT", (archive) => downloadRecording(archive, "txt"), "tools-export-txt").title = "Download a text report for this session";
-      currentButton(exports, "CSV", (archive) => downloadRecording(archive, "csv"), "tools-export-csv").title = "Download every retained sample with its real timestamp";
-      const gif = currentButton(exports, "GIF", (archive) => generateGifFromHistory(archive), "btn-export-gif");
-      gif.dataset.gif = "true";
-      currentButton(exports, "Add to ATH", addArchiveHighs, "tools-add-all-time").title = "Add this session’s highs to all-time highs";
+      if (replay) {
+        const exports = node(card, "div", void 0, "tools-actions tools-exports");
+        node(exports, "span", "Download", "tools-muted");
+        currentButton(exports, "TXT", (archive) => downloadRecording(archive, "txt"), "tools-export-txt").title = "Download a text report for this session";
+        currentButton(exports, "CSV", (archive) => downloadRecording(archive, "csv"), "tools-export-csv").title = "Download every retained sample with its real timestamp";
+        const gif = currentButton(exports, "GIF", (archive) => generateGifFromHistory(archive), "btn-export-gif");
+        gif.dataset.gif = "true";
+        currentButton(exports, "Add to ATH", addArchiveHighs, "tools-add-all-time").title = "Add this session’s highs to all-time highs";
+      }
       const automatic = node(card, "div", "", "tools-muted");
       automatic.dataset.cardAuto = "";
       automatic.setAttribute("role", "status");
-      const enable = button(card, "Enable automatic keeping…", () => favoriteAction(star.dataset.favoriteRoom, true), "tools-enable-automatic" + suffix);
-      enable.dataset.cardEnable = "";
       const retry = button(card, "Retry keeping", () => {
         keepFavoriteSession(star.dataset.favoriteRoom, true);
         render("library");
@@ -7090,6 +7139,24 @@ underlying system, so should run in the browser, Node, or Plask.
         status.id = "session-save-info";
         status.setAttribute("role", "status");
       }
+    }
+    function compareLiveWithPrevious() {
+      var _a;
+      const snapshot = captureLiveSessionFile();
+      const state = readLibrary(), ids = previousModelSessionIds(state.entries, snapshot);
+      if (!ids.length) {
+        refreshCards();
+        tell("No earlier saved sessions for " + snapshot.room + ". Keep a session in Library to compare with a later one.");
+        return;
+      }
+      liveComparisonArchive = snapshot;
+      selectedA = "live";
+      selectedB = ids[0];
+      selectedExtra = ids.slice(1);
+      Object.assign(analysisFilters, { room: snapshot.room.toLowerCase(), query: "", from: "", to: "" });
+      pickerOpen = false;
+      render("compare");
+      (_a = dialog.querySelector("#tools-analysis-chart") || dialog.querySelector("#tools-recording-picker > summary")) == null ? void 0 : _a.focus();
     }
     function openHistory(room) {
       readLibrary();
@@ -7104,23 +7171,7 @@ underlying system, so should run in the browser, Node, or Plask.
       observedSignature = "";
       refreshCurrent();
       updateSessionToolsStatus();
-      const actions = node(content, "div", void 0, "tools-actions");
-      button(actions, "Open saved file…", () => chooseFile(runtime.SESSION_FILE_MAX_BYTES, (value) => {
-        openSessionReplay(validateSessionFile(value));
-        observedSignature = "";
-        refreshCurrent();
-        tell("File opened in replay. Use Keep in library to store it here.");
-      }), "tools-open-session");
-      button(actions, "Import to library…", () => chooseFile(BACKUP_MAX_BYTES, (values) => {
-        const bundle = libraryImportBundle(values, runtime.TIERSCOPE_VERSION), result = importLibraryBundle(bundle);
-        const rooms = new Set(bundle.library.map((entry) => entry.archive.room.toLowerCase()));
-        libraryRoom = rooms.size === 1 ? [...rooms][0] : "*";
-        Object.assign(libraryFilters, { room: libraryRoom, query: "", from: "", to: "", favorites: false });
-        render("library");
-        tell("Imported: " + result.recordings + " new, " + result.updatedRecordings + " updated, " + result.favoriteModels + " favorite models added; existing recordings and model choices were preserved.");
-      }, true), "tools-import-session").title = "Import session files or Library bundles. Imported favorites need confirmation before automatic keeping.";
-      button(actions, "Refresh", () => render("library"), "tools-refresh-library").title = "Refresh list from this browser";
-      node(content, "p", state.count + " / " + LIBRARY_MAX_COUNT + " sessions · " + (state.bytes / 1024 / 1024).toFixed(2) + " / " + LIBRARY_MAX_BYTES / 1024 / 1024 + " MB · Kept until you delete them.", "tools-muted");
+      node(content, "p", state.count + " / " + LIBRARY_MAX_COUNT + " sessions · " + (state.bytes / 1024 / 1024).toFixed(2) + " / " + LIBRARY_MAX_BYTES / 1024 / 1024 + " MB · Kept until you delete them.", "tools-muted").id = "tools-library-storage";
       if (state.favoriteError) node(content, "p", state.favoriteError, "tools-muted");
       libraryFilters.room = libraryRoom || "";
       if (libraryRoom && libraryRoom !== "*" && !state.entries.some((entry) => entry.archive.room.toLowerCase() === libraryRoom)) libraryFilters.room = libraryRoom = "";
@@ -7187,6 +7238,23 @@ underlying system, so should run in the browser, Node, or Plask.
           render("library");
         });
       }
+      const actions = node(content, "div", void 0, "tools-actions tools-library-management");
+      actions.id = "tools-library-management";
+      button(actions, "Open saved file…", () => chooseFile(runtime.SESSION_FILE_MAX_BYTES, (value) => {
+        openSessionReplay(validateSessionFile(value));
+        observedSignature = "";
+        refreshCurrent();
+        tell("File opened in replay. Use Keep in library to store it here.");
+      }), "tools-open-session");
+      button(actions, "Import to library…", () => chooseFile(BACKUP_MAX_BYTES, (values) => {
+        const bundle = libraryImportBundle(values, runtime.TIERSCOPE_VERSION), result = importLibraryBundle(bundle);
+        const rooms = new Set(bundle.library.map((entry) => entry.archive.room.toLowerCase()));
+        libraryRoom = rooms.size === 1 ? [...rooms][0] : "*";
+        Object.assign(libraryFilters, { room: libraryRoom, query: "", from: "", to: "", favorites: false });
+        render("library");
+        tell("Imported: " + result.recordings + " new, " + result.updatedRecordings + " updated, " + result.favoriteModels + " favorite models added; existing recordings and model choices were preserved.");
+      }, true), "tools-import-session").title = "Import session files or Library bundles. Imported favorites need confirmation before automatic keeping.";
+      button(actions, "Refresh", () => render("library"), "tools-refresh-library").title = "Refresh list from this browser";
     }
     function analysisControls(comparing) {
       if (!library) readLibrary();
@@ -7210,6 +7278,10 @@ underlying system, so should run in the browser, Node, or Plask.
       }
       node(picker, "p", filteredSources.length + " matching recordings. Existing selections stay available when outside the filters.", "tools-muted");
       const sourceControls = node(picker, "div", void 0, "tools-actions");
+      if (liveComparisonArchive) button(sourceControls, "Refresh live snapshot", () => {
+        liveComparisonArchive = captureLiveSessionFile();
+        render(tab);
+      }, "tools-refresh-live-snapshot");
       if (currentArchive) button(sourceControls, "Refresh current / replayed snapshot", () => {
         currentArchive = captureSessionFile();
         render(tab);
@@ -7626,8 +7698,10 @@ underlying system, so should run in the browser, Node, or Plask.
       options = [];
       optionsLibrary = null;
       optionsArchive = null;
+      optionsLiveArchive = null;
       library = null;
       currentArchive = null;
+      liveComparisonArchive = null;
       cancelGifExport();
       if (detachDock) detachDock();
       document.removeEventListener("keydown", escape);
@@ -9227,7 +9301,7 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/bootstrap.js
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.16.1";
+    runtime.TIERSCOPE_VERSION = "3.17.0-beta.1";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;

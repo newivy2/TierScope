@@ -18,6 +18,8 @@ If you used the beta, install from the official link above to follow main releas
 
 **Current stable release: 3.16.1** · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.16.1)
 
+**Beta preview: 3.17.0-beta.1** — [Install the simpler live-session Library controls](https://raw.githubusercontent.com/newivy2/TierScope/beta/library-live-controls/tierscope.user.js). Adds a favorite-linked Auto keeping checkbox and direct comparison with earlier sessions, and moves file/import/refresh controls below the list. [Review notes](docs/library-live-controls-beta.md).
+
 
 ---
 

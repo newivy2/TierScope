@@ -17,7 +17,7 @@ import { filterLibraryEntries } from './library-query.js';
 import { recordingFilters } from './tools-view-helpers.js';
 import { exportLibrarySelection, importLibraryBundle, libraryImportBundle } from './library-transfer.js';
 import { renderAnalysisChart } from './analysis-chart-view.js';
-import { createModelHistoryReader } from './model-history.js';
+import { createModelHistoryReader, previousModelSessionIds } from './model-history.js';
 import { renderModelHistoryView } from './model-history-view.js';
 import { isPlaybackCurrent } from './playback-data.js';
 import { setPlaybackAllTimeState } from './playback-state.js';
@@ -72,11 +72,11 @@ export function openSessionTools(focusTarget) {
     dialog.setAttribute('aria-modal', 'false');
     dialog.innerHTML = libraryShell();
     document.body.appendChild(dialog);
-    let currentArchive = null, library = null, tab = 'library', fileRequest = 0, chartObserver = null;
+    let currentArchive = null, liveComparisonArchive = null, library = null, tab = 'library', fileRequest = 0, chartObserver = null;
     const libraryReader = createLibraryReader();
     const modelHistoryReader = createModelHistoryReader();
     let historyLimit = Infinity, historySelected = '';
-    let optionsLibrary = null, optionsArchive = null, options = [];
+    let optionsLibrary = null, optionsArchive = null, optionsLiveArchive = null, options = [];
     const savedAnalysis = readAnalysisPreferences();
     let {metric, threshold, sharedLength, summaryThresholds} = savedAnalysis.preferences;
     let selectedA = 'current', selectedB = '', selectedExtra = [], pendingBackup = null;
@@ -181,14 +181,15 @@ export function openSessionTools(focusTarget) {
         }
     }
     function sourceOptions() {
-        if (optionsLibrary === library && optionsArchive === currentArchive) return options;
+        if (optionsLibrary === library && optionsArchive === currentArchive && optionsLiveArchive === liveComparisonArchive) return options;
         const items = [];
+        if (liveComparisonArchive) items.push({id: 'live', title: 'Live snapshot — ' + liveComparisonArchive.room, archive: liveComparisonArchive});
         if (currentArchive) items.push({ id: 'current', title: 'Current / replayed snapshot — ' + currentArchive.room, archive: currentArchive });
         for (const entry of library.entries) {
             const title = entry.title && entry.title.trim().toLowerCase() !== entry.archive.room.toLowerCase() ? ' — ' + entry.title : '';
             items.push({...entry, title: entry.archive.room + title + ' — ' + new Date(entry.archive.session.history.timestamps[0]).toLocaleString()});
         }
-        optionsLibrary = library; optionsArchive = currentArchive; options = items;
+        optionsLibrary = library; optionsArchive = currentArchive; optionsLiveArchive = liveComparisonArchive; options = items;
         return options;
     }
     function selectSource(parent, label, id, selected, changed) {
@@ -196,7 +197,7 @@ export function openSessionTools(focusTarget) {
         const matches = filteredSources || sourceOptions(), choices = matches.slice();
         const retained = sourceOptions().find(item => item.id === selected);
         if (retained && !choices.some(item => item.id === selected)) choices.unshift({...retained, title: retained.title + ' (selected; outside filters)'});
-        if (selected && selected !== 'current' && !retained) choices.unshift({id: selected, title: 'Recording changed or removed — choose another'});
+        if (selected && selected !== 'current' && selected !== 'live' && !retained) choices.unshift({id: selected, title: 'Recording changed or removed — choose another'});
         for (const item of choices) { const option = node(select, 'option', item.title); option.value = item.id; }
         if (choices.some(item => item.id === selected)) select.value = selected;
         select.onchange = () => changed(select.value); return select.value;
@@ -256,7 +257,7 @@ export function openSessionTools(focusTarget) {
                 button.dataset.currentAvailable = String(available);
                 button.disabled = !available || button.dataset.gif === 'true' && !!runtime.gifExportJob;
             });
-            const star = card.querySelector('[data-card-star]'), info = card.querySelector('[data-card-auto]'), enable = card.querySelector('[data-card-enable]');
+            const star = card.querySelector('[data-card-star]'), info = card.querySelector('[data-card-auto]');
             let preference = {favorite: false, autoKeep: false};
             try { if (room !== 'unknown') preference = readModelFavorite(room); }
             catch (error) { preference.error = 'Favorites unavailable. Refresh to retry.'; }
@@ -265,10 +266,27 @@ export function openSessionTools(focusTarget) {
             info.textContent = replay ? 'Replay is a snapshot. Keep it explicitly to add or update it in Library.' :
                 preference.error || (status.error ? 'Automatic keep pending: ' + status.error :
                 preference.autoKeep ? status.savedAt ? 'Automatically kept at ' + new Date(status.savedAt).toLocaleTimeString() + '. Updates as you record.' :
-                    'Automatic keeping on · waiting for a recorded sample.' : preference.favorite ? 'Favorite · automatic keeping is off until you confirm.' : 'Star this model to automatically keep its live sessions.');
+                    'Automatic keeping on · waiting for a recorded sample.' : preference.favorite ? 'Favorite · automatic keeping is off until you confirm.' : 'Favorite this model to automatically keep their live sessions.');
             info.style.color = !replay && status.error ? 'var(--panel-warning)' : 'var(--panel-muted)';
-            enable.hidden = replay || !preference.favorite || preference.autoKeep;
-            enable.disabled = !!preference.error;
+            const automatic = card.querySelector('#tools-auto-keep');
+            if (automatic) {
+                automatic.checked = preference.autoKeep;
+                automatic.disabled = preference.autoKeep || room === 'unknown' || !!preference.error;
+                automatic.parentElement.dataset.locked = String(preference.autoKeep);
+                automatic.parentElement.title = preference.error || (preference.autoKeep ?
+                    'Automatic keeping is on for this favorite. Remove the star to turn it off; kept sessions stay in Library.' :
+                    'Favorite this model and confirm to automatically keep their live sessions.');
+                automatic.parentElement.querySelector('[data-auto-lock]').hidden = !preference.autoKeep;
+            }
+            const compare = card.querySelector('#tools-compare-previous');
+            if (compare) {
+                const previous = available ? previousModelSessionIds(library?.entries || [], {room, session: {
+                    sessionStartedAt: runtime.sessionStartedAt, history: {timestamps: history.timestamps}}}) : [];
+                compare.disabled = !available || !previous.length;
+                compare.title = !available ? 'Record a sample first.' : previous.length ?
+                    'Compare this live snapshot with ' + previous.length + ' earlier saved session(s) for ' + room + '.' :
+                    'Keep an earlier session for this model to compare with.';
+            }
             const retry = card.querySelector('[data-card-retry]'); retry.hidden = replay || !status.error;
             const historyButton = card.querySelector('[data-card-history]');
             historyButton.disabled = room === 'unknown'; historyButton.parentElement.hidden = room === 'unknown';
@@ -299,22 +317,46 @@ export function openSessionTools(focusTarget) {
             Object.assign(libraryFilters, {room: libraryRoom, query: '', from: '', to: '', favorites: false});
             render('library'); tell(result.added ? 'Session kept in the library.' : result.updated ? 'Library session updated; its name and notes were preserved.' : 'An equal or fuller session is already in the library.');
         }, 'tools-keep').className = 'tools-primary';
-        currentButton(actions, 'Save file', archive => downloadDataFile(archive, archiveName(archive)), 'tools-save-session');
-        const shortcuts = node(actions, 'span', undefined, 'tools-history-shortcut'); shortcuts.id = 'tools-room-shortcuts' + suffix;
+        if (replay) currentButton(actions, 'Save file', archive => downloadDataFile(archive, archiveName(archive)), 'tools-save-session');
+        else {
+            const label = node(actions, 'label', undefined, 'tools-auto-keep'), check = node(label, 'input');
+            check.type = 'checkbox'; check.id = 'tools-auto-keep';
+            node(label, 'span', 'Auto keeping');
+            const lock = node(label, 'span', '🔒'); lock.dataset.autoLock = ''; lock.setAttribute('aria-hidden', 'true');
+            check.onchange = action(() => {
+                const room = star.dataset.favoriteRoom;
+                try { refreshCards(); if (!readModelFavorite(room).autoKeep) favoriteAction(room, true); }
+                finally { refreshCards(); }
+            });
+        }
+        const shortcuts = node(replay ? actions : card, replay ? 'span' : 'div', undefined, replay ? 'tools-history-shortcut' : 'tools-actions tools-history-shortcut');
+        shortcuts.id = 'tools-room-shortcuts' + suffix;
+        if (!replay) button(shortcuts, 'Compare with previous', compareLiveWithPrevious, 'tools-compare-previous');
         const history = button(shortcuts, 'History · 0', () => openHistory(star.dataset.favoriteRoom.toLowerCase()), 'tools-room-history' + suffix);
         history.dataset.cardHistory = '';
-        const exports = node(card, 'div', undefined, 'tools-actions tools-exports');
-        node(exports, 'span', 'Download', 'tools-muted');
-        currentButton(exports, 'TXT', archive => downloadRecording(archive, 'txt'), 'tools-export-txt').title = 'Download a text report for this session';
-        currentButton(exports, 'CSV', archive => downloadRecording(archive, 'csv'), 'tools-export-csv').title = 'Download every retained sample with its real timestamp';
-        const gif = currentButton(exports, 'GIF', archive => generateGifFromHistory(archive), 'btn-export-gif'); gif.dataset.gif = 'true';
-        currentButton(exports, 'Add to ATH', addArchiveHighs, 'tools-add-all-time').title = 'Add this session’s highs to all-time highs';
+        if (replay) {
+            const exports = node(card, 'div', undefined, 'tools-actions tools-exports');
+            node(exports, 'span', 'Download', 'tools-muted');
+            currentButton(exports, 'TXT', archive => downloadRecording(archive, 'txt'), 'tools-export-txt').title = 'Download a text report for this session';
+            currentButton(exports, 'CSV', archive => downloadRecording(archive, 'csv'), 'tools-export-csv').title = 'Download every retained sample with its real timestamp';
+            const gif = currentButton(exports, 'GIF', archive => generateGifFromHistory(archive), 'btn-export-gif'); gif.dataset.gif = 'true';
+            currentButton(exports, 'Add to ATH', addArchiveHighs, 'tools-add-all-time').title = 'Add this session’s highs to all-time highs';
+        }
         const automatic = node(card, 'div', '', 'tools-muted'); automatic.dataset.cardAuto = ''; automatic.setAttribute('role', 'status');
-        const enable = button(card, 'Enable automatic keeping…', () => favoriteAction(star.dataset.favoriteRoom, true), 'tools-enable-automatic' + suffix); enable.dataset.cardEnable = '';
         const retry = button(card, 'Retry keeping', () => { keepFavoriteSession(star.dataset.favoriteRoom, true); render('library'); }, 'tools-retry-automatic' + suffix); retry.dataset.cardRetry = '';
         if (!replay) {
             const status = node(card, 'div', '', 'tools-muted'); status.id = 'session-save-info'; status.setAttribute('role', 'status');
         }
+    }
+    function compareLiveWithPrevious() {
+        const snapshot = captureLiveSessionFile();
+        const state = readLibrary(), ids = previousModelSessionIds(state.entries, snapshot);
+        if (!ids.length) { refreshCards(); tell('No earlier saved sessions for ' + snapshot.room + '. Keep a session in Library to compare with a later one.'); return; }
+        liveComparisonArchive = snapshot;
+        selectedA = 'live'; selectedB = ids[0]; selectedExtra = ids.slice(1);
+        Object.assign(analysisFilters, {room: snapshot.room.toLowerCase(), query: '', from: '', to: ''});
+        pickerOpen = false; render('compare');
+        (dialog.querySelector('#tools-analysis-chart') || dialog.querySelector('#tools-recording-picker > summary'))?.focus();
     }
     function openHistory(room) {
         readLibrary();
@@ -323,20 +365,7 @@ export function openSessionTools(focusTarget) {
     function renderLibrary() {
         const state = readLibrary();
         currentCard(); currentCard(true); observedSignature = ''; refreshCurrent(); updateSessionToolsStatus();
-        const actions = node(content, 'div', undefined, 'tools-actions');
-        button(actions, 'Open saved file…', () => chooseFile(runtime.SESSION_FILE_MAX_BYTES, value => {
-            openSessionReplay(validateSessionFile(value)); observedSignature = ''; refreshCurrent();
-            tell('File opened in replay. Use Keep in library to store it here.');
-        }), 'tools-open-session');
-        button(actions, 'Import to library…', () => chooseFile(BACKUP_MAX_BYTES, values => {
-            const bundle = libraryImportBundle(values, runtime.TIERSCOPE_VERSION), result = importLibraryBundle(bundle);
-            const rooms = new Set(bundle.library.map(entry => entry.archive.room.toLowerCase()));
-            libraryRoom = rooms.size === 1 ? [...rooms][0] : '*';
-            Object.assign(libraryFilters, {room: libraryRoom, query: '', from: '', to: '', favorites: false});
-            render('library'); tell('Imported: ' + result.recordings + ' new, ' + result.updatedRecordings + ' updated, ' + result.favoriteModels + ' favorite models added; existing recordings and model choices were preserved.');
-        }, true), 'tools-import-session').title = 'Import session files or Library bundles. Imported favorites need confirmation before automatic keeping.';
-        button(actions, 'Refresh', () => render('library'), 'tools-refresh-library').title = 'Refresh list from this browser';
-        node(content, 'p', state.count + ' / ' + LIBRARY_MAX_COUNT + ' sessions · ' + (state.bytes / 1024 / 1024).toFixed(2) + ' / ' + LIBRARY_MAX_BYTES / 1024 / 1024 + ' MB · Kept until you delete them.', 'tools-muted');
+        node(content, 'p', state.count + ' / ' + LIBRARY_MAX_COUNT + ' sessions · ' + (state.bytes / 1024 / 1024).toFixed(2) + ' / ' + LIBRARY_MAX_BYTES / 1024 / 1024 + ' MB · Kept until you delete them.', 'tools-muted').id = 'tools-library-storage';
         if (state.favoriteError) node(content, 'p', state.favoriteError, 'tools-muted');
         libraryFilters.room = libraryRoom || '';
         if (libraryRoom && libraryRoom !== '*' && !state.entries.some(entry => entry.archive.room.toLowerCase() === libraryRoom)) libraryFilters.room = libraryRoom = '';
@@ -370,6 +399,19 @@ export function openSessionTools(focusTarget) {
                 render('library');
             });
         }
+        const actions = node(content, 'div', undefined, 'tools-actions tools-library-management'); actions.id = 'tools-library-management';
+        button(actions, 'Open saved file…', () => chooseFile(runtime.SESSION_FILE_MAX_BYTES, value => {
+            openSessionReplay(validateSessionFile(value)); observedSignature = ''; refreshCurrent();
+            tell('File opened in replay. Use Keep in library to store it here.');
+        }), 'tools-open-session');
+        button(actions, 'Import to library…', () => chooseFile(BACKUP_MAX_BYTES, values => {
+            const bundle = libraryImportBundle(values, runtime.TIERSCOPE_VERSION), result = importLibraryBundle(bundle);
+            const rooms = new Set(bundle.library.map(entry => entry.archive.room.toLowerCase()));
+            libraryRoom = rooms.size === 1 ? [...rooms][0] : '*';
+            Object.assign(libraryFilters, {room: libraryRoom, query: '', from: '', to: '', favorites: false});
+            render('library'); tell('Imported: ' + result.recordings + ' new, ' + result.updatedRecordings + ' updated, ' + result.favoriteModels + ' favorite models added; existing recordings and model choices were preserved.');
+        }, true), 'tools-import-session').title = 'Import session files or Library bundles. Imported favorites need confirmation before automatic keeping.';
+        button(actions, 'Refresh', () => render('library'), 'tools-refresh-library').title = 'Refresh list from this browser';
     }
     function analysisControls(comparing) {
         if (!library) readLibrary();
@@ -382,6 +424,7 @@ export function openSessionTools(focusTarget) {
         catch (error) { filteredSources = []; tell(error.message, true); }
         node(picker, 'p', filteredSources.length + ' matching recordings. Existing selections stay available when outside the filters.', 'tools-muted');
         const sourceControls = node(picker, 'div', undefined, 'tools-actions');
+        if (liveComparisonArchive) button(sourceControls, 'Refresh live snapshot', () => { liveComparisonArchive = captureLiveSessionFile(); render(tab); }, 'tools-refresh-live-snapshot');
         if (currentArchive) button(sourceControls, 'Refresh current / replayed snapshot', () => { currentArchive = captureSessionFile(); render(tab); }, 'tools-refresh-snapshot');
         selectedA = selectSource(sourceControls, comparing ? 'A ' : 'Recording ', 'tools-source-a', selectedA, value => { selectedA = value; render(tab); });
         if (comparing) {
@@ -639,7 +682,7 @@ export function openSessionTools(focusTarget) {
         fileRequest++; refreshSessionTools = null; chartDraw = null;
         if (chartDispose) { chartDispose(); chartDispose = null; }
         analysisStates.clear(); analysisView = null; analysisSources = null; analysisOutput = null;
-        libraryReader.clear(); modelHistoryReader.clear(); options = []; optionsLibrary = null; optionsArchive = null; library = null; currentArchive = null;
+        libraryReader.clear(); modelHistoryReader.clear(); options = []; optionsLibrary = null; optionsArchive = null; optionsLiveArchive = null; library = null; currentArchive = null; liveComparisonArchive = null;
         cancelGifExport();
         if (detachDock) detachDock();
         document.removeEventListener('keydown', escape);

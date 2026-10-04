@@ -73,3 +73,25 @@ test('cached immutable recordings refresh by archive identity and never cache mu
   mutable.archive.session.history.total[0]=7; assert.equal(reader.read([mutable],'model').mean,7);
   reader.clear(); assert.equal(reader.read([a],'model').mean,10); assert.equal(reader.read([],'model').totalCount,0);
 });
+
+
+test('live comparison selects five earlier sessions, excluding current copies, later sessions and other rooms', async () => {
+  const {previousModelSessionIds}=await modulePromise;
+  const live=entry('live','MODEL',[10000,11000],[10,20]); live.archive.session.sessionStartedAt=8000;
+  const older=Array.from({length:7},(_,i)=>entry('r'+i,'model',[i*1000,i*1000+500],[1,2]));
+  const same=entry('saved-live','model',[8000,9000],[1,2]); same.archive.session.sessionStartedAt=8000;
+  const entries=[...older,same,entry('other','other',[7000],[1]),entry('later','model',[12000],[1]),entry('overlap','model',[9000],[1])];
+  const before=JSON.stringify(entries);
+  assert.deepEqual(previousModelSessionIds(entries,live.archive),['r6','r5','r4','r3','r2']);
+  assert.equal(JSON.stringify(entries),before);
+  assert.deepEqual(previousModelSessionIds([same],live.archive),[]);
+  assert.deepEqual(previousModelSessionIds([],live.archive),[]);
+});
+
+test('live comparison handles legacy start fallback, shorter histories and stable date ties', async () => {
+  const {previousModelSessionIds}=await modulePromise;
+  const live=entry('live','model',[4000,5000],[1,2]); live.archive.session.sessionStartedAt=null;
+  const entries=[entry('a','model',[2000],[1]),entry('b','model',[2000],[2]),entry('future','model',[5000],[3])];
+  assert.deepEqual(previousModelSessionIds(entries,live.archive),['b','a']);
+  assert.deepEqual(previousModelSessionIds(entries.slice(0,1),live.archive),['a']);
+});

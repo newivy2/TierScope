@@ -73,11 +73,16 @@ export function libraryShell() {
 #tierscope-session-tools .tools-exports{gap:4px;margin:5px 0 8px}
 #tierscope-session-tools .tools-exports button{padding:2px 5px;font-size:.9em}
 #tierscope-session-tools .tools-history-shortcut button{color:var(--panel-accent)}
+#tierscope-session-tools .tools-history-shortcut[hidden]{display:none}
 #tierscope-session-tools #session-save-info{font-size:.85em;margin-top:4px}
 #tierscope-session-tools .tools-library-bulk{gap:4px;font-size:.9em}
 #tierscope-session-tools .tools-library-bulk button{padding:3px 5px}
 #tools-library-selected{flex-basis:100%}
 #tools-library-selection{margin-top:8px}
+#tierscope-session-tools .tools-auto-keep{display:inline-flex;align-items:center;gap:5px;margin:0 0 0 5px;font-size:.92em}
+#tierscope-session-tools .tools-auto-keep[data-locked=true]{color:var(--panel-accent)}
+#tierscope-session-tools .tools-auto-keep input:disabled{opacity:1}
+#tierscope-session-tools .tools-library-management{border-top:1px solid var(--panel-divider);padding-top:9px;margin-top:12px}
 #tools-library-selection>summary{font-size:.9em;background:transparent;color:var(--panel-muted)}
 
 #tierscope-session-tools .tools-filters select{width:100%}
