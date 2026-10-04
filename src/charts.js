@@ -20,7 +20,7 @@ export function drawHistorySparklines(displayHistory, lastIndex, replayProgress)
     runtime.PANEL_ROWS.forEach(function(row) {
         if (runtime.collapsedRows.has(row.key)) return;
         var key = row.key === 'withtokens' ? 'withTokens' : row.key === 'anon' ? 'anonymous' : row.key;
-        drawSparkline('spark-' + row.key, key === 'roomTotal' ? roomTotalSeries(displayHistory) : displayHistory[key], row.key === 'total' ? themeColor('text') : row.key === 'roomTotal' ? themeColor('warning') : row.color,
+        drawSparkline('spark-' + row.key, key === 'roomTotal' ? roomTotalSeries(displayHistory) : displayHistory[key], row.key === 'total' ? themeColor('text') : row.key === 'roomTotal' ? themeColor('accent') : row.key === 'withtokens' ? themeColor('warning') : row.color,
             runtime.panelChartHeights[row.key] || row.height, displayHistory.timestamps, breaks, lastIndex, row.label, replayProgress);
     });
 }

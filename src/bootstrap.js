@@ -226,10 +226,10 @@ export function initializeRuntime() {
             key === 'female-trans' ? 'Female/Trans' : runtime.TIERS[key].name,
             color: runtime.TIERS[key].color, height: 28, display: 'flex' };
     }).concat([
-        { key: 'withtokens', label: 'With Tokens', icon: '💎', color: '#ff69b4', height: 28, display: 'flex' },
+        { key: 'withtokens', label: 'With Tokens', icon: '💎', color: 'var(--panel-warning)', height: 28, display: 'flex' },
         { key: 'total', label: 'Registered', icon: '📊', color: '#ffffff', height: 28, display: 'flex' },
         { key: 'anon', label: 'Anonymous', icon: '👻', color: '#888888', height: 50, display: 'block' },
-        { key: 'roomTotal', label: 'Room Total', icon: '👥', color: 'var(--panel-warning)', height: 28, display: 'flex' }
+        { key: 'roomTotal', label: 'Room Total', icon: '👥', color: 'var(--panel-accent)', height: 28, display: 'flex' }
     ]);
     runtime.collapsedRows = loadCollapsedRows();
     runtime.panelChartHeights = {};

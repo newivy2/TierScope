@@ -16,7 +16,7 @@ If you used the beta, install from the official link above to follow main releas
 
 ---
 
-**Current stable release: 3.16.0** · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.16.0)
+**Current stable release: 3.16.1** · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.16.1)
 
 
 ---
@@ -41,7 +41,7 @@ Charts use periodic room-data samples. Session history is stored locally through
 
 ## Main features
 
-- **Live audience tracking** — Follow viewer tiers, registered and anonymous viewers, viewers with tokens, and the room’s total audience in a yellow Room Total row below Anons.
+- **Live audience tracking** — Follow viewer tiers, registered and anonymous viewers, viewers with tokens in yellow, and the room’s total audience in a pink Room Total row below Anons.
 
 - **Session and all-time highs** — Switch between **SH** and **ATH** to compare the current session with previous records for that room. Green highlights and gentle pulses mark counts reaching or breaking the selected high.
 

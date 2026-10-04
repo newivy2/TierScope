@@ -79,7 +79,7 @@ export function updateCompactDashboard(frame) {
         point.y = max === min ? height / 2 : height - 3 - (point.value - min) / (max - min) * (height - 6);
         point.move = i === 0 || point.move;
     });
-    var color = frame.miniMetric === 'withTokens' ? '#ff69b4' : frame.miniMetric === 'total' ? frame.textColor : '#69BE45';
+    var color = frame.miniMetric === 'withTokens' ? frame.withTokensColor : frame.miniMetric === 'total' ? frame.textColor : frame.roomTotalColor;
     ctx.strokeStyle = color;
     ctx.save(); ctx.beginPath(); ctx.rect(2, 0, width - 2, height); ctx.clip();
     drawCanvasChart(ctx, points, color);
