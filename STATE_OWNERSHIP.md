@@ -62,13 +62,13 @@ The main, compact, trend and status views have no owner, storage or controller d
 
 ## Verification and remaining work
 
-The source checks reject unauthorized writes to live/playback/acquisition/preference fields, renderer dependencies on state/storage/controllers, and storage dependencies on owners or presentation. The 3.10.0 beta removes all remaining import cycles and the old controller-cycle allowance. Every future application import cycle fails the gate.
+The source checks reject unauthorized writes to live/playback/acquisition/preference fields, renderer dependencies on state/storage/controllers, and storage dependencies on owners or presentation. Release 3.10.0 removes all remaining import cycles and the old controller-cycle allowance. Every future application import cycle fails the gate.
 
 Behavior tests cover receipt commit/rollback, Reset/navigation/Stop with delayed API responses, replay replacement and stale callbacks, immutable recording/display snapshots, repainting without live mutations, storage failure/retry, captured records after Reset, and two tabs with Reset during replay and a pending scan. Existing file, library, backup, layout, theme, pulse and browser checks remain in the gate. The original 3.4.0 migration fingerprints are retained with explicit exceptions for reviewed changes.
 
 Remaining shared state includes live collection read views, storage metadata, layout measurements, drag/resize state and some DOM resource handles. The current guards are targeted checks, not a general effect/type system; helpers that receive shared values still require review. The beta preserves existing features and fixes the shifting scan-status row without redesigning the panel.
 
-## Acquisition and preference boundaries (3.10.0 beta)
+## Acquisition and preference boundaries (3.10.0)
 
 `ACQUISITION_FIELDS` owns 15 fields: generations/busy state, last route, DOM health and per-room fallback deadlines, local request restrictions/save status, selected/effective scan intervals, countdown/deadline, and scan/tracking/health timer handles. `beginAcquisition` refuses overlapping, stopped or restricted requests. `finishAcquisition` cannot release a replacement request. Reset, navigation, Stop and absence transitions invalidate work through named operations; ordinary manual Pause still allows an in-flight sample to finish.
 

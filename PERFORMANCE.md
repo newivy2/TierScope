@@ -28,9 +28,9 @@ A paired run during 3.8.0-beta.1 review used the same fixture on Node.js 22/head
 
 The new immutable recording/display boundary adds rendering cost in this fixture. Both runs remained below the existing 50 ms replay tick interval on this host; this is not a guarantee for slower devices. Replay history is frozen once and reused across frames instead of copied per frame. Browser pacing/layout checks still verify the moving gap connector and exact sample values. This benchmark measures frame work only, not opening a recording, live acquisition, memory or library/backup operations. Installed-script performance checks should include a long recording on the user’s normal browser.
 
-## 3.10.0-beta.1 paired replay check
+## 3.10.0 paired replay check
 
-The same 10,000-sample, 120-frame fixture was run three times per build and CPU setting, alternating published 3.9.0 and the beta in one Node.js 22/headless Chromium environment. Five warm-up frames remain excluded. The table reports the median of the three run means and the range of the three 95th-percentile results.
+The same 10,000-sample, 120-frame fixture was run three times per build and CPU setting, alternating published 3.9.0 and 3.10.0-beta.1 in one Node.js 22/headless Chromium environment during beta review. The measured renderer is unchanged in the stable 3.10.0 release. Five warm-up frames remain excluded. The table reports the median of the three run means and the range of the three 95th-percentile results.
 
 | CPU setting | Build | Median mean frame time | Run means | Run p95 range |
 | --- | --- | ---: | ---: | ---: |

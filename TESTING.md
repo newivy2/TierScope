@@ -87,7 +87,7 @@ The browser fixtures run in Chromium and Firefox. The local release check used c
 
 `npm run test:performance` measures 120 rendered Replay frames near the end of a 10,000-sample history, with all rows visible. It reports mean, 95th-percentile and maximum frame-render times; it is an informational benchmark, not a universal speed guarantee. The renderer retains exact stored samples while reducing draw calls to per-column extrema. See `PERFORMANCE.md` for the release measurement.
 
-## 3.10.0 beta boundaries and performance
+## 3.10.0 boundaries and performance
 
 `control-ownership.test.cjs` checks stale request completion, retry/cooldown survival, cross-tab policy revisions, cancelled timer callbacks, immutable read views and local preferences after failed writes. Source guards cover all four owners and reject every application import cycle. `chart-cache.test.cjs` compares cached frozen plots against uncached plots across windows, seeks, duplicate timestamps and gaps, and checks mutable histories after edits/appends/trimming. The theme browser fixture checks the timing/action row order and fixed control bounds across elapsed times (including 100 hours), countdown, scanning, pause, Stop, absence and restriction messages in both themes. It also checks the accessible moon–sun switch, indicator position/color, click/Space activation, visible keyboard focus and reduced-motion behavior.
 

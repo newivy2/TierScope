@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **3.9.0**. This release turns Library into an attached left-hand page, moves file and export actions there, and simplifies the main controls. Summary places its chart below the controls, followed by the audience overview and detailed statistics. Tracking, replay, storage formats and retention stay compatible with 3.8.0. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation links, see the [README](readme.md).
+Detailed reference for **3.10.0**. This release groups the timers above the action buttons and adds a moon–sun theme switch. Acquisition and panel preferences have explicit state owners, application imports are acyclic, and long-recording chart rendering uses a private cache. Tracking, replay, storage formats and retention stay compatible with 3.9.0. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation links, see the [README](readme.md).
 
 ## Contents
 
@@ -49,10 +49,12 @@ Keep only one enabled copy of TierScope. After an update, refresh existing room 
 | Row circle or icon | Collapse that row into the strip below the header. |
 | Boxed icon in the collapsed-row strip | Restore its row to its original position. |
 | Lamp slider | Adjust the main background and standard tier-row fills. |
-| Moon checkbox at the bottom right of Controls | Checked for dark mode; unchecked for bright mode. |
+| Moon–sun switch at the bottom right of Controls | Moon / blue track for dark mode; sun / amber track for bright mode. Click or press Space when focused to switch. |
 | **Replay** | Open recorded history for the current room. |
 | **Library** | Open recordings, model folders, session files and exports, summaries, comparison and backups beside the chart. |
 | **Reset** | Confirm clearing this room’s history, counters, and elapsed time, then request one fresh scan. Keep the automatic-scan pause state and layout preferences. |
+
+The top control row shows **Controls**, elapsed time and the scan countdown/status. The bottom row contains **Library**, **Replay**, play/pause, **Stop**, **Reset** and the theme switch. Library and Replay match the other action buttons, and Library uses the same pink accent as its replay shortcut. Reserved timer space keeps these rows steady as status text changes.
 
 The default scan interval is **60 seconds**, counted after a scan finishes. A new, unpaused room session requests its first sample as soon as the panel is initialized, then starts the normal countdown when that attempt completes. Existing retry waits and access restrictions still apply. Restored sessions keep their existing startup behavior; paused sessions wait for Resume. Faster polling does not guarantee fresher data from the site.
 
@@ -177,7 +179,7 @@ It preserves green high-value highlights, borders, text, charts, and the fills o
 
 ### Dark and bright mode
 
-The moon checkbox at the bottom right of Controls starts checked for **dark mode** when no preference has been saved. Uncheck it for **bright mode**. The choice is remembered across rooms and refreshes, independently of session data; Reset keeps it. Other already-open tabs keep their current theme until reloaded.
+The moon–sun switch at the bottom right of Controls starts in **dark mode** when no preference has been saved: its indicator sits beside the moon on a blue track. Switch to **bright mode** to move the indicator toward the sun on an amber track. Click the switch or reach it with Tab and press Space. Keyboard focus remains visible, and reduced-motion preferences disable the sliding animation. The choice is remembered across rooms and refreshes, independently of session data; Reset keeps it. Other already-open tabs keep their current theme until reloaded.
 
 The theme applies to expanded and compact views, Replay controls, scan settings, and chart tooltips. Bright mode uses light surfaces and darker neutral/status text. The registered-total chart switches from white to dark so it stays visible; tier colors, including dark purple and dark blue, stay unchanged. High-value backgrounds and pulses retain their green treatment, and the opacity slider keeps the same scope. Switching themes does not resize the panel, change tracking, or move the Replay position. GIF exports use a fixed dark background and palette, including orange for missing intervals.
 
@@ -453,6 +455,7 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
+| **3.10.0** | Give acquisition and panel preferences explicit state owners; eliminate application import cycles; cache immutable chart data for faster long replays. Group timers above Library, Replay and the other actions, keep control positions stable, match button sizes and the pink Library accent, and add an accessible moon–sun theme switch. Preserve saved-data compatibility. |
 | **3.9.0** | Release the attached Library, consolidated recording actions and simplified controls. Put the Summary chart first below its controls, followed by the audience overview and statistics. Preserve existing saved recordings and tracking behavior. |
 | **3.9.0-beta.1** | Unfold Library beside the panel with matching themes, model folders and responsive docking. Consolidate current/replayed/stored session files and TXT/CSV/GIF exports in Library; keep the chart usable and simplify main controls. |
 | **3.8.0** | Give playback protected state and frozen recording snapshots; render supplied display values; separate record storage from session/panel coordination. Enforce ownership and dependency boundaries while preserving controls, appearance and saved-data formats. |
