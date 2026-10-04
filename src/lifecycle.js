@@ -1,3 +1,4 @@
+import { nextSessionAbsence, pauseSessionForAbsence, stopLiveSession, startSessionClock, pauseSessionClock, resetLiveSession, pauseSessionRecording, resumeSessionRecording } from './live-session.js';
 import { drawAllSparklines } from './charts.js';
 import { updateMiniFreshness } from './compact.js';
 import { cancelGifExport } from './gif.js';
@@ -29,14 +30,7 @@ export function getEffectiveScanIntervalSeconds() {
 }
 
 export function nextBroadcasterAbsence(snapshot) {
-    if (snapshot.source !== 'API') return runtime.broadcasterAbsence;
-    if (snapshot.users.some(function(user) { return user.isOwner === true; })) {
-        runtime.absenceOverrideActive = false;
-        return { since: null, missing: 0 };
-    }
-    if (runtime.absenceOverrideActive || !runtime.isAutoRefreshOn || runtime.isPaused || runtime.isStopped) return runtime.broadcasterAbsence;
-    return { since: runtime.broadcasterAbsence.since === null ? Date.now() : runtime.broadcasterAbsence.since,
-        missing: Math.min(1000000, runtime.broadcasterAbsence.missing + 1) };
+    return nextSessionAbsence(Object.assign({}, snapshot, {observedAt: Date.now()}));
 }
 
 export function stopDescription() {
@@ -46,17 +40,10 @@ export function stopDescription() {
 
 export function checkAbsenceStop() {
     if (runtime.isStopped || !runtime.isAutoRefreshOn || runtime.absenceOverrideActive) return false;
-    if (runtime.absencePausedAt === null && !runtime.isPaused && runtime.broadcasterAbsence.missing >= 2 &&
-        runtime.broadcasterAbsence.since !== null && Date.now() - runtime.broadcasterAbsence.since >= runtime.ABSENCE_PAUSE_MS) {
-        // Anchor deadlines to observed absence even if a background tab wakes late.
-        runtime.absencePausedAt = runtime.broadcasterAbsence.since + runtime.ABSENCE_PAUSE_MS;
+    if (pauseSessionForAbsence(Date.now(), runtime.ABSENCE_PAUSE_MS)) {
         runtime.scanEpoch++;
         runtime.isScanning = false;
-        runtime.pausedElapsedTime = runtime.trackingStartTime ? Math.max(0, runtime.absencePausedAt - runtime.trackingStartTime) : 0;
-        runtime.isPaused = true;
-        if (runtime.trackingTimerInterval) clearInterval(runtime.trackingTimerInterval);
-        runtime.trackingTimerInterval = null;
-        runtime.pendingHistoryGap = true;
+        stopTrackingTimer();
         cancelHighPulses();
         // The next attempt checks presence only; it cannot record absent-room counts.
         runtime.nextScanAt = Math.max(Date.now(), readRequestPolicy().until);
@@ -94,22 +81,13 @@ export function updateStopControls() {
 }
 
 export function stopTracking(reason) {
-    if (runtime.isStopped) return;
-    runtime.stopReason = reason === 'absence' ? 'absence' : 'manual';
-    runtime.stoppedAt = runtime.stopReason === 'absence' && runtime.broadcasterAbsence.since !== null ?
-        Math.min(Date.now(), (runtime.absencePausedAt !== null ? runtime.absencePausedAt : runtime.broadcasterAbsence.since) + runtime.ABSENCE_STOP_MS) : Date.now();
-    runtime.isStopped = true;
-    // Invalidate pending API/DOM work before freezing this session.
+    if (!stopLiveSession(reason, Date.now(), runtime.ABSENCE_STOP_MS)) return;
+    // Invalidate pending API/DOM work before freezing the session's effects.
     runtime.scanEpoch++;
     runtime.isScanning = false;
-    runtime.isAutoRefreshOn = false;
     stopCountdown();
     runtime.nextScanAt = 0;
-    if (!runtime.isPaused) runtime.pausedElapsedTime = runtime.trackingStartTime ? Math.max(0, runtime.stoppedAt - runtime.trackingStartTime) : 0;
-    runtime.isPaused = true;
-    if (runtime.trackingTimerInterval) clearInterval(runtime.trackingTimerInterval);
-    runtime.trackingTimerInterval = null;
-    runtime.pendingHistoryGap = false;
+    stopTrackingTimer();
     cancelHighPulses();
     updateTrackingTimer();
     updateStopControls();
@@ -124,7 +102,6 @@ export function startNewSession() {
     if (!confirm('Start a new session?\n\nThe chart and elapsed time will start from zero. Export this stopped session first if you want to keep a report, CSV or GIF. Its saved record is retained until normal storage cleanup.')) return;
     saveSession(getModelName());
     runtime.tabRecords.delete(getStorageKey(getModelName()));
-    runtime.isAutoRefreshOn = true;
     resetTrackingData(false);
 }
 
@@ -147,14 +124,7 @@ export function updateTrackingTimer() {
 }
 
 export function startTrackingTimer() {
-    if (runtime.isStopped) return;
-    if (runtime.sessionStartedAt === null) runtime.sessionStartedAt = Date.now();
-    if (runtime.isPaused) {
-        runtime.isPaused = false;
-        runtime.trackingStartTime = Date.now() - runtime.pausedElapsedTime;
-    } else if (!runtime.trackingStartTime) {
-        runtime.trackingStartTime = Date.now();
-    }
+    if (!startSessionClock(Date.now())) return;
     if (runtime.trackingTimerInterval) {
         clearInterval(runtime.trackingTimerInterval);
         runtime.trackingTimerInterval = null;
@@ -165,10 +135,7 @@ export function startTrackingTimer() {
 }
 
 export function pauseTrackingTimer() {
-    if (runtime.isPaused) return;
-    runtime.pendingHistoryGap = true;
-    runtime.isPaused = true;
-    runtime.pausedElapsedTime = runtime.trackingStartTime ? Math.max(0, Date.now() - runtime.trackingStartTime) : 0;
+    if (!pauseSessionClock(Date.now())) return;
     if (runtime.trackingTimerInterval) {
         clearInterval(runtime.trackingTimerInterval);
         runtime.trackingTimerInterval = null;
@@ -178,32 +145,11 @@ export function pauseTrackingTimer() {
 }
 
 export function stopTrackingTimer() {
+    // Cancel the browser clock only. Reset/navigation own session data clearing.
     if (runtime.trackingTimerInterval) {
         clearInterval(runtime.trackingTimerInterval);
         runtime.trackingTimerInterval = null;
     }
-    runtime.trackingStartTime = null;
-    runtime.sessionStartedAt = null;
-    runtime.sessionStartEstimated = false;
-    runtime.sessionHighs = {};
-    runtime.pausedElapsedTime = 0;
-    runtime.isPaused = false;
-    runtime.roomTotalHighTime = null;
-    runtime.tierHighTimes = {};
-    runtime.withTokensHighTime = null;
-    runtime.totalHighTime = null;
-    runtime.anonHighTime = null;
-    runtime.femaleTransHighTime = null;
-    runtime.previousCounts = {
-        'red': 0, 'green': 0, 'purple': 0, 'pink': 0,
-        'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0,
-        'withTokens': 0, 'total': 0, 'anonymous': 0
-    };
-    runtime.hasTrendBaseline = false;
-    runtime.trendComparisonMode = 'last';
-    runtime.autoTrendEscalation = true;
-    runtime.newHighTiers = {};
-    updateTrackingTimer();
 }
 
 export function resetAllTracking() {
@@ -221,49 +167,17 @@ export function resetTrackingData(deleteSaved) {
     cancelGifExport();
     log('Performing main reset...');
     if (deleteSaved) deleteSession(modelName);
-    runtime.isStopped = false;
-    runtime.stoppedAt = null;
-    runtime.stopReason = null;
-    runtime.broadcasterAbsence = { since: null, missing: 0 };
-    runtime.absencePausedAt = null;
-    runtime.absenceOverrideActive = false;
     runtime.activeSessionStorageKey = getStorageKey(modelName);
     runtime.scanEpoch++;
     runtime.isScanning = false;
     stopCountdown();
     stopTrackingTimer();
-    // Reset the elapsed timer without changing the automatic scanning preference.
-    runtime.isPaused = !runtime.isAutoRefreshOn;
-    runtime.users.clear();
-    runtime.lastAcceptedAcquisition = null;
-    runtime.restoredDisplayFrame = null;
+    resetLiveSession(deleteSaved ? 'reset' : 'start');
     runtime.lastAcquisitionAttemptSource = 'API';
     runtime.domHealthStatus.consecutiveFailures = 0;
-    updateAcquisitionStatus();
-    runtime.previousUserCount = 0;
-    runtime.previousRoomTotal = 0;
-    runtime.roomTotal = 0;
-    runtime.roomTotalHigh = 0;
-    runtime.previousCounts = {
-        'red': 0, 'green': 0, 'purple': 0, 'pink': 0,
-        'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0,
-        'withTokens': 0, 'total': 0, 'anonymous': 0
-    };
-    runtime.hasTrendBaseline = false;
     runtime.trendComparisonMode = 'last';
     runtime.autoTrendEscalation = true;
-    runtime.newHighTiers = {};
-    runtime.history = {
-        timestamps: [],
-        'red': [], 'green': [], 'purple': [], 'pink': [], 'dark-blue': [], 'light-blue': [], 'gray': [], 'female-trans': [],
-        'withTokens': [], 'total': [], 'anonymous': []
-    };
-    runtime.roomTotalHighTime = null;
-    runtime.tierHighTimes = {};
-    runtime.withTokensHighTime = null;
-    runtime.totalHighTime = null;
-    runtime.anonHighTime = null;
-    runtime.femaleTransHighTime = null;
+    updateAcquisitionStatus();
     resetCountdown();
     updateDisplay();
     updateTrendDisplay();
@@ -434,11 +348,10 @@ export function stopCountdown() {
 export function pauseAutoRefresh() {
     if (runtime.isStopped) return;
     if (isAbsencePaused()) { runtime.scanEpoch++; runtime.isScanning = false; }
-    runtime.absencePausedAt = null;
-    runtime.broadcasterAbsence = { since: null, missing: 0 };
-    runtime.isAutoRefreshOn = false;
+    pauseSessionRecording(Date.now());
     stopCountdown();
-    pauseTrackingTimer();
+    stopTrackingTimer();
+    updateTrackingTimer();
     updateStopControls();
     updateCountdownDisplay();
     updateAcquisitionStatus();
@@ -455,17 +368,14 @@ export function toggleAutoRefresh() {
         // Only an observed API owner re-arms automation for this session.
         runtime.scanEpoch++;
         runtime.isScanning = false;
-        runtime.absenceOverrideActive = true;
     }
-    runtime.absencePausedAt = null;
-    runtime.broadcasterAbsence = { since: null, missing: 0 };
     // Only an explicit Resume clears access denial. Internal failure paths
     // call pauseAutoRefresh directly and cannot activate this override.
     var policy = readRequestPolicy();
     if (policy.blocked) {
         writeRequestPolicy({ until: policy.serverUntil || 0, serverUntil: policy.serverUntil || 0, failures: 0, blocked: 0, status: 0, revision: '' });
     }
-    runtime.isAutoRefreshOn = true;
+    resumeSessionRecording(Date.now(), overridingAbsence);
     startTrackingTimer();
     startCountdown();
     performScanThenReturn(true);

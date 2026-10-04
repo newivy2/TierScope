@@ -1,3 +1,4 @@
+import { configureSessionTracking, resetLiveSession } from './live-session.js';
 import { drawAllSparklines } from './charts.js';
 import { validateDOMHealth } from './dom.js';
 import { cleanupDragListeners, restorePanelGeometry } from './layout.js';
@@ -40,11 +41,10 @@ export function init() {
     }
     if (!loaded) {
         runtime.isMinimized = !isRoom;
-        runtime.isAutoRefreshOn = isRoom;
     } else {
         runtime.isMinimized = false;
-        runtime.isAutoRefreshOn = !runtime.isStopped && (!runtime.isPaused || runtime.absencePausedAt !== null);
     }
+    configureSessionTracking(loaded, isRoom);
     try {
         createPanel();
     } catch (e) {
@@ -162,18 +162,15 @@ export function checkUrlChange() {
         if (oldModel && oldModel !== 'unknown') {
             saveSession(oldModel);
         }
-        runtime.newHighTiers = {};
         runtime.activeSessionStorageKey = null;
         stopCountdown();
         runtime.nextScanAt = 0;
         runtime.countdownSeconds = runtime.scanIntervalSeconds;
         stopTrackingTimer();
-        runtime.isStopped = false;
-        runtime.stoppedAt = null;
-        runtime.stopReason = null;
-        runtime.broadcasterAbsence = { since: null, missing: 0 };
-        runtime.absencePausedAt = null;
-        runtime.absenceOverrideActive = false;
+        resetLiveSession('navigate');
+        runtime.trendComparisonMode = 'last';
+        runtime.autoTrendEscalation = true;
+        updateTrackingTimer();
         cleanupDragListeners();
         if (runtime.miniSettingsKeyHandler) {
             document.removeEventListener('keydown', runtime.miniSettingsKeyHandler, true);
@@ -185,31 +182,9 @@ export function checkUrlChange() {
             runtime.healthCheckInterval = null;
         }
         runtime.currentScale = runtime.panelGeometry ? runtime.panelGeometry.scale : runtime.currentScale;
-        runtime.users.clear();
-        runtime.roomTotal = 0;
-        runtime.lastAcceptedAcquisition = null;
-        runtime.restoredDisplayFrame = null;
         runtime.lastAcquisitionAttemptSource = 'API';
         runtime.domHealthStatus.consecutiveFailures = 0;
         updateAcquisitionStatus();
-        runtime.previousUserCount = 0;
-        runtime.previousRoomTotal = 0;
-        Object.keys(runtime.history).forEach(function(k) { runtime.history[k] = []; });
-        runtime.previousCounts = {
-            'red': 0, 'green': 0, 'purple': 0, 'pink': 0,
-            'dark-blue': 0, 'light-blue': 0, 'gray': 0, 'female-trans': 0,
-            'withTokens': 0, 'total': 0, 'anonymous': 0
-        };
-        runtime.hasTrendBaseline = false;
-        runtime.trendComparisonMode = 'last';
-        runtime.autoTrendEscalation = true;
-        runtime.roomTotalHigh = 0;
-        runtime.roomTotalHighTime = null;
-        runtime.tierHighTimes = {};
-        runtime.withTokensHighTime = null;
-        runtime.totalHighTime = null;
-        runtime.anonHighTime = null;
-        runtime.femaleTransHighTime = null;
         runtime.initGuard++;
         scheduleInit(2002);
     }

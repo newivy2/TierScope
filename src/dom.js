@@ -1,3 +1,4 @@
+import { sessionAnonymousCount } from './live-session.js';
 import { pauseAutoRefresh } from './lifecycle.js';
 import { runtime } from './runtime.js';
 import { log } from './utils.js';
@@ -117,12 +118,7 @@ export function getRoomTotal() {
 }
 
 export function getAnonymousCount() {
-    if (runtime.lastAcceptedAcquisition && runtime.lastAcceptedAcquisition.source === 'API') {
-        return runtime.lastAcceptedAcquisition.api.anonymousCount;
-    }
-    var tracked = runtime.users.size;
-    if (runtime.roomTotal > tracked) return runtime.roomTotal - tracked;
-    return 0;
+    return sessionAnonymousCount();
 }
 
 export function extractUsername(text) {

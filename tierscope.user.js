@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.6.1
+// @version      3.7.0
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -657,54 +657,369 @@ underlying system, so should run in the browser, Node, or Plask.
     }
   });
 
-  // src/history.js
-  function saveToHistory() {
-    var counts = { "red": 0, "green": 0, "purple": 0, "pink": 0, "dark-blue": 0, "light-blue": 0, "gray": 0, "female-trans": 0 };
-    runtime.users.forEach(function(data) {
-      if (counts[data.tier] !== void 0) counts[data.tier]++;
-      if (data.gender === "female" || data.gender === "trans") {
-        counts["female-trans"]++;
+  // src/live-session.js
+  var LIVE_SESSION_FIELDS = Object.freeze(["users", "roomTotal", "previousUserCount", "previousRoomTotal", "previousCounts", "hasTrendBaseline", "lastAcceptedAcquisition", "restoredDisplayFrame", "history", "pendingHistoryGap", "roomTotalHigh", "roomTotalHighTime", "tierHighTimes", "withTokensHighTime", "totalHighTime", "anonHighTime", "femaleTransHighTime", "sessionStartedAt", "sessionStartEstimated", "sessionHighs", "newHighTiers", "trackingStartTime", "isPaused", "isStopped", "stoppedAt", "stopReason", "broadcasterAbsence", "absencePausedAt", "absenceOverrideActive", "pausedElapsedTime", "isAutoRefreshOn"]);
+  var liveSessionState;
+  var sessionConfig;
+  var pendingSample = null;
+  var sessionRevision = 0;
+  function initializeLiveSession(target) {
+    liveSessionState = {
+      users: target.users,
+      roomTotal: target.roomTotal,
+      previousUserCount: target.previousUserCount,
+      previousRoomTotal: target.previousRoomTotal,
+      previousCounts: target.previousCounts,
+      hasTrendBaseline: target.hasTrendBaseline,
+      lastAcceptedAcquisition: target.lastAcceptedAcquisition,
+      restoredDisplayFrame: target.restoredDisplayFrame,
+      history: target.history,
+      pendingHistoryGap: target.pendingHistoryGap,
+      roomTotalHigh: target.roomTotalHigh,
+      roomTotalHighTime: target.roomTotalHighTime,
+      tierHighTimes: target.tierHighTimes,
+      withTokensHighTime: target.withTokensHighTime,
+      totalHighTime: target.totalHighTime,
+      anonHighTime: target.anonHighTime,
+      femaleTransHighTime: target.femaleTransHighTime,
+      sessionStartedAt: target.sessionStartedAt,
+      sessionStartEstimated: target.sessionStartEstimated,
+      sessionHighs: target.sessionHighs,
+      newHighTiers: target.newHighTiers,
+      trackingStartTime: target.trackingStartTime,
+      isPaused: target.isPaused,
+      isStopped: target.isStopped,
+      stoppedAt: target.stoppedAt,
+      stopReason: target.stopReason,
+      broadcasterAbsence: target.broadcasterAbsence,
+      absencePausedAt: target.absencePausedAt,
+      absenceOverrideActive: target.absenceOverrideActive,
+      pausedElapsedTime: target.pausedElapsedTime,
+      isAutoRefreshOn: target.isAutoRefreshOn
+    };
+    sessionConfig = { series: target.STORAGE_HISTORY_SERIES.slice(), tiers: (
+      /** @type {import('./session-types').Tier[]} */
+      Object.keys(target.TIERS)
+    ), maxHistory: target.MAX_HISTORY_LENGTH };
+    for (const key of LIVE_SESSION_FIELDS) {
+      Object.defineProperty(target, key, { enumerable: true, configurable: false, get: () => liveSessionState[key] });
+    }
+  }
+  function invalidateSample() {
+    if (pendingSample) liveSessionState = pendingSample.before;
+    pendingSample = null;
+    sessionRevision++;
+  }
+  function emptyCounts() {
+    return (
+      /** @type {Counts} */
+      Object.fromEntries(sessionConfig.series.map((key) => [key, 0]))
+    );
+  }
+  function copyHistory(history) {
+    return (
+      /** @type {History} */
+      Object.fromEntries(Object.entries(history).map(([key, values]) => [key, values.slice()]))
+    );
+  }
+  function copyHighs(highs) {
+    return Object.fromEntries(Object.entries(highs).map(([key, high]) => [key, __spreadValues({}, high)]));
+  }
+  function readSessionHigh(key, current = 0) {
+    let high = liveSessionState.sessionHighs[key];
+    if (!high) {
+      const values = liveSessionState.history[key] || [];
+      const value = Math.max(0, ...values);
+      high = { value, time: value > 0 ? liveSessionState.history.timestamps[values.indexOf(value)] : null };
+    }
+    return { value: Math.max(high.value, current || 0), time: high.time };
+  }
+  function synchronizeSessionHighTimes() {
+    const state = liveSessionState;
+    state.tierHighTimes = Object.fromEntries(sessionConfig.tiers.map((key) => [key, readSessionHigh(key).time]));
+    state.withTokensHighTime = readSessionHigh("withTokens").time;
+    state.totalHighTime = readSessionHigh("total").time;
+    state.anonHighTime = readSessionHigh("anonymous").time;
+    state.femaleTransHighTime = readSessionHigh("female-trans").time;
+  }
+  function sessionAnonymousCount() {
+    const state = liveSessionState;
+    if (state.lastAcceptedAcquisition && state.lastAcceptedAcquisition.source === "API") return state.lastAcceptedAcquisition.api.anonymousCount;
+    return Math.max(0, state.roomTotal - state.users.size);
+  }
+  function sessionCounts() {
+    const counts = emptyCounts();
+    for (const user of liveSessionState.users.values()) {
+      if (counts[user.tier] !== void 0) counts[user.tier]++;
+      if (user.gender === "female" || user.gender === "trans") counts["female-trans"]++;
+    }
+    counts.total = liveSessionState.users.size;
+    counts.withTokens = sessionConfig.tiers.filter((key) => key !== "gray" && key !== "female-trans").reduce((sum, key) => sum + counts[key], 0);
+    counts.anonymous = sessionAnonymousCount();
+    return counts;
+  }
+  function noteSessionRoomHigh(value, now) {
+    if (value > liveSessionState.roomTotalHigh) {
+      liveSessionState.roomTotalHigh = value;
+      liveSessionState.roomTotalHighTime = now;
+    }
+  }
+  function appendCurrentSessionSample(now, policy) {
+    const state = liveSessionState, counts = sessionCounts();
+    if (state.sessionStartedAt === null) state.sessionStartedAt = now;
+    for (const key of sessionConfig.series) {
+      const previous = readSessionHigh(key), value = counts[key];
+      if (value > previous.value) state.sessionHighs[key] = { value, time: now };
+      else if (!state.sessionHighs[key]) state.sessionHighs[key] = previous;
+      if (value > 0 && value >= state.sessionHighs[key].value) state.newHighTiers[key] = true;
+      else delete state.newHighTiers[key];
+    }
+    synchronizeSessionHighTimes();
+    if (!state.history.breaks || state.history.breaks.length !== state.history.timestamps.length) state.history.breaks = policy.breaks.slice();
+    const lastTime = state.history.timestamps.length ? state.history.timestamps.at(-1) : null;
+    state.history.breaks.push(lastTime !== null && (state.pendingHistoryGap || now - lastTime > Math.max(policy.intervalSeconds, policy.lastIntervalSeconds) * 2e3 + policy.timeoutMs));
+    state.pendingHistoryGap = false;
+    state.history.timestamps.push(now);
+    for (const key of sessionConfig.series) state.history[key].push(counts[key]);
+    if (state.history.timestamps.length > sessionConfig.maxHistory) {
+      state.history.timestamps.shift();
+      state.history.breaks.shift();
+      for (const key of sessionConfig.series) state.history[key].shift();
+    }
+    return counts;
+  }
+  function beginAcceptedSample(snapshot, room, now, policy) {
+    if (pendingSample) throw new Error("A sample is already pending.");
+    if (liveSessionState.isStopped) throw new Error("The session is stopped.");
+    const state = liveSessionState;
+    const before = __spreadProps(__spreadValues({}, state), {
+      history: copyHistory(state.history),
+      sessionHighs: copyHighs(state.sessionHighs),
+      tierHighTimes: __spreadValues({}, state.tierHighTimes),
+      newHighTiers: __spreadValues({}, state.newHighTiers)
+    });
+    const receipt = { before, revision: sessionRevision, counts: null, diagnostics: null };
+    pendingSample = receipt;
+    try {
+      state.restoredDisplayFrame = null;
+      state.users = new Map(snapshot.users.map((user) => [user.username, user]));
+      state.roomTotal = snapshot.roomTotal;
+      state.lastAcceptedAcquisition = { source: snapshot.source, timestamp: snapshot.timestamp, api: null };
+      if (snapshot.source === "API") {
+        const owners = snapshot.users.filter((user) => user.isOwner), unknownClasses = snapshot.diagnostics.unknownClasses, unknownGenders = snapshot.diagnostics.unknownGenders;
+        const tierSum = snapshot.users.filter((user) => user.tier !== null).length;
+        state.lastAcceptedAcquisition.api = { anonymousCount: snapshot.anonymousCount, registeredCount: snapshot.registeredCount, totalUsers: snapshot.totalUsers, ownerCount: owners.length };
+        receipt.diagnostics = {
+          room,
+          anonymousCount: snapshot.anonymousCount,
+          registeredCount: snapshot.registeredCount,
+          totalUsers: snapshot.totalUsers,
+          ownerCount: owners.length,
+          unknownClasses: Object.values(unknownClasses).reduce((a, b) => a + b, 0),
+          unknownGenders: Object.values(unknownGenders).reduce((a, b) => a + b, 0),
+          unknownClassCodes: unknownClasses,
+          unknownGenderCodes: unknownGenders,
+          viewerTierSum: tierSum,
+          registeredMinusTierSum: state.users.size - tierSum,
+          viewerTierGapExplanation: "Owner and unknown-class records count toward Registered, outside the seven viewer tiers",
+          timestamp: new Date(snapshot.timestamp).toISOString()
+        };
       }
-    });
-    var total = runtime.users.size;
-    var withTokens = counts["red"] + counts["green"] + counts["purple"] + counts["pink"] + counts["dark-blue"] + counts["light-blue"];
-    var anonymousCount = getAnonymousCount();
-    var now = Date.now();
-    if (runtime.sessionStartedAt === null) runtime.sessionStartedAt = now;
-    var sample = Object.assign({}, counts, { withTokens, total, anonymous: anonymousCount });
-    runtime.STORAGE_HISTORY_SERIES.forEach(function(key) {
-      var previous = getSessionHigh(key, 0);
-      var value = sample[key];
-      if (value > previous.value) runtime.sessionHighs[key] = { value, time: now };
-      else if (!runtime.sessionHighs[key]) runtime.sessionHighs[key] = previous;
-      if (value > 0 && value >= runtime.sessionHighs[key].value) runtime.newHighTiers[key] = true;
-      else delete runtime.newHighTiers[key];
-    });
-    syncHighTimes();
-    if (!runtime.history.breaks || runtime.history.breaks.length !== runtime.history.timestamps.length) runtime.history.breaks = getHistoryBreaks(runtime.history).slice();
-    var lastTime = runtime.history.timestamps.length ? runtime.history.timestamps[runtime.history.timestamps.length - 1] : null;
-    runtime.history.breaks.push(lastTime !== null && (runtime.pendingHistoryGap || now - lastTime > Math.max(runtime.scanIntervalSeconds, runtime.lastScheduledIntervalSeconds) * 2e3 + runtime.API_TIMEOUT_MS));
-    runtime.pendingHistoryGap = false;
-    runtime.history.timestamps.push(now);
-    Object.keys(counts).forEach(function(tier) {
-      runtime.history[tier].push(counts[tier]);
-    });
-    runtime.history["withTokens"].push(withTokens);
-    runtime.history["total"].push(total);
-    runtime.history["anonymous"].push(anonymousCount);
-    if (runtime.history.timestamps.length > runtime.MAX_HISTORY_LENGTH) {
-      runtime.history.timestamps.shift();
-      runtime.history.breaks.shift();
-      Object.keys(counts).forEach(function(tier) {
-        runtime.history[tier].shift();
-      });
-      runtime.history["withTokens"].shift();
-      runtime.history["total"].shift();
-      runtime.history["anonymous"].shift();
+      state.previousUserCount = state.users.size;
+      state.previousRoomTotal = state.roomTotal;
+      noteSessionRoomHigh(state.roomTotal > 0 ? state.roomTotal : state.users.size + sessionAnonymousCount(), now);
+      receipt.counts = appendCurrentSessionSample(now, policy);
+      state.hasTrendBaseline = true;
+      return receipt;
+    } catch (error) {
+      abortAcceptedSample(receipt);
+      throw error;
     }
-    if (!runtime.isMinimized) {
-      drawAllSparklines();
+  }
+  function commitAcceptedSample(receipt) {
+    if (pendingSample !== receipt || receipt.revision !== sessionRevision) return false;
+    liveSessionState.previousCounts = receipt.counts;
+    pendingSample = null;
+    return true;
+  }
+  function abortAcceptedSample(receipt) {
+    if (pendingSample !== receipt || receipt.revision !== sessionRevision) return false;
+    liveSessionState = receipt.before;
+    pendingSample = null;
+    return true;
+  }
+  function markSessionGap() {
+    liveSessionState.pendingHistoryGap = true;
+  }
+  function clearRestoredSessionFrame() {
+    liveSessionState.restoredDisplayFrame = null;
+  }
+  function prepareSessionHighsForSave() {
+    for (const key of sessionConfig.series) if (!liveSessionState.sessionHighs[key]) liveSessionState.sessionHighs[key] = readSessionHigh(key);
+  }
+  function restoreLiveSession(data, frame) {
+    invalidateSample();
+    const state = liveSessionState;
+    state.users = /* @__PURE__ */ new Map();
+    state.roomTotal = 0;
+    state.previousUserCount = 0;
+    state.previousRoomTotal = 0;
+    state.lastAcceptedAcquisition = null;
+    state.newHighTiers = {};
+    state.pendingHistoryGap = true;
+    for (const key of [
+      "roomTotalHigh",
+      "roomTotalHighTime",
+      "trackingStartTime",
+      "sessionStartedAt",
+      "sessionStartEstimated",
+      "isPaused",
+      "isStopped",
+      "stoppedAt",
+      "stopReason",
+      "absencePausedAt",
+      "absenceOverrideActive",
+      "pausedElapsedTime",
+      "hasTrendBaseline"
+    ]) state[key] = data[key];
+    state.history = copyHistory(data.history);
+    state.sessionHighs = copyHighs(data.sessionHighs);
+    state.previousCounts = __spreadValues({}, data.previousCounts);
+    state.broadcasterAbsence = __spreadValues({}, data.broadcasterAbsence);
+    synchronizeSessionHighTimes();
+    state.restoredDisplayFrame = frame;
+    if (frame) {
+      frame.isRestored = true;
+      frame.playbackNewHighTiers = {};
+      for (const key of sessionConfig.series) {
+        const value = state.history[key].at(-1);
+        if (value > 0 && value >= readSessionHigh(key).value) frame.playbackNewHighTiers[key] = true;
+      }
+      frame.roomTotalHigh = Math.max(state.roomTotalHigh, frame.roomTotalHigh);
     }
+  }
+  function configureSessionTracking(loaded, isRoom) {
+    liveSessionState.isAutoRefreshOn = loaded ? !liveSessionState.isStopped && (!liveSessionState.isPaused || liveSessionState.absencePausedAt !== null) : isRoom;
+  }
+  function resetLiveSession(mode) {
+    invalidateSample();
+    const state = liveSessionState;
+    if (mode === "start") state.isAutoRefreshOn = true;
+    state.isStopped = false;
+    state.stoppedAt = null;
+    state.stopReason = null;
+    state.broadcasterAbsence = { since: null, missing: 0 };
+    state.absencePausedAt = null;
+    state.absenceOverrideActive = false;
+    state.trackingStartTime = null;
+    state.sessionStartedAt = null;
+    state.sessionStartEstimated = false;
+    state.pausedElapsedTime = 0;
+    state.isPaused = mode === "navigate" ? false : !state.isAutoRefreshOn;
+    state.users = /* @__PURE__ */ new Map();
+    state.roomTotal = 0;
+    state.lastAcceptedAcquisition = null;
+    state.restoredDisplayFrame = null;
+    state.previousUserCount = 0;
+    state.previousRoomTotal = 0;
+    state.previousCounts = emptyCounts();
+    state.hasTrendBaseline = false;
+    state.roomTotalHigh = 0;
+    state.roomTotalHighTime = null;
+    state.sessionHighs = {};
+    state.newHighTiers = {};
+    state.tierHighTimes = {};
+    state.withTokensHighTime = null;
+    state.totalHighTime = null;
+    state.anonHighTime = null;
+    state.femaleTransHighTime = null;
+    state.history = /** @type {History} */
+    Object.fromEntries(["timestamps", "breaks", ...sessionConfig.series].map((key) => [key, []]));
+    state.pendingHistoryGap = false;
+  }
+  function startSessionClock(now) {
+    if (liveSessionState.isStopped) return false;
+    if (liveSessionState.sessionStartedAt === null) liveSessionState.sessionStartedAt = now;
+    if (liveSessionState.isPaused) {
+      liveSessionState.isPaused = false;
+      liveSessionState.trackingStartTime = now - liveSessionState.pausedElapsedTime;
+    } else if (!liveSessionState.trackingStartTime) liveSessionState.trackingStartTime = now;
+    return true;
+  }
+  function pauseSessionClock(now) {
+    if (liveSessionState.isPaused) return false;
+    liveSessionState.pendingHistoryGap = true;
+    liveSessionState.isPaused = true;
+    liveSessionState.pausedElapsedTime = liveSessionState.trackingStartTime ? Math.max(0, now - liveSessionState.trackingStartTime) : 0;
+    return true;
+  }
+  function pauseSessionRecording(now) {
+    liveSessionState.absencePausedAt = null;
+    liveSessionState.broadcasterAbsence = { since: null, missing: 0 };
+    liveSessionState.isAutoRefreshOn = false;
+    pauseSessionClock(now);
+  }
+  function resumeSessionRecording(now, overrideAbsence) {
+    if (overrideAbsence) liveSessionState.absenceOverrideActive = true;
+    liveSessionState.absencePausedAt = null;
+    liveSessionState.broadcasterAbsence = { since: null, missing: 0 };
+    liveSessionState.isAutoRefreshOn = true;
+    startSessionClock(now);
+  }
+  function nextSessionAbsence(snapshot) {
+    const state = liveSessionState;
+    if (snapshot.source !== "API") return state.broadcasterAbsence;
+    if (snapshot.users.some((user) => user.isOwner === true)) {
+      state.absenceOverrideActive = false;
+      return { since: null, missing: 0 };
+    }
+    if (state.absenceOverrideActive || !state.isAutoRefreshOn || state.isPaused || state.isStopped) return state.broadcasterAbsence;
+    return { since: state.broadcasterAbsence.since === null ? snapshot.observedAt : state.broadcasterAbsence.since, missing: Math.min(1e6, state.broadcasterAbsence.missing + 1) };
+  }
+  function observeSessionPresence(snapshot, now) {
+    liveSessionState.broadcasterAbsence = nextSessionAbsence(__spreadProps(__spreadValues({}, snapshot), { observedAt: now }));
+  }
+  function resumeSessionForOwnerReturn(now) {
+    liveSessionState.broadcasterAbsence = { since: null, missing: 0 };
+    liveSessionState.absencePausedAt = null;
+    liveSessionState.absenceOverrideActive = false;
+    startSessionClock(now);
+  }
+  function pauseSessionForAbsence(now, pauseMs) {
+    const state = liveSessionState;
+    if (state.isStopped || !state.isAutoRefreshOn || state.absenceOverrideActive || state.absencePausedAt !== null || state.isPaused || state.broadcasterAbsence.missing < 2 || state.broadcasterAbsence.since === null || now - state.broadcasterAbsence.since < pauseMs) return false;
+    state.absencePausedAt = state.broadcasterAbsence.since + pauseMs;
+    state.pausedElapsedTime = state.trackingStartTime ? Math.max(0, state.absencePausedAt - state.trackingStartTime) : 0;
+    state.isPaused = true;
+    state.pendingHistoryGap = true;
+    return true;
+  }
+  function stopLiveSession(reason, now, absenceStopMs) {
+    if (liveSessionState.isStopped) return false;
+    invalidateSample();
+    const state = liveSessionState;
+    state.stopReason = reason === "absence" ? "absence" : "manual";
+    state.stoppedAt = state.stopReason === "absence" && state.broadcasterAbsence.since !== null ? Math.min(now, (state.absencePausedAt !== null ? state.absencePausedAt : state.broadcasterAbsence.since) + absenceStopMs) : now;
+    state.isStopped = true;
+    state.isAutoRefreshOn = false;
+    if (!state.isPaused) state.pausedElapsedTime = state.trackingStartTime ? Math.max(0, state.stoppedAt - state.trackingStartTime) : 0;
+    state.isPaused = true;
+    state.pendingHistoryGap = false;
+    return true;
+  }
+
+  // src/history.js
+  function getSessionSamplePolicy() {
+    return {
+      breaks: getHistoryBreaks(runtime.history),
+      intervalSeconds: runtime.scanIntervalSeconds,
+      lastIntervalSeconds: runtime.lastScheduledIntervalSeconds,
+      timeoutMs: runtime.API_TIMEOUT_MS
+    };
+  }
+  function saveToHistory() {
+    appendCurrentSessionSample(Date.now(), getSessionSamplePolicy());
+    if (!runtime.isMinimized) drawAllSparklines();
   }
 
   // src/diagnostics.js
@@ -1330,9 +1645,7 @@ underlying system, so should run in the browser, Node, or Plask.
       if (!snapshot.users.some(function(user) {
         return user.isOwner === true;
       })) return null;
-      runtime.broadcasterAbsence = { since: null, missing: 0 };
-      runtime.absencePausedAt = null;
-      runtime.absenceOverrideActive = false;
+      resumeSessionForOwnerReturn(Date.now());
       startTrackingTimer();
       updateStopControls();
       validateRoomSnapshot(snapshot);
@@ -1357,7 +1670,7 @@ underlying system, so should run in the browser, Node, or Plask.
       var snapshot = await acquireAPISnapshot(context);
       if (!isAcquisitionCurrent(context)) return null;
       if (checkAbsenceStop() || !isAcquisitionCurrent(context)) return null;
-      runtime.broadcasterAbsence = nextBroadcasterAbsence(snapshot);
+      observeSessionPresence(snapshot, Date.now());
       if (checkAbsenceStop() || !isAcquisitionCurrent(context)) return null;
       validateRoomSnapshot(snapshot);
       runtime.domHealthStatus.consecutiveFailures = 0;
@@ -1401,48 +1714,7 @@ underlying system, so should run in the browser, Node, or Plask.
     }
   }
   function acceptRoomSnapshot(snapshot, modelName) {
-    runtime.restoredDisplayFrame = null;
-    runtime.users = new Map(snapshot.users.map(function(user) {
-      return [user.username, user];
-    }));
-    runtime.roomTotal = snapshot.roomTotal;
-    runtime.lastAcceptedAcquisition = { source: snapshot.source, timestamp: snapshot.timestamp, api: null };
-    if (snapshot.source === "API") {
-      var owners = snapshot.users.filter(function(user) {
-        return user.isOwner;
-      });
-      var tierSum = snapshot.users.filter(function(user) {
-        return user.tier !== null;
-      }).length;
-      var unknownClasses = snapshot.diagnostics.unknownClasses;
-      var unknownGenders = snapshot.diagnostics.unknownGenders;
-      runtime.lastAcceptedAcquisition.api = {
-        anonymousCount: snapshot.anonymousCount,
-        registeredCount: snapshot.registeredCount,
-        totalUsers: snapshot.totalUsers,
-        ownerCount: owners.length
-      };
-      return {
-        room: modelName,
-        anonymousCount: snapshot.anonymousCount,
-        registeredCount: snapshot.registeredCount,
-        totalUsers: snapshot.totalUsers,
-        ownerCount: owners.length,
-        unknownClasses: Object.values(unknownClasses).reduce(function(a, b) {
-          return a + b;
-        }, 0),
-        unknownGenders: Object.values(unknownGenders).reduce(function(a, b) {
-          return a + b;
-        }, 0),
-        unknownClassCodes: unknownClasses,
-        unknownGenderCodes: unknownGenders,
-        viewerTierSum: tierSum,
-        registeredMinusTierSum: runtime.users.size - tierSum,
-        viewerTierGapExplanation: "Owner and unknown-class records count toward Registered, outside the seven viewer tiers",
-        timestamp: new Date(snapshot.timestamp).toISOString()
-      };
-    }
-    return null;
+    return beginAcceptedSample(snapshot, modelName, Date.now(), getSessionSamplePolicy());
   }
   function updateAcquisitionStatus() {
     updateMiniFreshness();
@@ -1502,6 +1774,7 @@ underlying system, so should run in the browser, Node, or Plask.
     var context = { epoch: ++runtime.scanEpoch, generation: runtime.initGuard, url: location.href, room: getModelName(), policyRevision: policy.revision };
     var priorState = null;
     var sampleCommitted = false;
+    var sampleReceipt = null;
     var priorAbsence = runtime.broadcasterAbsence;
     var checkingReturn = isAbsencePaused();
     var statusEl = document.getElementById("auto-status");
@@ -1512,101 +1785,29 @@ underlying system, so should run in the browser, Node, or Plask.
       if (checkAbsenceStop()) return;
       if (checkingReturn && isAbsencePaused()) return;
       if (!snapshot) {
-        runtime.pendingHistoryGap = true;
+        markSessionGap();
         if (statusEl) {
           statusEl.textContent = "Scan skipped (unreliable)";
           statusEl.style.color = "var(--panel-negative)";
         }
         return;
       }
-      priorState = {
-        users: runtime.users,
-        roomTotal: runtime.roomTotal,
-        previousUserCount: runtime.previousUserCount,
-        previousRoomTotal: runtime.previousRoomTotal,
-        previousCounts: runtime.previousCounts,
-        hasTrendBaseline: runtime.hasTrendBaseline,
-        lastAcceptedAcquisition: runtime.lastAcceptedAcquisition,
-        restoredDisplayFrame: runtime.restoredDisplayFrame,
-        pendingHistoryGap: runtime.pendingHistoryGap,
+      sampleReceipt = acceptRoomSnapshot(snapshot, context.room);
+      priorState = Object.assign({}, sampleReceipt.before, {
         trendHTML: (document.getElementById("trend-container") || {}).innerHTML,
         trendHeaderText: (document.getElementById("trend-header-label") || {}).textContent,
-        history: Object.fromEntries(Object.keys(runtime.history).map(function(key) {
-          return [key, runtime.history[key].slice()];
-        })),
-        roomTotalHigh: runtime.roomTotalHigh,
-        roomTotalHighTime: runtime.roomTotalHighTime,
-        tierHighTimes: Object.fromEntries(Object.entries(runtime.tierHighTimes)),
-        withTokensHighTime: runtime.withTokensHighTime,
-        totalHighTime: runtime.totalHighTime,
-        anonHighTime: runtime.anonHighTime,
-        femaleTransHighTime: runtime.femaleTransHighTime,
-        sessionStartedAt: runtime.sessionStartedAt,
-        sessionHighs: Object.fromEntries(Object.entries(runtime.sessionHighs).map(function(entry) {
-          return [entry[0], Object.assign({}, entry[1])];
-        })),
-        allTimeHighs: readAllTimeHighs(context.room).highs,
-        newHighTiers: Object.fromEntries(Object.entries(runtime.newHighTiers))
-      };
-      var diagnostics = acceptRoomSnapshot(snapshot, context.room);
-      var counts = { "red": 0, "green": 0, "purple": 0, "pink": 0, "dark-blue": 0, "light-blue": 0, "gray": 0, "female-trans": 0 };
-      runtime.users.forEach(function(data) {
-        if (counts[data.tier] !== void 0) counts[data.tier]++;
-        if (data.gender === "female" || data.gender === "trans") {
-          counts["female-trans"]++;
-        }
+        allTimeHighs: readAllTimeHighs(context.room).highs
       });
-      var total = runtime.users.size;
-      var withTokens = counts["red"] + counts["green"] + counts["purple"] + counts["pink"] + counts["dark-blue"] + counts["light-blue"];
-      var anonymousCount = getAnonymousCount();
-      runtime.previousUserCount = total;
-      runtime.previousRoomTotal = runtime.roomTotal;
-      var currentRoomTotal = runtime.roomTotal > 0 ? runtime.roomTotal : total + anonymousCount;
-      if (currentRoomTotal > runtime.roomTotalHigh) {
-        runtime.roomTotalHigh = currentRoomTotal;
-        runtime.roomTotalHighTime = Date.now();
-      }
-      saveToHistory();
-      runtime.hasTrendBaseline = true;
+      var diagnostics = sampleReceipt.diagnostics;
+      if (!runtime.isMinimized) drawAllSparklines();
       updateDisplay();
       updateTrendDisplay();
-      runtime.previousCounts = {
-        "red": counts["red"] || 0,
-        "green": counts["green"] || 0,
-        "purple": counts["purple"] || 0,
-        "pink": counts["pink"] || 0,
-        "dark-blue": counts["dark-blue"] || 0,
-        "light-blue": counts["light-blue"] || 0,
-        "gray": counts["gray"] || 0,
-        "female-trans": counts["female-trans"] || 0,
-        "withTokens": withTokens || 0,
-        "total": total || 0,
-        "anonymous": anonymousCount || 0
-      };
       updateAcquisitionStatus();
-      sampleCommitted = true;
+      sampleCommitted = isAcquisitionCurrent(context) && commitAcceptedSample(sampleReceipt);
+      if (!sampleCommitted) abortAcceptedSample(sampleReceipt);
     } catch (err) {
-      if (priorState) {
-        runtime.users = priorState.users;
-        runtime.roomTotal = priorState.roomTotal;
-        runtime.previousUserCount = priorState.previousUserCount;
-        runtime.previousRoomTotal = priorState.previousRoomTotal;
-        runtime.previousCounts = priorState.previousCounts;
-        runtime.hasTrendBaseline = priorState.hasTrendBaseline;
-        runtime.lastAcceptedAcquisition = priorState.lastAcceptedAcquisition;
-        runtime.restoredDisplayFrame = priorState.restoredDisplayFrame;
-        runtime.history = priorState.history;
-        runtime.pendingHistoryGap = priorState.pendingHistoryGap;
-        runtime.roomTotalHigh = priorState.roomTotalHigh;
-        runtime.roomTotalHighTime = priorState.roomTotalHighTime;
-        runtime.tierHighTimes = priorState.tierHighTimes;
-        runtime.withTokensHighTime = priorState.withTokensHighTime;
-        runtime.totalHighTime = priorState.totalHighTime;
-        runtime.anonHighTime = priorState.anonHighTime;
-        runtime.femaleTransHighTime = priorState.femaleTransHighTime;
-        runtime.sessionStartedAt = priorState.sessionStartedAt;
-        runtime.sessionHighs = priorState.sessionHighs;
-        runtime.newHighTiers = priorState.newHighTiers || {};
+      var rolledBack = sampleReceipt && abortAcceptedSample(sampleReceipt);
+      if (rolledBack && priorState) {
         try {
           var trendEl = document.getElementById("trend-container");
           if (trendEl && typeof priorState.trendHTML === "string") trendEl.innerHTML = priorState.trendHTML;
@@ -1619,7 +1820,7 @@ underlying system, so should run in the browser, Node, or Plask.
           log("Could not repaint previous data: " + displayError.message);
         }
       }
-      runtime.pendingHistoryGap = true;
+      if (isAcquisitionCurrent(context)) markSessionGap();
       log("Error during scan; retaining previous valid data: " + err.message);
     } finally {
       if (sampleCommitted) {
@@ -1901,50 +2102,11 @@ underlying system, so should run in the browser, Node, or Plask.
     }
   }
   function restoreSessionState(data) {
-    runtime.users = /* @__PURE__ */ new Map();
-    runtime.roomTotal = 0;
-    runtime.previousUserCount = 0;
-    runtime.previousRoomTotal = 0;
-    runtime.lastAcceptedAcquisition = null;
-    runtime.newHighTiers = {};
-    runtime.history = data.history;
-    runtime.pendingHistoryGap = true;
-    runtime.tierHighTimes = data.tierHighTimes;
-    runtime.withTokensHighTime = data.withTokensHighTime;
-    runtime.totalHighTime = data.totalHighTime;
-    runtime.anonHighTime = data.anonHighTime;
-    runtime.femaleTransHighTime = data.femaleTransHighTime;
-    runtime.roomTotalHigh = data.roomTotalHigh;
-    runtime.roomTotalHighTime = data.roomTotalHighTime;
-    runtime.trackingStartTime = data.trackingStartTime;
-    runtime.sessionStartedAt = data.sessionStartedAt;
-    runtime.sessionStartEstimated = data.sessionStartEstimated;
-    runtime.sessionHighs = data.sessionHighs;
-    syncHighTimes();
-    runtime.isPaused = data.isPaused;
-    runtime.isStopped = data.isStopped;
-    runtime.stoppedAt = data.stoppedAt;
-    runtime.stopReason = data.stopReason;
-    runtime.broadcasterAbsence = data.broadcasterAbsence;
-    runtime.absencePausedAt = data.absencePausedAt;
-    runtime.absenceOverrideActive = data.absenceOverrideActive;
+    var snapshot = createPlaybackSnapshot(data.history);
+    restoreLiveSession(data, getPlaybackFrame(snapshot, snapshot.durationMs));
     runtime.lastScheduledIntervalSeconds = getEffectiveScanIntervalSeconds();
-    runtime.pausedElapsedTime = data.pausedElapsedTime;
-    runtime.previousCounts = data.previousCounts;
-    runtime.hasTrendBaseline = data.hasTrendBaseline;
     runtime.trendComparisonMode = data.trendComparisonMode;
     runtime.autoTrendEscalation = data.autoTrendEscalation;
-    var snapshot = createPlaybackSnapshot(runtime.history);
-    runtime.restoredDisplayFrame = getPlaybackFrame(snapshot, snapshot.durationMs);
-    if (runtime.restoredDisplayFrame) {
-      runtime.restoredDisplayFrame.isRestored = true;
-      runtime.restoredDisplayFrame.playbackNewHighTiers = {};
-      runtime.STORAGE_HISTORY_SERIES.forEach(function(key) {
-        var value = runtime.history[key][runtime.history[key].length - 1];
-        if (value > 0 && value >= getSessionHigh(key, 0).value) runtime.restoredDisplayFrame.playbackNewHighTiers[key] = true;
-      });
-      runtime.restoredDisplayFrame.roomTotalHigh = Math.max(runtime.roomTotalHigh, runtime.restoredDisplayFrame.roomTotalHigh);
-    }
   }
   function getStorageReportStatus(model) {
     if (!model || model === "unknown") return { producer: "Unknown (no saved session)", access: "No room" };
@@ -1965,9 +2127,7 @@ underlying system, so should run in the browser, Node, or Plask.
         updateAcquisitionStatus();
         return;
       }
-      runtime.STORAGE_HISTORY_SERIES.forEach(function(series) {
-        if (!runtime.sessionHighs[series]) runtime.sessionHighs[series] = getSessionHigh(series, 0);
-      });
+      prepareSessionHighsForSave();
       var saveData = {
         schemaVersion: runtime.STORAGE_SCHEMA_VERSION,
         producerVersion: runtime.TIERSCOPE_VERSION,
@@ -2016,7 +2176,7 @@ underlying system, so should run in the browser, Node, or Plask.
     }
   }
   function loadSession(model) {
-    runtime.restoredDisplayFrame = null;
+    clearRestoredSessionFrame();
     if (!model || model === "unknown") return false;
     leavePlayback(false);
     var key = getStorageKey(model);
@@ -2520,10 +2680,7 @@ underlying system, so should run in the browser, Node, or Plask.
     var withTokens = counts["red"] + counts["green"] + counts["purple"] + counts["pink"] + counts["dark-blue"] + counts["light-blue"];
     var anonymousCount = getAnonymousCount();
     var fullRoomTotal = runtime.roomTotal > total ? runtime.roomTotal : total + anonymousCount;
-    if (fullRoomTotal > runtime.roomTotalHigh) {
-      runtime.roomTotalHigh = fullRoomTotal;
-      runtime.roomTotalHighTime = Date.now();
-    }
+    noteSessionRoomHigh(fullRoomTotal, Date.now());
     if (runtime.presentationMode === "PLAYBACK") return;
     renderDisplayFrame({
       counts,
@@ -4652,22 +4809,10 @@ underlying system, so should run in the browser, Node, or Plask.
     }
   }
   function getSessionHigh(key, current) {
-    var saved = runtime.sessionHighs[key];
-    if (!saved) {
-      var values = runtime.history[key] || [];
-      var value = Math.max.apply(null, [0].concat(values));
-      saved = { value, time: value > 0 ? runtime.history.timestamps[values.indexOf(value)] : null };
-    }
-    return { value: Math.max(saved.value, current || 0), time: saved.time };
+    return readSessionHigh(key, current);
   }
   function syncHighTimes() {
-    Object.keys(runtime.TIERS).forEach(function(key) {
-      runtime.tierHighTimes[key] = getSessionHigh(key, 0).time;
-    });
-    runtime.withTokensHighTime = getSessionHigh("withTokens", 0).time;
-    runtime.totalHighTime = getSessionHigh("total", 0).time;
-    runtime.anonHighTime = getSessionHigh("anonymous", 0).time;
-    runtime.femaleTransHighTime = getSessionHigh("female-trans", 0).time;
+    synchronizeSessionHighTimes();
   }
   function getDisplayHigh(frame, key, current) {
     if (runtime.highMode === "ath") return displayedAllTimeState().highs[key];
@@ -4849,33 +4994,17 @@ underlying system, so should run in the browser, Node, or Plask.
     return Math.max(runtime.scanIntervalSeconds, Date.now() - runtime.broadcasterAbsence.since >= 10 * 6e4 ? 300 : 120);
   }
   function nextBroadcasterAbsence(snapshot) {
-    if (snapshot.source !== "API") return runtime.broadcasterAbsence;
-    if (snapshot.users.some(function(user) {
-      return user.isOwner === true;
-    })) {
-      runtime.absenceOverrideActive = false;
-      return { since: null, missing: 0 };
-    }
-    if (runtime.absenceOverrideActive || !runtime.isAutoRefreshOn || runtime.isPaused || runtime.isStopped) return runtime.broadcasterAbsence;
-    return {
-      since: runtime.broadcasterAbsence.since === null ? Date.now() : runtime.broadcasterAbsence.since,
-      missing: Math.min(1e6, runtime.broadcasterAbsence.missing + 1)
-    };
+    return nextSessionAbsence(Object.assign({}, snapshot, { observedAt: Date.now() }));
   }
   function stopDescription() {
     return runtime.stopReason === "absence" ? runtime.absencePausedAt !== null ? "Stopped after 3 hours auto-paused for broadcaster absence" : "Stopped after 3 hours of broadcaster absence" : "Session stopped";
   }
   function checkAbsenceStop() {
     if (runtime.isStopped || !runtime.isAutoRefreshOn || runtime.absenceOverrideActive) return false;
-    if (runtime.absencePausedAt === null && !runtime.isPaused && runtime.broadcasterAbsence.missing >= 2 && runtime.broadcasterAbsence.since !== null && Date.now() - runtime.broadcasterAbsence.since >= runtime.ABSENCE_PAUSE_MS) {
-      runtime.absencePausedAt = runtime.broadcasterAbsence.since + runtime.ABSENCE_PAUSE_MS;
+    if (pauseSessionForAbsence(Date.now(), runtime.ABSENCE_PAUSE_MS)) {
       runtime.scanEpoch++;
       runtime.isScanning = false;
-      runtime.pausedElapsedTime = runtime.trackingStartTime ? Math.max(0, runtime.absencePausedAt - runtime.trackingStartTime) : 0;
-      runtime.isPaused = true;
-      if (runtime.trackingTimerInterval) clearInterval(runtime.trackingTimerInterval);
-      runtime.trackingTimerInterval = null;
-      runtime.pendingHistoryGap = true;
+      stopTrackingTimer();
       cancelHighPulses();
       runtime.nextScanAt = Math.max(Date.now(), readRequestPolicy().until);
       updateTrackingTimer();
@@ -4911,20 +5040,12 @@ underlying system, so should run in the browser, Node, or Plask.
     });
   }
   function stopTracking(reason) {
-    if (runtime.isStopped) return;
-    runtime.stopReason = reason === "absence" ? "absence" : "manual";
-    runtime.stoppedAt = runtime.stopReason === "absence" && runtime.broadcasterAbsence.since !== null ? Math.min(Date.now(), (runtime.absencePausedAt !== null ? runtime.absencePausedAt : runtime.broadcasterAbsence.since) + runtime.ABSENCE_STOP_MS) : Date.now();
-    runtime.isStopped = true;
+    if (!stopLiveSession(reason, Date.now(), runtime.ABSENCE_STOP_MS)) return;
     runtime.scanEpoch++;
     runtime.isScanning = false;
-    runtime.isAutoRefreshOn = false;
     stopCountdown();
     runtime.nextScanAt = 0;
-    if (!runtime.isPaused) runtime.pausedElapsedTime = runtime.trackingStartTime ? Math.max(0, runtime.stoppedAt - runtime.trackingStartTime) : 0;
-    runtime.isPaused = true;
-    if (runtime.trackingTimerInterval) clearInterval(runtime.trackingTimerInterval);
-    runtime.trackingTimerInterval = null;
-    runtime.pendingHistoryGap = false;
+    stopTrackingTimer();
     cancelHighPulses();
     updateTrackingTimer();
     updateStopControls();
@@ -4938,7 +5059,6 @@ underlying system, so should run in the browser, Node, or Plask.
     if (!confirm("Start a new session?\n\nThe chart and elapsed time will start from zero. Export this stopped session first if you want to keep a report, CSV or GIF. Its saved record is retained until normal storage cleanup.")) return;
     saveSession(getModelName());
     runtime.tabRecords.delete(getStorageKey(getModelName()));
-    runtime.isAutoRefreshOn = true;
     resetTrackingData(false);
   }
   function updateTrackingTimer() {
@@ -4959,14 +5079,7 @@ underlying system, so should run in the browser, Node, or Plask.
     checkTrendAutoEscalation();
   }
   function startTrackingTimer() {
-    if (runtime.isStopped) return;
-    if (runtime.sessionStartedAt === null) runtime.sessionStartedAt = Date.now();
-    if (runtime.isPaused) {
-      runtime.isPaused = false;
-      runtime.trackingStartTime = Date.now() - runtime.pausedElapsedTime;
-    } else if (!runtime.trackingStartTime) {
-      runtime.trackingStartTime = Date.now();
-    }
+    if (!startSessionClock(Date.now())) return;
     if (runtime.trackingTimerInterval) {
       clearInterval(runtime.trackingTimerInterval);
       runtime.trackingTimerInterval = null;
@@ -4976,10 +5089,7 @@ underlying system, so should run in the browser, Node, or Plask.
     saveSession(getModelName());
   }
   function pauseTrackingTimer() {
-    if (runtime.isPaused) return;
-    runtime.pendingHistoryGap = true;
-    runtime.isPaused = true;
-    runtime.pausedElapsedTime = runtime.trackingStartTime ? Math.max(0, Date.now() - runtime.trackingStartTime) : 0;
+    if (!pauseSessionClock(Date.now())) return;
     if (runtime.trackingTimerInterval) {
       clearInterval(runtime.trackingTimerInterval);
       runtime.trackingTimerInterval = null;
@@ -4992,36 +5102,6 @@ underlying system, so should run in the browser, Node, or Plask.
       clearInterval(runtime.trackingTimerInterval);
       runtime.trackingTimerInterval = null;
     }
-    runtime.trackingStartTime = null;
-    runtime.sessionStartedAt = null;
-    runtime.sessionStartEstimated = false;
-    runtime.sessionHighs = {};
-    runtime.pausedElapsedTime = 0;
-    runtime.isPaused = false;
-    runtime.roomTotalHighTime = null;
-    runtime.tierHighTimes = {};
-    runtime.withTokensHighTime = null;
-    runtime.totalHighTime = null;
-    runtime.anonHighTime = null;
-    runtime.femaleTransHighTime = null;
-    runtime.previousCounts = {
-      "red": 0,
-      "green": 0,
-      "purple": 0,
-      "pink": 0,
-      "dark-blue": 0,
-      "light-blue": 0,
-      "gray": 0,
-      "female-trans": 0,
-      "withTokens": 0,
-      "total": 0,
-      "anonymous": 0
-    };
-    runtime.hasTrendBaseline = false;
-    runtime.trendComparisonMode = "last";
-    runtime.autoTrendEscalation = true;
-    runtime.newHighTiers = {};
-    updateTrackingTimer();
   }
   function resetAllTracking() {
     if (!isBroadcastRoom()) return;
@@ -5037,65 +5117,17 @@ underlying system, so should run in the browser, Node, or Plask.
     cancelGifExport();
     log("Performing main reset...");
     if (deleteSaved) deleteSession(modelName);
-    runtime.isStopped = false;
-    runtime.stoppedAt = null;
-    runtime.stopReason = null;
-    runtime.broadcasterAbsence = { since: null, missing: 0 };
-    runtime.absencePausedAt = null;
-    runtime.absenceOverrideActive = false;
     runtime.activeSessionStorageKey = getStorageKey(modelName);
     runtime.scanEpoch++;
     runtime.isScanning = false;
     stopCountdown();
     stopTrackingTimer();
-    runtime.isPaused = !runtime.isAutoRefreshOn;
-    runtime.users.clear();
-    runtime.lastAcceptedAcquisition = null;
-    runtime.restoredDisplayFrame = null;
+    resetLiveSession(deleteSaved ? "reset" : "start");
     runtime.lastAcquisitionAttemptSource = "API";
     runtime.domHealthStatus.consecutiveFailures = 0;
-    updateAcquisitionStatus();
-    runtime.previousUserCount = 0;
-    runtime.previousRoomTotal = 0;
-    runtime.roomTotal = 0;
-    runtime.roomTotalHigh = 0;
-    runtime.previousCounts = {
-      "red": 0,
-      "green": 0,
-      "purple": 0,
-      "pink": 0,
-      "dark-blue": 0,
-      "light-blue": 0,
-      "gray": 0,
-      "female-trans": 0,
-      "withTokens": 0,
-      "total": 0,
-      "anonymous": 0
-    };
-    runtime.hasTrendBaseline = false;
     runtime.trendComparisonMode = "last";
     runtime.autoTrendEscalation = true;
-    runtime.newHighTiers = {};
-    runtime.history = {
-      timestamps: [],
-      "red": [],
-      "green": [],
-      "purple": [],
-      "pink": [],
-      "dark-blue": [],
-      "light-blue": [],
-      "gray": [],
-      "female-trans": [],
-      "withTokens": [],
-      "total": [],
-      "anonymous": []
-    };
-    runtime.roomTotalHighTime = null;
-    runtime.tierHighTimes = {};
-    runtime.withTokensHighTime = null;
-    runtime.totalHighTime = null;
-    runtime.anonHighTime = null;
-    runtime.femaleTransHighTime = null;
+    updateAcquisitionStatus();
     resetCountdown();
     updateDisplay();
     updateTrendDisplay();
@@ -5261,11 +5293,10 @@ underlying system, so should run in the browser, Node, or Plask.
       runtime.scanEpoch++;
       runtime.isScanning = false;
     }
-    runtime.absencePausedAt = null;
-    runtime.broadcasterAbsence = { since: null, missing: 0 };
-    runtime.isAutoRefreshOn = false;
+    pauseSessionRecording(Date.now());
     stopCountdown();
-    pauseTrackingTimer();
+    stopTrackingTimer();
+    updateTrackingTimer();
     updateStopControls();
     updateCountdownDisplay();
     updateAcquisitionStatus();
@@ -5285,15 +5316,12 @@ underlying system, so should run in the browser, Node, or Plask.
     if (overridingAbsence) {
       runtime.scanEpoch++;
       runtime.isScanning = false;
-      runtime.absenceOverrideActive = true;
     }
-    runtime.absencePausedAt = null;
-    runtime.broadcasterAbsence = { since: null, missing: 0 };
     var policy = readRequestPolicy();
     if (policy.blocked) {
       writeRequestPolicy({ until: policy.serverUntil || 0, serverUntil: policy.serverUntil || 0, failures: 0, blocked: 0, status: 0, revision: "" });
     }
-    runtime.isAutoRefreshOn = true;
+    resumeSessionRecording(Date.now(), overridingAbsence);
     startTrackingTimer();
     startCountdown();
     performScanThenReturn(true);
@@ -5412,12 +5440,7 @@ underlying system, so should run in the browser, Node, or Plask.
     return 0;
   }
   function getAnonymousCount() {
-    if (runtime.lastAcceptedAcquisition && runtime.lastAcceptedAcquisition.source === "API") {
-      return runtime.lastAcceptedAcquisition.api.anonymousCount;
-    }
-    var tracked = runtime.users.size;
-    if (runtime.roomTotal > tracked) return runtime.roomTotal - tracked;
-    return 0;
+    return sessionAnonymousCount();
   }
   function extractUsername(text) {
     if (!text) return null;
@@ -6419,11 +6442,10 @@ underlying system, so should run in the browser, Node, or Plask.
     }
     if (!loaded) {
       runtime.isMinimized = !isRoom;
-      runtime.isAutoRefreshOn = isRoom;
     } else {
       runtime.isMinimized = false;
-      runtime.isAutoRefreshOn = !runtime.isStopped && (!runtime.isPaused || runtime.absencePausedAt !== null);
     }
+    configureSessionTracking(loaded, isRoom);
     try {
       createPanel();
     } catch (e) {
@@ -6551,18 +6573,15 @@ underlying system, so should run in the browser, Node, or Plask.
       if (oldModel && oldModel !== "unknown") {
         saveSession(oldModel);
       }
-      runtime.newHighTiers = {};
       runtime.activeSessionStorageKey = null;
       stopCountdown();
       runtime.nextScanAt = 0;
       runtime.countdownSeconds = runtime.scanIntervalSeconds;
       stopTrackingTimer();
-      runtime.isStopped = false;
-      runtime.stoppedAt = null;
-      runtime.stopReason = null;
-      runtime.broadcasterAbsence = { since: null, missing: 0 };
-      runtime.absencePausedAt = null;
-      runtime.absenceOverrideActive = false;
+      resetLiveSession("navigate");
+      runtime.trendComparisonMode = "last";
+      runtime.autoTrendEscalation = true;
+      updateTrackingTimer();
       cleanupDragListeners();
       if (runtime.miniSettingsKeyHandler) {
         document.removeEventListener("keydown", runtime.miniSettingsKeyHandler, true);
@@ -6574,41 +6593,9 @@ underlying system, so should run in the browser, Node, or Plask.
         runtime.healthCheckInterval = null;
       }
       runtime.currentScale = runtime.panelGeometry ? runtime.panelGeometry.scale : runtime.currentScale;
-      runtime.users.clear();
-      runtime.roomTotal = 0;
-      runtime.lastAcceptedAcquisition = null;
-      runtime.restoredDisplayFrame = null;
       runtime.lastAcquisitionAttemptSource = "API";
       runtime.domHealthStatus.consecutiveFailures = 0;
       updateAcquisitionStatus();
-      runtime.previousUserCount = 0;
-      runtime.previousRoomTotal = 0;
-      Object.keys(runtime.history).forEach(function(k) {
-        runtime.history[k] = [];
-      });
-      runtime.previousCounts = {
-        "red": 0,
-        "green": 0,
-        "purple": 0,
-        "pink": 0,
-        "dark-blue": 0,
-        "light-blue": 0,
-        "gray": 0,
-        "female-trans": 0,
-        "withTokens": 0,
-        "total": 0,
-        "anonymous": 0
-      };
-      runtime.hasTrendBaseline = false;
-      runtime.trendComparisonMode = "last";
-      runtime.autoTrendEscalation = true;
-      runtime.roomTotalHigh = 0;
-      runtime.roomTotalHighTime = null;
-      runtime.tierHighTimes = {};
-      runtime.withTokensHighTime = null;
-      runtime.totalHighTime = null;
-      runtime.anonHighTime = null;
-      runtime.femaleTransHighTime = null;
       runtime.initGuard++;
       scheduleInit(2002);
     }
@@ -6617,7 +6604,7 @@ underlying system, so should run in the browser, Node, or Plask.
   // src/runtime.js
   var runtime = {};
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.6.1";
+    runtime.TIERSCOPE_VERSION = "3.7.0";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;
@@ -6958,6 +6945,7 @@ underlying system, so should run in the browser, Node, or Plask.
     runtime.chartTimeCache = /* @__PURE__ */ new WeakMap();
     runtime.panelBackgroundPercent = 95;
     runtime.lastUrl = location.href;
+    initializeLiveSession(runtime);
     runtime.urlCheckInterval = setInterval(checkUrlChange, 500);
     window.addEventListener("beforeunload", function() {
       cancelGifExport();

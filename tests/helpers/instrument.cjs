@@ -8,6 +8,11 @@ const eslintScope = require('eslint-scope');
 // shipped bundle. No test hooks or compatibility aliases enter production.
 const stateNames = new Set([...fs.readFileSync(path.join(__dirname, '../../src/runtime.js'), 'utf8')
   .matchAll(/\bruntime\.([A-Za-z_$][\w$]*)\s*=/g)].map(match => match[1]));
+// Old fixtures can seed adversarial state directly, but only inside the test
+// copy. Production runtime properties are getter-only and writes use operations.
+const sessionModule = acorn.parse(fs.readFileSync(path.join(__dirname, '../../src/live-session.js'), 'utf8'), {ecmaVersion: 2022, sourceType: 'module'});
+const ownedStateNames = new Set(sessionModule.body.find(n => n.declaration?.declarations?.[0]?.id.name === 'LIVE_SESSION_FIELDS')
+  .declaration.declarations[0].init.arguments[0].elements.map(n => n.value));
 const cache = new Map();
 
 // Bundlers may print shorthand properties and 2e3 instead of 2000. Restore
@@ -45,7 +50,7 @@ function instrument(source) {
     if (!stateNames.has(id.name)) continue;
     const parent = parents.get(id);
     const shorthand = parent.type === 'Property' && parent.shorthand && parent.value === id;
-    edits.set(id.start, {start: id.start, end: id.end, text: (shorthand ? id.name + ': ' : '') + 'runtime.' + id.name});
+    edits.set(id.start, {start: id.start, end: id.end, text: (shorthand ? id.name + ': ' : '') + (ownedStateNames.has(id.name) ? 'liveSessionState.' : 'runtime.') + id.name});
   }
   for (const edit of [...edits.values()].sort((a,b) => b.start - a.start)) {
     source = source.slice(0, edit.start) + edit.text + source.slice(edit.end);

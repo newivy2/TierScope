@@ -1,3 +1,4 @@
+import { readSessionHigh, synchronizeSessionHighTimes } from './live-session.js';
 import { compactNumber } from './compact.js';
 import { validateSessionFile } from './files.js';
 import { updateDisplay } from './panel.js';
@@ -280,21 +281,11 @@ export function pulseAcceptedHighs(priorState) {
 }
 
 export function getSessionHigh(key, current) {
-    var saved = runtime.sessionHighs[key];
-    if (!saved) {
-        var values = runtime.history[key] || [];
-        var value = Math.max.apply(null, [0].concat(values));
-        saved = { value: value, time: value > 0 ? runtime.history.timestamps[values.indexOf(value)] : null };
-    }
-    return { value: Math.max(saved.value, current || 0), time: saved.time };
+    return readSessionHigh(key, current);
 }
 
 export function syncHighTimes() {
-    Object.keys(runtime.TIERS).forEach(function(key) { runtime.tierHighTimes[key] = getSessionHigh(key, 0).time; });
-    runtime.withTokensHighTime = getSessionHigh('withTokens', 0).time;
-    runtime.totalHighTime = getSessionHigh('total', 0).time;
-    runtime.anonHighTime = getSessionHigh('anonymous', 0).time;
-    runtime.femaleTransHighTime = getSessionHigh('female-trans', 0).time;
+    synchronizeSessionHighTimes();
 }
 
 export function getDisplayHigh(frame, key, current) {

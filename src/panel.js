@@ -1,3 +1,4 @@
+import { noteSessionRoomHigh } from './live-session.js';
 import { hideChartTooltip } from './charts.js';
 import { updateCompactDashboard } from './compact.js';
 import { getAnonymousCount } from './dom.js';
@@ -436,10 +437,7 @@ export function updateDisplay() {
     var withTokens = counts['red'] + counts['green'] + counts['purple'] + counts['pink'] + counts['dark-blue'] + counts['light-blue'];
     var anonymousCount = getAnonymousCount();
     var fullRoomTotal = runtime.roomTotal > total ? runtime.roomTotal : (total + anonymousCount);
-    if (fullRoomTotal > runtime.roomTotalHigh) {
-        runtime.roomTotalHigh = fullRoomTotal;
-        runtime.roomTotalHighTime = Date.now();
-    }
+    noteSessionRoomHigh(fullRoomTotal, Date.now());
     if (runtime.presentationMode === 'PLAYBACK') return;
     renderDisplayFrame({ counts: counts, total: total, withTokens: withTokens,
         anonymousCount: anonymousCount, fullRoomTotal: fullRoomTotal, roomTotalHigh: runtime.roomTotalHigh,
