@@ -46,7 +46,7 @@ test('new import cycles are rejected; the reviewed remaining cycles are limited 
 });
 
 test('panel views have no dependency on owners, live selectors, controllers or storage', () => {
-  const views = ['panel-view.js', 'compact-view.js', 'trend-view.js', 'status-view.js', 'chart-view.js'];
+  const views = ['panel-view.js', 'compact-view.js', 'trend-view.js', 'status-view.js', 'chart-view.js', 'library-dock.js', 'library-shell.js', 'recording-export-data.js'];
   const permitted = new Set([...views, 'display-values.js', 'format.js', 'history-data.js', 'theme-values.js', 'runtime.js']);
   for (const view of views) {
     assert.deepEqual([...dependencies(view)].filter(file => !permitted.has(file)), [], view);
@@ -79,7 +79,7 @@ test('owners and data/view layers remain outside every import cycle', () => {
   const protectedModules = ['live-session.js', 'playback-state.js', 'playback-data.js', 'display-model.js', 'presentation-data.js',
     'presentation.js', 'presentation-status.js', 'status-model.js', 'session-selectors.js', 'session-capture.js', 'high-selectors.js',
     'request-policy.js', 'storage.js', 'highs-store.js', 'backup.js', 'session-library.js', 'session-file-format.js',
-    'panel-view.js', 'compact-view.js', 'trend-view.js', 'status-view.js', 'chart-view.js'];
+    'panel-view.js', 'compact-view.js', 'trend-view.js', 'status-view.js', 'chart-view.js', 'library-dock.js', 'library-shell.js', 'recording-export-data.js'];
   for (const file of protectedModules) {
     assert(!graph[file].some(dependency => dependencies(dependency).has(file)), file);
   }

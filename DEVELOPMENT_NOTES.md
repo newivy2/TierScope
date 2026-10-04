@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **version 3.6.1**. This maintenance release makes diagnostics non-throwing and uses one room-route parser for startup and action targets. Reset is disabled on directory pages; file replay can still add or clear ATH for the recording's own room. The 3.6.0 features include a model-organized recording library, time-aware summaries, comparison, backup and restore, and visible session-save feedback while preserving the existing panel and tracking features. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For a quick introduction and installation links, see the [README](readme.md).
+Detailed reference for **3.9.0-beta.1**. This beta turns Library into an attached left-hand page, moves file and export actions there, and simplifies the main controls. Tracking, replay, storage formats and retention stay compatible with 3.8.0. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation links, see the [README](readme.md).
 
 ## Contents
 
@@ -40,7 +40,7 @@ Keep only one enabled copy of TierScope. After an update, refresh existing room 
 | Header / drag area | Move the panel; save its position when you release it. |
 | Pink upper-left resize handle | Scale the panel; save its size when you release it. |
 | **100%** in the header | Restore standard scale while keeping row visibility and session data. |
-| **Full ▾ / 4h ▾ / 2h ▾ / 1h ▾ / 30m ▾ / 15m ▾** in the expanded header | Open chart-window and session-file options. |
+| **Full ▾ / 4h ▾ / 2h ▾ / 1h ▾ / 30m ▾ / 15m ▾** in the expanded header | Open chart-window and high-record options. |
 | **−**, **+**, or **Expand** | Switch between expanded and compact views. |
 | **⏸ / ▶** in Controls or compact view | Pause or resume the current session. An already-running scan may finish. |
 | **■ Stop** | Confirm closing the session, freeze elapsed time and history, and discard pending scan results. |
@@ -50,11 +50,8 @@ Keep only one enabled copy of TierScope. After an update, refresh existing room 
 | Boxed icon in the collapsed-row strip | Restore its row to its original position. |
 | Lamp slider | Adjust the main background and standard tier-row fills. |
 | Moon checkbox at the bottom right of Controls | Checked for dark mode; unchecked for bright mode. |
-| **TXT** | Download a text summary of the current session. |
-| **CSV** | Download every retained history sample, including collapsed tiers. |
 | **Replay** | Open recorded history for the current room. |
-| **Save** | Download the current session as a file for later Replay. |
-| **Open** | Open a saved session file in FILE REPLAY. |
+| **Library** | Open recordings, model folders, session files and exports, summaries, comparison and backups beside the chart. |
 | **Reset** | Confirm clearing this room’s history, counters, and elapsed time, then request one fresh scan. Keep the automatic-scan pause state and layout preferences. |
 
 The default scan interval is **60 seconds**, counted after a scan finishes. A new, unpaused room session requests its first sample as soon as the panel is initialized, then starts the normal countdown when that attempt completes. Existing retry waits and access restrictions still apply. Restored sessions keep their existing startup behavior; paused sessions wait for Resume. Faster polling does not guarantee fresher data from the site.
@@ -216,15 +213,15 @@ Replay freezes the available history when opened. New scans continue updating th
 
 ## Session files
 
-Click **Save** beside Replay in Controls. The download ends in `.tierscope.json` and contains the room name, capture time, full retained sample history, gap markers, session highs and their recorded times, session start information, active elapsed time, and paused/stopped state. It contains aggregate counts, without viewer username collections. A running session can be saved without pausing or stopping it. Save becomes available after the first recorded sample.
+Click **Library** beside Replay, then **Save file** in the current/replayed recording card. The download ends in `.tierscope.json` and contains the room name, capture time, full retained sample history, gap markers, session highs and their recorded times, session start information, active elapsed time, and paused/stopped state. It contains aggregate counts, without viewer username collections. A running session can be saved without pausing or stopping it. Save becomes available after the first recorded sample.
 
-Click **Open** beside Save to reopen a download. It opens paused in a separate **FILE REPLAY** view, with the same stepping, playback speed, row controls, chart windows, and GIF export as ordinary Replay. The file’s room name stays visible above the Replay controls, independently of the room currently open in the browser. Long names shorten with an ellipsis; hover over the name to read it in full. The options menu shows its room, capture time, sample count, and whole-session room high. The Replay time tooltip includes captured active time and session state. Replay SH values still use retained samples through the selected frame; the file also preserves whole-session highs that may predate those samples. ATH mode compares against the file room's saved all-time records. Opening the file does not add its highs; use the separate **Add to all-time highs** action beside the room name or in the menu.
+Click **Open saved file…** in Library to reopen a download. It opens paused in a separate **FILE REPLAY** view, with the same stepping, playback speed, row controls, chart windows, and GIF export as ordinary Replay. The file’s room name stays visible above the Replay controls, independently of the room currently open in the browser. Long names shorten with an ellipsis; hover over the name to read it in full. The options menu shows its room, capture time, sample count, and whole-session room high. The Replay time tooltip includes captured active time and session state. Replay SH values still use retained samples through the selected frame; the file also preserves whole-session highs that may predate those samples. ATH mode compares against the file room's saved all-time records. Opening the file does not add its highs; use the separate **Add to all-time highs** action in Library or in the chart-window menu.
 
-Both ordinary Replay and FILE REPLAY have **Save** and **Open** buttons below the timeline, beside the time display. Save downloads the full session being replayed without moving playback; Open switches to another saved file. The header menu also retains **Save session file** and **Open session file…**. Open is also available without a live session; on directory pages, expand the panel to reach Controls.
+Both ordinary Replay and FILE REPLAY have a **Library** button beside the playback controls. The library stays open during playback; its current recording card switches to the replay snapshot. **Save file** downloads the entire session without moving playback, and **Open saved file…** switches to another saved file. Open works without a live session; on directory pages, expand the panel to reach Library.
 
 Opening a file does not replace, merge, save over, or resume the current room session. Current live acquisition continues with its existing pause/Stop state. **Close Replay** returns to that room’s latest data. It is also possible to expand TierScope on a directory page and open a file there; opening the file itself makes no acquisition requests. Imported Replay is not automatically restored after refresh or navigation: reopen the file when needed.
 
-The file has no three-hour expiration. Keep the download wherever you normally keep documents. It contains only the samples still retained when captured; it cannot recover data already removed by the 10,000-sample limit. Saving from ordinary Replay captures its entire frozen session, and saving from FILE REPLAY downloads that file’s supported data again. Chart-window selection and playback position do not trim these exports. GIF filenames use the file’s room when exporting imported Replay. TXT and CSV remain in the current room’s live Controls.
+The file has no three-hour expiration. Keep the download wherever you normally keep documents. It contains only the samples still retained when captured; it cannot recover data already removed by the 10,000-sample limit. Saving from ordinary Replay captures its entire frozen session, and saving from FILE REPLAY downloads that file’s supported data again. Chart-window selection and playback position do not trim these exports. GIF filenames use the file’s room when exporting imported Replay. TXT and CSV in Library use the selected current/replayed recording or stored library entry, including samples beyond the playhead.
 
 Files are validated before opening. Unsupported versions, malformed data, empty histories, invalid counts, and files over 8 MB are rejected without replacing the current Replay. File format version 1 uses a `TierScopeSession` envelope with a supported session schema, separately from the userscript version. Import copies only supported aggregate fields; it does not evaluate file contents or restore acquisition settings. A pending file read is discarded after Reset, navigation, closing Replay, or selecting a newer file.
 
@@ -232,7 +229,7 @@ Files are validated before opening. Unsupported versions, malformed data, empty 
 
 GIFs are drawn from recorded audience counts; they do not capture the broadcast video or panel.
 
-Open **Replay**, then click **GIF**. Progress and **Cancel** appear within the existing Replay controls.
+Open **Library**, then click **GIF** in the current/replayed recording card. A stored recording has **More… → GIF**. You do not need to enter replay first. Progress and **Cancel** appear at the top of Library; closing Library cancels generation.
 
 | Property | Output |
 | --- | --- |
@@ -256,17 +253,17 @@ Replay controls belong to the panel. The downloaded GIF does not contain pause, 
 
 ## Session tools
 
-Click **Library** beside the main Replay / Save / Open controls to open the entire **Session tools** window, starting with model folders. Summary, Compare and Backup & restore remain available as tabs. You can also use the chart-window menu in the main header → **Session library, analysis & backup…**. The window supports keyboard navigation, Escape to close, dark/bright themes and small viewports. Closing it returns focus to the Library button or header menu that opened it. Room navigation closes it and discards pending file reads.
+Click **Library** beside Replay in Controls or beside Play in Replay. It opens a matching page to the left of the chart, with Recordings, Summary, Compare and Backup tabs. The chart remains usable. The page follows panel movement, scale and theme; small windows use a scrollable sheet. The × button, Library button or Escape closes it. Temporary space borrowed for docking is restored on close unless you moved the panel. Room navigation closes Library and discards pending file reads.
 
 ### Library
 
-**Keep current / replayed session in library** takes a frozen copy of the full retained recording, including its session highs. In file Replay it keeps the file's recording. **Import session file…** adds a downloaded recording directly. Neither action changes ATH or live history. Re-saving the same recording with a different export timestamp or producer version does not create a duplicate.
+**Keep in library** in the current/replayed recording card takes a frozen copy of the full retained recording, including its session highs. In file Replay it keeps the file's recording. **Import to library…** adds a downloaded recording directly. **Open saved file…** opens one for replay without retaining it automatically. Neither action changes ATH or live history. Re-saving the same recording with a different export timestamp or producer version does not create a duplicate.
 
 Repeated saves recognize the model and recorded session start. A fuller compatible copy updates the existing entry and preserves its custom name; an equal or older/shorter copy does not replace it. Shared samples must agree, so conflicting recordings remain separate even when their start timestamps match. New sessions for the same model remain separate. Updates store the replacement before removing obsolete copies, so a failed save retains the prior recording. After history rollover, the library follows the existing 10,000-sample retention limit; it does not extend live history indefinitely. Estimated legacy start times cannot link windows with no overlapping samples.
 
-Both ordinary Replay and FILE REPLAY also have **Keep in library** below the timeline, to the left of the clock. It keeps the full replayed recording, including samples beyond the playhead. The button confirms **Kept in library**, **Updated library** or **Already kept**; a storage failure shows **Retry keep** with an explanation. Keeping a file uses that file's room and does not add its peaks to ATH. Playback position, speed and the background live session are preserved.
+The current/replayed card names its source and provides **Keep in library**, **Save file**, **TXT**, **CSV**, **GIF**, and **Add to all-time highs**. Keep always stores the whole replayed recording, including samples beyond the playhead, and shows whether it added, updated or already had the recording. A storage failure appears in Library and the action can be retried. Keeping a file uses that file’s room and does not add its peaks to ATH. Playback position, speed and background live data are preserved.
 
-The library opens with alphabetically ordered **model folders**, each showing its recording count and most recent recording date. Open a folder to see that model's recordings, newest first by their first retained sample; **All models** returns to the folder list. Existing recordings are grouped automatically without moving stored data. Keep/import opens the matching model folder. Search by model or title always covers the whole library, including other folders. Rename, replay, download a standalone session file, or confirm deletion. Large lists show 50 folders or recordings at a time with **Show more**. Library Replay has the existing file Replay controls, including explicit Add to ATH. The library persists across session Reset and the temporary session's three-hour expiry. It is kept only in this browser's userscript storage, up to **500 recordings / 25 MB**. Either limit can fill the library; updates also need temporary space to save the replacement safely. Nothing is automatically archived or evicted; a full library asks you to export and remove entries. Unreadable entries are retained and can be explicitly removed.
+The library opens with alphabetically ordered **model folders**, each showing its recording count and most recent recording date. Open a folder to see that model's recordings, newest first by their first retained sample; **All models** returns to the folder list. Existing recordings are grouped automatically without moving stored data. Keep/import opens the matching model folder. Search by model or title always covers the whole library, including other folders. Each recording shows **Replay** and **Summary**; **More…** contains Save file, TXT, CSV, GIF, Add to all-time highs, Rename and confirmed Delete. These exports use that recording without opening it in replay. Large lists show 50 folders or recordings at a time with **Show more**. Library Replay keeps the library open and uses the existing file Replay controls; explicit Add to ATH is available in the recording card. The library persists across session Reset and the temporary session's three-hour expiry. It is kept only in this browser's userscript storage, up to **500 recordings / 25 MB**. Either limit can fill the library; updates also need temporary space to save the replacement safely. Nothing is automatically archived or evicted; a full library asks you to export and remove entries. Unreadable entries are retained and can be explicitly removed.
 
 ### Summary and comparison
 
@@ -288,7 +285,7 @@ Invalid or future formats are rejected before writing. A restore checks availabl
 
 ### Session save feedback
 
-A failed automatic session save displays **Session not saved** in expanded and compact modes. The chart-window menu shows the last successful save time or a storage warning. Live tracking continues; keep the tab open and use Save to download the current session. The warning clears after a successful save. ATH retains its separate storage feedback.
+A failed automatic session save displays **Session not saved** in expanded and compact modes. The live recording card in Library shows the last successful save time or a storage warning. Live tracking continues; keep the tab open and use Save to download the current session. The warning clears after a successful save. ATH retains its separate storage feedback.
 
 ## Understanding the counts
 
@@ -320,11 +317,11 @@ With API samples, owner records are excluded from the seven color tiers but rema
 
 ### TXT session summary
 
-**TXT** downloads a `.txt` file containing the latest displayed session counts, high values and their recorded times, tier breakdowns, acquisition details, and storage/version information. Before the first fresh scan after restoration, it explicitly labels its counts as a saved snapshot. Collapsed rows are included. It is a summary, not a raw time-series export.
+**TXT** in the current live card downloads a `.txt` file containing the latest displayed session counts, high values and their recorded times, tier breakdowns, acquisition details, and storage/version information. Before the first fresh scan after restoration, it explicitly labels its counts as a saved snapshot. Collapsed rows are included. It is a summary, not a raw time-series export. For replay or a stored recording, TXT reports that recording’s room, original timing, final retained counts, and full-session highs with their real timestamps, without borrowing live-room diagnostics.
 
 ### CSV history
 
-Click **CSV** next to TXT in live Controls to download the current room’s **entire retained history**, with one row per sample. Unlike the GIF, this export is not limited to 60 frames. It includes all tiers regardless of which panel rows are collapsed.
+Click **CSV** in Library’s current/replayed card or a stored recording’s **More…** actions to download that recording’s **entire retained history**, with one row per sample. Unlike the GIF, this export is not limited to 60 frames. It includes all tiers regardless of which panel rows are collapsed.
 
 The CSV columns are:
 
@@ -432,11 +429,11 @@ The previous button is disabled at the first sample and the next button at the l
 
 **No CSV download**
 
-CSV requires at least one recorded sample. Use the **CSV** button in live Controls; return from Replay first if those controls are hidden.
+CSV requires at least one recorded sample. Open **Library** and use **CSV** in the current/replayed card or a stored recording’s **More…** actions.
 
 **No GIF button**
 
-Click **Replay** first. GIF export is deliberately absent from live Controls.
+Open **Library**. GIF is in the current/replayed card and in **More…** for stored recordings.
 
 **“GIF encoder missing”**
 
@@ -456,6 +453,7 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
+| **3.9.0-beta.1** | Unfold Library beside the panel with matching themes, model folders and responsive docking. Consolidate current/replayed/stored session files and TXT/CSV/GIF exports in Library; keep the chart usable and simplify main controls. |
 | **3.8.0** | Give playback protected state and frozen recording snapshots; render supplied display values; separate record storage from session/panel coordination. Enforce ownership and dependency boundaries while preserving controls, appearance and saved-data formats. |
 | **3.7.0** | Coordinate live-session sample acceptance, highs, timing and lifecycle operations under one owner. Keep timer cancellation separate from clearing data; preserve valid live samples through failed saves and reject stale responses after Reset, navigation or Stop. |
 | **3.6.1** | Release safe diagnostic logging and consistent room targets. Preserve API restrictions through console failures; guard non-room Reset/ATH Clear while retaining file replay actions for its own room. |

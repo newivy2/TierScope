@@ -36,7 +36,7 @@ function makeHistory(count,kind='normal'){
   }
   return data;
 }
-function fresh(){const h=harness(new Map(),injected);h.t.initPanel();return h;}
+function fresh(){const h=harness(new Map(),injected);h.t.initPanel();for(const id of ['btn-export-gif','gif-export-controls','gif-export-status','btn-cancel-gif']){const e=h.context.document.createElement('div');e.id=id;h.context.document.body.appendChild(e);}return h;}
 async function exportGif(h){
   const count=h.downloads.length;let done=false;
   const before=h.api.__gif.playbackState();

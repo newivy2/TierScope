@@ -67,14 +67,10 @@ export function updatePanelOptions() {
     if (button) {
         button.style.display = runtime.isMinimized ? 'none' : '';
         button.textContent = ({ full: 'Full', fourHours: '4h', twoHours: '2h', hour: '1h', halfHour: '30m', quarter: '15m' })[runtime.chartWindowMode] + ' ▾';
-        button.title = 'Chart window and session files. Showing ' + ({ full: 'full history', fourHours: 'the last 4 hours', twoHours: 'the last 2 hours', hour: 'the last hour', halfHour: 'the last 30 minutes', quarter: 'the last 15 minutes' })[runtime.chartWindowMode] + '.';
+        button.title = 'Chart window and highs. Showing ' + ({ full: 'full history', fourHours: 'the last 4 hours', twoHours: 'the last 2 hours', hour: 'the last hour', halfHour: 'the last 30 minutes', quarter: 'the last 15 minutes' })[runtime.chartWindowMode] + '.';
     }
     var select = document.getElementById('chart-window-select');
     if (select) select.value = runtime.chartWindowMode;
-    ['btn-save-session', 'btn-control-save-session', 'btn-playback-save-session'].forEach(function(id) {
-        var save = document.getElementById(id);
-        if (save) save.disabled = !((isPlaybackCurrent(runtime.playback) && runtime.playback.archive) || runtime.history.timestamps.length);
-    });
     var info = document.getElementById('session-file-info');
     if (info) {
         var archive = isPlaybackCurrent(runtime.playback) && runtime.playback.imported ? runtime.playback.archive : null;
@@ -86,7 +82,7 @@ export function updatePanelOptions() {
 
 export function bindPanelOptions() {
     var button = document.getElementById('btn-panel-options'), menu = document.getElementById('panel-options');
-    var cleanupSessionTools = bindSessionTools(menu);
+    var cleanupSessionTools = bindSessionTools();
     var input = document.getElementById('session-file-input');
     function close(focus) { menu.style.display = 'none'; button.setAttribute('aria-expanded', 'false'); if (focus) button.focus(); }
     button.onmousedown = function(event) { event.stopPropagation(); };
@@ -98,17 +94,9 @@ export function bindPanelOptions() {
     };
     document.getElementById('panel-options-close').onclick = function() { close(true); };
     document.getElementById('chart-window-select').onchange = function() { setChartWindow(this.value); };
-    document.getElementById('btn-save-session').onclick = function() { downloadSessionFile(); close(true); };
-    document.getElementById('btn-control-save-session').onclick = downloadSessionFile;
-    document.getElementById('btn-playback-save-session').onclick = downloadSessionFile;
-    function chooseSessionFile() { input.value = ''; input.click(); }
-    document.getElementById('btn-open-session').onclick = chooseSessionFile;
-    document.getElementById('btn-control-open-session').onclick = chooseSessionFile;
-    document.getElementById('btn-playback-open-session').onclick = chooseSessionFile;
     document.getElementById('btn-high-mode').onclick = toggleHighMode;
     document.getElementById('mini-high').onclick = toggleHighMode;
     document.getElementById('btn-add-all-time').onclick = addFileToAllTimeHighs;
-    document.getElementById('btn-playback-add-all-time').onclick = addFileToAllTimeHighs;
     document.getElementById('btn-clear-all-time').onclick = clearAllTimeHighs;
     input.onchange = function() { var file = input.files && input.files[0]; if (file) { close(false); readSessionFile(file); } };
     function outside(event) { if (!menu.contains(event.target) && !button.contains(event.target)) close(false); }

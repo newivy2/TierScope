@@ -1,10 +1,10 @@
 import { hideChartTooltip } from './chart-view.js';
 import { drawAllSparklines } from './charts.js';
-import { getAnonymousCount } from './dom.js';
 import { cancelHighPulse, cancelHighPulses } from './highs.js';
 import { updateDisplay } from './presentation.js';
 import { paintPlayback } from './replay.js';
 import { runtime } from './runtime.js';
+import { getAnonymousCount } from './session-selectors.js';
 import { getTierMarker, log } from './utils.js';
 
 export function loadCollapsedRows() {

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.8.0
+// @version      3.9.0-beta.1
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -1697,6 +1697,9 @@ underlying system, so should run in the browser, Node, or Plask.
   function stopDescription() {
     return runtime.stopReason === "absence" ? runtime.absencePausedAt !== null ? "Stopped after 3 hours auto-paused for broadcaster absence" : "Stopped after 3 hours of broadcaster absence" : "Session stopped";
   }
+  function getAnonymousCount() {
+    return sessionAnonymousCount();
+  }
 
   // src/request-policy.js
   function readRequestPolicy() {
@@ -2536,285 +2539,377 @@ underlying system, so should run in the browser, Node, or Plask.
     renderTrendDisplay(buildTrendDisplayModel());
   }
 
-  // src/gif.js
-  var import_omggif = __toESM(require_omggif(), 1);
-  function createGifSurface(palette) {
-    var canvas = document.createElement("canvas");
-    canvas.width = runtime.GIF_WIDTH;
-    canvas.height = runtime.GIF_HEIGHT;
-    var ctx = canvas.getContext("2d", { alpha: false });
-    if (!ctx) throw new Error("Canvas is unavailable.");
-    var pixels = new Uint8Array(runtime.GIF_WIDTH * runtime.GIF_HEIGHT);
-    var colors = palette.map(function(color) {
-      return "#" + color.toString(16).padStart(6, "0");
-    });
-    function rect(x, y, width, height, color) {
-      x = Math.round(x);
-      y = Math.round(y);
-      width = Math.round(width);
-      height = Math.round(height);
-      var left = Math.max(0, x), top = Math.max(0, y);
-      var right = Math.min(runtime.GIF_WIDTH, x + width), bottom = Math.min(runtime.GIF_HEIGHT, y + height);
-      if (right <= left || bottom <= top) return;
-      ctx.fillStyle = colors[color];
-      ctx.fillRect(left, top, right - left, bottom - top);
-      for (var row = top; row < bottom; row++) {
-        pixels.fill(color, row * runtime.GIF_WIDTH + left, row * runtime.GIF_WIDTH + right);
-      }
-    }
-    function text(value, x, y, color, scale, rightAlign) {
-      scale = scale || 1;
-      value = String(value).toUpperCase();
-      if (rightAlign) x -= (value.length * 6 - 1) * scale;
-      for (var i = 0; i < value.length; i++) {
-        var glyph = runtime.GIF_FONT[value[i]] || runtime.GIF_FONT["?"];
-        for (var row = 0; row < 7; row++) {
-          for (var col = 0; col < 5; col++) {
-            if (glyph[row] & 1 << 4 - col) {
-              rect(x + (i * 6 + col) * scale, y + row * scale, scale, scale, color);
-            }
-          }
-        }
-      }
-    }
-    return { canvas, pixels, rect, text };
-  }
-  function gifCount(value) {
-    value = Math.max(0, Number(value) || 0);
-    var text = String(Math.round(value));
-    return text.length <= 10 ? text : value.toExponential(2);
-  }
-  function getGifSampleIndex(snapshot, frameIndex, frameCount) {
-    var last = snapshot.timeline.length - 1;
-    if (snapshot.timeline.length <= runtime.GIF_MAX_FRAMES) return frameIndex;
-    if (frameIndex === 0) return 0;
-    if (frameIndex === frameCount - 1) return last;
-    var position = snapshot.durationMs * frameIndex / (frameCount - 1);
-    var low = 0, high = snapshot.timeline.length;
-    while (low < high) {
-      var middle = Math.floor((low + high) / 2);
-      if (snapshot.timeline[middle] <= position) low = middle + 1;
-      else high = middle;
-    }
-    return Math.max(0, low - 1);
-  }
-  function drawGifSparkline(surface, values, lastIndex, color, bounds, times, breaks) {
-    var left = bounds.left, top = bounds.top;
-    var plotWidth = bounds.width - 2, plotHeight = bounds.height - 2;
-    var minimum = values[0], maximum = values[0];
-    for (var i = 1; i <= lastIndex; i++) {
-      minimum = Math.min(minimum, values[i]);
-      maximum = Math.max(maximum, values[i]);
-    }
-    var range = maximum - minimum || 1;
-    function y(value) {
-      return maximum === minimum ? top + Math.round(plotHeight / 2) : top + plotHeight - Math.round((value - minimum) / range * plotHeight);
-    }
-    function line(x0, y0, x1, y1, strokeColor, dashed) {
-      var dx = Math.abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
-      var dy = -Math.abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
-      var error = dx + dy, step = 0;
-      var distancePerStep = Math.hypot(dx, dy) / Math.max(dx, -dy, 1);
-      while (true) {
-        if (!dashed || step * distancePerStep % 10 < 6) surface.rect(x0, y0, dashed ? 1 : 2, dashed ? 1 : 2, strokeColor);
-        if (x0 === x1 && y0 === y1) break;
-        var twiceError = 2 * error;
-        if (twiceError >= dy) {
-          error += dy;
-          x0 += sx;
-        }
-        if (twiceError <= dx) {
-          error += dx;
-          y0 += sy;
-        }
-        step++;
-      }
-    }
-    var plot = buildChartPlot(values, times || values.map(function(_, i2) {
-      return i2;
-    }), breaks || [], plotWidth, lastIndex);
-    for (var p = 1; p < plot.points.length; p++) {
-      if (!plot.points[p].move) continue;
-      var before = plot.points[p - 1], after = plot.points[p];
-      line(left + Math.round(before.x), y(before.value), left + Math.round(after.x), y(after.value), runtime.GIF_GAP_COLOR_INDEX, true);
-    }
-    var previous = null;
-    plot.points.forEach(function(point) {
-      var x = left + Math.round(point.x), nextY = y(point.value);
-      if (previous && !point.move) line(previous.x, previous.y, x, nextY, color, false);
-      else surface.rect(x, nextY, 2, 2, color);
-      previous = { x, y: nextY };
-    });
-  }
-  function drawGifSummary(surface, snapshot, index, tiers) {
-    var data = snapshot.history;
-    var breaks = getHistoryBreaks(data);
-    var margin = 16, rowStart = 90, rowStep = 44, groupGap = 12;
-    var chartLeft = 176, countWidth = 70, columnGap = 10;
-    var chartWidth = runtime.GIF_WIDTH - chartLeft - margin - countWidth - columnGap;
-    surface.rect(0, 0, runtime.GIF_WIDTH, runtime.GIF_HEIGHT, 0);
-    surface.text("TIERSCOPE REPLAY", margin, 12, 1, 3);
-    surface.text(formatElapsedTime(snapshot.timeline[index]) + " / " + formatElapsedTime(snapshot.durationMs), margin, 46, 1, 2);
-    surface.text("LINES SCALED PER SERIES", margin, 67, 1, 1);
-    if (breaks.some(function(gap, i) {
-      return gap && i > 0 && i <= index;
-    })) {
-      surface.text("ORANGE DASHES: NO SAMPLES", runtime.GIF_WIDTH - margin, 67, runtime.GIF_GAP_COLOR_INDEX, 1, true);
-    }
-    surface.rect(margin, 80, runtime.GIF_WIDTH - margin * 2, 2, 1);
-    function drawRow(label, values, top, color) {
-      surface.rect(margin, top + 14, 6, 14, color);
-      surface.text(label, 30, top + 14, 1, 2);
-      drawGifSparkline(
-        surface,
-        values,
-        index,
-        color,
-        { left: chartLeft, top: top + 2, width: chartWidth, height: 36 },
-        data.timestamps,
-        breaks
-      );
-      var count = gifCount(values[index]);
-      var countScale = (count.length * 6 - 1) * 2 <= countWidth ? 2 : 1;
-      surface.text(count, runtime.GIF_WIDTH - margin, top + (countScale === 2 ? 14 : 18), color, countScale, true);
-    }
-    tiers.forEach(function(tier, row) {
-      drawRow(
-        tier === "female-trans" ? "FEMALE/TRANS" : runtime.TIERS[tier].name,
-        data[tier],
-        rowStart + row * rowStep,
-        row + 2
-      );
-    });
-    var totalsStart = rowStart + tiers.length * rowStep;
-    surface.rect(margin, totalsStart, runtime.GIF_WIDTH - margin * 2, 2, 1);
-    totalsStart += groupGap;
-    var roomTotals = data.total.map(function(value, i) {
-      return value + data.anonymous[i];
-    });
-    drawRow("TOTAL", roomTotals, totalsStart, 1);
-    drawRow("WITH TOKENS", data.withTokens, totalsStart + rowStep, 10);
-    drawRow("REGISTERED", data.total, totalsStart + rowStep * 2, 1);
-    drawRow("ANONYMOUS", data.anonymous, totalsStart + rowStep * 3, 11);
-  }
-  function cancelGifExport() {
-    if (runtime.gifExportJob) runtime.gifExportJob.cancelled = true;
-  }
-  async function generateGifFromHistory() {
-    if (runtime.gifExportJob) return;
-    var button = document.getElementById("btn-export-gif");
-    var status = document.getElementById("gif-export-status");
-    var cancel = document.getElementById("btn-cancel-gif");
-    var progress = document.getElementById("gif-export-controls");
-    var job = {
-      cancelled: false,
-      url: location.href,
-      generation: runtime.initGuard,
-      key: runtime.activeSessionStorageKey
-    };
-    runtime.gifExportJob = job;
-    if (button) button.disabled = true;
-    if (progress) progress.style.display = "flex";
-    if (cancel) cancel.hidden = false;
-    if (status) status.textContent = "Preparing GIF…";
-    function checkJob() {
-      if (job.cancelled || location.href !== job.url || runtime.initGuard !== job.generation || runtime.activeSessionStorageKey !== job.key) throw new Error("GIF export cancelled.");
-    }
+  // src/layout.js
+  function loadCollapsedRows() {
     try {
-      if (!isPlaybackCurrent(runtime.playback)) throw new Error("Open Replay before downloading a GIF.");
-      var model = runtime.playback.archive ? runtime.playback.archive.room : getModelName();
-      var snapshot = runtime.playback.snapshot;
-      if (!snapshot.timeline.length) throw new Error("No recorded history to export yet.");
-      var tiers = Object.keys(runtime.TIERS);
-      var palette = [1315870, 16777215].concat(tiers.map(function(tier) {
-        return parseInt(runtime.TIERS[tier].color.slice(1), 16);
-      }));
-      palette.push(16738740, 8947848);
-      palette.push(15244101);
-      while ((palette.length & palette.length - 1) !== 0) palette.push(palette[0]);
-      var surface = createGifSurface(palette);
-      var frameCount = Math.min(runtime.GIF_MAX_FRAMES, snapshot.timeline.length);
-      var bytes = new Uint8Array(256 * 1024);
-      var writer = new import_omggif.GifWriter(bytes, runtime.GIF_WIDTH, runtime.GIF_HEIGHT, { palette, loop: 0 });
-      for (var i = 0; i < frameCount; i++) {
-        await new Promise(function(resolve) {
-          setTimeout(resolve, 0);
-        });
-        checkJob();
-        var index = getGifSampleIndex(snapshot, i, frameCount);
-        drawGifSummary(surface, snapshot, index, tiers);
-        var needed = writer.getOutputBufferPosition() + runtime.GIF_WIDTH * runtime.GIF_HEIGHT * 2 + 1024;
-        if (needed > bytes.length) {
-          var grown = new Uint8Array(Math.max(bytes.length * 2, needed));
-          grown.set(bytes);
-          bytes = grown;
-          writer.setOutputBuffer(bytes);
-        }
-        var delay = Math.round((i + 1) * runtime.GIF_DURATION_CS / frameCount) - Math.round(i * runtime.GIF_DURATION_CS / frameCount);
-        writer.addFrame(0, 0, runtime.GIF_WIDTH, runtime.GIF_HEIGHT, surface.pixels, { delay, disposal: 1 });
-        if (status) status.textContent = "GIF " + Math.round((i + 1) / frameCount * 100) + "%";
+      var raw = GM_getValue(runtime.COLLAPSED_ROWS_KEY, null);
+      if (raw !== null && typeof raw !== "undefined") {
+        var saved = JSON.parse(raw);
+        if (!Array.isArray(saved) || !saved.every(function(key) {
+          return runtime.PANEL_ROWS.some(function(row) {
+            return row.key === key;
+          });
+        })) throw new Error("Invalid collapsed-row preferences");
+        return new Set(saved);
       }
-      checkJob();
-      var length = writer.end();
-      if (length > bytes.length) throw new Error("GIF output buffer overflow.");
-      var blob = new Blob([bytes.subarray(0, length)], { type: "image/gif" });
-      var url = URL.createObjectURL(blob);
-      try {
-        var link = document.createElement("a");
-        link.href = url;
-        link.download = model.replace(/[^a-z0-9_-]/gi, "_") + "-replay-" + (/* @__PURE__ */ new Date()).toISOString().slice(0, 10) + ".gif";
-        document.body.appendChild(link);
-        try {
-          link.click();
-        } finally {
-          link.remove();
-        }
-      } finally {
-        setTimeout(function() {
-          URL.revokeObjectURL(url);
-        }, 6e4);
-      }
-      if (status) status.textContent = "GIF downloaded";
-      log("GIF export complete: " + frameCount + " frames, " + length + " bytes");
     } catch (error) {
-      if (status) status.textContent = error.message;
-      log("GIF export: " + error.message);
-      if (!job.cancelled && location.href === job.url && runtime.initGuard === job.generation) alert(error.message);
-    } finally {
-      if (button) button.disabled = false;
-      if (cancel) cancel.hidden = true;
-      if (progress) progress.style.display = "none";
-      if (button && status) button.title = status.textContent;
-      if (runtime.gifExportJob === job) runtime.gifExportJob = null;
+      log("Could not restore row preferences: " + error.message);
+    }
+    return /* @__PURE__ */ new Set(["red", "green"]);
+  }
+  function panelRowMarker(row) {
+    return row.icon || getTierMarker(row.key);
+  }
+  function collapseMarkerHtml(key) {
+    var row = runtime.PANEL_ROWS.find(function(item) {
+      return item.key === key;
+    });
+    return '<button type="button" class="tier-collapse-marker" id="collapse-row-' + key + '" aria-controls="tier-row-' + key + '" aria-expanded="true" aria-label="Collapse ' + row.label + ' row" title="Collapse ' + row.label + ' row" style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:24px;padding:0;border:0;border-radius:3px;background:transparent;color:inherit;font-size:14px;line-height:1;cursor:pointer;">' + panelRowMarker(row) + "</button>";
+  }
+  function collapsedTrayHtml() {
+    return '<div id="collapsed-tier-tray" role="group" aria-label="Collapsed rows. Click an icon to restore its row." style="display:none;flex-wrap:wrap;align-items:center;gap:3px;margin-bottom:4px;">' + runtime.PANEL_ROWS.map(function(row) {
+      return '<button type="button" id="restore-row-' + row.key + '" aria-controls="tier-row-' + row.key + '" aria-expanded="false" aria-label="Restore ' + row.label + ' row" title="Restore ' + row.label + ' row" style="display:none;align-items:center;justify-content:center;flex:0 0 22px;width:22px;height:22px;box-sizing:border-box;padding:0;border:1px solid ' + (row.key === "total" ? "var(--panel-text)" : row.color) + ';border-radius:3px;background:rgba(var(--panel-row-rgb),0.05);color:var(--panel-text);font-size:12px;line-height:1;cursor:pointer;">' + panelRowMarker(row) + "</button>";
+    }).join("") + "</div>";
+  }
+  function applyRowLayout() {
+    runtime.chartLayoutRevision++;
+    var region = document.getElementById("tier-chart-region");
+    var tray = document.getElementById("collapsed-tier-tray");
+    var group = document.getElementById("summary-tier-rows");
+    var measurable = region && region.offsetHeight > 0;
+    var visibleCount = runtime.PANEL_ROWS.length - runtime.collapsedRows.size;
+    if (region) region.style.height = "auto";
+    runtime.PANEL_ROWS.forEach(function(row) {
+      runtime.panelChartHeights[row.key] = row.height;
+      var canvas = document.getElementById("spark-" + row.key);
+      if (canvas) canvas.style.height = row.height + "px";
+      var element = document.getElementById("tier-row-" + row.key);
+      if (measurable && element) element.style.display = row.display;
+    });
+    if (measurable && tray) tray.style.display = "none";
+    if (measurable && group) group.style.display = "block";
+    if (measurable) {
+      runtime.PANEL_ROWS.forEach(function(row) {
+        var canvas = document.getElementById("spark-" + row.key);
+        if (!canvas) return;
+        var parent = canvas.parentElement;
+        var style = window.getComputedStyle(parent);
+        var minimum = parent.clientHeight - (parseFloat(style.paddingTop) || 0) - (parseFloat(style.paddingBottom) || 0);
+        runtime.panelChartHeights[row.key] = Math.max(row.height, minimum);
+        canvas.style.height = runtime.panelChartHeights[row.key] + "px";
+      });
+      if (runtime.panelChartRegionHeight === null) runtime.panelChartRegionHeight = region.offsetHeight;
+    }
+    if (tray) tray.style.display = runtime.collapsedRows.size ? "flex" : "none";
+    runtime.PANEL_ROWS.forEach(function(row) {
+      var collapsed = runtime.collapsedRows.has(row.key);
+      var element = document.getElementById("tier-row-" + row.key);
+      if (element) element.style.display = collapsed ? "none" : row.display;
+      var restore = document.getElementById("restore-row-" + row.key);
+      if (restore) restore.style.display = collapsed ? "inline-flex" : "none";
+      var collapse = document.getElementById("collapse-row-" + row.key);
+      if (collapse) collapse.setAttribute("aria-expanded", String(!collapsed));
+    });
+    if (group) group.style.display = runtime.collapsedRows.has("withtokens") && runtime.collapsedRows.has("total") ? "none" : "block";
+    var extra = measurable && visibleCount ? Math.max(0, runtime.panelChartRegionHeight - region.offsetHeight) / visibleCount : 0;
+    runtime.PANEL_ROWS.forEach(function(row) {
+      if (runtime.collapsedRows.has(row.key)) return;
+      runtime.panelChartHeights[row.key] += extra;
+      var canvas = document.getElementById("spark-" + row.key);
+      if (canvas) canvas.style.height = runtime.panelChartHeights[row.key] + "px";
+    });
+    if (region && visibleCount && runtime.panelChartRegionHeight !== null) {
+      region.style.height = runtime.panelChartRegionHeight + "px";
+    }
+    runtime.rowLayoutNeedsMeasure = !measurable;
+  }
+  function setRowCollapsed(key, collapsed) {
+    cancelHighPulse(key);
+    if (!runtime.PANEL_ROWS.some(function(row) {
+      return row.key === key;
+    })) return;
+    if (collapsed) runtime.collapsedRows.add(key);
+    else runtime.collapsedRows.delete(key);
+    try {
+      GM_setValue(runtime.COLLAPSED_ROWS_KEY, JSON.stringify(Array.from(runtime.collapsedRows)));
+    } catch (error) {
+      log("Could not save row preferences: " + error.message);
+    }
+    applyRowLayout();
+    if (runtime.presentationMode === "PLAYBACK") {
+      paintPlayback(runtime.playback);
+    } else {
+      updateDisplay();
+      drawAllSparklines();
+    }
+    constrainPanelPosition();
+    var target = document.getElementById((collapsed ? "restore-row-" : "collapse-row-") + key);
+    if (target) target.focus({ preventScroll: true });
+  }
+  function bindRowControls() {
+    runtime.panelChartRegionHeight = null;
+    runtime.PANEL_ROWS.forEach(function(row) {
+      [false, true].forEach(function(collapsed) {
+        var button = document.getElementById((collapsed ? "collapse-row-" : "restore-row-") + row.key);
+        if (button) button.onclick = function(event) {
+          event.stopPropagation();
+          setRowCollapsed(row.key, collapsed);
+        };
+      });
+    });
+    var container = document.getElementById("tracker-container");
+    if (container) container.addEventListener("transitionend", function(event) {
+      if (event.target === container && event.propertyName === "width") {
+        redrawPanelCharts();
+        constrainPanelPosition();
+      }
+    });
+    applyRowLayout();
+  }
+  function redrawPanelCharts() {
+    if (runtime.isMinimized) return;
+    runtime.chartLayoutRevision++;
+    if (runtime.presentationMode === "PLAYBACK") paintPlayback(runtime.playback);
+    else drawAllSparklines();
+  }
+  function cleanupDragListeners() {
+    for (var i = 0; i < runtime.dragListeners.length; i++) {
+      var listener = runtime.dragListeners[i];
+      document.removeEventListener(listener.type, listener.fn, listener.options);
+    }
+    runtime.dragListeners = [];
+  }
+  function addDragListener(type, fn, options) {
+    document.addEventListener(type, fn, options);
+    runtime.dragListeners.push({ type, fn, options });
+  }
+  function loadPanelGeometry() {
+    try {
+      var raw = GM_getValue(runtime.PANEL_GEOMETRY_KEY, null);
+      if (raw === null) return null;
+      var data = JSON.parse(raw);
+      if (!data || !Number.isFinite(data.left) || !Number.isFinite(data.top) || !Number.isFinite(data.scale) || data.scale < 0.5 || data.scale > 3) return null;
+      return { left: data.left, top: data.top, scale: data.scale };
+    } catch (error) {
+      return null;
     }
   }
-
-  // src/presentation-status.js
-  function updateMiniFreshness() {
-    var element = document.getElementById("mini-freshness");
-    if (element) renderStatus(element, buildFreshnessModel());
+  function constrainPanelPosition() {
+    var container = document.getElementById("tracker-container");
+    if (!container) return;
+    var rect = container.getBoundingClientRect();
+    container.style.left = Math.max(0, Math.min(rect.left, Math.max(0, window.innerWidth - rect.width))) + "px";
+    container.style.top = Math.max(0, Math.min(rect.top, Math.max(0, window.innerHeight - rect.height))) + "px";
+    container.style.right = "auto";
   }
-  function updateAcquisitionStatus() {
-    updateMiniFreshness();
-    var element = document.getElementById("acquisition-status");
-    if (element) renderStatus(element, buildAcquisitionStatusModel());
+  function savePanelGeometry() {
+    var container = document.getElementById("tracker-container");
+    if (!container) return;
+    var rect = container.getBoundingClientRect();
+    runtime.panelGeometry = { left: rect.left, top: rect.top, scale: runtime.currentScale };
+    try {
+      GM_setValue(runtime.PANEL_GEOMETRY_KEY, JSON.stringify(runtime.panelGeometry));
+    } catch (error) {
+      log("Could not save panel position/scale: " + error.message);
+    }
   }
-
-  // src/history.js
-  function getSessionSamplePolicy() {
-    return {
-      breaks: getHistoryBreaks(runtime.history),
-      intervalSeconds: runtime.scanIntervalSeconds,
-      lastIntervalSeconds: runtime.lastScheduledIntervalSeconds,
-      timeoutMs: runtime.API_TIMEOUT_MS
+  function restorePanelGeometry() {
+    var container = document.getElementById("tracker-container");
+    if (!container) return;
+    if (runtime.panelGeometry) {
+      container.style.left = runtime.panelGeometry.left + "px";
+      container.style.top = runtime.panelGeometry.top + "px";
+      container.style.right = "auto";
+      applyScale(runtime.panelGeometry.scale);
+    } else applyScale(runtime.currentScale);
+    constrainPanelPosition();
+    redrawPanelCharts();
+  }
+  function restoreStandardSize() {
+    applyScale(1);
+    redrawPanelCharts();
+    constrainPanelPosition();
+    savePanelGeometry();
+  }
+  function applyScale(scale) {
+    runtime.currentScale = scale;
+    var container = document.getElementById("tracker-container");
+    if (!container) return;
+    container.style.transform = "scale(" + scale + ")";
+    container.style.transformOrigin = "top left";
+    container.dataset.scale = scale;
+  }
+  function setupResizable() {
+    var container = document.getElementById("tracker-container");
+    if (!container) return;
+    var resizeHandle = document.createElement("div");
+    resizeHandle.id = "resize-handle";
+    resizeHandle.style.cssText = "position:absolute;top:0;left:0;width:16px;height:16px;background:linear-gradient(135deg, #ff69b4 50%, transparent 50%);cursor:nw-resize;z-index:999999;border-top-left-radius:6px;opacity:0.8;transition:opacity 0.2s;";
+    resizeHandle.addEventListener("mouseenter", function() {
+      this.style.opacity = "1";
+    });
+    resizeHandle.addEventListener("mouseleave", function() {
+      this.style.opacity = "0.8";
+    });
+    container.appendChild(resizeHandle);
+    var startResize = function(e) {
+      if (runtime.isDragging) return;
+      runtime.isResizing = true;
+      runtime.resizeStartX = e.clientX;
+      runtime.resizeStartY = e.clientY;
+      var rect = container.getBoundingClientRect();
+      runtime.resizeStartWidth = rect.width;
+      runtime.resizeStartHeight = rect.height;
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    var doResize = function(e) {
+      if (!runtime.isResizing) return;
+      var deltaX = runtime.resizeStartX - e.clientX;
+      var deltaY = runtime.resizeStartY - e.clientY;
+      var newWidth = runtime.resizeStartWidth + deltaX;
+      var baseWidth = container.offsetWidth;
+      var newScale = Math.max(0.5, Math.min(3, newWidth / baseWidth));
+      applyScale(newScale);
+    };
+    var stopResize = function() {
+      if (!runtime.isResizing) return;
+      runtime.isResizing = false;
+      redrawPanelCharts();
+      constrainPanelPosition();
+      savePanelGeometry();
+    };
+    resizeHandle.addEventListener("mousedown", startResize);
+    document.addEventListener("mousemove", doResize);
+    document.addEventListener("mouseup", stopResize);
+    window._trackerResizeCleanup = function() {
+      resizeHandle.removeEventListener("mousedown", startResize);
+      document.removeEventListener("mousemove", doResize);
+      document.removeEventListener("mouseup", stopResize);
     };
   }
-  function saveToHistory() {
-    appendCurrentSessionSample(Date.now(), getSessionSamplePolicy());
-    if (!runtime.isMinimized) drawAllSparklines();
+  function setupResizeHandler() {
+    if (runtime.windowResizeHandler) {
+      window.removeEventListener("resize", runtime.windowResizeHandler);
+      runtime.windowResizeHandler = null;
+    }
+    var resizeTimeout;
+    runtime.windowResizeHandler = function() {
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(function() {
+        constrainPanelPosition();
+        redrawPanelCharts();
+      }, 100);
+    };
+    window.addEventListener("resize", runtime.windowResizeHandler);
   }
-  function syncHighTimes() {
-    synchronizeSessionHighTimes();
+  function setupDraggable() {
+    var container = document.getElementById("tracker-container");
+    var dragHandle = document.getElementById("drag-handle");
+    if (!container || !dragHandle) return;
+    var startDrag = function(e) {
+      if (runtime.isResizing || e.target.closest && e.target.closest("button, input, select, a")) return;
+      runtime.isDragging = true;
+      var rect = container.getBoundingClientRect();
+      var scale = runtime.currentScale || 1;
+      runtime.dragOffsetX = (e.clientX - rect.left) / scale;
+      runtime.dragOffsetY = (e.clientY - rect.top) / scale;
+      if (container.style.right !== "auto") {
+        container.style.left = rect.left + "px";
+        container.style.right = "auto";
+      }
+      addDragListener("mousemove", doDrag, false);
+      addDragListener("mouseup", stopDrag, false);
+      e.preventDefault();
+    };
+    var doDrag = function(e) {
+      if (!runtime.isDragging) return;
+      var scale = runtime.currentScale || 1;
+      var newX = e.clientX - runtime.dragOffsetX * scale;
+      var newY = e.clientY - runtime.dragOffsetY * scale;
+      var maxX = window.innerWidth - container.offsetWidth * scale;
+      var maxY = window.innerHeight - container.offsetHeight * scale;
+      newX = Math.max(0, Math.min(newX, maxX));
+      newY = Math.max(0, Math.min(newY, maxY));
+      container.style.left = newX + "px";
+      container.style.top = newY + "px";
+    };
+    var stopDrag = function() {
+      runtime.isDragging = false;
+      cleanupDragListeners();
+      savePanelGeometry();
+    };
+    dragHandle.addEventListener("mousedown", startDrag, false);
+  }
+  function toggleView() {
+    hideChartTooltip();
+    if (runtime.presentationMode === "PLAYBACK") return;
+    cancelHighPulses();
+    runtime.isMinimized = !runtime.isMinimized;
+    var fullView = document.getElementById("full-view");
+    var miniView = document.getElementById("minimized-view");
+    var toggleBtn = document.getElementById("btn-toggle");
+    var container = document.getElementById("tracker-container");
+    var headerText = document.getElementById("header-text");
+    var resizeHandle = document.getElementById("resize-handle");
+    var anonymousCount = getAnonymousCount();
+    var previousTransition = container ? container.style.transition : "";
+    if (container) container.style.transition = "none";
+    if (runtime.isMinimized) {
+      if (fullView) fullView.style.display = "none";
+      if (miniView) miniView.style.display = "block";
+      if (toggleBtn) toggleBtn.textContent = "+";
+      if (container) container.style.width = runtime.BASE_WIDTH_MINI + "px";
+      if (resizeHandle) resizeHandle.style.display = "none";
+      if (runtime.isResizing) runtime.isResizing = false;
+      var currentTotal = runtime.roomTotal > 0 ? runtime.roomTotal : runtime.users.size + anonymousCount;
+      if (headerText) headerText.textContent = currentTotal.toLocaleString() + " (H:" + runtime.roomTotalHigh.toLocaleString() + ")";
+    } else {
+      if (fullView) fullView.style.display = "block";
+      if (miniView) miniView.style.display = "none";
+      if (toggleBtn) toggleBtn.textContent = "−";
+      if (container) container.style.width = runtime.BASE_WIDTH_FULL + "px";
+      if (resizeHandle) resizeHandle.style.display = "block";
+      var currentTotal = runtime.roomTotal > 0 ? runtime.roomTotal : runtime.users.size + anonymousCount;
+      if (headerText) headerText.textContent = "USERS: " + currentTotal.toLocaleString() + " (H:" + runtime.roomTotalHigh.toLocaleString() + ")";
+    }
+    var settings = document.getElementById("mini-settings");
+    if (settings) settings.style.display = "none";
+    var settingsButton = document.getElementById("mini-settings-toggle");
+    if (settingsButton) settingsButton.setAttribute("aria-expanded", "false");
+    updateDisplay();
+    if (!runtime.isMinimized) {
+      drawAllSparklines();
+      constrainPanelPosition();
+    }
+    constrainPanelPosition();
+    if (container) container.style.transition = previousTransition;
+  }
+
+  // src/charts.js
+  function drawAllSparklines() {
+    if (runtime.presentationMode === "PLAYBACK") return;
+    drawHistorySparklines(runtime.history);
+  }
+  function drawHistorySparklines(displayHistory, lastIndex, replayProgress) {
+    hideChartTooltip();
+    if (runtime.rowLayoutNeedsMeasure) applyRowLayout();
+    var breaks = getHistoryBreaks(displayHistory);
+    runtime.PANEL_ROWS.forEach(function(row) {
+      if (runtime.collapsedRows.has(row.key)) return;
+      var key = row.key === "withtokens" ? "withTokens" : row.key === "anon" ? "anonymous" : row.key;
+      drawSparkline(
+        "spark-" + row.key,
+        displayHistory[key],
+        row.key === "total" ? themeColor("text") : row.color,
+        runtime.panelChartHeights[row.key] || row.height,
+        displayHistory.timestamps,
+        breaks,
+        lastIndex,
+        row.label,
+        replayProgress
+      );
+    });
   }
 
   // src/storage.js
@@ -3122,6 +3217,531 @@ underlying system, so should run in the browser, Node, or Plask.
     } catch (error) {
       return { status: "failed", error: error.message || String(error) };
     }
+  }
+
+  // src/session-file-format.js
+  function validateSessionFile(file) {
+    if (!isStorageObject(file) || file.format !== runtime.SESSION_FILE_FORMAT || file.formatVersion !== runtime.SESSION_FILE_VERSION) {
+      throw new Error("This is not a supported TierScope session file.");
+    }
+    if (typeof file.room !== "string" || !/^[a-z0-9_-]{1,100}$/i.test(file.room) || typeof file.producerVersion !== "string" || file.producerVersion.length > 40) {
+      throw new Error("Invalid session file information.");
+    }
+    var data = file.session;
+    validateStoredSession(data);
+    if (data.schemaVersion !== runtime.STORAGE_SCHEMA_VERSION || !data.history.timestamps.length || !isStorageObject(data.sessionHighs) || !isStorageNumber(data.roomTotalHigh) || !(data.sessionStartedAt === null || isStorageTimestamp(data.sessionStartedAt)) || typeof data.sessionStartEstimated !== "boolean" || !isStorageTimestamp(data.pausedElapsedTime) || typeof data.isPaused !== "boolean" || typeof data.isStopped !== "boolean" || !(data.roomTotalHighTime === null || isStorageTimestamp(data.roomTotalHighTime))) {
+      throw new Error("Session file is incomplete.");
+    }
+    runtime.STORAGE_HISTORY_SERIES.forEach(function(key) {
+      if (!data.history[key].every(Number.isSafeInteger) || !Number.isSafeInteger(data.sessionHighs[key].value)) {
+        throw new Error("Session counts must be whole numbers.");
+      }
+    });
+    var roomPeak = 0;
+    data.history.timestamps.forEach(function(_, i) {
+      var total = data.history.total[i] + data.history.anonymous[i];
+      if (!Number.isSafeInteger(total)) throw new Error("Invalid session room total.");
+      roomPeak = Math.max(roomPeak, total);
+    });
+    if (!Number.isSafeInteger(data.roomTotalHigh) || data.roomTotalHigh < roomPeak) throw new Error("Invalid session room high.");
+    var normalized = normalizeStoredSession(data);
+    var clean = { schemaVersion: runtime.STORAGE_SCHEMA_VERSION };
+    [
+      "timestamp",
+      "history",
+      "sessionStartedAt",
+      "sessionStartEstimated",
+      "sessionHighs",
+      "roomTotalHigh",
+      "roomTotalHighTime",
+      "pausedElapsedTime",
+      "isPaused",
+      "isStopped",
+      "stoppedAt",
+      "stopReason"
+    ].forEach(function(key) {
+      clean[key] = normalized[key];
+    });
+    return {
+      format: runtime.SESSION_FILE_FORMAT,
+      formatVersion: runtime.SESSION_FILE_VERSION,
+      producerVersion: file.producerVersion,
+      room: file.room,
+      session: clean
+    };
+  }
+
+  // src/gif.js
+  var import_omggif = __toESM(require_omggif(), 1);
+  function createGifSurface(palette) {
+    var canvas = document.createElement("canvas");
+    canvas.width = runtime.GIF_WIDTH;
+    canvas.height = runtime.GIF_HEIGHT;
+    var ctx = canvas.getContext("2d", { alpha: false });
+    if (!ctx) throw new Error("Canvas is unavailable.");
+    var pixels = new Uint8Array(runtime.GIF_WIDTH * runtime.GIF_HEIGHT);
+    var colors = palette.map(function(color) {
+      return "#" + color.toString(16).padStart(6, "0");
+    });
+    function rect(x, y, width, height, color) {
+      x = Math.round(x);
+      y = Math.round(y);
+      width = Math.round(width);
+      height = Math.round(height);
+      var left = Math.max(0, x), top = Math.max(0, y);
+      var right = Math.min(runtime.GIF_WIDTH, x + width), bottom = Math.min(runtime.GIF_HEIGHT, y + height);
+      if (right <= left || bottom <= top) return;
+      ctx.fillStyle = colors[color];
+      ctx.fillRect(left, top, right - left, bottom - top);
+      for (var row = top; row < bottom; row++) {
+        pixels.fill(color, row * runtime.GIF_WIDTH + left, row * runtime.GIF_WIDTH + right);
+      }
+    }
+    function text(value, x, y, color, scale, rightAlign) {
+      scale = scale || 1;
+      value = String(value).toUpperCase();
+      if (rightAlign) x -= (value.length * 6 - 1) * scale;
+      for (var i = 0; i < value.length; i++) {
+        var glyph = runtime.GIF_FONT[value[i]] || runtime.GIF_FONT["?"];
+        for (var row = 0; row < 7; row++) {
+          for (var col = 0; col < 5; col++) {
+            if (glyph[row] & 1 << 4 - col) {
+              rect(x + (i * 6 + col) * scale, y + row * scale, scale, scale, color);
+            }
+          }
+        }
+      }
+    }
+    return { canvas, pixels, rect, text };
+  }
+  function gifCount(value) {
+    value = Math.max(0, Number(value) || 0);
+    var text = String(Math.round(value));
+    return text.length <= 10 ? text : value.toExponential(2);
+  }
+  function getGifSampleIndex(snapshot, frameIndex, frameCount) {
+    var last = snapshot.timeline.length - 1;
+    if (snapshot.timeline.length <= runtime.GIF_MAX_FRAMES) return frameIndex;
+    if (frameIndex === 0) return 0;
+    if (frameIndex === frameCount - 1) return last;
+    var position = snapshot.durationMs * frameIndex / (frameCount - 1);
+    var low = 0, high = snapshot.timeline.length;
+    while (low < high) {
+      var middle = Math.floor((low + high) / 2);
+      if (snapshot.timeline[middle] <= position) low = middle + 1;
+      else high = middle;
+    }
+    return Math.max(0, low - 1);
+  }
+  function drawGifSparkline(surface, values, lastIndex, color, bounds, times, breaks) {
+    var left = bounds.left, top = bounds.top;
+    var plotWidth = bounds.width - 2, plotHeight = bounds.height - 2;
+    var minimum = values[0], maximum = values[0];
+    for (var i = 1; i <= lastIndex; i++) {
+      minimum = Math.min(minimum, values[i]);
+      maximum = Math.max(maximum, values[i]);
+    }
+    var range = maximum - minimum || 1;
+    function y(value) {
+      return maximum === minimum ? top + Math.round(plotHeight / 2) : top + plotHeight - Math.round((value - minimum) / range * plotHeight);
+    }
+    function line(x0, y0, x1, y1, strokeColor, dashed) {
+      var dx = Math.abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+      var dy = -Math.abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+      var error = dx + dy, step = 0;
+      var distancePerStep = Math.hypot(dx, dy) / Math.max(dx, -dy, 1);
+      while (true) {
+        if (!dashed || step * distancePerStep % 10 < 6) surface.rect(x0, y0, dashed ? 1 : 2, dashed ? 1 : 2, strokeColor);
+        if (x0 === x1 && y0 === y1) break;
+        var twiceError = 2 * error;
+        if (twiceError >= dy) {
+          error += dy;
+          x0 += sx;
+        }
+        if (twiceError <= dx) {
+          error += dx;
+          y0 += sy;
+        }
+        step++;
+      }
+    }
+    var plot = buildChartPlot(values, times || values.map(function(_, i2) {
+      return i2;
+    }), breaks || [], plotWidth, lastIndex);
+    for (var p = 1; p < plot.points.length; p++) {
+      if (!plot.points[p].move) continue;
+      var before = plot.points[p - 1], after = plot.points[p];
+      line(left + Math.round(before.x), y(before.value), left + Math.round(after.x), y(after.value), runtime.GIF_GAP_COLOR_INDEX, true);
+    }
+    var previous = null;
+    plot.points.forEach(function(point) {
+      var x = left + Math.round(point.x), nextY = y(point.value);
+      if (previous && !point.move) line(previous.x, previous.y, x, nextY, color, false);
+      else surface.rect(x, nextY, 2, 2, color);
+      previous = { x, y: nextY };
+    });
+  }
+  function drawGifSummary(surface, snapshot, index, tiers) {
+    var data = snapshot.history;
+    var breaks = getHistoryBreaks(data);
+    var margin = 16, rowStart = 90, rowStep = 44, groupGap = 12;
+    var chartLeft = 176, countWidth = 70, columnGap = 10;
+    var chartWidth = runtime.GIF_WIDTH - chartLeft - margin - countWidth - columnGap;
+    surface.rect(0, 0, runtime.GIF_WIDTH, runtime.GIF_HEIGHT, 0);
+    surface.text("TIERSCOPE REPLAY", margin, 12, 1, 3);
+    surface.text(formatElapsedTime(snapshot.timeline[index]) + " / " + formatElapsedTime(snapshot.durationMs), margin, 46, 1, 2);
+    surface.text("LINES SCALED PER SERIES", margin, 67, 1, 1);
+    if (breaks.some(function(gap, i) {
+      return gap && i > 0 && i <= index;
+    })) {
+      surface.text("ORANGE DASHES: NO SAMPLES", runtime.GIF_WIDTH - margin, 67, runtime.GIF_GAP_COLOR_INDEX, 1, true);
+    }
+    surface.rect(margin, 80, runtime.GIF_WIDTH - margin * 2, 2, 1);
+    function drawRow(label, values, top, color) {
+      surface.rect(margin, top + 14, 6, 14, color);
+      surface.text(label, 30, top + 14, 1, 2);
+      drawGifSparkline(
+        surface,
+        values,
+        index,
+        color,
+        { left: chartLeft, top: top + 2, width: chartWidth, height: 36 },
+        data.timestamps,
+        breaks
+      );
+      var count = gifCount(values[index]);
+      var countScale = (count.length * 6 - 1) * 2 <= countWidth ? 2 : 1;
+      surface.text(count, runtime.GIF_WIDTH - margin, top + (countScale === 2 ? 14 : 18), color, countScale, true);
+    }
+    tiers.forEach(function(tier, row) {
+      drawRow(
+        tier === "female-trans" ? "FEMALE/TRANS" : runtime.TIERS[tier].name,
+        data[tier],
+        rowStart + row * rowStep,
+        row + 2
+      );
+    });
+    var totalsStart = rowStart + tiers.length * rowStep;
+    surface.rect(margin, totalsStart, runtime.GIF_WIDTH - margin * 2, 2, 1);
+    totalsStart += groupGap;
+    var roomTotals = data.total.map(function(value, i) {
+      return value + data.anonymous[i];
+    });
+    drawRow("TOTAL", roomTotals, totalsStart, 1);
+    drawRow("WITH TOKENS", data.withTokens, totalsStart + rowStep, 10);
+    drawRow("REGISTERED", data.total, totalsStart + rowStep * 2, 1);
+    drawRow("ANONYMOUS", data.anonymous, totalsStart + rowStep * 3, 11);
+  }
+  function cancelGifExport() {
+    if (runtime.gifExportJob) runtime.gifExportJob.cancelled = true;
+  }
+  async function generateGifFromHistory(recording) {
+    if (runtime.gifExportJob) return;
+    var button = document.getElementById("btn-export-gif");
+    var status = document.getElementById("gif-export-status");
+    var cancel = document.getElementById("btn-cancel-gif");
+    var progress = document.getElementById("gif-export-controls");
+    var job = {
+      cancelled: false,
+      url: location.href,
+      generation: runtime.initGuard,
+      key: runtime.activeSessionStorageKey
+    };
+    runtime.gifExportJob = job;
+    if (button) button.disabled = true;
+    if (progress) progress.style.display = "flex";
+    if (cancel) cancel.hidden = false;
+    if (status) status.textContent = "Preparing GIF…";
+    function checkJob() {
+      if (job.cancelled || location.href !== job.url || runtime.initGuard !== job.generation || runtime.activeSessionStorageKey !== job.key) throw new Error("GIF export cancelled.");
+    }
+    try {
+      if (!recording && !isPlaybackCurrent(runtime.playback)) throw new Error("Open Replay before downloading a GIF.");
+      var archive = recording ? validateSessionFile(recording) : runtime.playback.archive;
+      var model = archive ? archive.room : getModelName();
+      var snapshot = recording ? createPlaybackSnapshot(archive.session.history) : runtime.playback.snapshot;
+      if (!snapshot.timeline.length) throw new Error("No recorded history to export yet.");
+      var tiers = Object.keys(runtime.TIERS);
+      var palette = [1315870, 16777215].concat(tiers.map(function(tier) {
+        return parseInt(runtime.TIERS[tier].color.slice(1), 16);
+      }));
+      palette.push(16738740, 8947848);
+      palette.push(15244101);
+      while ((palette.length & palette.length - 1) !== 0) palette.push(palette[0]);
+      var surface = createGifSurface(palette);
+      var frameCount = Math.min(runtime.GIF_MAX_FRAMES, snapshot.timeline.length);
+      var bytes = new Uint8Array(256 * 1024);
+      var writer = new import_omggif.GifWriter(bytes, runtime.GIF_WIDTH, runtime.GIF_HEIGHT, { palette, loop: 0 });
+      for (var i = 0; i < frameCount; i++) {
+        await new Promise(function(resolve) {
+          setTimeout(resolve, 0);
+        });
+        checkJob();
+        var index = getGifSampleIndex(snapshot, i, frameCount);
+        drawGifSummary(surface, snapshot, index, tiers);
+        var needed = writer.getOutputBufferPosition() + runtime.GIF_WIDTH * runtime.GIF_HEIGHT * 2 + 1024;
+        if (needed > bytes.length) {
+          var grown = new Uint8Array(Math.max(bytes.length * 2, needed));
+          grown.set(bytes);
+          bytes = grown;
+          writer.setOutputBuffer(bytes);
+        }
+        var delay = Math.round((i + 1) * runtime.GIF_DURATION_CS / frameCount) - Math.round(i * runtime.GIF_DURATION_CS / frameCount);
+        writer.addFrame(0, 0, runtime.GIF_WIDTH, runtime.GIF_HEIGHT, surface.pixels, { delay, disposal: 1 });
+        if (status) status.textContent = "GIF " + Math.round((i + 1) / frameCount * 100) + "%";
+      }
+      checkJob();
+      var length = writer.end();
+      if (length > bytes.length) throw new Error("GIF output buffer overflow.");
+      var blob = new Blob([bytes.subarray(0, length)], { type: "image/gif" });
+      var url = URL.createObjectURL(blob);
+      try {
+        var link = document.createElement("a");
+        link.href = url;
+        link.download = model.replace(/[^a-z0-9_-]/gi, "_") + "-replay-" + (/* @__PURE__ */ new Date()).toISOString().slice(0, 10) + ".gif";
+        document.body.appendChild(link);
+        try {
+          link.click();
+        } finally {
+          link.remove();
+        }
+      } finally {
+        setTimeout(function() {
+          URL.revokeObjectURL(url);
+        }, 6e4);
+      }
+      if (status) status.textContent = "GIF downloaded";
+      log("GIF export complete: " + frameCount + " frames, " + length + " bytes");
+    } catch (error) {
+      if (status) status.textContent = error.message;
+      log("GIF export: " + error.message);
+      if (!job.cancelled && location.href === job.url && runtime.initGuard === job.generation) alert(error.message);
+    } finally {
+      if (button) button.disabled = button.dataset.currentAvailable === "false";
+      if (cancel) cancel.hidden = true;
+      if (progress) progress.style.display = "none";
+      if (button && status) button.title = status.textContent;
+      if (runtime.gifExportJob === job) runtime.gifExportJob = null;
+    }
+  }
+
+  // src/presentation-status.js
+  function updateMiniFreshness() {
+    var element = document.getElementById("mini-freshness");
+    if (element) renderStatus(element, buildFreshnessModel());
+  }
+  function updateAcquisitionStatus() {
+    updateMiniFreshness();
+    var element = document.getElementById("acquisition-status");
+    if (element) renderStatus(element, buildAcquisitionStatusModel());
+  }
+
+  // src/dom.js
+  function validateDOMHealth() {
+    const now = Date.now();
+    const container = document.getElementById("tracker-container");
+    const userListTab = document.querySelector(runtime.DOM_SELECTORS.userListTab);
+    const hasUserList = !!userListTab;
+    let hasUsernameElements = false;
+    for (let i = 0; i < runtime.DOM_SELECTORS.usernameElements.length; i++) {
+      if (document.querySelector(runtime.DOM_SELECTORS.usernameElements[i])) {
+        hasUsernameElements = true;
+        break;
+      }
+    }
+    const health = {
+      timestamp: now,
+      userListTab: hasUserList,
+      usernameElements: hasUsernameElements,
+      container: !!container,
+      roomTotalSelectors: runtime.DOM_SELECTORS.roomTotal.some((sel) => !!document.querySelector(sel))
+    };
+    const wasHealthy = runtime.domHealthStatus.isHealthy;
+    runtime.domHealthStatus.isHealthy = health.userListTab && health.usernameElements;
+    runtime.domHealthStatus.lastCheck = now;
+    runtime.domHealthStatus.userListTabFound = hasUserList;
+    if (!runtime.domHealthStatus.isHealthy) {
+      runtime.domHealthStatus.consecutiveFailures++;
+      if (runtime.domHealthStatus.consecutiveFailures === 1 || runtime.domHealthStatus.consecutiveFailures % 10 === 0) {
+        diagnostic("warn", "DOM health check failed:", health);
+        if (container) {
+          const statusEl = document.getElementById("auto-status");
+          if (statusEl) {
+            statusEl.textContent = "DOM mismatch - check console";
+            statusEl.style.color = "var(--panel-negative)";
+          }
+        }
+      }
+      if (runtime.domHealthStatus.consecutiveFailures > 5 && runtime.isAutoRefreshOn) {
+        diagnostic("warn", "Auto-pausing due to DOM health issues");
+        pauseAutoRefresh();
+      }
+    } else {
+      if (!wasHealthy && runtime.domHealthStatus.consecutiveFailures > 0) {
+        log("DOM health restored");
+        const statusEl = document.getElementById("auto-status");
+        if (statusEl && runtime.isAutoRefreshOn) {
+          statusEl.textContent = "Next: " + runtime.countdownSeconds + "s";
+          statusEl.style.color = "var(--panel-positive)";
+        }
+      }
+      runtime.domHealthStatus.consecutiveFailures = 0;
+    }
+    return health;
+  }
+  function getTierFromClassList(classList) {
+    for (var i = 0; i < classList.length; i++) {
+      var className = classList[i];
+      var lower = className.toLowerCase();
+      if (className === "tippedTonsRecently" || lower === "tippedtonsrecently") return "purple";
+      if (className === "tippedALotRecently" || lower === "tippedalotrecently") return "pink";
+      if (className === "tippedRecently" || lower === "tippedrecently") return "dark-blue";
+      if (className === "inFanClub" || lower === "infanclub") return "green";
+      if (className === "mod" || lower === "moderator") return "red";
+      if (className === "hasTokens" || lower === "hastokens") return "light-blue";
+      if (className === "defaultUser" || lower === "defaultuser") return "gray";
+    }
+    return null;
+  }
+  function getTierFromElement(el) {
+    var tier = getTierFromClassList(el.classList);
+    if (tier) return tier;
+    var parent = el.parentElement;
+    for (var i = 0; i < 4 && parent; i++) {
+      tier = getTierFromClassList(parent.classList);
+      if (tier) return tier;
+      parent = parent.parentElement;
+    }
+    return "gray";
+  }
+  function getGenderFromElement(el) {
+    var genderImg = el.querySelector('img[data-testid="gender-icon"], img[title="Trans"], img[title="Female"], img[title="Male"], img[title="Couple"]');
+    if (!genderImg) {
+      var parent = el.parentElement;
+      for (var i = 0; i < 3 && parent; i++) {
+        genderImg = parent.querySelector('img[data-testid="gender-icon"], img[title="Trans"], img[title="Female"], img[title="Male"], img[title="Couple"]');
+        if (genderImg) break;
+        parent = parent.parentElement;
+      }
+    }
+    if (genderImg) {
+      var src = genderImg.src || "";
+      var title = genderImg.title || "";
+      if (src.indexOf("female") !== -1 || title === "Female") return "female";
+      if (src.indexOf("trans") !== -1 || title === "Trans") return "trans";
+      if (src.indexOf("male") !== -1 || title === "Male") return "male";
+      if (src.indexOf("couple") !== -1 || title === "Couple") return "couple";
+    }
+    return "unknown";
+  }
+  function getRoomTotal() {
+    for (var i = 0; i < runtime.DOM_SELECTORS.roomTotal.length; i++) {
+      var el = document.querySelector(runtime.DOM_SELECTORS.roomTotal[i]);
+      if (el) {
+        var text = el.textContent || "";
+        var match = text.match(/USERS\s*\(?(\d[\d,]*)\)?/i);
+        if (match) return parseInt(match[1].replace(/,/g, ""));
+      }
+    }
+    return 0;
+  }
+  function extractUsername(text) {
+    if (!text) return null;
+    text = text.trim().split("\n")[0];
+    var match = text.match(/^([^\s\(\[\<\,]+)/);
+    if (match) {
+      var candidate = match[1].trim();
+      if (candidate.length >= 2 && candidate.length <= 30) {
+        var clean = candidate.replace(/[^\w\-]+$/, "");
+        if (clean.length >= 2) return clean;
+      }
+    }
+    return null;
+  }
+  function findTab(tabName) {
+    var selectors = runtime.DOM_SELECTORS.tabs[tabName.toLowerCase()] || [];
+    for (var i = 0; i < selectors.length; i++) {
+      var el = document.querySelector(selectors[i]);
+      if (el) return el;
+    }
+    var buttons = document.querySelectorAll('button, div[role="tab"]');
+    for (var j = 0; j < buttons.length; j++) {
+      var btn = buttons[j];
+      var text = (btn.textContent || "").toUpperCase();
+      if (text.indexOf(tabName.toUpperCase()) !== -1) return btn;
+    }
+    return null;
+  }
+  function isScanValid(newUserCount, newRoomTotal) {
+    if (runtime.previousRoomTotal === 0) return true;
+    if (newRoomTotal === 0 && runtime.previousRoomTotal > 0) {
+      log("Scan rejected: room total is 0 but previous was " + runtime.previousRoomTotal);
+      return false;
+    }
+    var roomTotalChange = Math.abs(newRoomTotal - runtime.previousRoomTotal) / runtime.previousRoomTotal;
+    if (roomTotalChange > 0.1) return true;
+    var userDrop = runtime.previousUserCount > 0 ? (runtime.previousUserCount - newUserCount) / runtime.previousUserCount : 0;
+    if (userDrop > 0.5) {
+      log("Scan rejected: user count dropped " + Math.round(userDrop * 100) + "% (" + runtime.previousUserCount + " -> " + newUserCount + ") while room total stable (" + runtime.previousRoomTotal + " -> " + newRoomTotal + ")");
+      return false;
+    }
+    return true;
+  }
+  function scanUsers() {
+    var userListTab = document.querySelector(runtime.DOM_SELECTORS.userListTab);
+    if (!userListTab) throw new Error("UserListTab not found");
+    var snapshotUsers = /* @__PURE__ */ new Map();
+    var snapshotRoomTotal = getRoomTotal();
+    if (!snapshotRoomTotal) throw new Error("DOM room total missing or zero");
+    var userElements = [];
+    for (var i = 0; i < runtime.DOM_SELECTORS.usernameElements.length; i++) {
+      var found = userListTab.querySelectorAll(runtime.DOM_SELECTORS.usernameElements[i]);
+      for (var j = 0; j < found.length; j++) {
+        userElements.push(found[j]);
+      }
+    }
+    for (var i = 0; i < userElements.length; i++) {
+      var el = userElements[i];
+      var rawText = (el.textContent || "").trim() || (el.getAttribute("data-username") || "").trim();
+      var username = extractUsername(rawText);
+      if (username && !snapshotUsers.has(username)) {
+        var tier = getTierFromElement(el);
+        var gender = getGenderFromElement(el);
+        snapshotUsers.set(username, {
+          username,
+          rawClass: null,
+          tier,
+          genderCode: null,
+          gender,
+          rawFlag: null,
+          isOwner: null
+        });
+      }
+    }
+    if (!snapshotUsers.size) throw new Error("DOM sample contains no readable users");
+    return {
+      source: "DOM",
+      timestamp: Date.now(),
+      roomTotal: snapshotRoomTotal,
+      users: Array.from(snapshotUsers.values())
+    };
+  }
+
+  // src/history.js
+  function getSessionSamplePolicy() {
+    return {
+      breaks: getHistoryBreaks(runtime.history),
+      intervalSeconds: runtime.scanIntervalSeconds,
+      lastIntervalSeconds: runtime.lastScheduledIntervalSeconds,
+      timeoutMs: runtime.API_TIMEOUT_MS
+    };
+  }
+  function saveToHistory() {
+    appendCurrentSessionSample(Date.now(), getSessionSamplePolicy());
+    if (!runtime.isMinimized) drawAllSparklines();
+  }
+  function syncHighTimes() {
+    synchronizeSessionHighTimes();
   }
 
   // src/session-persistence.js
@@ -3939,625 +4559,6 @@ underlying system, so should run in the browser, Node, or Plask.
     saveSession(getModelName());
   }
 
-  // src/dom.js
-  function validateDOMHealth() {
-    const now = Date.now();
-    const container = document.getElementById("tracker-container");
-    const userListTab = document.querySelector(runtime.DOM_SELECTORS.userListTab);
-    const hasUserList = !!userListTab;
-    let hasUsernameElements = false;
-    for (let i = 0; i < runtime.DOM_SELECTORS.usernameElements.length; i++) {
-      if (document.querySelector(runtime.DOM_SELECTORS.usernameElements[i])) {
-        hasUsernameElements = true;
-        break;
-      }
-    }
-    const health = {
-      timestamp: now,
-      userListTab: hasUserList,
-      usernameElements: hasUsernameElements,
-      container: !!container,
-      roomTotalSelectors: runtime.DOM_SELECTORS.roomTotal.some((sel) => !!document.querySelector(sel))
-    };
-    const wasHealthy = runtime.domHealthStatus.isHealthy;
-    runtime.domHealthStatus.isHealthy = health.userListTab && health.usernameElements;
-    runtime.domHealthStatus.lastCheck = now;
-    runtime.domHealthStatus.userListTabFound = hasUserList;
-    if (!runtime.domHealthStatus.isHealthy) {
-      runtime.domHealthStatus.consecutiveFailures++;
-      if (runtime.domHealthStatus.consecutiveFailures === 1 || runtime.domHealthStatus.consecutiveFailures % 10 === 0) {
-        diagnostic("warn", "DOM health check failed:", health);
-        if (container) {
-          const statusEl = document.getElementById("auto-status");
-          if (statusEl) {
-            statusEl.textContent = "DOM mismatch - check console";
-            statusEl.style.color = "var(--panel-negative)";
-          }
-        }
-      }
-      if (runtime.domHealthStatus.consecutiveFailures > 5 && runtime.isAutoRefreshOn) {
-        diagnostic("warn", "Auto-pausing due to DOM health issues");
-        pauseAutoRefresh();
-      }
-    } else {
-      if (!wasHealthy && runtime.domHealthStatus.consecutiveFailures > 0) {
-        log("DOM health restored");
-        const statusEl = document.getElementById("auto-status");
-        if (statusEl && runtime.isAutoRefreshOn) {
-          statusEl.textContent = "Next: " + runtime.countdownSeconds + "s";
-          statusEl.style.color = "var(--panel-positive)";
-        }
-      }
-      runtime.domHealthStatus.consecutiveFailures = 0;
-    }
-    return health;
-  }
-  function getTierFromClassList(classList) {
-    for (var i = 0; i < classList.length; i++) {
-      var className = classList[i];
-      var lower = className.toLowerCase();
-      if (className === "tippedTonsRecently" || lower === "tippedtonsrecently") return "purple";
-      if (className === "tippedALotRecently" || lower === "tippedalotrecently") return "pink";
-      if (className === "tippedRecently" || lower === "tippedrecently") return "dark-blue";
-      if (className === "inFanClub" || lower === "infanclub") return "green";
-      if (className === "mod" || lower === "moderator") return "red";
-      if (className === "hasTokens" || lower === "hastokens") return "light-blue";
-      if (className === "defaultUser" || lower === "defaultuser") return "gray";
-    }
-    return null;
-  }
-  function getTierFromElement(el) {
-    var tier = getTierFromClassList(el.classList);
-    if (tier) return tier;
-    var parent = el.parentElement;
-    for (var i = 0; i < 4 && parent; i++) {
-      tier = getTierFromClassList(parent.classList);
-      if (tier) return tier;
-      parent = parent.parentElement;
-    }
-    return "gray";
-  }
-  function getGenderFromElement(el) {
-    var genderImg = el.querySelector('img[data-testid="gender-icon"], img[title="Trans"], img[title="Female"], img[title="Male"], img[title="Couple"]');
-    if (!genderImg) {
-      var parent = el.parentElement;
-      for (var i = 0; i < 3 && parent; i++) {
-        genderImg = parent.querySelector('img[data-testid="gender-icon"], img[title="Trans"], img[title="Female"], img[title="Male"], img[title="Couple"]');
-        if (genderImg) break;
-        parent = parent.parentElement;
-      }
-    }
-    if (genderImg) {
-      var src = genderImg.src || "";
-      var title = genderImg.title || "";
-      if (src.indexOf("female") !== -1 || title === "Female") return "female";
-      if (src.indexOf("trans") !== -1 || title === "Trans") return "trans";
-      if (src.indexOf("male") !== -1 || title === "Male") return "male";
-      if (src.indexOf("couple") !== -1 || title === "Couple") return "couple";
-    }
-    return "unknown";
-  }
-  function getRoomTotal() {
-    for (var i = 0; i < runtime.DOM_SELECTORS.roomTotal.length; i++) {
-      var el = document.querySelector(runtime.DOM_SELECTORS.roomTotal[i]);
-      if (el) {
-        var text = el.textContent || "";
-        var match = text.match(/USERS\s*\(?(\d[\d,]*)\)?/i);
-        if (match) return parseInt(match[1].replace(/,/g, ""));
-      }
-    }
-    return 0;
-  }
-  function getAnonymousCount() {
-    return sessionAnonymousCount();
-  }
-  function extractUsername(text) {
-    if (!text) return null;
-    text = text.trim().split("\n")[0];
-    var match = text.match(/^([^\s\(\[\<\,]+)/);
-    if (match) {
-      var candidate = match[1].trim();
-      if (candidate.length >= 2 && candidate.length <= 30) {
-        var clean = candidate.replace(/[^\w\-]+$/, "");
-        if (clean.length >= 2) return clean;
-      }
-    }
-    return null;
-  }
-  function findTab(tabName) {
-    var selectors = runtime.DOM_SELECTORS.tabs[tabName.toLowerCase()] || [];
-    for (var i = 0; i < selectors.length; i++) {
-      var el = document.querySelector(selectors[i]);
-      if (el) return el;
-    }
-    var buttons = document.querySelectorAll('button, div[role="tab"]');
-    for (var j = 0; j < buttons.length; j++) {
-      var btn = buttons[j];
-      var text = (btn.textContent || "").toUpperCase();
-      if (text.indexOf(tabName.toUpperCase()) !== -1) return btn;
-    }
-    return null;
-  }
-  function isScanValid(newUserCount, newRoomTotal) {
-    if (runtime.previousRoomTotal === 0) return true;
-    if (newRoomTotal === 0 && runtime.previousRoomTotal > 0) {
-      log("Scan rejected: room total is 0 but previous was " + runtime.previousRoomTotal);
-      return false;
-    }
-    var roomTotalChange = Math.abs(newRoomTotal - runtime.previousRoomTotal) / runtime.previousRoomTotal;
-    if (roomTotalChange > 0.1) return true;
-    var userDrop = runtime.previousUserCount > 0 ? (runtime.previousUserCount - newUserCount) / runtime.previousUserCount : 0;
-    if (userDrop > 0.5) {
-      log("Scan rejected: user count dropped " + Math.round(userDrop * 100) + "% (" + runtime.previousUserCount + " -> " + newUserCount + ") while room total stable (" + runtime.previousRoomTotal + " -> " + newRoomTotal + ")");
-      return false;
-    }
-    return true;
-  }
-  function scanUsers() {
-    var userListTab = document.querySelector(runtime.DOM_SELECTORS.userListTab);
-    if (!userListTab) throw new Error("UserListTab not found");
-    var snapshotUsers = /* @__PURE__ */ new Map();
-    var snapshotRoomTotal = getRoomTotal();
-    if (!snapshotRoomTotal) throw new Error("DOM room total missing or zero");
-    var userElements = [];
-    for (var i = 0; i < runtime.DOM_SELECTORS.usernameElements.length; i++) {
-      var found = userListTab.querySelectorAll(runtime.DOM_SELECTORS.usernameElements[i]);
-      for (var j = 0; j < found.length; j++) {
-        userElements.push(found[j]);
-      }
-    }
-    for (var i = 0; i < userElements.length; i++) {
-      var el = userElements[i];
-      var rawText = (el.textContent || "").trim() || (el.getAttribute("data-username") || "").trim();
-      var username = extractUsername(rawText);
-      if (username && !snapshotUsers.has(username)) {
-        var tier = getTierFromElement(el);
-        var gender = getGenderFromElement(el);
-        snapshotUsers.set(username, {
-          username,
-          rawClass: null,
-          tier,
-          genderCode: null,
-          gender,
-          rawFlag: null,
-          isOwner: null
-        });
-      }
-    }
-    if (!snapshotUsers.size) throw new Error("DOM sample contains no readable users");
-    return {
-      source: "DOM",
-      timestamp: Date.now(),
-      roomTotal: snapshotRoomTotal,
-      users: Array.from(snapshotUsers.values())
-    };
-  }
-
-  // src/layout.js
-  function loadCollapsedRows() {
-    try {
-      var raw = GM_getValue(runtime.COLLAPSED_ROWS_KEY, null);
-      if (raw !== null && typeof raw !== "undefined") {
-        var saved = JSON.parse(raw);
-        if (!Array.isArray(saved) || !saved.every(function(key) {
-          return runtime.PANEL_ROWS.some(function(row) {
-            return row.key === key;
-          });
-        })) throw new Error("Invalid collapsed-row preferences");
-        return new Set(saved);
-      }
-    } catch (error) {
-      log("Could not restore row preferences: " + error.message);
-    }
-    return /* @__PURE__ */ new Set(["red", "green"]);
-  }
-  function panelRowMarker(row) {
-    return row.icon || getTierMarker(row.key);
-  }
-  function collapseMarkerHtml(key) {
-    var row = runtime.PANEL_ROWS.find(function(item) {
-      return item.key === key;
-    });
-    return '<button type="button" class="tier-collapse-marker" id="collapse-row-' + key + '" aria-controls="tier-row-' + key + '" aria-expanded="true" aria-label="Collapse ' + row.label + ' row" title="Collapse ' + row.label + ' row" style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:24px;padding:0;border:0;border-radius:3px;background:transparent;color:inherit;font-size:14px;line-height:1;cursor:pointer;">' + panelRowMarker(row) + "</button>";
-  }
-  function collapsedTrayHtml() {
-    return '<div id="collapsed-tier-tray" role="group" aria-label="Collapsed rows. Click an icon to restore its row." style="display:none;flex-wrap:wrap;align-items:center;gap:3px;margin-bottom:4px;">' + runtime.PANEL_ROWS.map(function(row) {
-      return '<button type="button" id="restore-row-' + row.key + '" aria-controls="tier-row-' + row.key + '" aria-expanded="false" aria-label="Restore ' + row.label + ' row" title="Restore ' + row.label + ' row" style="display:none;align-items:center;justify-content:center;flex:0 0 22px;width:22px;height:22px;box-sizing:border-box;padding:0;border:1px solid ' + (row.key === "total" ? "var(--panel-text)" : row.color) + ';border-radius:3px;background:rgba(var(--panel-row-rgb),0.05);color:var(--panel-text);font-size:12px;line-height:1;cursor:pointer;">' + panelRowMarker(row) + "</button>";
-    }).join("") + "</div>";
-  }
-  function applyRowLayout() {
-    runtime.chartLayoutRevision++;
-    var region = document.getElementById("tier-chart-region");
-    var tray = document.getElementById("collapsed-tier-tray");
-    var group = document.getElementById("summary-tier-rows");
-    var measurable = region && region.offsetHeight > 0;
-    var visibleCount = runtime.PANEL_ROWS.length - runtime.collapsedRows.size;
-    if (region) region.style.height = "auto";
-    runtime.PANEL_ROWS.forEach(function(row) {
-      runtime.panelChartHeights[row.key] = row.height;
-      var canvas = document.getElementById("spark-" + row.key);
-      if (canvas) canvas.style.height = row.height + "px";
-      var element = document.getElementById("tier-row-" + row.key);
-      if (measurable && element) element.style.display = row.display;
-    });
-    if (measurable && tray) tray.style.display = "none";
-    if (measurable && group) group.style.display = "block";
-    if (measurable) {
-      runtime.PANEL_ROWS.forEach(function(row) {
-        var canvas = document.getElementById("spark-" + row.key);
-        if (!canvas) return;
-        var parent = canvas.parentElement;
-        var style = window.getComputedStyle(parent);
-        var minimum = parent.clientHeight - (parseFloat(style.paddingTop) || 0) - (parseFloat(style.paddingBottom) || 0);
-        runtime.panelChartHeights[row.key] = Math.max(row.height, minimum);
-        canvas.style.height = runtime.panelChartHeights[row.key] + "px";
-      });
-      if (runtime.panelChartRegionHeight === null) runtime.panelChartRegionHeight = region.offsetHeight;
-    }
-    if (tray) tray.style.display = runtime.collapsedRows.size ? "flex" : "none";
-    runtime.PANEL_ROWS.forEach(function(row) {
-      var collapsed = runtime.collapsedRows.has(row.key);
-      var element = document.getElementById("tier-row-" + row.key);
-      if (element) element.style.display = collapsed ? "none" : row.display;
-      var restore = document.getElementById("restore-row-" + row.key);
-      if (restore) restore.style.display = collapsed ? "inline-flex" : "none";
-      var collapse = document.getElementById("collapse-row-" + row.key);
-      if (collapse) collapse.setAttribute("aria-expanded", String(!collapsed));
-    });
-    if (group) group.style.display = runtime.collapsedRows.has("withtokens") && runtime.collapsedRows.has("total") ? "none" : "block";
-    var extra = measurable && visibleCount ? Math.max(0, runtime.panelChartRegionHeight - region.offsetHeight) / visibleCount : 0;
-    runtime.PANEL_ROWS.forEach(function(row) {
-      if (runtime.collapsedRows.has(row.key)) return;
-      runtime.panelChartHeights[row.key] += extra;
-      var canvas = document.getElementById("spark-" + row.key);
-      if (canvas) canvas.style.height = runtime.panelChartHeights[row.key] + "px";
-    });
-    if (region && visibleCount && runtime.panelChartRegionHeight !== null) {
-      region.style.height = runtime.panelChartRegionHeight + "px";
-    }
-    runtime.rowLayoutNeedsMeasure = !measurable;
-  }
-  function setRowCollapsed(key, collapsed) {
-    cancelHighPulse(key);
-    if (!runtime.PANEL_ROWS.some(function(row) {
-      return row.key === key;
-    })) return;
-    if (collapsed) runtime.collapsedRows.add(key);
-    else runtime.collapsedRows.delete(key);
-    try {
-      GM_setValue(runtime.COLLAPSED_ROWS_KEY, JSON.stringify(Array.from(runtime.collapsedRows)));
-    } catch (error) {
-      log("Could not save row preferences: " + error.message);
-    }
-    applyRowLayout();
-    if (runtime.presentationMode === "PLAYBACK") {
-      paintPlayback(runtime.playback);
-    } else {
-      updateDisplay();
-      drawAllSparklines();
-    }
-    constrainPanelPosition();
-    var target = document.getElementById((collapsed ? "restore-row-" : "collapse-row-") + key);
-    if (target) target.focus({ preventScroll: true });
-  }
-  function bindRowControls() {
-    runtime.panelChartRegionHeight = null;
-    runtime.PANEL_ROWS.forEach(function(row) {
-      [false, true].forEach(function(collapsed) {
-        var button = document.getElementById((collapsed ? "collapse-row-" : "restore-row-") + row.key);
-        if (button) button.onclick = function(event) {
-          event.stopPropagation();
-          setRowCollapsed(row.key, collapsed);
-        };
-      });
-    });
-    var container = document.getElementById("tracker-container");
-    if (container) container.addEventListener("transitionend", function(event) {
-      if (event.target === container && event.propertyName === "width") {
-        redrawPanelCharts();
-        constrainPanelPosition();
-      }
-    });
-    applyRowLayout();
-  }
-  function redrawPanelCharts() {
-    if (runtime.isMinimized) return;
-    runtime.chartLayoutRevision++;
-    if (runtime.presentationMode === "PLAYBACK") paintPlayback(runtime.playback);
-    else drawAllSparklines();
-  }
-  function cleanupDragListeners() {
-    for (var i = 0; i < runtime.dragListeners.length; i++) {
-      var listener = runtime.dragListeners[i];
-      document.removeEventListener(listener.type, listener.fn, listener.options);
-    }
-    runtime.dragListeners = [];
-  }
-  function addDragListener(type, fn, options) {
-    document.addEventListener(type, fn, options);
-    runtime.dragListeners.push({ type, fn, options });
-  }
-  function loadPanelGeometry() {
-    try {
-      var raw = GM_getValue(runtime.PANEL_GEOMETRY_KEY, null);
-      if (raw === null) return null;
-      var data = JSON.parse(raw);
-      if (!data || !Number.isFinite(data.left) || !Number.isFinite(data.top) || !Number.isFinite(data.scale) || data.scale < 0.5 || data.scale > 3) return null;
-      return { left: data.left, top: data.top, scale: data.scale };
-    } catch (error) {
-      return null;
-    }
-  }
-  function constrainPanelPosition() {
-    var container = document.getElementById("tracker-container");
-    if (!container) return;
-    var rect = container.getBoundingClientRect();
-    container.style.left = Math.max(0, Math.min(rect.left, Math.max(0, window.innerWidth - rect.width))) + "px";
-    container.style.top = Math.max(0, Math.min(rect.top, Math.max(0, window.innerHeight - rect.height))) + "px";
-    container.style.right = "auto";
-  }
-  function savePanelGeometry() {
-    var container = document.getElementById("tracker-container");
-    if (!container) return;
-    var rect = container.getBoundingClientRect();
-    runtime.panelGeometry = { left: rect.left, top: rect.top, scale: runtime.currentScale };
-    try {
-      GM_setValue(runtime.PANEL_GEOMETRY_KEY, JSON.stringify(runtime.panelGeometry));
-    } catch (error) {
-      log("Could not save panel position/scale: " + error.message);
-    }
-  }
-  function restorePanelGeometry() {
-    var container = document.getElementById("tracker-container");
-    if (!container) return;
-    if (runtime.panelGeometry) {
-      container.style.left = runtime.panelGeometry.left + "px";
-      container.style.top = runtime.panelGeometry.top + "px";
-      container.style.right = "auto";
-      applyScale(runtime.panelGeometry.scale);
-    } else applyScale(runtime.currentScale);
-    constrainPanelPosition();
-    redrawPanelCharts();
-  }
-  function restoreStandardSize() {
-    applyScale(1);
-    redrawPanelCharts();
-    constrainPanelPosition();
-    savePanelGeometry();
-  }
-  function applyScale(scale) {
-    runtime.currentScale = scale;
-    var container = document.getElementById("tracker-container");
-    if (!container) return;
-    container.style.transform = "scale(" + scale + ")";
-    container.style.transformOrigin = "top left";
-    container.dataset.scale = scale;
-  }
-  function setupResizable() {
-    var container = document.getElementById("tracker-container");
-    if (!container) return;
-    var resizeHandle = document.createElement("div");
-    resizeHandle.id = "resize-handle";
-    resizeHandle.style.cssText = "position:absolute;top:0;left:0;width:16px;height:16px;background:linear-gradient(135deg, #ff69b4 50%, transparent 50%);cursor:nw-resize;z-index:999999;border-top-left-radius:6px;opacity:0.8;transition:opacity 0.2s;";
-    resizeHandle.addEventListener("mouseenter", function() {
-      this.style.opacity = "1";
-    });
-    resizeHandle.addEventListener("mouseleave", function() {
-      this.style.opacity = "0.8";
-    });
-    container.appendChild(resizeHandle);
-    var startResize = function(e) {
-      if (runtime.isDragging) return;
-      runtime.isResizing = true;
-      runtime.resizeStartX = e.clientX;
-      runtime.resizeStartY = e.clientY;
-      var rect = container.getBoundingClientRect();
-      runtime.resizeStartWidth = rect.width;
-      runtime.resizeStartHeight = rect.height;
-      e.preventDefault();
-      e.stopPropagation();
-    };
-    var doResize = function(e) {
-      if (!runtime.isResizing) return;
-      var deltaX = runtime.resizeStartX - e.clientX;
-      var deltaY = runtime.resizeStartY - e.clientY;
-      var newWidth = runtime.resizeStartWidth + deltaX;
-      var baseWidth = container.offsetWidth;
-      var newScale = Math.max(0.5, Math.min(3, newWidth / baseWidth));
-      applyScale(newScale);
-    };
-    var stopResize = function() {
-      if (!runtime.isResizing) return;
-      runtime.isResizing = false;
-      redrawPanelCharts();
-      constrainPanelPosition();
-      savePanelGeometry();
-    };
-    resizeHandle.addEventListener("mousedown", startResize);
-    document.addEventListener("mousemove", doResize);
-    document.addEventListener("mouseup", stopResize);
-    window._trackerResizeCleanup = function() {
-      resizeHandle.removeEventListener("mousedown", startResize);
-      document.removeEventListener("mousemove", doResize);
-      document.removeEventListener("mouseup", stopResize);
-    };
-  }
-  function setupResizeHandler() {
-    if (runtime.windowResizeHandler) {
-      window.removeEventListener("resize", runtime.windowResizeHandler);
-      runtime.windowResizeHandler = null;
-    }
-    var resizeTimeout;
-    runtime.windowResizeHandler = function() {
-      clearTimeout(resizeTimeout);
-      resizeTimeout = setTimeout(function() {
-        constrainPanelPosition();
-        redrawPanelCharts();
-      }, 100);
-    };
-    window.addEventListener("resize", runtime.windowResizeHandler);
-  }
-  function setupDraggable() {
-    var container = document.getElementById("tracker-container");
-    var dragHandle = document.getElementById("drag-handle");
-    if (!container || !dragHandle) return;
-    var startDrag = function(e) {
-      if (runtime.isResizing || e.target.closest && e.target.closest("button, input, select, a")) return;
-      runtime.isDragging = true;
-      var rect = container.getBoundingClientRect();
-      var scale = runtime.currentScale || 1;
-      runtime.dragOffsetX = (e.clientX - rect.left) / scale;
-      runtime.dragOffsetY = (e.clientY - rect.top) / scale;
-      if (container.style.right !== "auto") {
-        container.style.left = rect.left + "px";
-        container.style.right = "auto";
-      }
-      addDragListener("mousemove", doDrag, false);
-      addDragListener("mouseup", stopDrag, false);
-      e.preventDefault();
-    };
-    var doDrag = function(e) {
-      if (!runtime.isDragging) return;
-      var scale = runtime.currentScale || 1;
-      var newX = e.clientX - runtime.dragOffsetX * scale;
-      var newY = e.clientY - runtime.dragOffsetY * scale;
-      var maxX = window.innerWidth - container.offsetWidth * scale;
-      var maxY = window.innerHeight - container.offsetHeight * scale;
-      newX = Math.max(0, Math.min(newX, maxX));
-      newY = Math.max(0, Math.min(newY, maxY));
-      container.style.left = newX + "px";
-      container.style.top = newY + "px";
-    };
-    var stopDrag = function() {
-      runtime.isDragging = false;
-      cleanupDragListeners();
-      savePanelGeometry();
-    };
-    dragHandle.addEventListener("mousedown", startDrag, false);
-  }
-  function toggleView() {
-    hideChartTooltip();
-    if (runtime.presentationMode === "PLAYBACK") return;
-    cancelHighPulses();
-    runtime.isMinimized = !runtime.isMinimized;
-    var fullView = document.getElementById("full-view");
-    var miniView = document.getElementById("minimized-view");
-    var toggleBtn = document.getElementById("btn-toggle");
-    var container = document.getElementById("tracker-container");
-    var headerText = document.getElementById("header-text");
-    var resizeHandle = document.getElementById("resize-handle");
-    var anonymousCount = getAnonymousCount();
-    var previousTransition = container ? container.style.transition : "";
-    if (container) container.style.transition = "none";
-    if (runtime.isMinimized) {
-      if (fullView) fullView.style.display = "none";
-      if (miniView) miniView.style.display = "block";
-      if (toggleBtn) toggleBtn.textContent = "+";
-      if (container) container.style.width = runtime.BASE_WIDTH_MINI + "px";
-      if (resizeHandle) resizeHandle.style.display = "none";
-      if (runtime.isResizing) runtime.isResizing = false;
-      var currentTotal = runtime.roomTotal > 0 ? runtime.roomTotal : runtime.users.size + anonymousCount;
-      if (headerText) headerText.textContent = currentTotal.toLocaleString() + " (H:" + runtime.roomTotalHigh.toLocaleString() + ")";
-    } else {
-      if (fullView) fullView.style.display = "block";
-      if (miniView) miniView.style.display = "none";
-      if (toggleBtn) toggleBtn.textContent = "−";
-      if (container) container.style.width = runtime.BASE_WIDTH_FULL + "px";
-      if (resizeHandle) resizeHandle.style.display = "block";
-      var currentTotal = runtime.roomTotal > 0 ? runtime.roomTotal : runtime.users.size + anonymousCount;
-      if (headerText) headerText.textContent = "USERS: " + currentTotal.toLocaleString() + " (H:" + runtime.roomTotalHigh.toLocaleString() + ")";
-    }
-    var settings = document.getElementById("mini-settings");
-    if (settings) settings.style.display = "none";
-    var settingsButton = document.getElementById("mini-settings-toggle");
-    if (settingsButton) settingsButton.setAttribute("aria-expanded", "false");
-    updateDisplay();
-    if (!runtime.isMinimized) {
-      drawAllSparklines();
-      constrainPanelPosition();
-    }
-    constrainPanelPosition();
-    if (container) container.style.transition = previousTransition;
-  }
-
-  // src/charts.js
-  function drawAllSparklines() {
-    if (runtime.presentationMode === "PLAYBACK") return;
-    drawHistorySparklines(runtime.history);
-  }
-  function drawHistorySparklines(displayHistory, lastIndex, replayProgress) {
-    hideChartTooltip();
-    if (runtime.rowLayoutNeedsMeasure) applyRowLayout();
-    var breaks = getHistoryBreaks(displayHistory);
-    runtime.PANEL_ROWS.forEach(function(row) {
-      if (runtime.collapsedRows.has(row.key)) return;
-      var key = row.key === "withtokens" ? "withTokens" : row.key === "anon" ? "anonymous" : row.key;
-      drawSparkline(
-        "spark-" + row.key,
-        displayHistory[key],
-        row.key === "total" ? themeColor("text") : row.color,
-        runtime.panelChartHeights[row.key] || row.height,
-        displayHistory.timestamps,
-        breaks,
-        lastIndex,
-        row.label,
-        replayProgress
-      );
-    });
-  }
-
-  // src/session-file-format.js
-  function validateSessionFile(file) {
-    if (!isStorageObject(file) || file.format !== runtime.SESSION_FILE_FORMAT || file.formatVersion !== runtime.SESSION_FILE_VERSION) {
-      throw new Error("This is not a supported TierScope session file.");
-    }
-    if (typeof file.room !== "string" || !/^[a-z0-9_-]{1,100}$/i.test(file.room) || typeof file.producerVersion !== "string" || file.producerVersion.length > 40) {
-      throw new Error("Invalid session file information.");
-    }
-    var data = file.session;
-    validateStoredSession(data);
-    if (data.schemaVersion !== runtime.STORAGE_SCHEMA_VERSION || !data.history.timestamps.length || !isStorageObject(data.sessionHighs) || !isStorageNumber(data.roomTotalHigh) || !(data.sessionStartedAt === null || isStorageTimestamp(data.sessionStartedAt)) || typeof data.sessionStartEstimated !== "boolean" || !isStorageTimestamp(data.pausedElapsedTime) || typeof data.isPaused !== "boolean" || typeof data.isStopped !== "boolean" || !(data.roomTotalHighTime === null || isStorageTimestamp(data.roomTotalHighTime))) {
-      throw new Error("Session file is incomplete.");
-    }
-    runtime.STORAGE_HISTORY_SERIES.forEach(function(key) {
-      if (!data.history[key].every(Number.isSafeInteger) || !Number.isSafeInteger(data.sessionHighs[key].value)) {
-        throw new Error("Session counts must be whole numbers.");
-      }
-    });
-    var roomPeak = 0;
-    data.history.timestamps.forEach(function(_, i) {
-      var total = data.history.total[i] + data.history.anonymous[i];
-      if (!Number.isSafeInteger(total)) throw new Error("Invalid session room total.");
-      roomPeak = Math.max(roomPeak, total);
-    });
-    if (!Number.isSafeInteger(data.roomTotalHigh) || data.roomTotalHigh < roomPeak) throw new Error("Invalid session room high.");
-    var normalized = normalizeStoredSession(data);
-    var clean = { schemaVersion: runtime.STORAGE_SCHEMA_VERSION };
-    [
-      "timestamp",
-      "history",
-      "sessionStartedAt",
-      "sessionStartEstimated",
-      "sessionHighs",
-      "roomTotalHigh",
-      "roomTotalHighTime",
-      "pausedElapsedTime",
-      "isPaused",
-      "isStopped",
-      "stoppedAt",
-      "stopReason"
-    ].forEach(function(key) {
-      clean[key] = normalized[key];
-    });
-    return {
-      format: runtime.SESSION_FILE_FORMAT,
-      formatVersion: runtime.SESSION_FILE_VERSION,
-      producerVersion: file.producerVersion,
-      room: file.room,
-      session: clean
-    };
-  }
-
   // src/session-capture.js
   function captureSessionFile() {
     if (isPlaybackCurrent(runtime.playback) && runtime.playback.archive) return runtime.playback.archive;
@@ -5362,887 +5363,240 @@ underlying system, so should run in the browser, Node, or Plask.
     return JSON.parse(text.replace(/^\uFEFF/, ""));
   }
 
-  // src/session-analysis.js
-  var ANALYSIS_METRICS = Object.freeze({
-    room: "Room audience",
-    total: "Registered viewers",
-    withTokens: "Viewers with tokens",
-    red: "Moderators",
-    green: "Fan club",
-    purple: "Dark purple",
-    pink: "Light purple",
-    "dark-blue": "Dark blue",
-    "light-blue": "Light blue",
-    gray: "Grey",
-    "female-trans": "Female / trans",
-    anonymous: "Anonymous viewers"
-  });
-  function analysisSeries(archive, metric) {
-    if (!Object.prototype.hasOwnProperty.call(ANALYSIS_METRICS, metric)) throw new Error("Unknown analysis metric.");
-    const history = archive.session.history;
-    const values = metric === "room" ? (
-      /** @type {number[]} */
-      history.total.map((v, i) => v + /** @type {number[]} */
-      history.anonymous[i])
-    ) : (
-      /** @type {number[]} */
-      history[metric]
-    );
-    const origin = history.timestamps[0];
-    const times = history.timestamps.map((time) => time - origin);
-    for (let i = 0; i < times.length; i++) times[i] = Math.max(0, times[i], i ? times[i - 1] : 0);
-    return { times, values, breaks: history.breaks || times.map(() => false) };
-  }
-  function summarizeSession(archive, metric = "room", threshold = 100, limitMs = Infinity) {
-    if (!Number.isFinite(threshold) || threshold < 0 || !(limitMs >= 0)) throw new Error("Invalid summary range or threshold.");
-    const { times, values, breaks } = analysisSeries(archive, metric);
-    const end = Math.min(times.length ? times[times.length - 1] : 0, limitMs);
-    let coveredMs = 0, weighted = 0, registeredWeight = 0, tokenWeight = 0, atOrAboveMs = 0, peak = 0, samples = 0;
-    let peakTime = null;
-    for (let i = 0; i < times.length && times[i] <= end; i++) {
-      samples++;
-      if (peakTime === null || values[i] > peak) {
-        peak = values[i];
-        peakTime = archive.session.history.timestamps[i];
+  // src/library-dock.js
+  function attachLibraryDock(panel, library, onTheme) {
+    const original = { left: panel.style.left, top: panel.style.top, right: panel.style.right };
+    let lastPosition = __spreadValues({}, original), movedByUser = false, borrowed = false, frame = 0, closed = false;
+    let previousTheme = "";
+    const position = () => ({ left: panel.style.left, top: panel.style.top, right: panel.style.right });
+    function arrange() {
+      frame = 0;
+      if (closed || !panel.isConnected || !library.isConnected) return;
+      const now = position();
+      if (Object.keys(now).some((key) => now[key] !== lastPosition[key])) movedByUser = true;
+      let rect = panel.getBoundingClientRect();
+      const scale = Math.max(0.9, Math.min(1.6, Number(panel.dataset.scale) || 1));
+      const width = Math.round(370 * scale), margin = 8;
+      const docked = window.innerWidth >= rect.width + width + margin * 2;
+      if (docked) {
+        const left = Math.max(width + margin - 1, Math.min(rect.left, window.innerWidth - rect.width - margin));
+        if (Math.abs(left - rect.left) > 0.5) {
+          panel.style.left = left + "px";
+          panel.style.right = "auto";
+          borrowed = true;
+          rect = panel.getBoundingClientRect();
+        }
       }
-      if (i + 1 >= times.length || breaks[i + 1]) continue;
-      const duration = Math.max(0, Math.min(end, times[i + 1]) - times[i]);
-      coveredMs += duration;
-      weighted += duration * values[i];
-      registeredWeight += duration * /** @type {number[]} */
-      archive.session.history.total[i];
-      tokenWeight += duration * /** @type {number[]} */
-      archive.session.history.withTokens[i];
-      if (values[i] >= threshold) atOrAboveMs += duration;
-    }
-    return {
-      samples,
-      spanMs: end,
-      coveredMs,
-      gapMs: end - coveredMs,
-      peak,
-      peakTime,
-      sessionPeak: metric === "room" ? archive.session.roomTotalHigh : archive.session.sessionHighs[metric].value,
-      mean: coveredMs ? weighted / coveredMs : null,
-      tokenShare: registeredWeight ? tokenWeight / registeredWeight * 100 : null,
-      atOrAboveMs,
-      coverage: end ? coveredMs / end * 100 : null
-    };
-  }
-  function summarizeAudience(archive) {
-    const audience = ["room", "total", "withTokens", "anonymous"].map((metric) => __spreadValues({ metric }, summarizeSession(archive, metric)));
-    const [room, registered, tokens, anonymous] = audience;
-    return {
-      audience,
-      tokenShareRegistered: registered.tokenShare,
-      tokenShareRoom: room.mean && tokens.mean !== null ? tokens.mean / room.mean * 100 : null,
-      anonymousShareRoom: room.mean && anonymous.mean !== null ? anonymous.mean / room.mean * 100 : null
-    };
-  }
-  var ANALYSIS_MAX_THRESHOLDS = 8;
-  function parseAnalysisThresholds(text) {
-    const parts = text.split(",").map((part) => part.trim());
-    if (!parts.length || parts.length > ANALYSIS_MAX_THRESHOLDS || parts.some((part) => !/^\d+$/.test(part) || !Number.isSafeInteger(Number(part)))) {
-      throw new Error("Enter 1–" + ANALYSIS_MAX_THRESHOLDS + " non-negative whole numbers separated by commas, without thousands separators.");
-    }
-    return [...new Set(parts.map(Number))].sort((a, b) => a - b);
-  }
-  function summarizeThresholds(archive, metric, thresholds) {
-    if (!thresholds.length || thresholds.length > ANALYSIS_MAX_THRESHOLDS || thresholds.some((value) => !Number.isSafeInteger(value) || value < 0)) {
-      throw new Error("Invalid analysis thresholds.");
-    }
-    return thresholds.map((threshold) => {
-      const summary = summarizeSession(archive, metric, threshold);
-      return {
-        threshold,
-        durationMs: summary.coveredMs ? summary.atOrAboveMs : null,
-        percent: summary.coveredMs ? summary.atOrAboveMs / summary.coveredMs * 100 : null
+      lastPosition = position();
+      const height = Math.min(window.innerHeight - margin * 2, Math.max(420, rect.height));
+      const top = Math.max(margin, Math.min(rect.top, window.innerHeight - height - margin));
+      const styles = {
+        left: (docked ? rect.left - width + 1 : margin) + "px",
+        top: top + "px",
+        width: (docked ? width : Math.min(window.innerWidth - margin * 2, 520)) + "px",
+        height: height + "px",
+        fontSize: 11 * scale + "px"
       };
-    });
-  }
-  function compareSessions(a, b, metric = "room", threshold = 100, sharedLength = true) {
-    const sa = analysisSeries(a, metric), sb = analysisSeries(b, metric);
-    const spanA = sa.times.length ? sa.times[sa.times.length - 1] : 0;
-    const spanB = sb.times.length ? sb.times[sb.times.length - 1] : 0;
-    const limitMs = sharedLength ? Math.min(spanA, spanB) : Infinity;
-    return {
-      a: summarizeSession(a, metric, threshold, limitMs),
-      b: summarizeSession(b, metric, threshold, limitMs),
-      limitMs,
-      axisMs: sharedLength ? limitMs : Math.max(spanA, spanB)
-    };
-  }
-
-  // src/session-tools.js
-  var closeSessionTools = null;
-  var replayKeepState = { archive: null, label: "Keep in library", message: "" };
-  function updateReplayLibraryButton() {
-    const button = document.getElementById("btn-playback-keep-library");
-    if (!button) return;
-    const archive = isPlaybackCurrent(runtime.playback) ? runtime.playback.archive : null;
-    if (replayKeepState.archive !== archive) replayKeepState = { archive, label: "Keep in library", message: "" };
-    button.disabled = !archive;
-    if (button.textContent !== replayKeepState.label) button.textContent = replayKeepState.label;
-    const title = replayKeepState.message || "Keep the full replayed recording in this browser's library";
-    if (button.title !== title) button.title = title;
-    const label = replayKeepState.label + ". " + title;
-    if (button.getAttribute("aria-label") !== label) button.setAttribute("aria-label", label);
-  }
-  function keepReplayInLibrary() {
-    if (!isPlaybackCurrent(runtime.playback) || !runtime.playback.archive) return;
-    const archive = runtime.playback.archive;
-    try {
-      const result = keepSessionInLibrary(archive);
-      replayKeepState = {
-        archive,
-        label: result.added ? "Kept in library" : result.updated ? "Updated library" : "Already kept",
-        message: archive.room + ": " + (result.added ? "Full recording kept in the library." : result.updated ? "Library recording updated; its name was preserved." : "An equal or fuller recording is already in the library.")
-      };
-    } catch (error) {
-      replayKeepState = { archive, label: "Retry keep", message: "Could not keep this recording: " + error.message };
-      alert(replayKeepState.message);
+      for (const [key, value] of Object.entries(styles)) if (library.style[key] !== value) library.style[key] = value;
+      const mode = docked ? "docked" : "sheet";
+      if (panel.dataset.libraryOpen !== mode) panel.dataset.libraryOpen = mode;
+      if (library.dataset.layout !== mode) library.dataset.layout = mode;
+      const theme = panel.getAttribute("data-theme") || "dark";
+      if (theme !== previousTheme) {
+        previousTheme = theme;
+        library.dataset.theme = theme;
+        setThemeVariables(library);
+        if (onTheme) onTheme();
+      }
     }
-    updateReplayLibraryButton();
-  }
-  function updateSessionToolsStatus() {
-    updateReplayLibraryButton();
-    const element = document.getElementById("session-save-info");
-    if (!element) return;
-    const state = getSessionSaveState(getModelName());
-    const warning = state.error || runtime.sessionStorageNotice;
-    element.textContent = warning ? "Session saving unavailable. Keep this tab open or download a session file." : state.savedAt ? "Session saved in this browser at " + new Date(state.savedAt).toLocaleTimeString() + "." : "No session saved in this tab yet.";
-    element.style.color = warning ? "var(--panel-warning)" : "var(--panel-muted)";
-  }
-  function bindSessionTools(menu) {
-    document.getElementById("btn-playback-keep-library").onclick = keepReplayInLibrary;
-    const libraryButton = document.getElementById("btn-control-library");
-    libraryButton.onclick = () => openSessionTools(libraryButton);
-    const button = document.createElement("button");
-    button.id = "btn-session-tools";
-    button.type = "button";
-    button.textContent = "Session library, analysis & backup…";
-    button.style.cssText = "display:block;width:100%;margin:8px 0 4px;padding:5px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:3px;cursor:pointer;";
-    button.onclick = () => {
-      menu.style.display = "none";
-      document.getElementById("btn-panel-options").setAttribute("aria-expanded", "false");
-      openSessionTools();
-    };
-    menu.appendChild(button);
-    const status = document.createElement("div");
-    status.id = "session-save-info";
-    status.setAttribute("role", "status");
-    status.style.cssText = "font-size:10px;line-height:1.4;margin-top:6px;";
-    menu.appendChild(status);
-    menu.style.maxHeight = "75vh";
-    menu.style.overflowY = "auto";
-    updateSessionToolsStatus();
+    function schedule() {
+      if (!closed && !frame) frame = window.requestAnimationFrame(arrange);
+    }
+    const resize = window.ResizeObserver ? new window.ResizeObserver(schedule) : null;
+    if (resize) resize.observe(panel);
+    const mutation = new window.MutationObserver(schedule);
+    mutation.observe(panel, { attributes: true, attributeFilter: ["style", "data-scale", "data-theme"] });
+    window.addEventListener("resize", schedule);
+    arrange();
     return () => {
-      if (closeSessionTools) closeSessionTools();
+      closed = true;
+      if (frame) window.cancelAnimationFrame(frame);
+      if (resize) resize.disconnect();
+      mutation.disconnect();
+      window.removeEventListener("resize", schedule);
+      delete panel.dataset.libraryOpen;
+      if (borrowed && !movedByUser) for (const [key, value] of Object.entries(original)) panel.style[key] = value;
     };
-  }
-  function openSessionTools(focusTarget) {
-    if (closeSessionTools) closeSessionTools();
-    const origin = location.href, generation = runtime.initGuard, focusBefore = focusTarget || document.getElementById("btn-panel-options") || document.activeElement;
-    const dialog = document.createElement("dialog");
-    dialog.id = "tierscope-session-tools";
-    dialog.setAttribute("aria-labelledby", "tools-title");
-    dialog.style.cssText = "box-sizing:border-box;width:min(780px,94vw);max-height:90vh;padding:20px;border:1px solid #ff69b4;border-radius:10px;background:var(--panel-solid);color:var(--panel-text);font:14px/1.5 Arial,sans-serif;overflow:auto;";
-    setThemeVariables(dialog);
-    dialog.innerHTML = '<style>#tierscope-session-tools::backdrop{background:#0009}#tierscope-session-tools *{box-sizing:border-box}#tierscope-session-tools button,#tierscope-session-tools select,#tierscope-session-tools input{font:inherit;color:var(--panel-text);background:var(--panel-button);border:1px solid var(--panel-divider);border-radius:5px;padding:5px 8px;max-width:100%}#tierscope-session-tools button{cursor:pointer}#tierscope-session-tools button:disabled{opacity:.5;cursor:default}#tierscope-session-tools button:focus-visible,#tierscope-session-tools select:focus-visible,#tierscope-session-tools input:focus-visible{outline:2px solid #ff69b4;outline-offset:2px}#tierscope-session-tools button[aria-pressed=true]{border-color:#ff69b4}#tierscope-session-tools .tools-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:12px 0}#tierscope-session-tools .tools-muted{color:var(--panel-muted);font-size:12px}#tierscope-session-tools .tools-row{border-top:1px solid var(--panel-divider);padding:12px 0;overflow-wrap:anywhere}#tierscope-session-tools table{width:100%;border-collapse:collapse;font-size:13px}#tierscope-session-tools th,#tierscope-session-tools td{text-align:left;padding:7px;border-bottom:1px solid var(--panel-divider)}#tierscope-session-tools caption{text-align:left;font-weight:bold;padding:8px 0}#tierscope-session-tools .tools-scroll{overflow-x:auto}#tierscope-session-tools canvas{display:block;width:100%;height:240px}#tierscope-session-tools label{display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap;min-width:0;max-width:100%}#tierscope-session-tools h3{font-size:16px;margin:12px 0}</style><div class="tools-actions" style="justify-content:space-between;margin-top:0"><h2 id="tools-title" style="font-size:20px;margin:0">Session tools</h2><button id="tools-close" aria-label="Close session tools">Close</button></div><nav class="tools-actions" aria-label="Session tools"><button data-tools-tab="library">Library</button><button data-tools-tab="summary">Summary</button><button data-tools-tab="compare">Compare</button><button data-tools-tab="backup">Backup &amp; restore</button></nav><div id="tools-message" role="status" aria-live="polite" style="white-space:pre-line;overflow-wrap:anywhere"></div><div id="tools-content"></div>';
-    document.body.appendChild(dialog);
-    let currentArchive = null, library = null, tab = "library", fileRequest = 0, chartObserver = null;
-    let selectedA = "current", selectedB = "", metric = "room", threshold = 100, sharedLength = true, pendingBackup = null;
-    let summaryThresholds = [25, 50, 100], libraryRoom = null;
-    try {
-      currentArchive = captureSessionFile();
-    } catch (error) {
-    }
-    const content = dialog.querySelector("#tools-content"), message = dialog.querySelector("#tools-message");
-    const current = () => dialog.isConnected && dialog.open && origin === location.href && generation === runtime.initGuard;
-    function tell(text, error = false) {
-      message.textContent = text;
-      message.style.color = error ? "var(--panel-negative)" : "var(--panel-positive)";
-    }
-    function action(fn) {
-      return () => {
-        try {
-          fn();
-        } catch (error) {
-          tell(error.message, true);
-        }
-      };
-    }
-    function button(parent, text, fn, id) {
-      const element = document.createElement("button");
-      element.type = "button";
-      element.textContent = text;
-      if (id) element.id = id;
-      element.onclick = action(fn);
-      parent.appendChild(element);
-      return element;
-    }
-    function node(parent, tag, text, className) {
-      const element = document.createElement(tag);
-      if (text !== void 0) element.textContent = text;
-      if (className) element.className = className;
-      parent.appendChild(element);
-      return element;
-    }
-    function chooseFile(maxBytes, accept) {
-      const input = document.createElement("input");
-      input.type = "file";
-      input.accept = ".json,application/json";
-      input.hidden = true;
-      const request = ++fileRequest;
-      dialog.appendChild(input);
-      input.onchange = async () => {
-        const file = input.files && input.files[0];
-        if (!file) {
-          input.remove();
-          return;
-        }
-        try {
-          const value = await readDataFile(file, maxBytes);
-          if (current() && request === fileRequest) accept(value);
-        } catch (error) {
-          if (current() && request === fileRequest) tell(error.message, true);
-        } finally {
-          input.remove();
-        }
-      };
-      input.addEventListener("cancel", () => input.remove(), { once: true });
-      input.click();
-    }
-    function readLibrary() {
-      library = readSessionLibrary();
-      return library;
-    }
-    function sourceOptions() {
-      const items = [];
-      if (currentArchive) items.push({ id: "current", title: "Current / replayed snapshot — " + currentArchive.room, archive: currentArchive });
-      for (const entry of library.entries) items.push({ id: entry.id, title: (entry.title || entry.archive.room) + " — " + new Date(entry.archive.session.history.timestamps[0]).toLocaleString(), archive: entry.archive });
-      return items;
-    }
-    function selectSource(parent, label, id, selected, changed) {
-      const wrapper = node(parent, "label", label), select = node(wrapper, "select");
-      select.id = id;
-      for (const item of sourceOptions()) {
-        const option = node(select, "option", item.title);
-        option.value = item.id;
-      }
-      if (sourceOptions().some((item) => item.id === selected)) select.value = selected;
-      select.onchange = () => changed(select.value);
-      return select.value;
-    }
-    function renderLibrary() {
-      const state = readLibrary();
-      const folders = /* @__PURE__ */ new Map();
-      for (const entry of state.entries) {
-        const room = entry.archive.room.toLowerCase();
-        if (!folders.has(room)) folders.set(room, []);
-        folders.get(room).push(entry);
-      }
-      if (libraryRoom && !folders.has(libraryRoom)) libraryRoom = null;
-      node(content, "p", state.count + " / " + LIBRARY_MAX_COUNT + " recordings · " + (state.bytes / 1024 / 1024).toFixed(2) + " / " + LIBRARY_MAX_BYTES / 1024 / 1024 + " MB. Kept until you delete them; nothing is removed automatically.", "tools-muted");
-      const actions = node(content, "div", void 0, "tools-actions");
-      button(actions, "Keep current / replayed session in library", () => {
-        const archive = captureSessionFile();
-        const result = keepSessionInLibrary(archive);
-        currentArchive = archive;
-        libraryRoom = archive.room.toLowerCase();
-        render("library");
-        tell(result.added ? "Recording kept in the library." : result.updated ? "Library recording updated." : "An equal or fuller recording is already in the library.");
-      }, "tools-keep").disabled = !currentArchive;
-      button(actions, "Import session file…", () => chooseFile(runtime.SESSION_FILE_MAX_BYTES, (value) => {
-        const archive = validateSessionFile(value), result = keepSessionInLibrary(archive);
-        libraryRoom = archive.room.toLowerCase();
-        render("library");
-        tell(result.added ? "Recording imported into the library." : result.updated ? "Library recording updated from the file." : "An equal or fuller recording is already in the library.");
-      }), "tools-import-session");
-      button(actions, "Refresh list", () => render("library"));
-      const searchLabel = node(content, "label", "Find a recording "), search = node(searchLabel, "input");
-      search.type = "search";
-      search.id = "tools-library-search";
-      search.placeholder = "Model or title — all models";
-      search.title = "Search all recordings, including those in other model folders.";
-      const list = node(content, "div");
-      list.id = "tools-library-list";
-      let shown = 50;
-      function rows() {
-        list.replaceChildren();
-        const query = search.value.trim().toLowerCase();
-        const browsingFolders = !query && !libraryRoom;
-        const visible = query ? state.entries.filter((entry) => (entry.title + " " + entry.archive.room).toLowerCase().includes(query)) : libraryRoom ? folders.get(libraryRoom) : [...folders.keys()].sort((a, b) => a.localeCompare(b));
-        const heading = node(list, "div", void 0, "tools-actions");
-        if (!browsingFolders) button(heading, "All models", () => {
-          const previous = libraryRoom;
-          libraryRoom = null;
-          search.value = "";
-          shown = 50;
-          rows();
-          (document.getElementById("tools-folder-" + previous) || search).focus();
-        }, "tools-library-all-models");
-        node(heading, "h3", query ? "Search results — all models" : libraryRoom ? "Folder: " + libraryRoom : "Model folders");
-        if (browsingFolders) node(list, "p", folders.size + " model folder(s). Open a folder to see its recordings, newest first.", "tools-muted");
-        if (!visible.length) node(list, "p", state.entries.length ? "No matching recordings." : "No recordings yet. Keep a session or import a session file.");
-        if (browsingFolders) for (const room of visible.slice(0, shown)) {
-          const entries = folders.get(room), row = node(list, "div", void 0, "tools-folder");
-          row.style.cssText = "border-top:1px solid var(--panel-divider);padding:12px 0;overflow-wrap:anywhere;";
-          const open = button(row, "📁 " + room, () => {
-            libraryRoom = room;
-            shown = 50;
-            rows();
-            document.getElementById("tools-library-all-models").focus();
-          }, "tools-folder-" + room);
-          open.setAttribute("aria-label", "Open recordings for " + room);
-          node(row, "div", entries.length + (entries.length === 1 ? " recording" : " recordings") + " · Latest: " + new Date(entries[0].archive.session.history.timestamps[0]).toLocaleString(), "tools-muted");
-        }
-        else for (const entry of visible.slice(0, shown)) {
-          const row = node(list, "div", void 0, "tools-row");
-          row.dataset.libraryId = entry.id;
-          node(row, "strong", entry.title || entry.archive.room);
-          node(row, "div", entry.archive.room + " · " + new Date(entry.archive.session.history.timestamps[0]).toLocaleString() + " · " + entry.archive.session.history.timestamps.length + " samples", "tools-muted");
-          const actions2 = node(row, "div", void 0, "tools-actions");
-          button(actions2, "Replay", () => {
-            openSessionReplay(entry.archive);
-            close();
-          });
-          button(actions2, "Summary", () => {
-            selectedA = entry.id;
-            render("summary");
-          });
-          button(actions2, "Download", () => downloadDataFile(entry.archive, entry.archive.room + "-session.tierscope.json"));
-          button(actions2, "Rename", () => {
-            const title = window.prompt("Recording title (up to 80 characters):", entry.title);
-            if (title !== null) {
-              renameLibrarySession(entry.id, title);
-              render("library");
-            }
-          });
-          button(actions2, "Delete", () => {
-            if (!confirm("Delete this library recording: " + (entry.title || entry.archive.room) + "?\n\nLive tracking, ATH and downloaded files are unchanged.")) return;
-            removeLibrarySession(entry.id);
-            render("library");
-            tell("Library recording deleted.");
-          });
-        }
-        if (visible.length > 50) node(list, "p", "Showing " + Math.min(shown, visible.length) + " of " + visible.length + (browsingFolders ? " model folders." : " matching recordings."), "tools-muted");
-        if (shown < visible.length) button(list, "Show " + Math.min(50, visible.length - shown) + " more", () => {
-          shown += 50;
-          rows();
-          (document.getElementById("tools-library-more") || search).focus();
-        }, "tools-library-more");
-      }
-      search.oninput = () => {
-        shown = 50;
-        rows();
-      };
-      rows();
-      if (state.damaged.length) {
-        node(content, "p", state.damaged.length + " unreadable library record(s) were retained.", "tools-muted");
-        button(content, "Remove unreadable library records…", () => {
-          if (!confirm("Delete the " + state.damaged.length + " unreadable library record(s)? This cannot be undone.")) return;
-          for (const key of state.damaged) removeLibrarySession(key.slice(LIBRARY_PREFIX.length));
-          render("library");
-        });
-      }
-    }
-    function analysisControls(comparing) {
-      if (!library) readLibrary();
-      if (!sourceOptions().length) {
-        node(content, "p", "Record a session or import one into the library to see analysis.");
-        return null;
-      }
-      const controls = node(content, "div", void 0, "tools-actions");
-      if (currentArchive) button(controls, "Refresh current / replayed snapshot", () => {
-        currentArchive = captureSessionFile();
-        render(tab);
-      }, "tools-refresh-snapshot");
-      selectedA = selectSource(controls, comparing ? "A " : "Recording ", "tools-source-a", selectedA, (value) => {
-        selectedA = value;
-        render(tab);
-      });
-      if (comparing) {
-        if (!sourceOptions().some((item) => item.id === selectedB)) selectedB = (sourceOptions().find((item) => item.id !== selectedA) || sourceOptions()[0]).id;
-        selectedB = selectSource(controls, "B ", "tools-source-b", selectedB, (value) => {
-          selectedB = value;
-          render(tab);
-        });
-      }
-      const label = node(controls, "label", "Metric "), metricSelect = node(label, "select");
-      metricSelect.id = "tools-metric";
-      for (const [key, name] of Object.entries(ANALYSIS_METRICS)) {
-        const option = node(metricSelect, "option", name);
-        option.value = key;
-      }
-      metricSelect.value = metric;
-      metricSelect.onchange = () => {
-        metric = metricSelect.value;
-        render(tab);
-      };
-      const thresholdLabel = node(controls, "label", comparing ? "Threshold " : "Thresholds "), input = node(thresholdLabel, "input");
-      input.id = "tools-threshold";
-      input.style.width = comparing ? "105px" : "200px";
-      if (comparing) {
-        input.type = "number";
-        input.min = "0";
-        input.max = "9007199254740991";
-        input.step = "1";
-        input.value = threshold;
-      } else {
-        input.type = "text";
-        input.maxLength = 160;
-        input.value = summaryThresholds.join(", ");
-        input.placeholder = "25, 50, 100";
-        input.title = "Up to 8 counts separated by commas. Applies to the selected metric.";
-      }
-      input.oninput = () => input.setCustomValidity("");
-      function applyThreshold() {
-        try {
-          if (comparing) {
-            if (!Number.isSafeInteger(input.valueAsNumber) || input.valueAsNumber < 0) throw new Error("Enter a non-negative whole number.");
-            threshold = input.valueAsNumber;
-          } else summaryThresholds = parseAnalysisThresholds(input.value);
-        } catch (error) {
-          input.setCustomValidity(error.message);
-          input.reportValidity();
-          return;
-        }
-        input.setCustomValidity("");
-        render(tab);
-      }
-      input.onkeydown = (event) => {
-        if (event.key === "Enter") {
-          event.preventDefault();
-          applyThreshold();
-        }
-      };
-      button(controls, comparing ? "Apply threshold" : "Apply thresholds", applyThreshold, "tools-apply-threshold");
-      if (comparing) {
-        const label2 = node(controls, "label"), check = node(label2, "input");
-        check.type = "checkbox";
-        check.checked = sharedLength;
-        check.id = "tools-shared-length";
-        node(label2, "span", "Match shared length");
-        check.onchange = () => {
-          sharedLength = check.checked;
-          render(tab);
-        };
-      }
-      node(content, "p", "Aligned from the first retained sample, using real elapsed time. Averages and threshold durations hold each sample until the next; recording gaps are excluded. The final sample has no assumed duration.", "tools-muted");
-      if (comparing) node(content, "p", "A: " + sourceOptions().find((item) => item.id === selectedA).title + " · B: " + sourceOptions().find((item) => item.id === selectedB).title, "tools-muted");
-      return sourceOptions();
-    }
-    const number = (value) => value === null ? "Not enough data" : value.toLocaleString(void 0, { maximumFractionDigits: 1 });
-    const percent = (value) => value === null ? "Not enough data" : number(value) + "%";
-    function audienceOverview(archive) {
-      const overview = summarizeAudience(archive), coverage = overview.audience[0];
-      node(content, "h3", "Audience overview");
-      node(content, "p", archive.room + " · " + coverage.samples + " samples · Covered time " + formatElapsedTime(coverage.coveredMs) + " · Excluded gaps " + formatElapsedTime(coverage.gapMs) + " · Coverage " + percent(coverage.coverage), "tools-muted");
-      const scroll = node(content, "div", void 0, "tools-scroll"), table = node(scroll, "table");
-      table.id = "tools-audience-table";
-      node(table, "caption", "Audience across the retained recording");
-      const head = node(node(table, "thead"), "tr");
-      ["Audience", "Time-weighted average", "Peak in recording", "Full-session high"].forEach((label) => {
-        node(head, "th", label).scope = "col";
-      });
-      const body = node(table, "tbody");
-      for (const summary of overview.audience) {
-        const row = node(body, "tr");
-        node(row, "th", ANALYSIS_METRICS[summary.metric]).scope = "row";
-        node(row, "td", number(summary.mean));
-        const peak = node(row, "td", number(summary.peak));
-        if (summary.peakTime !== null) peak.title = "First recorded at " + new Date(summary.peakTime).toLocaleString();
-        node(row, "td", number(summary.sessionPeak));
-      }
-      node(content, "p", "Room audience = registered + anonymous viewers. A full-session high may predate retained history. Hover a recording peak for its first recorded time.", "tools-muted");
-      const shares = node(content, "div");
-      shares.id = "tools-audience-shares";
-      node(shares, "h3", "Audience proportions");
-      node(shares, "p", "Token holders / registered viewers: " + percent(overview.tokenShareRegistered));
-      node(shares, "p", "Token holders / whole room: " + percent(overview.tokenShareRoom));
-      node(shares, "p", "Anonymous / whole room: " + percent(overview.anonymousShareRoom));
-      node(shares, "p", "Shares use viewer-time over covered intervals. A crowded interval contributes more than a quiet interval of the same length; gaps contribute nothing.", "tools-muted");
-    }
-    function thresholdTable(archive) {
-      const scroll = node(content, "div", void 0, "tools-scroll"), table = node(scroll, "table");
-      table.id = "tools-threshold-table";
-      node(table, "caption", ANALYSIS_METRICS[metric] + " — time at or above selected thresholds");
-      const head = node(node(table, "thead"), "tr");
-      ["Threshold", "Time at or above", "% of covered time"].forEach((label) => {
-        node(head, "th", label).scope = "col";
-      });
-      const body = node(table, "tbody");
-      for (const result of summarizeThresholds(archive, metric, summaryThresholds)) {
-        const row = node(body, "tr");
-        node(row, "th", number(result.threshold)).scope = "row";
-        node(row, "td", result.durationMs === null ? "Not enough data" : formatElapsedTime(result.durationMs));
-        node(row, "td", percent(result.percent));
-      }
-      node(content, "p", "Includes samples equal to the threshold. Percentages use covered recording time; gaps and time after the final sample are excluded.", "tools-muted");
-    }
-    function summaryTable(summaries, labels, comparing = true) {
-      const scroll = node(content, "div", void 0, "tools-scroll"), table = node(scroll, "table");
-      table.id = "tools-summary-table";
-      node(table, "caption", ANALYSIS_METRICS[metric] + " — retained recording statistics");
-      const head = node(table, "thead"), headRow = node(head, "tr");
-      node(headRow, "th", "Measure");
-      labels.forEach((label) => node(headRow, "th", label));
-      const body = node(table, "tbody");
-      const rows = [
-        ["Samples in range", (s) => number(s.samples)],
-        ["Elapsed span", (s) => formatElapsedTime(s.spanMs)],
-        ["Covered recording time", (s) => formatElapsedTime(s.coveredMs)],
-        ["Excluded gaps", (s) => formatElapsedTime(s.gapMs)],
-        ["Coverage", (s) => s.coverage === null ? "Not enough data" : number(s.coverage) + "%"],
-        ["Time-weighted average", (s) => number(s.mean)],
-        ["Peak in range", (s) => number(s.peak)],
-        ["Full-session high", (s) => number(s.sessionPeak)],
-        ["Token-holder share of registered viewers", (s) => s.tokenShare === null ? "Not enough data" : number(s.tokenShare) + "%"]
-      ];
-      if (comparing) rows.push(["Time at or above " + threshold.toLocaleString(), (s) => s.coveredMs ? formatElapsedTime(s.atOrAboveMs) : "Not enough data"]);
-      for (const [label, value] of rows) {
-        const row = node(body, "tr");
-        const cell = node(row, "th", label);
-        cell.scope = "row";
-        summaries.forEach((summary) => node(row, "td", value(summary)));
-      }
-      node(content, "p", "The full-session high can predate retained history and is not limited by “Match shared length.” Token-holder share is weighted by recorded registered-viewer time.", "tools-muted");
-    }
-    function chart(archives, labels, endMs) {
-      const legend = node(content, "p", labels.map((label, i) => (i ? "B (dashed blue): " : "A (pink): ") + label).join(" · "), "tools-muted");
-      const canvas = node(content, "canvas");
-      canvas.id = "tools-analysis-chart";
-      canvas.setAttribute("role", "img");
-      canvas.setAttribute("aria-label", ANALYSIS_METRICS[metric] + " by minutes since the first retained sample. " + legend.textContent + ". Statistics are in the table below.");
-      function draw() {
-        const width = Math.max(260, canvas.clientWidth), height = 240, ratio = window.devicePixelRatio || 1;
-        canvas.width = width * ratio;
-        canvas.height = height * ratio;
-        const ctx = canvas.getContext("2d");
-        ctx.scale(ratio, ratio);
-        const series = archives.map((archive) => analysisSeries(archive, metric));
-        let max = 1;
-        series.forEach((s) => s.values.forEach((value, i) => {
-          if (s.times[i] <= endMs) max = Math.max(max, value);
-        }));
-        const left = 58, top = 16, right = width - 12, bottom = height - 38, span = endMs || 1;
-        ctx.strokeStyle = runtime.isDarkMode ? "#686875" : "#b6bdca";
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(left, top);
-        ctx.lineTo(left, bottom);
-        ctx.lineTo(right, bottom);
-        ctx.stroke();
-        ctx.fillStyle = runtime.isDarkMode ? "#ddd" : "#41485a";
-        ctx.font = "11px Arial";
-        ctx.textAlign = "left";
-        ctx.fillText(number(max), 2, top + 8);
-        ctx.fillText("0", 30, bottom);
-        ctx.fillText("0m", left, bottom + 19);
-        ctx.textAlign = "right";
-        ctx.fillText(number(endMs / 6e4) + "m", right, bottom + 19);
-        series.forEach((s, j) => {
-          ctx.strokeStyle = j ? runtime.isDarkMode ? "#79baff" : "#175db0" : runtime.isDarkMode ? "#ff69b4" : "#b42370";
-          ctx.lineWidth = 2;
-          ctx.setLineDash(j ? [6, 4] : []);
-          ctx.beginPath();
-          const isolated = [];
-          let previousX = null, previousY = null;
-          for (let i = 0; i < s.times.length && s.times[i] <= endMs; i++) {
-            const x = left + s.times[i] / span * (right - left), y = bottom - s.values[i] / max * (bottom - top);
-            if (previousX === null || s.breaks[i]) ctx.moveTo(x, y);
-            else {
-              ctx.lineTo(x, previousY);
-              ctx.lineTo(x, y);
-            }
-            previousX = x;
-            previousY = y;
-            if ((i === 0 || s.breaks[i]) && (i + 1 === s.times.length || s.breaks[i + 1] || s.times[i + 1] > endMs)) isolated.push([x, y]);
-            if (i + 1 < s.times.length && s.times[i + 1] > endMs && !s.breaks[i + 1]) ctx.lineTo(right, y);
-          }
-          ctx.stroke();
-          ctx.setLineDash([]);
-          ctx.fillStyle = ctx.strokeStyle;
-          isolated.forEach(([x, y]) => {
-            ctx.beginPath();
-            ctx.arc(x, y, 3, 0, Math.PI * 2);
-            ctx.fill();
-          });
-        });
-      }
-      draw();
-      if (window.ResizeObserver) {
-        chartObserver = new window.ResizeObserver(draw);
-        chartObserver.observe(canvas);
-      }
-    }
-    function renderAnalysis(comparing) {
-      const options = analysisControls(comparing);
-      if (!options) return;
-      const a = options.find((item) => item.id === selectedA), b = options.find((item) => item.id === selectedB);
-      if (comparing) {
-        if (a.id === b.id) node(content, "p", "Choose a second recording to make a comparison.", "tools-muted");
-        const result = compareSessions(a.archive, b.archive, metric, threshold, sharedLength);
-        chart([a.archive, b.archive], [a.archive.room, b.archive.room], result.axisMs);
-        summaryTable([result.a, result.b], ["A", "B"]);
-      } else {
-        const summary = summarizeSession(a.archive, metric, threshold);
-        audienceOverview(a.archive);
-        thresholdTable(a.archive);
-        node(content, "h3", ANALYSIS_METRICS[metric] + " — chart and details");
-        chart([a.archive], [a.archive.room], summary.spanMs);
-        summaryTable([summary], [a.archive.room], false);
-      }
-    }
-    function checkbox(parent, id, text, checked = true) {
-      const label = node(parent, "label"), input = node(label, "input");
-      input.type = "checkbox";
-      input.id = id;
-      input.checked = checked;
-      node(label, "span", text);
-      return input;
-    }
-    function renderBackup() {
-      node(content, "h3", "Back up this browser");
-      node(content, "p", "Download ATH for every room and your saved preferences: theme, panel size/position, collapsed rows, compact metric, chart window and SH/ATH mode. Keep this file somewhere safe. Session-only controls such as the scan interval are not saved preferences.", "tools-muted");
-      const include = checkbox(content, "tools-backup-library", "Include library recordings");
-      const actions = node(content, "div", void 0, "tools-actions");
-      button(actions, "Download backup", () => {
-        downloadDataFile(createTierScopeBackup(include.checked), "TierScope-backup-" + (/* @__PURE__ */ new Date()).toISOString().slice(0, 10) + ".json");
-        tell("Backup download requested. Check your browser downloads.");
-      }, "tools-backup-download");
-      node(content, "h3", "Restore a backup");
-      node(content, "p", "ATH is merged without lowering existing records. New library sessions are added; fuller versions of the same session update its entry and keep its name. Saved preferences take effect after refreshing your room tabs.", "tools-muted");
-      button(content, "Choose backup…", () => {
-        pendingBackup = null;
-        render("backup");
-        chooseFile(BACKUP_MAX_BYTES, (value) => {
-          pendingBackup = validateTierScopeBackup(value);
-          render("backup");
-          tell("Backup validated. Review the contents and choose what to restore.");
-        });
-      }, "tools-backup-open");
-      if (pendingBackup) {
-        node(content, "p", pendingBackup.rooms.length + " rooms · " + Object.keys(pendingBackup.preferences).length + " saved preferences · " + pendingBackup.library.length + " recordings", "tools-muted");
-        const choices = node(content, "div", void 0, "tools-actions");
-        const highs = checkbox(choices, "tools-restore-highs", "Merge ATH"), preferences = checkbox(choices, "tools-restore-preferences", "Restore preferences"), recordings = checkbox(choices, "tools-restore-library", "Add library recordings");
-        button(content, "Restore selected data", () => {
-          if (!highs.checked && !preferences.checked && !recordings.checked) throw new Error("Choose at least one kind of data to restore.");
-          if (!confirm("Restore the selected backup data?\n\nATH will be merged, library recordings added or updated with fuller versions, and selected saved preferences replaced. Your live session is not replaced.")) return;
-          const result = restoreTierScopeBackup(pendingBackup, { highs: highs.checked, preferences: preferences.checked, library: recordings.checked });
-          library = null;
-          if (runtime.playback) setPlaybackAllTimeState(runtime.playback, readAllTimeHighs(displayedHighRoom()));
-          repaintHighMode();
-          tell("Restored: " + result.rooms + " room ATH updates, " + result.recordings + " new recordings, " + result.updatedRecordings + " updated recordings, " + result.preferences + " preferences." + (result.preferences ? "\nRefresh your room tabs when convenient to apply preferences." : ""));
-        }, "tools-backup-restore");
-      }
-    }
-    function render(next) {
-      const focusedId = dialog.contains(document.activeElement) ? document.activeElement.id : "";
-      if (next !== tab) library = null;
-      tab = next;
-      fileRequest++;
-      if (chartObserver) {
-        chartObserver.disconnect();
-        chartObserver = null;
-      }
-      content.replaceChildren();
-      message.textContent = "";
-      dialog.querySelectorAll("[data-tools-tab]").forEach((button2) => button2.setAttribute("aria-pressed", String(button2.dataset.toolsTab === tab)));
-      try {
-        if (tab === "library") renderLibrary();
-        else if (tab === "backup") renderBackup();
-        else renderAnalysis(tab === "compare");
-      } catch (error) {
-        tell(error.message, true);
-      }
-      if (focusedId) {
-        const target = document.getElementById(focusedId);
-        if (target && dialog.contains(target)) target.focus();
-      }
-    }
-    function close() {
-      fileRequest++;
-      if (chartObserver) chartObserver.disconnect();
-      if (dialog.open) dialog.close();
-      dialog.remove();
-      if (closeSessionTools === close) closeSessionTools = null;
-      if (focusBefore && focusBefore.isConnected) focusBefore.focus();
-    }
-    closeSessionTools = close;
-    dialog.querySelector("#tools-close").onclick = close;
-    dialog.addEventListener("cancel", (event) => {
-      event.preventDefault();
-      close();
-    });
-    dialog.addEventListener("close", () => {
-      if (dialog.isConnected) close();
-    });
-    dialog.querySelectorAll("[data-tools-tab]").forEach((button2) => {
-      button2.onclick = () => render(button2.dataset.toolsTab);
-    });
-    dialog.showModal();
-    render("library");
   }
 
-  // src/files.js
-  function setChartWindow(value) {
-    if (!hasStorageField(runtime.CHART_WINDOWS, value)) return;
-    runtime.chartWindowMode = value;
+  // src/library-shell.js
+  function libraryShell() {
+    return `<style>
+#tracker-container[data-library-open=docked]{border-top-left-radius:0!important;border-bottom-left-radius:0!important}
+#tierscope-session-tools{position:fixed;inset:auto;margin:0;padding:0;box-sizing:border-box;max-width:none;max-height:none;min-width:0;border:1px solid #ff69b4;border-radius:7px 0 0 7px;background:var(--panel-solid);color:var(--panel-text);font:11px/1.45 Arial,sans-serif;z-index:1000000;box-shadow:-8px 5px 24px #0004;overflow:hidden;display:flex;flex-direction:column}
+#tierscope-session-tools[data-layout=sheet]{border-radius:7px;box-shadow:0 8px 32px #0007}
+#tierscope-session-tools[data-layout=docked]::after{content:'';position:absolute;pointer-events:none;inset:0 0 0 auto;width:9px;background:linear-gradient(90deg,transparent,#0002);border-right:1px solid #ff69b450}
+#tierscope-session-tools *{box-sizing:border-box}
+#tierscope-session-tools button,#tierscope-session-tools select,#tierscope-session-tools input,#tierscope-session-tools summary{font:inherit;color:var(--panel-text);background:var(--panel-button);border:1px solid var(--panel-divider);border-radius:3px;padding:4px 7px;max-width:100%;min-width:0}
+#tierscope-session-tools button,#tierscope-session-tools summary{cursor:pointer}
+#tierscope-session-tools button:hover,#tierscope-session-tools summary:hover{border-color:var(--panel-accent)}
+#tierscope-session-tools button:disabled{opacity:.45;cursor:default}
+#tierscope-session-tools :is(button,select,input,summary):focus-visible{outline:2px solid #ff69b4;outline-offset:2px}
+#tierscope-session-tools .tools-primary{background:#ff69b420;border-color:#ff69b4;color:var(--panel-accent);font-weight:bold}
+#tierscope-session-tools .tools-danger{color:var(--panel-negative)}
+#tierscope-session-tools .tools-head{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid #ff69b4;background:rgba(255,105,180,.06);flex-shrink:0}
+#tierscope-session-tools h2{font-size:1.15em;letter-spacing:.04em;margin:0;color:var(--panel-accent)}
+#tierscope-session-tools .tools-subtitle{font-size:.9em;color:var(--panel-muted)}
+#tierscope-session-tools nav{display:flex;gap:3px;padding:8px 10px 0;flex-shrink:0}
+#tierscope-session-tools nav button{flex:1;padding:5px 2px;font-size:.95em;background:transparent;border-color:transparent;border-bottom:2px solid transparent;border-radius:3px 3px 0 0}
+#tierscope-session-tools nav button[aria-pressed=true]{color:var(--panel-accent);background:#ff69b412;border-bottom-color:#ff69b4}
+#tools-content{padding:10px 12px 14px;overflow:auto;min-height:0;flex:1;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#ff69b470 transparent}
+#tools-message:not(:empty){padding:7px 12px;border-bottom:1px solid var(--panel-divider);font-size:.95em;white-space:pre-line;overflow-wrap:anywhere;flex-shrink:0}
+#tierscope-session-tools .tools-actions{display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin:8px 0}
+#tierscope-session-tools .tools-muted{color:var(--panel-muted);font-size:.92em;line-height:1.45}
+#tierscope-session-tools p{margin:6px 0 9px}
+#tierscope-session-tools h3{font-size:1em;margin:8px 0;color:var(--panel-secondary)}
+#tierscope-session-tools .tools-current{border:1px solid #4169e170;background:rgba(65,105,225,.08);border-radius:4px;padding:9px;margin-bottom:10px}
+#tierscope-session-tools .tools-current strong{display:block;font-size:1.1em;overflow-wrap:anywhere}
+#tierscope-session-tools .tools-eyebrow{color:var(--panel-accent);text-transform:uppercase;font-size:.8em;letter-spacing:.08em;margin-bottom:3px}
+#tierscope-session-tools .tools-row{border:1px solid var(--panel-divider);border-left:3px solid #ff69b480;background:rgba(var(--panel-row-rgb),.035);border-radius:4px;padding:8px;margin:6px 0;overflow-wrap:anywhere}
+#tierscope-session-tools .tools-row strong{font-size:1.05em}
+#tierscope-session-tools .tools-folder{margin:5px 0}
+#tierscope-session-tools .tools-folder button{display:flex;flex-direction:column;gap:4px;width:100%;text-align:left;padding:9px;border-left:3px solid #ff69b480;background:rgba(var(--panel-row-rgb),.04)}
+#tierscope-session-tools .tools-folder-name{font-weight:bold;color:var(--panel-text)}
+#tierscope-session-tools .tools-folder-meta{font-size:.9em;color:var(--panel-muted)}
+#tierscope-session-tools .tools-search{display:flex;width:100%;gap:6px;align-items:center;margin:8px 0}
+#tools-library-search{flex:1;width:100%}
+#tierscope-session-tools .tools-more{margin-left:auto}
+#tierscope-session-tools .tools-more[open]{flex-basis:100%;margin:0}
+#tierscope-session-tools .tools-more[open] summary{display:inline-block;margin-bottom:4px}
+#tierscope-session-tools .tools-more-actions{display:flex;gap:4px;flex-wrap:wrap;border-top:1px solid var(--panel-divider);padding-top:6px}
+#tierscope-session-tools table{width:100%;border-collapse:collapse;font-size:.93em}
+#tierscope-session-tools th,#tierscope-session-tools td{text-align:left;padding:6px 4px;border-bottom:1px solid var(--panel-divider)}
+#tierscope-session-tools caption{text-align:left;font-weight:bold;padding:7px 0;color:var(--panel-secondary)}
+#tierscope-session-tools .tools-scroll{overflow-x:auto}
+#tierscope-session-tools canvas{display:block;width:100%;height:200px}
+#tierscope-session-tools label{display:inline-flex;gap:5px;align-items:center;flex-wrap:wrap;min-width:0;max-width:100%}
+#tierscope-session-tools select{width:auto;max-width:100%}
+#tools-source-a,#tools-source-b{width:100%}
+#gif-export-controls{padding:8px 12px;gap:6px;align-items:center;flex-shrink:0;border-bottom:1px solid var(--panel-divider)}
+</style>
+<div class="tools-head"><div><h2 id="tools-title">LIBRARY</h2><div class="tools-subtitle">Recordings &amp; session tools</div></div><button id="tools-close" type="button" aria-label="Close library" title="Close library (Escape)">×</button></div>
+<nav aria-label="Session tools"><button data-tools-tab="library">Recordings</button><button data-tools-tab="summary">Summary</button><button data-tools-tab="compare">Compare</button><button data-tools-tab="backup">Backup</button></nav>
+<div id="tools-message" role="status" aria-live="polite"></div>
+<div id="gif-export-controls" style="display:none"><span id="gif-export-status" role="status"></span><button id="btn-cancel-gif" hidden type="button">Cancel</button></div>
+<div id="tools-content"></div>`;
+  }
+
+  // src/recording-export-data.js
+  function recordingCSV(archive) {
+    const h = archive.session.history;
+    function cell(value) {
+      let text = String(value);
+      if (typeof value === "string" && /^[\s]*[=+@-]/.test(text)) text = "'" + text;
+      return '"' + text.replace(/"/g, '""') + '"';
+    }
+    const rows = [[
+      "room",
+      "sample_index",
+      "timestamp_utc",
+      "elapsed_seconds",
+      "room_total",
+      "registered",
+      "anonymous",
+      "with_tokens",
+      "moderators",
+      "fan_club",
+      "dark_purple",
+      "light_purple",
+      "dark_blue",
+      "light_blue",
+      "grey",
+      "female_trans"
+    ]];
+    h.timestamps.forEach((time, i) => rows.push([
+      archive.room,
+      i + 1,
+      new Date(time).toISOString(),
+      Math.max(0, time - h.timestamps[0]) / 1e3,
+      h.total[i] + h.anonymous[i],
+      h.total[i],
+      h.anonymous[i],
+      h.withTokens[i],
+      h.red[i],
+      h.green[i],
+      h.purple[i],
+      h.pink[i],
+      h["dark-blue"][i],
+      h["light-blue"][i],
+      h.gray[i],
+      h["female-trans"][i]
+    ]));
+    return "\uFEFF" + rows.map((row) => row.map(cell).join(",")).join("\r\n") + "\r\n";
+  }
+  function recordingText(archive, version, generatedAt) {
+    const s = archive.session, h = s.history, last = h.timestamps.length - 1;
+    const time = (value) => value === null ? "Not recorded" : new Date(value).toISOString();
+    const report = [
+      "================================",
+      "TIERSCOPE RECORDING REPORT",
+      "================================",
+      "",
+      "Model: " + archive.room,
+      "TierScope Version: " + version,
+      "Recording Producer Version: " + archive.producerVersion,
+      "Report Generated: " + time(generatedAt),
+      "Session Start: " + time(s.sessionStartedAt) + (s.sessionStartEstimated ? " (estimated)" : ""),
+      "Recording State: " + (s.isStopped ? "Stopped" : s.isPaused ? "Paused snapshot" : "Running snapshot"),
+      "Recorded Active Seconds: " + s.pausedElapsedTime / 1e3,
+      "Retained Samples: " + h.timestamps.length,
+      "First Retained Sample: " + time(h.timestamps[0]),
+      "Last Retained Sample: " + time(h.timestamps[last]),
+      "Recording Gaps: " + (h.breaks || []).filter((value) => value).length,
+      "",
+      "--- SESSION HIGHS ---",
+      "High timestamps use real recording time, including pauses.",
+      "Room Total High: " + s.roomTotalHigh + " at " + time(s.roomTotalHighTime)
+    ];
+    const names = {
+      red: "Moderators",
+      green: "Fan Club",
+      purple: "Dark Purple",
+      pink: "Light Purple",
+      "dark-blue": "Dark Blue",
+      "light-blue": "Light Blue",
+      gray: "Grey",
+      "female-trans": "Female / Trans",
+      withTokens: "With Tokens",
+      total: "Registered",
+      anonymous: "Anonymous"
+    };
+    for (const [key, label] of Object.entries(names)) {
+      const high = s.sessionHighs[key];
+      report.push(label + " High: " + high.value + " at " + time(high.time));
+    }
+    report.push("", "--- LAST RECORDED SAMPLE ---", "Room Total: " + (h.total[last] + h.anonymous[last]));
+    for (const [key, label] of Object.entries(names)) report.push(label + ": " + h[key][last]);
+    report.push("", "This report describes the full selected recording, not the replay cursor or another live room.", "");
+    return report.join("\n");
+  }
+
+  // src/recording-exports.js
+  function downloadRecording(archive, format) {
+    const recording = validateSessionFile(archive);
+    const now = Date.now();
+    const content = format === "csv" ? recordingCSV(recording) : recordingText(recording, runtime.TIERSCOPE_VERSION, now);
+    const blob = new Blob([content], { type: format === "csv" ? "text/csv;charset=utf-8" : "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob), link = document.createElement("a");
+    link.href = url;
+    link.download = recording.room + "-" + (format === "csv" ? "history-" : "recording-report-") + new Date(now).toISOString().replace(/[:.]/g, "-") + "." + format;
+    document.body.appendChild(link);
     try {
-      GM_setValue(runtime.CHART_WINDOW_KEY, value);
-    } catch (error) {
-      log("Could not save chart window preference");
+      link.click();
+    } finally {
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 6e4);
     }
-    runtime.chartLayoutRevision++;
-    updatePanelOptions();
-    redrawPanelCharts();
-  }
-  function downloadSessionFile() {
-    try {
-      var archive = captureSessionFile();
-      var blob = new Blob([JSON.stringify(archive)], { type: "application/json;charset=utf-8" });
-      var url = URL.createObjectURL(blob), link = document.createElement("a");
-      link.href = url;
-      link.download = archive.room + "-session-" + new Date(archive.session.timestamp).toISOString().replace(/[:.]/g, "-") + ".tierscope.json";
-      document.body.appendChild(link);
-      try {
-        link.click();
-      } finally {
-        link.remove();
-        setTimeout(function() {
-          URL.revokeObjectURL(url);
-        }, 6e4);
-      }
-    } catch (error) {
-      alert("Could not save session file: " + error.message);
-    }
-  }
-  function openSessionReplay(file) {
-    var archive = validateSessionFile(file);
-    leavePlayback(false);
-    if (runtime.isMinimized) toggleView();
-    openOwnedPlayback({
-      url: location.href,
-      key: runtime.activeSessionStorageKey,
-      generation: runtime.initGuard,
-      imported: true,
-      archive,
-      snapshot: createPlaybackSnapshot(archive.session.history),
-      allTimeState: readAllTimeHighs(archive.room)
-    }, Date.now(), false);
-    cancelHighPulses();
-    setPlaybackLayout(true);
-    return paintPlayback(runtime.playback);
-  }
-  async function readSessionFile(file) {
-    if (!file) return false;
-    var request = nextSessionFileRequest(), url = location.href, generation = runtime.initGuard;
-    function current() {
-      return request === runtime.sessionFileLoadGeneration && url === location.href && generation === runtime.initGuard;
-    }
-    try {
-      if (file.size > runtime.SESSION_FILE_MAX_BYTES) throw new Error("Session files must be 8 MB or smaller.");
-      var text = await file.text();
-      if (!current()) return false;
-      if (text.length > runtime.SESSION_FILE_MAX_BYTES) throw new Error("Session file is too large.");
-      return openSessionReplay(JSON.parse(text.replace(/^\uFEFF/, "")));
-    } catch (error) {
-      if (current()) alert("Could not open session file: " + error.message);
-      return false;
-    }
-  }
-  function updatePanelOptions() {
-    updateSessionToolsStatus();
-    updateHighControls();
-    var button = document.getElementById("btn-panel-options");
-    if (button) {
-      button.style.display = runtime.isMinimized ? "none" : "";
-      button.textContent = { full: "Full", fourHours: "4h", twoHours: "2h", hour: "1h", halfHour: "30m", quarter: "15m" }[runtime.chartWindowMode] + " ▾";
-      button.title = "Chart window and session files. Showing " + { full: "full history", fourHours: "the last 4 hours", twoHours: "the last 2 hours", hour: "the last hour", halfHour: "the last 30 minutes", quarter: "the last 15 minutes" }[runtime.chartWindowMode] + ".";
-    }
-    var select = document.getElementById("chart-window-select");
-    if (select) select.value = runtime.chartWindowMode;
-    ["btn-save-session", "btn-control-save-session", "btn-playback-save-session"].forEach(function(id) {
-      var save = document.getElementById(id);
-      if (save) save.disabled = !(isPlaybackCurrent(runtime.playback) && runtime.playback.archive || runtime.history.timestamps.length);
-    });
-    var info = document.getElementById("session-file-info");
-    if (info) {
-      var archive = isPlaybackCurrent(runtime.playback) && runtime.playback.imported ? runtime.playback.archive : null;
-      info.style.display = archive ? "block" : "none";
-      if (archive) info.textContent = archive.room + " · " + archive.session.history.timestamps.length + " samples\nSaved " + new Date(archive.session.timestamp).toLocaleString() + "\nSession room high: " + archive.session.roomTotalHigh.toLocaleString();
-    }
-  }
-  function bindPanelOptions() {
-    var button = document.getElementById("btn-panel-options"), menu = document.getElementById("panel-options");
-    var cleanupSessionTools = bindSessionTools(menu);
-    var input = document.getElementById("session-file-input");
-    function close(focus) {
-      menu.style.display = "none";
-      button.setAttribute("aria-expanded", "false");
-      if (focus) button.focus();
-    }
-    button.onmousedown = function(event) {
-      event.stopPropagation();
-    };
-    button.onclick = function(event) {
-      event.stopPropagation();
-      updatePanelOptions();
-      var open = menu.style.display === "none";
-      menu.style.display = open ? "block" : "none";
-      button.setAttribute("aria-expanded", String(open));
-      if (open) document.getElementById("chart-window-select").focus();
-    };
-    document.getElementById("panel-options-close").onclick = function() {
-      close(true);
-    };
-    document.getElementById("chart-window-select").onchange = function() {
-      setChartWindow(this.value);
-    };
-    document.getElementById("btn-save-session").onclick = function() {
-      downloadSessionFile();
-      close(true);
-    };
-    document.getElementById("btn-control-save-session").onclick = downloadSessionFile;
-    document.getElementById("btn-playback-save-session").onclick = downloadSessionFile;
-    function chooseSessionFile() {
-      input.value = "";
-      input.click();
-    }
-    document.getElementById("btn-open-session").onclick = chooseSessionFile;
-    document.getElementById("btn-control-open-session").onclick = chooseSessionFile;
-    document.getElementById("btn-playback-open-session").onclick = chooseSessionFile;
-    document.getElementById("btn-high-mode").onclick = toggleHighMode;
-    document.getElementById("mini-high").onclick = toggleHighMode;
-    document.getElementById("btn-add-all-time").onclick = addFileToAllTimeHighs;
-    document.getElementById("btn-playback-add-all-time").onclick = addFileToAllTimeHighs;
-    document.getElementById("btn-clear-all-time").onclick = clearAllTimeHighs;
-    input.onchange = function() {
-      var file = input.files && input.files[0];
-      if (file) {
-        close(false);
-        readSessionFile(file);
-      }
-    };
-    function outside(event) {
-      if (!menu.contains(event.target) && !button.contains(event.target)) close(false);
-    }
-    function escape(event) {
-      if (event.key === "Escape" && menu.style.display !== "none") {
-        close(true);
-        event.stopPropagation();
-      }
-    }
-    document.addEventListener("pointerdown", outside);
-    document.addEventListener("keydown", escape, true);
-    runtime.panelOptionsCleanup = function() {
-      cleanupSessionTools();
-      document.removeEventListener("pointerdown", outside);
-      document.removeEventListener("keydown", escape, true);
-    };
-    updatePanelOptions();
   }
 
   // src/reports.js
@@ -6466,6 +5820,946 @@ underlying system, so should run in the browser, Node, or Plask.
     }
   }
 
+  // src/session-analysis.js
+  var ANALYSIS_METRICS = Object.freeze({
+    room: "Room audience",
+    total: "Registered viewers",
+    withTokens: "Viewers with tokens",
+    red: "Moderators",
+    green: "Fan club",
+    purple: "Dark purple",
+    pink: "Light purple",
+    "dark-blue": "Dark blue",
+    "light-blue": "Light blue",
+    gray: "Grey",
+    "female-trans": "Female / trans",
+    anonymous: "Anonymous viewers"
+  });
+  function analysisSeries(archive, metric) {
+    if (!Object.prototype.hasOwnProperty.call(ANALYSIS_METRICS, metric)) throw new Error("Unknown analysis metric.");
+    const history = archive.session.history;
+    const values = metric === "room" ? (
+      /** @type {number[]} */
+      history.total.map((v, i) => v + /** @type {number[]} */
+      history.anonymous[i])
+    ) : (
+      /** @type {number[]} */
+      history[metric]
+    );
+    const origin = history.timestamps[0];
+    const times = history.timestamps.map((time) => time - origin);
+    for (let i = 0; i < times.length; i++) times[i] = Math.max(0, times[i], i ? times[i - 1] : 0);
+    return { times, values, breaks: history.breaks || times.map(() => false) };
+  }
+  function summarizeSession(archive, metric = "room", threshold = 100, limitMs = Infinity) {
+    if (!Number.isFinite(threshold) || threshold < 0 || !(limitMs >= 0)) throw new Error("Invalid summary range or threshold.");
+    const { times, values, breaks } = analysisSeries(archive, metric);
+    const end = Math.min(times.length ? times[times.length - 1] : 0, limitMs);
+    let coveredMs = 0, weighted = 0, registeredWeight = 0, tokenWeight = 0, atOrAboveMs = 0, peak = 0, samples = 0;
+    let peakTime = null;
+    for (let i = 0; i < times.length && times[i] <= end; i++) {
+      samples++;
+      if (peakTime === null || values[i] > peak) {
+        peak = values[i];
+        peakTime = archive.session.history.timestamps[i];
+      }
+      if (i + 1 >= times.length || breaks[i + 1]) continue;
+      const duration = Math.max(0, Math.min(end, times[i + 1]) - times[i]);
+      coveredMs += duration;
+      weighted += duration * values[i];
+      registeredWeight += duration * /** @type {number[]} */
+      archive.session.history.total[i];
+      tokenWeight += duration * /** @type {number[]} */
+      archive.session.history.withTokens[i];
+      if (values[i] >= threshold) atOrAboveMs += duration;
+    }
+    return {
+      samples,
+      spanMs: end,
+      coveredMs,
+      gapMs: end - coveredMs,
+      peak,
+      peakTime,
+      sessionPeak: metric === "room" ? archive.session.roomTotalHigh : archive.session.sessionHighs[metric].value,
+      mean: coveredMs ? weighted / coveredMs : null,
+      tokenShare: registeredWeight ? tokenWeight / registeredWeight * 100 : null,
+      atOrAboveMs,
+      coverage: end ? coveredMs / end * 100 : null
+    };
+  }
+  function summarizeAudience(archive) {
+    const audience = ["room", "total", "withTokens", "anonymous"].map((metric) => __spreadValues({ metric }, summarizeSession(archive, metric)));
+    const [room, registered, tokens, anonymous] = audience;
+    return {
+      audience,
+      tokenShareRegistered: registered.tokenShare,
+      tokenShareRoom: room.mean && tokens.mean !== null ? tokens.mean / room.mean * 100 : null,
+      anonymousShareRoom: room.mean && anonymous.mean !== null ? anonymous.mean / room.mean * 100 : null
+    };
+  }
+  var ANALYSIS_MAX_THRESHOLDS = 8;
+  function parseAnalysisThresholds(text) {
+    const parts = text.split(",").map((part) => part.trim());
+    if (!parts.length || parts.length > ANALYSIS_MAX_THRESHOLDS || parts.some((part) => !/^\d+$/.test(part) || !Number.isSafeInteger(Number(part)))) {
+      throw new Error("Enter 1–" + ANALYSIS_MAX_THRESHOLDS + " non-negative whole numbers separated by commas, without thousands separators.");
+    }
+    return [...new Set(parts.map(Number))].sort((a, b) => a - b);
+  }
+  function summarizeThresholds(archive, metric, thresholds) {
+    if (!thresholds.length || thresholds.length > ANALYSIS_MAX_THRESHOLDS || thresholds.some((value) => !Number.isSafeInteger(value) || value < 0)) {
+      throw new Error("Invalid analysis thresholds.");
+    }
+    return thresholds.map((threshold) => {
+      const summary = summarizeSession(archive, metric, threshold);
+      return {
+        threshold,
+        durationMs: summary.coveredMs ? summary.atOrAboveMs : null,
+        percent: summary.coveredMs ? summary.atOrAboveMs / summary.coveredMs * 100 : null
+      };
+    });
+  }
+  function compareSessions(a, b, metric = "room", threshold = 100, sharedLength = true) {
+    const sa = analysisSeries(a, metric), sb = analysisSeries(b, metric);
+    const spanA = sa.times.length ? sa.times[sa.times.length - 1] : 0;
+    const spanB = sb.times.length ? sb.times[sb.times.length - 1] : 0;
+    const limitMs = sharedLength ? Math.min(spanA, spanB) : Infinity;
+    return {
+      a: summarizeSession(a, metric, threshold, limitMs),
+      b: summarizeSession(b, metric, threshold, limitMs),
+      limitMs,
+      axisMs: sharedLength ? limitMs : Math.max(spanA, spanB)
+    };
+  }
+
+  // src/session-tools.js
+  var closeSessionTools = null;
+  var refreshSessionTools = null;
+  function updateSessionToolsStatus() {
+    if (refreshSessionTools) refreshSessionTools();
+    const element = document.getElementById("session-save-info");
+    if (!element) return;
+    if (isPlaybackCurrent(runtime.playback)) {
+      element.textContent = "Replay snapshot — use Keep in library to retain it here.";
+      element.style.color = "var(--panel-muted)";
+      return;
+    }
+    const state = getSessionSaveState(getModelName());
+    const warning = state.error || runtime.sessionStorageNotice;
+    element.textContent = warning ? "Session saving unavailable. Keep this tab open or download a session file." : state.savedAt ? "Session saved in this browser at " + new Date(state.savedAt).toLocaleTimeString() + "." : "No session saved in this tab yet.";
+    element.style.color = warning ? "var(--panel-warning)" : "var(--panel-muted)";
+  }
+  function bindSessionTools() {
+    for (const id of ["btn-control-library", "btn-playback-library"]) {
+      const button = document.getElementById(id);
+      if (button) button.onclick = () => {
+        if (closeSessionTools) closeSessionTools();
+        else openSessionTools(button);
+      };
+    }
+    return () => {
+      if (closeSessionTools) closeSessionTools();
+    };
+  }
+  function openSessionTools(focusTarget) {
+    if (closeSessionTools) closeSessionTools();
+    const origin = location.href, generation = runtime.initGuard, focusBefore = focusTarget || document.getElementById("btn-control-library") || document.activeElement;
+    const dialog = document.createElement("dialog");
+    dialog.id = "tierscope-session-tools";
+    dialog.setAttribute("aria-labelledby", "tools-title");
+    dialog.setAttribute("aria-modal", "false");
+    dialog.innerHTML = libraryShell();
+    document.body.appendChild(dialog);
+    let currentArchive = null, library = null, tab = "library", fileRequest = 0, chartObserver = null;
+    let selectedA = "current", selectedB = "", metric = "room", threshold = 100, sharedLength = true, pendingBackup = null;
+    let summaryThresholds = [25, 50, 100], libraryRoom = null, chartDraw = null;
+    let observedSource = null, observedSignature = "";
+    let detachDock = null;
+    try {
+      currentArchive = captureSessionFile();
+    } catch (error) {
+    }
+    const content = dialog.querySelector("#tools-content"), message = dialog.querySelector("#tools-message");
+    const current = () => dialog.isConnected && dialog.open && origin === location.href && generation === runtime.initGuard;
+    function tell(text, error = false) {
+      message.textContent = text;
+      message.style.color = error ? "var(--panel-negative)" : "var(--panel-positive)";
+    }
+    function action(fn) {
+      return () => {
+        try {
+          fn();
+        } catch (error) {
+          tell(error.message, true);
+        }
+      };
+    }
+    function button(parent, text, fn, id) {
+      const element = document.createElement("button");
+      element.type = "button";
+      element.textContent = text;
+      if (id) element.id = id;
+      element.onclick = action(fn);
+      parent.appendChild(element);
+      return element;
+    }
+    function node(parent, tag, text, className) {
+      const element = document.createElement(tag);
+      if (text !== void 0) element.textContent = text;
+      if (className) element.className = className;
+      parent.appendChild(element);
+      return element;
+    }
+    function chooseFile(maxBytes, accept) {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = ".json,application/json";
+      input.hidden = true;
+      const request = ++fileRequest;
+      dialog.appendChild(input);
+      input.onchange = async () => {
+        const file = input.files && input.files[0];
+        if (!file) {
+          input.remove();
+          return;
+        }
+        try {
+          const value = await readDataFile(file, maxBytes);
+          if (current() && request === fileRequest) accept(value);
+        } catch (error) {
+          if (current() && request === fileRequest) tell(error.message, true);
+        } finally {
+          input.remove();
+        }
+      };
+      input.addEventListener("cancel", () => input.remove(), { once: true });
+      input.click();
+    }
+    function readLibrary() {
+      library = readSessionLibrary();
+      return library;
+    }
+    function sourceOptions() {
+      const items = [];
+      if (currentArchive) items.push({ id: "current", title: "Current / replayed snapshot — " + currentArchive.room, archive: currentArchive });
+      for (const entry of library.entries) items.push({ id: entry.id, title: (entry.title || entry.archive.room) + " — " + new Date(entry.archive.session.history.timestamps[0]).toLocaleString(), archive: entry.archive });
+      return items;
+    }
+    function selectSource(parent, label, id, selected, changed) {
+      const wrapper = node(parent, "label", label), select = node(wrapper, "select");
+      select.id = id;
+      for (const item of sourceOptions()) {
+        const option = node(select, "option", item.title);
+        option.value = item.id;
+      }
+      if (sourceOptions().some((item) => item.id === selected)) select.value = selected;
+      select.onchange = () => changed(select.value);
+      return select.value;
+    }
+    function archiveName(archive) {
+      return archive.room + "-session-" + new Date(archive.session.timestamp).toISOString().replace(/[:.]/g, "-") + ".tierscope.json";
+    }
+    function addArchiveHighs(archive) {
+      const result = storeAllTimeHighs(archive.room, sessionAllTimeHighs(archive.session, "file"));
+      if (isPlaybackCurrent(runtime.playback) && runtime.playback.archive.room.toLowerCase() === archive.room.toLowerCase()) {
+        setPlaybackAllTimeState(runtime.playback, result.state);
+      }
+      repaintHighMode();
+      tell(result.saved ? (result.changed ? "All-time highs updated for " : "No higher records for ") + archive.room + "." : result.state.error || "Records changed in another tab. Try again.", !result.saved);
+    }
+    function refreshCurrent() {
+      const playback = isPlaybackCurrent(runtime.playback) ? runtime.playback : null;
+      const source = playback ? playback.archive : runtime.history;
+      const history = playback ? source.session.history : runtime.history;
+      const room = playback ? source.room : getModelName();
+      const available = history.timestamps.length > 0 && (playback || runtime.activeSessionStorageKey === getStorageKey(room) && runtime.lastUrl === location.href);
+      const signature = [room, !!playback, history.timestamps.length, history.timestamps.at(-1), runtime.isPaused, runtime.isStopped].join(":");
+      if (source === observedSource && signature === observedSignature) return;
+      const replaced = source !== observedSource;
+      observedSource = source;
+      observedSignature = signature;
+      if (replaced || !currentArchive) {
+        try {
+          currentArchive = captureSessionFile();
+        } catch (error) {
+          currentArchive = null;
+        }
+      }
+      const title = dialog.querySelector("#tools-current-room"), meta = dialog.querySelector("#tools-current-meta"), label = dialog.querySelector("#tools-current-kind");
+      if (title) title.textContent = room === "unknown" ? "No room session" : room;
+      if (label) label.textContent = playback ? playback.imported ? "File / library replay" : "Replay snapshot" : runtime.isStopped ? "Stopped session" : runtime.isPaused ? "Paused session" : "Current live session";
+      if (meta) meta.textContent = available ? history.timestamps.length.toLocaleString() + " samples · " + new Date(history.timestamps[0]).toLocaleString() : "Record a sample or open a saved session to get started.";
+      dialog.querySelectorAll("[data-current-action]").forEach((button2) => {
+        button2.dataset.currentAvailable = String(!!available);
+        button2.disabled = !available || button2.id === "btn-export-gif" && !!runtime.gifExportJob;
+      });
+      if (replaced && tab !== "library" && tab !== "backup") render(tab);
+    }
+    function currentCard() {
+      const card = node(content, "section", void 0, "tools-current");
+      card.setAttribute("aria-label", "Current or replayed recording");
+      node(card, "div", "", "tools-eyebrow").id = "tools-current-kind";
+      node(card, "strong", "").id = "tools-current-room";
+      node(card, "div", "", "tools-muted").id = "tools-current-meta";
+      const actions = node(card, "div", void 0, "tools-actions");
+      function currentButton(parent, text, fn, id) {
+        const control = button(parent, text, () => fn(captureSessionFile()), id);
+        control.dataset.currentAction = "true";
+        return control;
+      }
+      currentButton(actions, "Keep in library", (archive) => {
+        const result = keepSessionInLibrary(archive);
+        currentArchive = archive;
+        libraryRoom = archive.room.toLowerCase();
+        render("library");
+        tell(result.added ? "Recording kept in the library." : result.updated ? "Library recording updated; its name was preserved." : "An equal or fuller recording is already in the library.");
+      }, "tools-keep").className = "tools-primary";
+      currentButton(actions, "Save file", (archive) => downloadDataFile(archive, archiveName(archive)), "tools-save-session");
+      const exports = node(card, "div", void 0, "tools-actions");
+      currentButton(exports, "TXT", (archive) => {
+        if (isPlaybackCurrent(runtime.playback)) downloadRecording(archive, "txt");
+        else downloadTrackingReport();
+      }, "tools-export-txt").title = "Download a text report for this recording";
+      currentButton(exports, "CSV", (archive) => downloadRecording(archive, "csv"), "tools-export-csv").title = "Download every retained sample with its real timestamp";
+      currentButton(exports, "GIF", (archive) => generateGifFromHistory(archive), "btn-export-gif").title = "Download an animated GIF of the full recording";
+      currentButton(exports, "Add to all-time highs", addArchiveHighs, "tools-add-all-time");
+      const status = node(card, "div", "", "tools-muted");
+      status.id = "session-save-info";
+      status.setAttribute("role", "status");
+      observedSignature = "";
+      refreshCurrent();
+      updateSessionToolsStatus();
+    }
+    function renderLibrary() {
+      const state = readLibrary();
+      currentCard();
+      const actions = node(content, "div", void 0, "tools-actions");
+      button(actions, "Open saved file…", () => chooseFile(runtime.SESSION_FILE_MAX_BYTES, (value) => {
+        openSessionReplay(validateSessionFile(value));
+        observedSignature = "";
+        refreshCurrent();
+        tell("File opened in replay. Use Keep in library to store it here.");
+      }), "tools-open-session");
+      button(actions, "Import to library…", () => chooseFile(runtime.SESSION_FILE_MAX_BYTES, (value) => {
+        const archive = validateSessionFile(value), result = keepSessionInLibrary(archive);
+        libraryRoom = archive.room.toLowerCase();
+        render("library");
+        tell(result.added ? "Recording imported into the library." : result.updated ? "Library recording updated from the file." : "An equal or fuller recording is already in the library.");
+      }), "tools-import-session");
+      button(actions, "Refresh", () => render("library"), "tools-refresh-library").title = "Refresh list from this browser";
+      node(content, "p", state.count + " / " + LIBRARY_MAX_COUNT + " recordings · " + (state.bytes / 1024 / 1024).toFixed(2) + " / " + LIBRARY_MAX_BYTES / 1024 / 1024 + " MB · Kept until you delete them.", "tools-muted");
+      const folders = /* @__PURE__ */ new Map();
+      for (const entry of state.entries) {
+        const room = entry.archive.room.toLowerCase();
+        if (!folders.has(room)) folders.set(room, []);
+        folders.get(room).push(entry);
+      }
+      if (libraryRoom && !folders.has(libraryRoom)) libraryRoom = null;
+      const searchLabel = node(content, "label", "Find ", "tools-search"), search = node(searchLabel, "input");
+      search.type = "search";
+      search.id = "tools-library-search";
+      search.placeholder = "Model or recording title";
+      search.title = "Search all recordings, including other model folders.";
+      const list = node(content, "div");
+      list.id = "tools-library-list";
+      let shown = 50;
+      function rows() {
+        list.replaceChildren();
+        const query = search.value.trim().toLowerCase(), browsingFolders = !query && !libraryRoom;
+        const visible = query ? state.entries.filter((entry) => (entry.title + " " + entry.archive.room).toLowerCase().includes(query)) : libraryRoom ? folders.get(libraryRoom) : [...folders.keys()].sort((a, b) => a.localeCompare(b));
+        const heading = node(list, "div", void 0, "tools-actions");
+        if (!browsingFolders) button(heading, "‹ All models", () => {
+          const previous = libraryRoom;
+          libraryRoom = null;
+          search.value = "";
+          shown = 50;
+          rows();
+          (document.getElementById("tools-folder-" + previous) || search).focus();
+        }, "tools-library-all-models");
+        node(heading, "h3", query ? "Search results — all models" : libraryRoom ? "Folder: " + libraryRoom : "Model folders");
+        if (!visible.length) node(list, "p", state.entries.length ? "No matching recordings." : "Your library is empty. Keep a recording above or import a session file.", "tools-muted");
+        if (browsingFolders) for (const room of visible.slice(0, shown)) {
+          const entries = folders.get(room), row = node(list, "div", void 0, "tools-folder");
+          const open = button(row, "", () => {
+            libraryRoom = room;
+            shown = 50;
+            rows();
+            document.getElementById("tools-library-all-models").focus();
+          }, "tools-folder-" + room);
+          open.setAttribute("aria-label", "Open recordings for " + room);
+          node(open, "span", "▱  " + room, "tools-folder-name");
+          node(open, "span", entries.length + (entries.length === 1 ? " recording" : " recordings") + " · Latest " + new Date(entries[0].archive.session.history.timestamps[0]).toLocaleDateString(), "tools-folder-meta");
+        }
+        else for (const entry of visible.slice(0, shown)) {
+          const row = node(list, "article", void 0, "tools-row");
+          row.dataset.libraryId = entry.id;
+          node(row, "strong", entry.title || entry.archive.room);
+          node(row, "div", new Date(entry.archive.session.history.timestamps[0]).toLocaleString() + " · " + entry.archive.session.history.timestamps.length + " samples", "tools-muted");
+          if (query) node(row, "div", entry.archive.room, "tools-muted");
+          const actions2 = node(row, "div", void 0, "tools-actions");
+          button(actions2, "Replay", () => {
+            openSessionReplay(entry.archive);
+            observedSignature = "";
+            refreshCurrent();
+            tell("Replaying " + (entry.title || entry.archive.room) + ".");
+          }).className = "tools-primary";
+          button(actions2, "Summary", () => {
+            selectedA = entry.id;
+            render("summary");
+          });
+          const more = node(actions2, "details", void 0, "tools-more");
+          node(more, "summary", "More…");
+          const extras = node(more, "div", void 0, "tools-more-actions");
+          button(extras, "Save file", () => downloadDataFile(entry.archive, archiveName(entry.archive)));
+          button(extras, "TXT", () => downloadRecording(entry.archive, "txt"));
+          button(extras, "CSV", () => downloadRecording(entry.archive, "csv"));
+          button(extras, "GIF", () => generateGifFromHistory(entry.archive));
+          button(extras, "Add to all-time highs", () => addArchiveHighs(entry.archive));
+          button(extras, "Rename", () => {
+            const title = window.prompt("Recording title (up to 80 characters):", entry.title);
+            if (title !== null) {
+              renameLibrarySession(entry.id, title);
+              render("library");
+            }
+          });
+          button(extras, "Delete", () => {
+            if (!confirm("Delete this library recording: " + (entry.title || entry.archive.room) + "?\n\nLive tracking, ATH and downloaded files are unchanged.")) return;
+            removeLibrarySession(entry.id);
+            render("library");
+            tell("Library recording deleted.");
+          }).className = "tools-danger";
+        }
+        if (visible.length > 50) node(list, "p", "Showing " + Math.min(shown, visible.length) + " of " + visible.length + (browsingFolders ? " model folders." : " matching recordings."), "tools-muted");
+        if (shown < visible.length) button(list, "Show " + Math.min(50, visible.length - shown) + " more", () => {
+          shown += 50;
+          rows();
+          (document.getElementById("tools-library-more") || search).focus();
+        }, "tools-library-more");
+      }
+      search.oninput = () => {
+        shown = 50;
+        rows();
+      };
+      rows();
+      if (state.damaged.length) {
+        node(content, "p", state.damaged.length + " unreadable library record(s) were retained.", "tools-muted");
+        button(content, "Remove unreadable library records…", () => {
+          if (!confirm("Delete the " + state.damaged.length + " unreadable library record(s)? This cannot be undone.")) return;
+          for (const key of state.damaged) removeLibrarySession(key.slice(LIBRARY_PREFIX.length));
+          render("library");
+        });
+      }
+    }
+    function analysisControls(comparing) {
+      if (!library) readLibrary();
+      if (!sourceOptions().length) {
+        node(content, "p", "Record a session or import one into the library to see analysis.");
+        return null;
+      }
+      const controls = node(content, "div", void 0, "tools-actions");
+      if (currentArchive) button(controls, "Refresh current / replayed snapshot", () => {
+        currentArchive = captureSessionFile();
+        render(tab);
+      }, "tools-refresh-snapshot");
+      selectedA = selectSource(controls, comparing ? "A " : "Recording ", "tools-source-a", selectedA, (value) => {
+        selectedA = value;
+        render(tab);
+      });
+      if (comparing) {
+        if (!sourceOptions().some((item) => item.id === selectedB)) selectedB = (sourceOptions().find((item) => item.id !== selectedA) || sourceOptions()[0]).id;
+        selectedB = selectSource(controls, "B ", "tools-source-b", selectedB, (value) => {
+          selectedB = value;
+          render(tab);
+        });
+      }
+      const label = node(controls, "label", "Metric "), metricSelect = node(label, "select");
+      metricSelect.id = "tools-metric";
+      for (const [key, name] of Object.entries(ANALYSIS_METRICS)) {
+        const option = node(metricSelect, "option", name);
+        option.value = key;
+      }
+      metricSelect.value = metric;
+      metricSelect.onchange = () => {
+        metric = metricSelect.value;
+        render(tab);
+      };
+      const thresholdLabel = node(controls, "label", comparing ? "Threshold " : "Thresholds "), input = node(thresholdLabel, "input");
+      input.id = "tools-threshold";
+      input.style.width = comparing ? "105px" : "200px";
+      if (comparing) {
+        input.type = "number";
+        input.min = "0";
+        input.max = "9007199254740991";
+        input.step = "1";
+        input.value = threshold;
+      } else {
+        input.type = "text";
+        input.maxLength = 160;
+        input.value = summaryThresholds.join(", ");
+        input.placeholder = "25, 50, 100";
+        input.title = "Up to 8 counts separated by commas. Applies to the selected metric.";
+      }
+      input.oninput = () => input.setCustomValidity("");
+      function applyThreshold() {
+        try {
+          if (comparing) {
+            if (!Number.isSafeInteger(input.valueAsNumber) || input.valueAsNumber < 0) throw new Error("Enter a non-negative whole number.");
+            threshold = input.valueAsNumber;
+          } else summaryThresholds = parseAnalysisThresholds(input.value);
+        } catch (error) {
+          input.setCustomValidity(error.message);
+          input.reportValidity();
+          return;
+        }
+        input.setCustomValidity("");
+        render(tab);
+      }
+      input.onkeydown = (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          applyThreshold();
+        }
+      };
+      button(controls, comparing ? "Apply threshold" : "Apply thresholds", applyThreshold, "tools-apply-threshold");
+      if (comparing) {
+        const label2 = node(controls, "label"), check = node(label2, "input");
+        check.type = "checkbox";
+        check.checked = sharedLength;
+        check.id = "tools-shared-length";
+        node(label2, "span", "Match shared length");
+        check.onchange = () => {
+          sharedLength = check.checked;
+          render(tab);
+        };
+      }
+      node(content, "p", "Aligned from the first retained sample, using real elapsed time. Averages and threshold durations hold each sample until the next; recording gaps are excluded. The final sample has no assumed duration.", "tools-muted");
+      if (comparing) node(content, "p", "A: " + sourceOptions().find((item) => item.id === selectedA).title + " · B: " + sourceOptions().find((item) => item.id === selectedB).title, "tools-muted");
+      return sourceOptions();
+    }
+    const number = (value) => value === null ? "Not enough data" : value.toLocaleString(void 0, { maximumFractionDigits: 1 });
+    const percent = (value) => value === null ? "Not enough data" : number(value) + "%";
+    function audienceOverview(archive) {
+      const overview = summarizeAudience(archive), coverage = overview.audience[0];
+      node(content, "h3", "Audience overview");
+      node(content, "p", archive.room + " · " + coverage.samples + " samples · Covered time " + formatElapsedTime(coverage.coveredMs) + " · Excluded gaps " + formatElapsedTime(coverage.gapMs) + " · Coverage " + percent(coverage.coverage), "tools-muted");
+      const scroll = node(content, "div", void 0, "tools-scroll"), table = node(scroll, "table");
+      table.id = "tools-audience-table";
+      node(table, "caption", "Audience across the retained recording");
+      const head = node(node(table, "thead"), "tr");
+      ["Audience", "Time-weighted average", "Peak in recording", "Full-session high"].forEach((label) => {
+        node(head, "th", label).scope = "col";
+      });
+      const body = node(table, "tbody");
+      for (const summary of overview.audience) {
+        const row = node(body, "tr");
+        node(row, "th", ANALYSIS_METRICS[summary.metric]).scope = "row";
+        node(row, "td", number(summary.mean));
+        const peak = node(row, "td", number(summary.peak));
+        if (summary.peakTime !== null) peak.title = "First recorded at " + new Date(summary.peakTime).toLocaleString();
+        node(row, "td", number(summary.sessionPeak));
+      }
+      node(content, "p", "Room audience = registered + anonymous viewers. A full-session high may predate retained history. Hover a recording peak for its first recorded time.", "tools-muted");
+      const shares = node(content, "div");
+      shares.id = "tools-audience-shares";
+      node(shares, "h3", "Audience proportions");
+      node(shares, "p", "Token holders / registered viewers: " + percent(overview.tokenShareRegistered));
+      node(shares, "p", "Token holders / whole room: " + percent(overview.tokenShareRoom));
+      node(shares, "p", "Anonymous / whole room: " + percent(overview.anonymousShareRoom));
+      node(shares, "p", "Shares use viewer-time over covered intervals. A crowded interval contributes more than a quiet interval of the same length; gaps contribute nothing.", "tools-muted");
+    }
+    function thresholdTable(archive) {
+      const scroll = node(content, "div", void 0, "tools-scroll"), table = node(scroll, "table");
+      table.id = "tools-threshold-table";
+      node(table, "caption", ANALYSIS_METRICS[metric] + " — time at or above selected thresholds");
+      const head = node(node(table, "thead"), "tr");
+      ["Threshold", "Time at or above", "% of covered time"].forEach((label) => {
+        node(head, "th", label).scope = "col";
+      });
+      const body = node(table, "tbody");
+      for (const result of summarizeThresholds(archive, metric, summaryThresholds)) {
+        const row = node(body, "tr");
+        node(row, "th", number(result.threshold)).scope = "row";
+        node(row, "td", result.durationMs === null ? "Not enough data" : formatElapsedTime(result.durationMs));
+        node(row, "td", percent(result.percent));
+      }
+      node(content, "p", "Includes samples equal to the threshold. Percentages use covered recording time; gaps and time after the final sample are excluded.", "tools-muted");
+    }
+    function summaryTable(summaries, labels, comparing = true) {
+      const scroll = node(content, "div", void 0, "tools-scroll"), table = node(scroll, "table");
+      table.id = "tools-summary-table";
+      node(table, "caption", ANALYSIS_METRICS[metric] + " — retained recording statistics");
+      const head = node(table, "thead"), headRow = node(head, "tr");
+      node(headRow, "th", "Measure");
+      labels.forEach((label) => node(headRow, "th", label));
+      const body = node(table, "tbody");
+      const rows = [
+        ["Samples in range", (s) => number(s.samples)],
+        ["Elapsed span", (s) => formatElapsedTime(s.spanMs)],
+        ["Covered recording time", (s) => formatElapsedTime(s.coveredMs)],
+        ["Excluded gaps", (s) => formatElapsedTime(s.gapMs)],
+        ["Coverage", (s) => s.coverage === null ? "Not enough data" : number(s.coverage) + "%"],
+        ["Time-weighted average", (s) => number(s.mean)],
+        ["Peak in range", (s) => number(s.peak)],
+        ["Full-session high", (s) => number(s.sessionPeak)],
+        ["Token-holder share of registered viewers", (s) => s.tokenShare === null ? "Not enough data" : number(s.tokenShare) + "%"]
+      ];
+      if (comparing) rows.push(["Time at or above " + threshold.toLocaleString(), (s) => s.coveredMs ? formatElapsedTime(s.atOrAboveMs) : "Not enough data"]);
+      for (const [label, value] of rows) {
+        const row = node(body, "tr");
+        const cell = node(row, "th", label);
+        cell.scope = "row";
+        summaries.forEach((summary) => node(row, "td", value(summary)));
+      }
+      node(content, "p", "The full-session high can predate retained history and is not limited by “Match shared length.” Token-holder share is weighted by recorded registered-viewer time.", "tools-muted");
+    }
+    function chart(archives, labels, endMs) {
+      const legend = node(content, "p", labels.map((label, i) => (i ? "B (dashed blue): " : "A (pink): ") + label).join(" · "), "tools-muted");
+      const canvas = node(content, "canvas");
+      canvas.id = "tools-analysis-chart";
+      canvas.setAttribute("role", "img");
+      canvas.setAttribute("aria-label", ANALYSIS_METRICS[metric] + " by minutes since the first retained sample. " + legend.textContent + ". Statistics are in the table below.");
+      function draw() {
+        const width = Math.max(260, canvas.clientWidth), height = 200, ratio = window.devicePixelRatio || 1;
+        canvas.width = width * ratio;
+        canvas.height = height * ratio;
+        const ctx = canvas.getContext("2d");
+        ctx.scale(ratio, ratio);
+        const series = archives.map((archive) => analysisSeries(archive, metric));
+        let max = 1;
+        series.forEach((s) => s.values.forEach((value, i) => {
+          if (s.times[i] <= endMs) max = Math.max(max, value);
+        }));
+        const left = 58, top = 16, right = width - 12, bottom = height - 38, span = endMs || 1;
+        ctx.strokeStyle = runtime.isDarkMode ? "#686875" : "#b6bdca";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(left, top);
+        ctx.lineTo(left, bottom);
+        ctx.lineTo(right, bottom);
+        ctx.stroke();
+        ctx.fillStyle = runtime.isDarkMode ? "#ddd" : "#41485a";
+        ctx.font = "11px Arial";
+        ctx.textAlign = "left";
+        ctx.fillText(number(max), 2, top + 8);
+        ctx.fillText("0", 30, bottom);
+        ctx.fillText("0m", left, bottom + 19);
+        ctx.textAlign = "right";
+        ctx.fillText(number(endMs / 6e4) + "m", right, bottom + 19);
+        series.forEach((s, j) => {
+          ctx.strokeStyle = j ? runtime.isDarkMode ? "#79baff" : "#175db0" : runtime.isDarkMode ? "#ff69b4" : "#b42370";
+          ctx.lineWidth = 2;
+          ctx.setLineDash(j ? [6, 4] : []);
+          ctx.beginPath();
+          const isolated = [];
+          let previousX = null, previousY = null;
+          for (let i = 0; i < s.times.length && s.times[i] <= endMs; i++) {
+            const x = left + s.times[i] / span * (right - left), y = bottom - s.values[i] / max * (bottom - top);
+            if (previousX === null || s.breaks[i]) ctx.moveTo(x, y);
+            else {
+              ctx.lineTo(x, previousY);
+              ctx.lineTo(x, y);
+            }
+            previousX = x;
+            previousY = y;
+            if ((i === 0 || s.breaks[i]) && (i + 1 === s.times.length || s.breaks[i + 1] || s.times[i + 1] > endMs)) isolated.push([x, y]);
+            if (i + 1 < s.times.length && s.times[i + 1] > endMs && !s.breaks[i + 1]) ctx.lineTo(right, y);
+          }
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.fillStyle = ctx.strokeStyle;
+          isolated.forEach(([x, y]) => {
+            ctx.beginPath();
+            ctx.arc(x, y, 3, 0, Math.PI * 2);
+            ctx.fill();
+          });
+        });
+      }
+      chartDraw = draw;
+      draw();
+      if (window.ResizeObserver) {
+        chartObserver = new window.ResizeObserver(draw);
+        chartObserver.observe(canvas);
+      }
+    }
+    function renderAnalysis(comparing) {
+      const options = analysisControls(comparing);
+      if (!options) return;
+      const a = options.find((item) => item.id === selectedA), b = options.find((item) => item.id === selectedB);
+      if (comparing) {
+        if (a.id === b.id) node(content, "p", "Choose a second recording to make a comparison.", "tools-muted");
+        const result = compareSessions(a.archive, b.archive, metric, threshold, sharedLength);
+        chart([a.archive, b.archive], [a.archive.room, b.archive.room], result.axisMs);
+        summaryTable([result.a, result.b], ["A", "B"]);
+      } else {
+        const summary = summarizeSession(a.archive, metric, threshold);
+        audienceOverview(a.archive);
+        thresholdTable(a.archive);
+        node(content, "h3", ANALYSIS_METRICS[metric] + " — chart and details");
+        chart([a.archive], [a.archive.room], summary.spanMs);
+        summaryTable([summary], [a.archive.room], false);
+      }
+    }
+    function checkbox(parent, id, text, checked = true) {
+      const label = node(parent, "label"), input = node(label, "input");
+      input.type = "checkbox";
+      input.id = id;
+      input.checked = checked;
+      node(label, "span", text);
+      return input;
+    }
+    function renderBackup() {
+      node(content, "h3", "Back up this browser");
+      node(content, "p", "Download ATH for every room and your saved preferences: theme, panel size/position, collapsed rows, compact metric, chart window and SH/ATH mode. Keep this file somewhere safe. Session-only controls such as the scan interval are not saved preferences.", "tools-muted");
+      const include = checkbox(content, "tools-backup-library", "Include library recordings");
+      const actions = node(content, "div", void 0, "tools-actions");
+      button(actions, "Download backup", () => {
+        downloadDataFile(createTierScopeBackup(include.checked), "TierScope-backup-" + (/* @__PURE__ */ new Date()).toISOString().slice(0, 10) + ".json");
+        tell("Backup download requested. Check your browser downloads.");
+      }, "tools-backup-download");
+      node(content, "h3", "Restore a backup");
+      node(content, "p", "ATH is merged without lowering existing records. New library sessions are added; fuller versions of the same session update its entry and keep its name. Saved preferences take effect after refreshing your room tabs.", "tools-muted");
+      button(content, "Choose backup…", () => {
+        pendingBackup = null;
+        render("backup");
+        chooseFile(BACKUP_MAX_BYTES, (value) => {
+          pendingBackup = validateTierScopeBackup(value);
+          render("backup");
+          tell("Backup validated. Review the contents and choose what to restore.");
+        });
+      }, "tools-backup-open");
+      if (pendingBackup) {
+        node(content, "p", pendingBackup.rooms.length + " rooms · " + Object.keys(pendingBackup.preferences).length + " saved preferences · " + pendingBackup.library.length + " recordings", "tools-muted");
+        const choices = node(content, "div", void 0, "tools-actions");
+        const highs = checkbox(choices, "tools-restore-highs", "Merge ATH"), preferences = checkbox(choices, "tools-restore-preferences", "Restore preferences"), recordings = checkbox(choices, "tools-restore-library", "Add library recordings");
+        button(content, "Restore selected data", () => {
+          if (!highs.checked && !preferences.checked && !recordings.checked) throw new Error("Choose at least one kind of data to restore.");
+          if (!confirm("Restore the selected backup data?\n\nATH will be merged, library recordings added or updated with fuller versions, and selected saved preferences replaced. Your live session is not replaced.")) return;
+          const result = restoreTierScopeBackup(pendingBackup, { highs: highs.checked, preferences: preferences.checked, library: recordings.checked });
+          library = null;
+          if (runtime.playback) setPlaybackAllTimeState(runtime.playback, readAllTimeHighs(displayedHighRoom()));
+          repaintHighMode();
+          tell("Restored: " + result.rooms + " room ATH updates, " + result.recordings + " new recordings, " + result.updatedRecordings + " updated recordings, " + result.preferences + " preferences." + (result.preferences ? "\nRefresh your room tabs when convenient to apply preferences." : ""));
+        }, "tools-backup-restore");
+      }
+    }
+    function render(next) {
+      const focusedId = dialog.contains(document.activeElement) ? document.activeElement.id : "";
+      if (next !== tab) library = null;
+      tab = next;
+      fileRequest++;
+      chartDraw = null;
+      if (chartObserver) {
+        chartObserver.disconnect();
+        chartObserver = null;
+      }
+      content.replaceChildren();
+      message.textContent = "";
+      dialog.querySelectorAll("[data-tools-tab]").forEach((button2) => button2.setAttribute("aria-pressed", String(button2.dataset.toolsTab === tab)));
+      try {
+        if (tab === "library") renderLibrary();
+        else if (tab === "backup") renderBackup();
+        else renderAnalysis(tab === "compare");
+      } catch (error) {
+        tell(error.message, true);
+      }
+      if (focusedId) {
+        const target = document.getElementById(focusedId);
+        if (target && dialog.contains(target)) target.focus();
+      }
+    }
+    function close() {
+      fileRequest++;
+      refreshSessionTools = null;
+      cancelGifExport();
+      if (detachDock) detachDock();
+      document.removeEventListener("keydown", escape);
+      for (const id of ["btn-control-library", "btn-playback-library"]) {
+        const button2 = document.getElementById(id);
+        if (button2) button2.setAttribute("aria-expanded", "false");
+      }
+      if (chartObserver) chartObserver.disconnect();
+      if (dialog.open) dialog.close();
+      dialog.remove();
+      if (closeSessionTools === close) closeSessionTools = null;
+      let focus = focusBefore;
+      if (!focus || !focus.isConnected || !focus.getClientRects().length || window.getComputedStyle(focus).visibility === "hidden") {
+        focus = document.getElementById(isPlaybackCurrent(runtime.playback) ? "btn-playback-library" : "btn-control-library");
+      }
+      if (focus) focus.focus();
+    }
+    function escape(event) {
+      if (event.key === "Escape" && !event.defaultPrevented) {
+        event.preventDefault();
+        close();
+      }
+    }
+    closeSessionTools = close;
+    refreshSessionTools = refreshCurrent;
+    document.addEventListener("keydown", escape);
+    dialog.querySelector("#btn-cancel-gif").onclick = cancelGifExport;
+    for (const id of ["btn-control-library", "btn-playback-library"]) {
+      const button2 = document.getElementById(id);
+      if (button2) button2.setAttribute("aria-expanded", "true");
+    }
+    dialog.querySelector("#tools-close").onclick = close;
+    dialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      close();
+    });
+    dialog.addEventListener("close", () => {
+      if (dialog.isConnected) close();
+    });
+    dialog.querySelectorAll("[data-tools-tab]").forEach((button2) => {
+      button2.onclick = () => render(button2.dataset.toolsTab);
+    });
+    dialog.show();
+    detachDock = attachLibraryDock(document.getElementById("tracker-container"), dialog, () => {
+      if (chartDraw) chartDraw();
+    });
+    render("library");
+    dialog.querySelector("#tools-close").focus();
+  }
+
+  // src/files.js
+  function setChartWindow(value) {
+    if (!hasStorageField(runtime.CHART_WINDOWS, value)) return;
+    runtime.chartWindowMode = value;
+    try {
+      GM_setValue(runtime.CHART_WINDOW_KEY, value);
+    } catch (error) {
+      log("Could not save chart window preference");
+    }
+    runtime.chartLayoutRevision++;
+    updatePanelOptions();
+    redrawPanelCharts();
+  }
+  function downloadSessionFile() {
+    try {
+      var archive = captureSessionFile();
+      var blob = new Blob([JSON.stringify(archive)], { type: "application/json;charset=utf-8" });
+      var url = URL.createObjectURL(blob), link = document.createElement("a");
+      link.href = url;
+      link.download = archive.room + "-session-" + new Date(archive.session.timestamp).toISOString().replace(/[:.]/g, "-") + ".tierscope.json";
+      document.body.appendChild(link);
+      try {
+        link.click();
+      } finally {
+        link.remove();
+        setTimeout(function() {
+          URL.revokeObjectURL(url);
+        }, 6e4);
+      }
+    } catch (error) {
+      alert("Could not save session file: " + error.message);
+    }
+  }
+  function openSessionReplay(file) {
+    var archive = validateSessionFile(file);
+    leavePlayback(false);
+    if (runtime.isMinimized) toggleView();
+    openOwnedPlayback({
+      url: location.href,
+      key: runtime.activeSessionStorageKey,
+      generation: runtime.initGuard,
+      imported: true,
+      archive,
+      snapshot: createPlaybackSnapshot(archive.session.history),
+      allTimeState: readAllTimeHighs(archive.room)
+    }, Date.now(), false);
+    cancelHighPulses();
+    setPlaybackLayout(true);
+    return paintPlayback(runtime.playback);
+  }
+  async function readSessionFile(file) {
+    if (!file) return false;
+    var request = nextSessionFileRequest(), url = location.href, generation = runtime.initGuard;
+    function current() {
+      return request === runtime.sessionFileLoadGeneration && url === location.href && generation === runtime.initGuard;
+    }
+    try {
+      if (file.size > runtime.SESSION_FILE_MAX_BYTES) throw new Error("Session files must be 8 MB or smaller.");
+      var text = await file.text();
+      if (!current()) return false;
+      if (text.length > runtime.SESSION_FILE_MAX_BYTES) throw new Error("Session file is too large.");
+      return openSessionReplay(JSON.parse(text.replace(/^\uFEFF/, "")));
+    } catch (error) {
+      if (current()) alert("Could not open session file: " + error.message);
+      return false;
+    }
+  }
+  function updatePanelOptions() {
+    updateSessionToolsStatus();
+    updateHighControls();
+    var button = document.getElementById("btn-panel-options");
+    if (button) {
+      button.style.display = runtime.isMinimized ? "none" : "";
+      button.textContent = { full: "Full", fourHours: "4h", twoHours: "2h", hour: "1h", halfHour: "30m", quarter: "15m" }[runtime.chartWindowMode] + " ▾";
+      button.title = "Chart window and highs. Showing " + { full: "full history", fourHours: "the last 4 hours", twoHours: "the last 2 hours", hour: "the last hour", halfHour: "the last 30 minutes", quarter: "the last 15 minutes" }[runtime.chartWindowMode] + ".";
+    }
+    var select = document.getElementById("chart-window-select");
+    if (select) select.value = runtime.chartWindowMode;
+    var info = document.getElementById("session-file-info");
+    if (info) {
+      var archive = isPlaybackCurrent(runtime.playback) && runtime.playback.imported ? runtime.playback.archive : null;
+      info.style.display = archive ? "block" : "none";
+      if (archive) info.textContent = archive.room + " · " + archive.session.history.timestamps.length + " samples\nSaved " + new Date(archive.session.timestamp).toLocaleString() + "\nSession room high: " + archive.session.roomTotalHigh.toLocaleString();
+    }
+  }
+  function bindPanelOptions() {
+    var button = document.getElementById("btn-panel-options"), menu = document.getElementById("panel-options");
+    var cleanupSessionTools = bindSessionTools();
+    var input = document.getElementById("session-file-input");
+    function close(focus) {
+      menu.style.display = "none";
+      button.setAttribute("aria-expanded", "false");
+      if (focus) button.focus();
+    }
+    button.onmousedown = function(event) {
+      event.stopPropagation();
+    };
+    button.onclick = function(event) {
+      event.stopPropagation();
+      updatePanelOptions();
+      var open = menu.style.display === "none";
+      menu.style.display = open ? "block" : "none";
+      button.setAttribute("aria-expanded", String(open));
+      if (open) document.getElementById("chart-window-select").focus();
+    };
+    document.getElementById("panel-options-close").onclick = function() {
+      close(true);
+    };
+    document.getElementById("chart-window-select").onchange = function() {
+      setChartWindow(this.value);
+    };
+    document.getElementById("btn-high-mode").onclick = toggleHighMode;
+    document.getElementById("mini-high").onclick = toggleHighMode;
+    document.getElementById("btn-add-all-time").onclick = addFileToAllTimeHighs;
+    document.getElementById("btn-clear-all-time").onclick = clearAllTimeHighs;
+    input.onchange = function() {
+      var file = input.files && input.files[0];
+      if (file) {
+        close(false);
+        readSessionFile(file);
+      }
+    };
+    function outside(event) {
+      if (!menu.contains(event.target) && !button.contains(event.target)) close(false);
+    }
+    function escape(event) {
+      if (event.key === "Escape" && menu.style.display !== "none") {
+        close(true);
+        event.stopPropagation();
+      }
+    }
+    document.addEventListener("pointerdown", outside);
+    document.addEventListener("keydown", escape, true);
+    runtime.panelOptionsCleanup = function() {
+      cleanupSessionTools();
+      document.removeEventListener("pointerdown", outside);
+      document.removeEventListener("keydown", escape, true);
+    };
+    updatePanelOptions();
+  }
+
   // src/theme.js
   function applyPanelTheme(redraw) {
     var container = document.getElementById("tracker-container");
@@ -6527,12 +6821,12 @@ underlying system, so should run in the browser, Node, or Plask.
     if (existing) existing.remove();
     var div = document.createElement("div");
     div.id = "cb-tier-tracker";
-    var html = '<div id="tracker-container" style="position:fixed;top:80px;right:20px;background:rgba(20,20,30,0.95);color:var(--panel-text);padding:5px;border-radius:6px;font-family:Arial,sans-serif;font-size:9px;z-index:999999;width:' + runtime.BASE_WIDTH_MINI + 'px;border:1px solid #ff69b4;transition:width 0.3s ease;cursor:default;user-select:none;"><div id="drag-handle" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;border-bottom:1px solid #ff69b4;padding-bottom:3px;cursor:move;"><span id="header-text" style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:bold;color:var(--panel-accent);font-size:10px;">USERS: 0 (SH:0)</span><span id="mini-room-change" style="font-size:8px;margin:0 3px;display:none;"></span><div style="display:flex;align-items:center;gap:3px;flex-shrink:0;"><button type="button" id="btn-high-mode" aria-pressed="false" aria-label="Session highs. Switch to all-time highs" style="display:none;min-width:29px;background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;">SH</button><button type="button" id="btn-panel-options" aria-label="Chart window and session files" aria-expanded="false" aria-controls="panel-options" style="display:none;background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;white-space:nowrap;">Full ▾</button><button type="button" id="btn-standard-size" title="Restore standard panel size (100%)" aria-label="Restore standard panel size" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;">100%</button><button id="btn-toggle" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:9px;padding:1px 4px;flex-shrink:0;">+</button></div></div><div id="panel-options" role="group" aria-label="Chart and session options" style="display:none;position:absolute;right:5px;top:29px;width:190px;max-width:calc(100% - 10px);box-sizing:border-box;z-index:5;padding:8px;background:var(--panel-solid);color:var(--panel-text);border:1px solid #ff69b4;border-radius:4px;font-size:11px;box-shadow:0 3px 12px #0008;"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;"><strong>Charts &amp; sessions</strong><button type="button" id="panel-options-close" aria-label="Close chart and session options" style="background:var(--panel-button);color:var(--panel-text);border:0;border-radius:3px;cursor:pointer;">×</button></div><label for="chart-window-select">Chart window</label><select id="chart-window-select" style="display:block;width:100%;margin:4px 0 6px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);font-size:11px;"><option value="full">Full history</option><option value="fourHours">Last 4 hours</option><option value="twoHours">Last 2 hours</option><option value="hour">Last hour</option><option value="halfHour">Last 30 minutes</option><option value="quarter">Last 15 minutes</option></select><div style="font-size:10px;color:var(--panel-muted);line-height:1.4;margin-bottom:8px;">Charts only. Downloads keep the full retained history.</div><button type="button" id="btn-save-session" style="display:block;width:100%;margin:4px 0;padding:4px;background:#4169E1;color:#fff;border:0;border-radius:3px;cursor:pointer;">Save session file</button><button type="button" id="btn-open-session" style="display:block;width:100%;margin:4px 0;padding:4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:3px;cursor:pointer;">Open session file…</button><input type="file" id="session-file-input" accept=".json,application/json" style="display:none;"><div id="session-file-info" style="display:none;margin-top:7px;font-size:10px;line-height:1.4;white-space:pre-line;overflow-wrap:anywhere;color:var(--panel-secondary);"></div><div style="border-top:1px solid var(--panel-divider);margin-top:8px;padding-top:6px;"><strong>All-time highs</strong><div id="all-time-info" style="font-size:10px;line-height:1.4;margin:4px 0;color:var(--panel-secondary);"></div><button type="button" id="btn-add-all-time" style="display:none;width:100%;margin:4px 0;padding:4px;background:#4169E1;color:#fff;border:0;border-radius:3px;cursor:pointer;">Add to all-time highs</button><button type="button" id="btn-clear-all-time" style="display:block;width:100%;margin:4px 0;padding:4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:3px;cursor:pointer;">Clear all-time highs…</button><div id="all-time-action-status" role="status" style="font-size:10px;line-height:1.4;overflow-wrap:anywhere;color:var(--panel-secondary);"></div></div></div><div id="minimized-view" style="display:block;position:relative;"><div style="display:flex;align-items:center;justify-content:space-between;gap:3px;"><button type="button" id="mini-metric" style="background:transparent;border:0;color:var(--panel-secondary);font:inherit;cursor:pointer;padding:2px 0;" aria-label="Cycle chart metric">Room total ▾</button><button type="button" id="mini-high" style="background:transparent;border:0;padding:0;color:var(--panel-subtle);font-size:8px;cursor:pointer;"></button></div><canvas id="mini-chart" width="140" height="36" style="display:block;width:100%;height:36px;" role="img" aria-label="Recent audience history"></canvas><div style="display:flex;justify-content:space-between;gap:4px;margin:3px 0;"><span title="With Tokens">💎 <span id="mini-withtokens">0</span> <span id="mini-withtokens-change"></span></span><span title="Registered">📊 <span id="mini-total">0</span> <span id="mini-total-change"></span></span></div><div style="display:flex;align-items:center;gap:3px;"><span id="mini-freshness" style="flex:1;min-width:0;font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">No sample</span><button type="button" id="btn-auto" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;cursor:pointer;" title="Pause or resume scans">⏸</button><button type="button" id="mini-settings-toggle" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;cursor:pointer;" aria-label="Scan interval settings" title="Scan interval settings — adjust how often TierScope scans" aria-expanded="false" aria-controls="mini-settings">◷</button><button type="button" id="btn-expand" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;font-size:9px;cursor:pointer;" title="Expand panel" aria-label="Expand panel">↗</button></div><div id="mini-settings" style="display:none;position:absolute;left:0;right:0;top:17px;background:var(--panel-settings);border:1px solid #ff69b4;border-radius:4px;padding:5px;z-index:2;" role="group" aria-label="Scan interval"><div style="display:flex;justify-content:space-between;align-items:center;font-size:9px;color:var(--panel-secondary);">Scan interval <button type="button" id="mini-settings-close" aria-label="Close scan interval settings" title="Close (Escape)" style="background:var(--panel-button);color:var(--panel-text);border:0;border-radius:3px;cursor:pointer;padding:1px 5px;font-size:13px;">×</button></div><div style="display:flex;align-items:center;justify-content:center;gap:3px;margin:3px 0;padding:2px;background:rgba(var(--panel-row-rgb),0.05);border-radius:3px;"><button id="btn-timer-down" style="background:var(--panel-button-strong);border:none;color:var(--panel-text);border-radius:2px;cursor:pointer;font-size:9px;padding:1px 4px;font-weight:bold;">−</button><span id="timer-display" style="font-size:11px;color:var(--panel-warning);font-weight:bold;min-width:28px;">60s</span><button id="btn-timer-up" style="background:var(--panel-button-strong);border:none;color:var(--panel-text);border-radius:2px;cursor:pointer;font-size:9px;padding:1px 4px;font-weight:bold;">+</button></div><div style="display:flex;gap:2px;justify-content:center;margin-top:3px;"><button class="timer-preset" data-time="30" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">30s</button><button class="timer-preset" data-time="60" style="background:#ff69b4;border:1px solid #ff69b4;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">60s</button><button class="timer-preset" data-time="120" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">2m</button><button class="timer-preset" data-time="300" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">5m</button></div><div id="auto-status" style="margin-top:3px;font-size:8px;color:var(--panel-muted);">Starting...</div></div></div><div id="full-view" style="display:none;"><div id="tier-chart-region" style="display:flow-root;">' + collapsedTrayHtml();
+    var html = '<div id="tracker-container" style="position:fixed;top:80px;right:20px;background:rgba(20,20,30,0.95);color:var(--panel-text);padding:5px;border-radius:6px;font-family:Arial,sans-serif;font-size:9px;z-index:999999;width:' + runtime.BASE_WIDTH_MINI + 'px;border:1px solid #ff69b4;transition:width 0.3s ease;cursor:default;user-select:none;"><div id="drag-handle" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;border-bottom:1px solid #ff69b4;padding-bottom:3px;cursor:move;"><span id="header-text" style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:bold;color:var(--panel-accent);font-size:10px;">USERS: 0 (SH:0)</span><span id="mini-room-change" style="font-size:8px;margin:0 3px;display:none;"></span><div style="display:flex;align-items:center;gap:3px;flex-shrink:0;"><button type="button" id="btn-high-mode" aria-pressed="false" aria-label="Session highs. Switch to all-time highs" style="display:none;min-width:29px;background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;">SH</button><button type="button" id="btn-panel-options" aria-label="Chart window and highs" aria-expanded="false" aria-controls="panel-options" style="display:none;background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;white-space:nowrap;">Full ▾</button><button type="button" id="btn-standard-size" title="Restore standard panel size (100%)" aria-label="Restore standard panel size" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;">100%</button><button id="btn-toggle" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:9px;padding:1px 4px;flex-shrink:0;">+</button></div></div><div id="panel-options" role="group" aria-label="Chart and high options" style="display:none;position:absolute;right:5px;top:29px;width:190px;max-width:calc(100% - 10px);box-sizing:border-box;z-index:5;padding:8px;background:var(--panel-solid);color:var(--panel-text);border:1px solid #ff69b4;border-radius:4px;font-size:11px;box-shadow:0 3px 12px #0008;"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;"><strong>Charts &amp; highs</strong><button type="button" id="panel-options-close" aria-label="Close chart and high options" style="background:var(--panel-button);color:var(--panel-text);border:0;border-radius:3px;cursor:pointer;">×</button></div><label for="chart-window-select">Chart window</label><select id="chart-window-select" style="display:block;width:100%;margin:4px 0 6px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);font-size:11px;"><option value="full">Full history</option><option value="fourHours">Last 4 hours</option><option value="twoHours">Last 2 hours</option><option value="hour">Last hour</option><option value="halfHour">Last 30 minutes</option><option value="quarter">Last 15 minutes</option></select><div style="font-size:10px;color:var(--panel-muted);line-height:1.4;margin-bottom:8px;">Charts only. Downloads keep the full retained history.</div><input type="file" id="session-file-input" accept=".json,application/json" style="display:none;"><div id="session-file-info" style="display:none;margin-top:7px;font-size:10px;line-height:1.4;white-space:pre-line;overflow-wrap:anywhere;color:var(--panel-secondary);"></div><div style="border-top:1px solid var(--panel-divider);margin-top:8px;padding-top:6px;"><strong>All-time highs</strong><div id="all-time-info" style="font-size:10px;line-height:1.4;margin:4px 0;color:var(--panel-secondary);"></div><button type="button" id="btn-add-all-time" style="display:none;width:100%;margin:4px 0;padding:4px;background:#4169E1;color:#fff;border:0;border-radius:3px;cursor:pointer;">Add to all-time highs</button><button type="button" id="btn-clear-all-time" style="display:block;width:100%;margin:4px 0;padding:4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:3px;cursor:pointer;">Clear all-time highs…</button><div id="all-time-action-status" role="status" style="font-size:10px;line-height:1.4;overflow-wrap:anywhere;color:var(--panel-secondary);"></div></div></div><div id="minimized-view" style="display:block;position:relative;"><div style="display:flex;align-items:center;justify-content:space-between;gap:3px;"><button type="button" id="mini-metric" style="background:transparent;border:0;color:var(--panel-secondary);font:inherit;cursor:pointer;padding:2px 0;" aria-label="Cycle chart metric">Room total ▾</button><button type="button" id="mini-high" style="background:transparent;border:0;padding:0;color:var(--panel-subtle);font-size:8px;cursor:pointer;"></button></div><canvas id="mini-chart" width="140" height="36" style="display:block;width:100%;height:36px;" role="img" aria-label="Recent audience history"></canvas><div style="display:flex;justify-content:space-between;gap:4px;margin:3px 0;"><span title="With Tokens">💎 <span id="mini-withtokens">0</span> <span id="mini-withtokens-change"></span></span><span title="Registered">📊 <span id="mini-total">0</span> <span id="mini-total-change"></span></span></div><div style="display:flex;align-items:center;gap:3px;"><span id="mini-freshness" style="flex:1;min-width:0;font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">No sample</span><button type="button" id="btn-auto" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;cursor:pointer;" title="Pause or resume scans">⏸</button><button type="button" id="mini-settings-toggle" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;cursor:pointer;" aria-label="Scan interval settings" title="Scan interval settings — adjust how often TierScope scans" aria-expanded="false" aria-controls="mini-settings">◷</button><button type="button" id="btn-expand" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;font-size:9px;cursor:pointer;" title="Expand panel" aria-label="Expand panel">↗</button></div><div id="mini-settings" style="display:none;position:absolute;left:0;right:0;top:17px;background:var(--panel-settings);border:1px solid #ff69b4;border-radius:4px;padding:5px;z-index:2;" role="group" aria-label="Scan interval"><div style="display:flex;justify-content:space-between;align-items:center;font-size:9px;color:var(--panel-secondary);">Scan interval <button type="button" id="mini-settings-close" aria-label="Close scan interval settings" title="Close (Escape)" style="background:var(--panel-button);color:var(--panel-text);border:0;border-radius:3px;cursor:pointer;padding:1px 5px;font-size:13px;">×</button></div><div style="display:flex;align-items:center;justify-content:center;gap:3px;margin:3px 0;padding:2px;background:rgba(var(--panel-row-rgb),0.05);border-radius:3px;"><button id="btn-timer-down" style="background:var(--panel-button-strong);border:none;color:var(--panel-text);border-radius:2px;cursor:pointer;font-size:9px;padding:1px 4px;font-weight:bold;">−</button><span id="timer-display" style="font-size:11px;color:var(--panel-warning);font-weight:bold;min-width:28px;">60s</span><button id="btn-timer-up" style="background:var(--panel-button-strong);border:none;color:var(--panel-text);border-radius:2px;cursor:pointer;font-size:9px;padding:1px 4px;font-weight:bold;">+</button></div><div style="display:flex;gap:2px;justify-content:center;margin-top:3px;"><button class="timer-preset" data-time="30" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">30s</button><button class="timer-preset" data-time="60" style="background:#ff69b4;border:1px solid #ff69b4;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">60s</button><button class="timer-preset" data-time="120" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">2m</button><button class="timer-preset" data-time="300" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">5m</button></div><div id="auto-status" style="margin-top:3px;font-size:8px;color:var(--panel-muted);">Starting...</div></div></div><div id="full-view" style="display:none;"><div id="tier-chart-region" style="display:flow-root;">' + collapsedTrayHtml();
     Object.keys(runtime.TIERS).forEach(function(key) {
       var t = runtime.TIERS[key];
       html += '<div id="tier-row-' + key + '" data-tier="' + key + '" style="display:flex;align-items:center;padding:1px 3px;margin:1px 0;background:rgba(var(--panel-row-rgb),calc(0.05 * var(--tier-background-scale, 1)));border-radius:3px;border-left:3px solid ' + t.color + ';"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml(key) + '</div><canvas id="spark-' + key + '" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-' + key + '" style="font-weight:bold;color:' + t.color + ';font-size:14px;">0</span><div id="high-' + key + '" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div>';
     });
-    html += '<div id="summary-tier-rows" style="border-top:1px solid var(--panel-divider);margin-top:4px;padding-top:4px;"><div id="tier-row-withtokens" data-tier="withtokens" style="display:flex;align-items:center;padding:2px 3px;background:rgba(255,105,180,0.15);border-radius:3px;border:1px solid #ff69b4;margin-bottom:3px;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("withtokens") + '</div><canvas id="spark-withtokens" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-withtokens" style="font-weight:bold;color:#ff69b4;font-size:14px;">0</span><span id="pct-withtokens" style="font-size:8px;color:#ff69b4;margin-left:2px;">0%</span><div id="high-withtokens" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div><div id="tier-row-total" data-tier="total" style="display:flex;align-items:center;padding:2px 3px;background:rgba(var(--panel-row-rgb),0.1);border-radius:3px;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("total") + '</div><canvas id="spark-total" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-total" style="font-weight:bold;color:var(--panel-text);font-size:14px;">0</span><div id="high-total" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div></div><div id="tier-row-anon" data-tier="anonymous" style="margin-top:5px;padding:5px;background:rgba(136,136,136,0.15);border-radius:3px;border:1px solid #888;"><div style="display:flex;align-items:center;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("anon") + `</div><canvas id="spark-anon" width="105" height="50" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="anon-ratio-full" style="font-size:13px;font-weight:bold;color:#ff69b4;">--</span><div id="high-anon" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div></div></div><div id="trend-section" style="position:relative;border-top:1px solid #4169E1;margin-top:5px;padding-top:5px;"><div id="live-trend"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;flex-wrap:wrap;gap:2px;"><span id="trend-header-label" style="font-size:9px;font-weight:bold;color:#4169E1;">📈 TREND</span><div style="display:flex;gap:2px;flex-wrap:wrap;"><button class="trend-preset-btn" data-mode="last" style="background:#4169E1;border:1px solid #4169E1;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Last</button><button class="trend-preset-btn" data-mode="5min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">5m</button><button class="trend-preset-btn" data-mode="15min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">15m</button><button class="trend-preset-btn" data-mode="30min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">30m</button><button class="trend-preset-btn" data-mode="1hour" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">1h</button><button class="trend-preset-btn" data-mode="start" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Start</button><button id="btn-trend-auto" style="background:#32CD32;border:1px solid #32CD32;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;" title="Auto-escalation ON - Click to disable">AUTO</button></div></div><div id="trend-container" style="min-height:30px;"><div style="font-size:8px;color:var(--panel-faint);text-align:center;padding:8px;">Waiting for scan...</div></div></div><div id="playback-controls" style="display:none;position:absolute;top:5px;left:0;right:0;bottom:0;padding:0 2px;box-sizing:border-box;grid-template-rows:minmax(14px,1fr) 14px 12px;gap:2px;" aria-label="Playback controls"><div id="gif-export-controls" style="display:none;position:absolute;inset:0;z-index:1;align-items:center;justify-content:center;gap:5px;background:var(--panel-solid);border-radius:3px;padding:3px;"><span id="gif-export-status" role="status" style="font-size:8px;color:var(--panel-secondary);overflow-wrap:anywhere;"></span><button id="btn-cancel-gif" hidden style="font-size:8px;cursor:pointer;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;">Cancel</button></div><div style="display:flex;flex-direction:column;justify-content:center;gap:4px;min-width:0;"><div id="playback-file-controls" style="display:none;align-items:center;gap:4px;min-width:0;"><div id="playback-room" style="display:none;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;line-height:12px;font-weight:bold;color:var(--panel-text);"></div><button type="button" id="btn-playback-add-all-time" aria-live="polite" title="Add this file's highs to the room named beside this button" style="display:none;flex-shrink:0;min-width:88px;font-size:8px;line-height:12px;margin:0;padding:0 4px;white-space:nowrap;background:#4169E1;color:#fff;border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Add to all-time highs</button></div><div style="display:flex;align-items:center;justify-content:space-between;gap:3px;"><strong id="playback-label" style="font-size:9px;color:var(--panel-warning);">PLAYBACK</strong><button id="playback-play" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#4169E1;color:white;border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Pause</button><select id="playback-speed" aria-label="Playback speed" style="font-size:8px;height:15px;margin:0;padding:0;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select><button id="btn-export-gif" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#ff69b4;color:white;border:1px solid #ff69b4;border-radius:2px;cursor:pointer;" title="Download this Replay as a ` + runtime.GIF_WIDTH + " × " + runtime.GIF_HEIGHT + ` GIF">GIF</button><button id="playback-return" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Return to Live</button></div></div><div style="display:flex;align-items:center;gap:4px;min-width:0;"><button type="button" id="playback-previous" title="Previous recorded sample (pauses Replay)" aria-label="Previous recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">|&#9664;</button><input id="playback-scrubber" type="range" min="0" max="0" value="0" step="any" aria-label="Playback timeline" style="flex:1;min-width:0;width:100%;height:12px;margin:0;accent-color:var(--panel-warning);cursor:pointer;"><button type="button" id="playback-next" title="Next recorded sample (pauses Replay)" aria-label="Next recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">&#9654;|</button></div><div id="playback-file-actions" style="display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:4px;min-width:0;"><button type="button" id="btn-playback-keep-library" aria-live="polite" title="Keep the full replayed recording in this browser's library" style="grid-column:1;justify-self:start;white-space:nowrap;font-size:8px;line-height:10px;height:12px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Keep in library</button><div id="playback-position" style="grid-column:2;font-size:9px;line-height:12px;text-align:center;white-space:nowrap;color:var(--panel-secondary);font-family:monospace;">00:00:00 / 00:00:00</div><div style="grid-column:3;justify-self:end;display:flex;gap:2px;"><button type="button" id="btn-playback-save-session" aria-label="Save replay session file" title="Save the full session being replayed" style="font-size:8px;line-height:10px;height:12px;box-sizing:border-box;margin:0;padding:0 4px;background:#4169E1;color:#fff;border:1px solid #4169E1;border-radius:2px;cursor:pointer;">Save</button><button type="button" id="btn-playback-open-session" aria-label="Open session file in replay" title="Open another saved session in FILE REPLAY" style="font-size:8px;line-height:10px;height:12px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Open</button></div></div></div></div><div id="control-field" style="margin-top:5px;padding:4px;background:rgba(65,105,225,0.15);border-radius:3px;border:1px solid #4169E1;"><div id="control-session-row" style="display:flex;justify-content:space-between;align-items:center;gap:3px;margin-bottom:4px;white-space:nowrap;"><span style="font-size:9px;font-weight:bold;color:#4169E1;">🎛️ CONTROLS</span><div id="control-session-buttons" style="display:flex;gap:2px;align-items:center;"><button id="btn-replay" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-warning);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;" title="Replay recorded history">Replay</button><button type="button" id="btn-control-save-session" aria-label="Save session file" title="Save this session as a file to replay later" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:#4169E1;color:white;border:1px solid #4169E1;border-radius:2px;cursor:pointer;">Save</button><button type="button" id="btn-control-open-session" aria-label="Open session file" title="Open a saved session in FILE REPLAY" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Open</button><button type="button" id="btn-control-library" aria-label="Open session library" title="Open model folders, session summaries, comparisons and backups" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Library</button></div><span style="font-size:11px;color:var(--panel-positive);font-weight:bold;" id="control-next-scan">Next: 60s</span></div><div id="control-action-row" style="display:grid;grid-template-columns:minmax(max-content,1fr) auto minmax(0,1fr);align-items:center;gap:3px;"><span style="font-size:12px;color:var(--panel-warning);font-family:monospace;font-weight:bold;flex-shrink:0;" id="control-tracking-timer">00:00:00</span><div id="control-action-buttons" style="display:flex;gap:2px;align-items:center;"><button id="btn-download-report" style="background:#4169E1;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Download tracking report"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="4" x2="12" y2="16"/><polyline points="6 10 12 16 18 10"/><line x1="4" y1="20" x2="20" y2="20"/></svg>TXT</button><button id="btn-download-csv" style="background:#4169E1;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Download all retained history as CSV"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="4" x2="12" y2="16"/><polyline points="6 10 12 16 18 10"/><line x1="4" y1="20" x2="20" y2="20"/></svg>CSV</button><button id="btn-control-auto" style="background:#32CD32;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 4px;min-width:24px;" title="Auto-Refresh ON">⏸</button><button type="button" id="btn-control-stop" aria-label="Stop this session" title="Stop this session and freeze its history and elapsed time" style="background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;white-space:nowrap;">■ Stop</button><button id="btn-main-reset" style="background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Reset all tracking data"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12"/><path d="M3 3v9h9"/></svg>Reset</button></div><label id="dark-mode-control" style="justify-self:end;display:inline-flex;align-items:center;gap:2px;cursor:pointer;color:var(--panel-secondary);line-height:1;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 13a9 9 0 0 1-10-10 9 9 0 1 0 10 10Z"/></svg><input type="checkbox" id="dark-mode-toggle" checked aria-label="Dark mode" style="appearance:auto;width:12px;height:12px;margin:0;cursor:pointer;accent-color:#4169E1;"></label></div></div><div id="tracker-footer" style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:4px;margin-top:5px;min-height:14px;"><div id="acquisition-status" style="max-width:80px;font-size:7px;color:var(--panel-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="No accepted sample yet">No sample</div><div id="background-slider-controls" style="display:flex;align-items:center;gap:3px;min-width:0;"><svg width="11" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--panel-warning)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink:0;"><path d="M9 18h6M10 22h4M8 14a6 6 0 1 1 8 0c-1 1-1 2-1 4H9c0-2 0-3-1-4Z"/></svg><input type="range" id="opacity-slider" min="30" max="100" value="95" aria-label="Background opacity" style="flex:1;min-width:0;width:100%;height:12px;margin:0;cursor:pointer;accent-color:#ff69b4;" title="Main and standard tier background opacity"><span id="opacity-value" style="font-size:8px;color:var(--panel-secondary);min-width:23px;">95%</span></div><div id="tierscope-logo" style="justify-self:end;display:flex;align-items:center;gap:3px;white-space:nowrap;opacity:0.6;transition:opacity 0.2s;" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0.6"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#ff69b4" stroke-width="2" style="flex-shrink:0;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="2" x2="12" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/></svg><span title="TierScope ` + runtime.TIERSCOPE_VERSION + `" style="font-size:7px;font-family:'Courier New',monospace;font-weight:bold;color:var(--panel-accent);letter-spacing:1px;">TIERSCOPE</span></div></div></div>`;
+    html += '<div id="summary-tier-rows" style="border-top:1px solid var(--panel-divider);margin-top:4px;padding-top:4px;"><div id="tier-row-withtokens" data-tier="withtokens" style="display:flex;align-items:center;padding:2px 3px;background:rgba(255,105,180,0.15);border-radius:3px;border:1px solid #ff69b4;margin-bottom:3px;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("withtokens") + '</div><canvas id="spark-withtokens" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-withtokens" style="font-weight:bold;color:#ff69b4;font-size:14px;">0</span><span id="pct-withtokens" style="font-size:8px;color:#ff69b4;margin-left:2px;">0%</span><div id="high-withtokens" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div><div id="tier-row-total" data-tier="total" style="display:flex;align-items:center;padding:2px 3px;background:rgba(var(--panel-row-rgb),0.1);border-radius:3px;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("total") + '</div><canvas id="spark-total" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-total" style="font-weight:bold;color:var(--panel-text);font-size:14px;">0</span><div id="high-total" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div></div><div id="tier-row-anon" data-tier="anonymous" style="margin-top:5px;padding:5px;background:rgba(136,136,136,0.15);border-radius:3px;border:1px solid #888;"><div style="display:flex;align-items:center;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("anon") + '</div><canvas id="spark-anon" width="105" height="50" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="anon-ratio-full" style="font-size:13px;font-weight:bold;color:#ff69b4;">--</span><div id="high-anon" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div></div></div><div id="trend-section" style="position:relative;border-top:1px solid #4169E1;margin-top:5px;padding-top:5px;"><div id="live-trend"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;flex-wrap:wrap;gap:2px;"><span id="trend-header-label" style="font-size:9px;font-weight:bold;color:#4169E1;">📈 TREND</span><div style="display:flex;gap:2px;flex-wrap:wrap;"><button class="trend-preset-btn" data-mode="last" style="background:#4169E1;border:1px solid #4169E1;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Last</button><button class="trend-preset-btn" data-mode="5min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">5m</button><button class="trend-preset-btn" data-mode="15min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">15m</button><button class="trend-preset-btn" data-mode="30min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">30m</button><button class="trend-preset-btn" data-mode="1hour" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">1h</button><button class="trend-preset-btn" data-mode="start" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Start</button><button id="btn-trend-auto" style="background:#32CD32;border:1px solid #32CD32;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;" title="Auto-escalation ON - Click to disable">AUTO</button></div></div><div id="trend-container" style="min-height:30px;"><div style="font-size:8px;color:var(--panel-faint);text-align:center;padding:8px;">Waiting for scan...</div></div></div><div id="playback-controls" style="display:none;position:absolute;top:5px;left:0;right:0;bottom:0;padding:0 2px;box-sizing:border-box;grid-template-rows:minmax(14px,1fr) 14px 12px;gap:2px;" aria-label="Playback controls"><div style="display:flex;flex-direction:column;justify-content:center;gap:4px;min-width:0;"><div id="playback-file-controls" style="display:none;align-items:center;gap:4px;min-width:0;"><div id="playback-room" style="display:none;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;line-height:12px;font-weight:bold;color:var(--panel-text);"></div></div><div style="display:flex;align-items:center;justify-content:space-between;gap:3px;"><strong id="playback-label" style="font-size:9px;color:var(--panel-warning);">PLAYBACK</strong><button id="playback-play" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#4169E1;color:white;border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Pause</button><select id="playback-speed" aria-label="Playback speed" style="font-size:8px;height:15px;margin:0;padding:0;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select><button type="button" id="btn-playback-library" aria-label="Open session library" aria-expanded="false" aria-controls="tierscope-session-tools" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-accent);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Library</button><button id="playback-return" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Return to Live</button></div></div><div style="display:flex;align-items:center;gap:4px;min-width:0;"><button type="button" id="playback-previous" title="Previous recorded sample (pauses Replay)" aria-label="Previous recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">|&#9664;</button><input id="playback-scrubber" type="range" min="0" max="0" value="0" step="any" aria-label="Playback timeline" style="flex:1;min-width:0;width:100%;height:12px;margin:0;accent-color:var(--panel-warning);cursor:pointer;"><button type="button" id="playback-next" title="Next recorded sample (pauses Replay)" aria-label="Next recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">&#9654;|</button></div><div id="playback-file-actions" style="display:flex;justify-content:center;min-width:0;"><div id="playback-position" style="font-size:9px;line-height:12px;text-align:center;white-space:nowrap;color:var(--panel-secondary);font-family:monospace;">00:00:00 / 00:00:00</div></div></div></div><div id="control-field" style="margin-top:5px;padding:4px;background:rgba(65,105,225,0.15);border-radius:3px;border:1px solid #4169E1;"><div id="control-session-row" style="display:flex;justify-content:space-between;align-items:center;gap:3px;margin-bottom:4px;white-space:nowrap;"><span style="font-size:9px;font-weight:bold;color:#4169E1;">🎛️ CONTROLS</span><div id="control-session-buttons" style="display:flex;gap:2px;align-items:center;"><button id="btn-replay" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-warning);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;" title="Replay recorded history">Replay</button><button type="button" id="btn-control-library" aria-expanded="false" aria-controls="tierscope-session-tools" aria-label="Open session library" title="Open model folders, session summaries, comparisons and backups" style="font-size:8px;line-height:11px;height:13px;box-sizing:border-box;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Library</button></div><span style="font-size:11px;color:var(--panel-positive);font-weight:bold;" id="control-next-scan">Next: 60s</span></div><div id="control-action-row" style="display:grid;grid-template-columns:minmax(max-content,1fr) auto minmax(0,1fr);align-items:center;gap:3px;"><span style="font-size:12px;color:var(--panel-warning);font-family:monospace;font-weight:bold;flex-shrink:0;" id="control-tracking-timer">00:00:00</span><div id="control-action-buttons" style="display:flex;gap:2px;align-items:center;"><button id="btn-control-auto" style="background:#32CD32;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 4px;min-width:24px;" title="Auto-Refresh ON">⏸</button><button type="button" id="btn-control-stop" aria-label="Stop this session" title="Stop this session and freeze its history and elapsed time" style="background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;white-space:nowrap;">■ Stop</button><button id="btn-main-reset" style="background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Reset all tracking data"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12"/><path d="M3 3v9h9"/></svg>Reset</button></div><label id="dark-mode-control" style="justify-self:end;display:inline-flex;align-items:center;gap:2px;cursor:pointer;color:var(--panel-secondary);line-height:1;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 13a9 9 0 0 1-10-10 9 9 0 1 0 10 10Z"/></svg><input type="checkbox" id="dark-mode-toggle" checked aria-label="Dark mode" style="appearance:auto;width:12px;height:12px;margin:0;cursor:pointer;accent-color:#4169E1;"></label></div></div><div id="tracker-footer" style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:4px;margin-top:5px;min-height:14px;"><div id="acquisition-status" style="max-width:80px;font-size:7px;color:var(--panel-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="No accepted sample yet">No sample</div><div id="background-slider-controls" style="display:flex;align-items:center;gap:3px;min-width:0;"><svg width="11" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--panel-warning)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink:0;"><path d="M9 18h6M10 22h4M8 14a6 6 0 1 1 8 0c-1 1-1 2-1 4H9c0-2 0-3-1-4Z"/></svg><input type="range" id="opacity-slider" min="30" max="100" value="95" aria-label="Background opacity" style="flex:1;min-width:0;width:100%;height:12px;margin:0;cursor:pointer;accent-color:#ff69b4;" title="Main and standard tier background opacity"><span id="opacity-value" style="font-size:8px;color:var(--panel-secondary);min-width:23px;">95%</span></div><div id="tierscope-logo" style="justify-self:end;display:flex;align-items:center;gap:3px;white-space:nowrap;opacity:0.6;transition:opacity 0.2s;" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0.6"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#ff69b4" stroke-width="2" style="flex-shrink:0;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="2" x2="12" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/></svg><span title="TierScope ' + runtime.TIERSCOPE_VERSION + `" style="font-size:7px;font-family:'Courier New',monospace;font-weight:bold;color:var(--panel-accent);letter-spacing:1px;">TIERSCOPE</span></div></div></div>`;
     div.innerHTML = html;
     document.body.appendChild(div);
     applyPanelTheme(false);
@@ -6555,14 +6849,9 @@ underlying system, so should run in the browser, Node, or Plask.
         restoreStandardSize();
       };
     }
-    var btnCSV = document.getElementById("btn-download-csv");
-    if (btnCSV) btnCSV.onclick = downloadTrackingCSV;
-    var btnDownload = document.getElementById("btn-download-report");
     var btnMainReset = document.getElementById("btn-main-reset");
     var btnControlAuto = document.getElementById("btn-control-auto");
-    var btnExportGif = document.getElementById("btn-export-gif");
     var opacitySlider = document.getElementById("opacity-slider");
-    if (btnDownload) btnDownload.addEventListener("click", downloadTrackingReport);
     if (btnMainReset) btnMainReset.addEventListener("click", resetAllTracking);
     if (btnControlAuto) btnControlAuto.addEventListener("click", toggleAutoRefresh);
     document.getElementById("btn-control-stop").onclick = function() {
@@ -6570,8 +6859,6 @@ underlying system, so should run in the browser, Node, or Plask.
       if (!confirm("Stop this session?\n\nHistory will remain available for Replay and downloads, but this session cannot be resumed. Starting again begins a new session.")) return;
       stopTracking("manual");
     };
-    if (btnExportGif) btnExportGif.addEventListener("click", generateGifFromHistory);
-    document.getElementById("btn-cancel-gif").onclick = cancelGifExport;
     updateContainerOpacity(runtime.panelBackgroundPercent);
     if (opacitySlider) {
       opacitySlider.addEventListener("input", function() {
@@ -6870,7 +7157,7 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/bootstrap.js
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.8.0";
+    runtime.TIERSCOPE_VERSION = "3.9.0-beta.1";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;
