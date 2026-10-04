@@ -86,6 +86,6 @@ The chart renderer keeps weakly keyed, private dense copies of immutable sample 
 
 Library reading isolates unreadable keys while retaining healthy entries. Explicit partial backups list every omitted key; raw recovery downloads preserve damaged values separately and are not accepted as normal backups. An unreadable value with unknown size prevents library additions until it can be read or explicitly removed. Normal session/library schemas and retention limits are unchanged. Backup format 1 gains optional root fields `analysisPreferences` and `recovery`; older readers can still restore the standard fields, but do not display the new partial-backup notice. New readers accept old backups without clearing analysis preferences that the old file does not contain.
 
-## Library reader lifetime (3.12.0 beta)
+## Library reader lifetime (3.12.0)
 
 A Library opening owns a bounded reader cache, separate from live state, replay, persistence and the analysis-preference owner. Every read checks current keys and raw values, while unchanged entries share frozen aggregate data. Fresh containers isolate grouping and caller changes from the next read. Cached records cannot hide storage errors or deleted/changed values; failed listing clears all retained entries. Closing Library clears the reader. Backup creation and record mutations retain fresh validation and existing rollback/capacity checks. Source-option labels belong to the same dialog and are invalidated when its library or current recording changes.

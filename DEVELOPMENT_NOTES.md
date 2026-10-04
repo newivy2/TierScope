@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **3.12.0-beta.1**. This beta improves large-library browsing while preserving the panel, recordings, exports and retention limits. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation links, see the [README](readme.md).
+Detailed reference for **3.12.0**. This release improves large-library browsing while preserving the panel, recordings, exports and retention limits. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation links, see the [README](readme.md).
 
 ## Contents
 
@@ -461,7 +461,7 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
-| **3.12.0-beta.1** | Speed up repeated Library reads with bounded, per-opening reuse of validated records; preserve refresh and cross-tab changes, avoid repeated source-label formatting, and measure large-library performance and memory. |
+| **3.12.0** | Speed up repeated Library reads with bounded, per-opening reuse of validated records; preserve refresh and cross-tab changes, avoid repeated source-label formatting, and measure large-library performance and memory. |
 | **3.11.0** | Retain committed samples through drawing failures and retry presentation independently; add explicit healthy-recording partial backups with omission notices and separate raw recovery downloads; remember analysis metric, thresholds and shared-length choices, including in backups. |
 | **3.10.1** | Keep the main panel above Library in both attached and narrow-window sheet layouts, so overlap cannot hide Scope or intercept its controls. Preserve positioning, scale and the sheet breakpoint. |
 | **3.10.0** | Give acquisition and panel preferences explicit state owners; eliminate application import cycles; cache immutable chart data for faster long replays. Group timers above Library, Replay and the other actions, keep control positions stable, match button sizes and the pink Library accent, and add an accessible moon–sun theme switch. Preserve saved-data compatibility. |

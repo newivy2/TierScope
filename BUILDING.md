@@ -86,7 +86,7 @@ All console access goes through `diagnostics.js`; a structural check prevents ne
 
 Valid acquisitions commit before any drawing or persistence effect. `recovery.test.cjs` and the pulse/browser fixtures verify sample retention, independent save failures, automatic redraw, stale-session protection and Replay isolation. The library reader can isolate individual read failures; a partial backup requires explicit opt-in, declares omissions and leaves originals intact. Raw recovery exports are deliberately separate from importable backups. Remembered analysis choices use `tierscope:ui:analysis:v1`; their validation is shared with backup code without a store-to-controller dependency. Existing import-cycle and ownership gates continue to apply.
 
-## Library performance (3.12.0 beta)
+## Library performance (3.12.0)
 
 `createLibraryReader()` in `session-library.js` owns a cache for one open Library. Every read enumerates current keys and retrieves raw values; only identical strings can reuse validated data and UTF-8 byte counts. Changed/deleted/unavailable values invalidate their entries, and a failed key listing clears the cache. Admission is bounded by 500 raw records and 25 MiB of raw data; an oversized or over-count library is still fully reported. The cache stores frozen, validated aggregate snapshots and returns new grouping containers. Arrays contain validated primitives and are frozen before recursively freezing enclosing objects, avoiding another per-sample walk.
 

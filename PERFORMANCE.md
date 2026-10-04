@@ -47,9 +47,9 @@ The tradeoff is one extra array per rendered immutable series, plus its gaps arr
 
 Reproduce with `npm run test:performance`, optionally setting `TIERSCOPE_SOURCE=/path/to/3.9.0.user.js` and `TIERSCOPE_CPU_THROTTLE=4`. The original unthrottled fixture and sample order are unchanged.
 
-## 3.12.0-beta.1 paired library measurements
+## 3.12.0 paired library measurements
 
-Measured on 2026-10-04 with Node.js 22 and pinned Playwright Chromium in the same cloud workspace. Three runs per build and CPU setting alternated published 3.11.0 and this beta. Each dataset starts in a fresh page; seeding is excluded. Profiling was disabled for the paired timings. The table reports medians in milliseconds. [Raw results](docs/benchmarks/library-3.12.0-beta.1.json) include all runs, action timings, storage-read counts, byte sizes and heap observations.
+Measured on 2026-10-04 with Node.js 22 and pinned Playwright Chromium in the same cloud workspace. Three runs per build and CPU setting alternated published 3.11.0 and 3.12.0-beta.1 during review. The measured runtime code is unchanged in stable 3.12.0. Each dataset starts in a fresh page; seeding is excluded. Profiling was disabled for the paired timings. The table reports medians in milliseconds. [Raw results](docs/benchmarks/library-3.12.0-beta.1.json) include all runs, action timings, storage-read counts, byte sizes and heap observations.
 
 Datasets contain valid synthetic histories, known gaps and several recordings per model: 12 × 300 samples (0.20 MiB), 500 × 500 samples (13.45 MiB), and 36 × 10,000 samples (18.64 MiB). Both large cases fit the existing library limits.
 

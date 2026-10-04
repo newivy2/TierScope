@@ -98,7 +98,7 @@ Run `TIERSCOPE_CPU_THROTTLE=4 npm run test:performance` for a Chromium CPU-slowd
 
 `recovery.test.cjs` covers failed painting with successful and failed saves, the automatic redraw interval, Reset/navigation/Stop during painting, Replay isolation, retained gaps/trends/highs, partial backups, raw damaged-value downloads, individual unreadable keys, unknown capacity, restore validation/rollback and preference persistence across tabs. The session-tools browser fixture exercises explicit partial-backup selection, omission warnings in previews and confirmation, recovery-file rejection as a normal backup, analysis choices across refresh, and visible preference-write failure/retry in both engines. The pulse fixture verifies that drawing recovery neither loses samples nor replays a missed high pulse.
 
-## Library cache and benchmark (3.12.0 beta)
+## Library cache and benchmark (3.12.0)
 
 `library-cache.test.cjs` verifies bounded reuse of validated records without skipping storage reads, isolation of returned containers, deep immutability of reused snapshots, invalidation on changed/deleted/missing/unreadable values and failed key listing, and fresh state after closing/reopening. It compares cached and uncached reads through deduplication, growing sessions, rename, deletion and backup restore, and checks UTF-8 byte counts for non-ASCII text and lone surrogates. The session-tools browser fixture uses an actual second page sharing storage to change a title and corrupt/restore a record while Library remains open.
 
