@@ -254,13 +254,15 @@ export function createPanel() {
                     '<input type="range" id="opacity-slider" min="30" max="100" value="95" aria-label="Background opacity" style="flex:1;min-width:0;width:100%;height:12px;margin:0;cursor:pointer;accent-color:#ff69b4;" title="Main and standard tier background opacity">' +
                     '<span id="opacity-value" style="font-size:8px;color:var(--panel-secondary);min-width:23px;">95%</span>' +
                 '</div>' +
-                '<div id="tierscope-logo" style="justify-self:end;display:flex;align-items:center;gap:3px;white-space:nowrap;opacity:0.6;transition:opacity 0.2s;" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0.6">' +
-                '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#ff69b4" stroke-width="2" style="flex-shrink:0;">' +
+                '<div id="tierscope-logo" style="justify-self:end;display:flex;flex-direction:column;align-items:center;gap:0;white-space:nowrap;opacity:0.6;transition:opacity 0.2s;" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0.6">' +
+                '<div style="display:flex;align-items:center;gap:3px;height:8px;">' +
+                '<svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#ff69b4" stroke-width="2" style="flex-shrink:0;">' +
                     '<circle cx="12" cy="12" r="10"/>' +
                     '<line x1="12" y1="2" x2="12" y2="22"/>' +
                     '<line x1="2" y1="12" x2="22" y2="12"/>' +
                 '</svg>' +
-                '<span title="TierScope ' + runtime.TIERSCOPE_VERSION + '" style="font-size:7px;font-family:\'Courier New\',monospace;font-weight:bold;color:var(--panel-accent);letter-spacing:1px;">TIERSCOPE</span>' +
+                '<span title="TierScope ' + runtime.TIERSCOPE_VERSION + '" style="font-size:7px;line-height:8px;font-family:\'Courier New\',monospace;font-weight:bold;color:var(--panel-accent);letter-spacing:1px;">TIERSCOPE</span></div>' +
+                '<span id="tierscope-version" style="font:5px/6px Arial,sans-serif;letter-spacing:.15px;color:var(--panel-muted);">' + runtime.TIERSCOPE_VERSION + '</span>' +
                 '</div>' +
             '</div>' +
         '</div>';

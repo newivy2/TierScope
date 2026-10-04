@@ -137,3 +137,23 @@ Remaining costs are visible in large cases. Metric changes rebuild analysis and 
 The fixture includes JavaScript, canvas drawing commands and forced layout, but excludes paint/compositing, userscript-manager storage overhead, website activity and input scheduling. CPU slowdown is a stress simulation, not a particular device. Heap snapshots exclude native canvas/DOM memory and are not peak-memory measurements or a leak proof. No machine-dependent timing assertions are added to CI.
 
 Reproduce with `TIERSCOPE_BENCH_COMPARE=1 npm run test:library-performance`, optionally setting `TIERSCOPE_CPU_THROTTLE=4`. Use one benchmark mode at a time.
+
+## 3.15.0-beta.1 Library continuity
+
+Stable 3.15.0 preserves the measured beta behavior; only the displayed release version changes. Paired measurements on 2026-10-04 compare published 3.14.0 with 3.15.0-beta.1 using the same Node.js 22/Playwright Chromium environment and the comparison fixture. Three fresh-page runs per build and CPU setting alternate build order. Existing datasets, six recordings, 20 cursor warmups and 120 measured cursor updates are unchanged. The fixture now also measures hiding/showing one line and applying a threshold after restoring the full range. Values below are medians in milliseconds. [Raw results](docs/benchmarks/library-continuity-3.15.0-beta.1.json) include both script hashes, all runs, storage reads and heap snapshots.
+
+| Dataset / action | 3.14.0 normal | Beta normal | 3.14.0 at 4× slowdown | Beta at 4× slowdown |
+| --- | ---: | ---: | ---: | ---: |
+| 12 × 300 / change metric | 12.5 | 8.3 | 63.1 | 44.7 |
+| 500 × 500 / change metric | 107.4 | 10.7 | 419.1 | 48.3 |
+| 500 × 500 / apply threshold | 79.2 | 2.1 | 422.0 | 11.2 |
+| 36 × 10,000 / change metric | 67.9 | 70.1 | 381.8 | 278.5 |
+| 36 × 10,000 / apply threshold | 65.8 | 6.3 | 324.5 | 38.3 |
+| 36 × 10,000 / hide line | 39.7 | 37.9 | 213.2 | 197.3 |
+| 36 × 10,000 / show line | 52.4 | 50.0 | 247.1 | 234.5 |
+
+The main improvement comes from keeping the recording selectors and chart controls attached when changing metrics or thresholds. Threshold updates skip chart work entirely. Selection checkboxes update selection controls without rebuilding recording rows; browser tests check node identity and preserve open note editors. Reduced chart plots are retained for one series/window/width combination, saving reduction work during visibility/theme redraws. Drawing the paths still costs time.
+
+This does not remove first-open storage validation or every expensive redraw. For 500 recordings, first opening measured 151.1 → 143.9 ms normally and 614.4 → 653.6 ms under slowdown; for long recordings, 189.8 → 204.7 ms normally and 942.0 → 959.7 ms under slowdown. No consistent first-open improvement is claimed. Long metric changes and line redraws still take hundreds of milliseconds under slowdown. Bulk import/export validation and serialization are unchanged. Draft retention adds only note text and small identity/display metadata, not recording arrays; chart interaction and plot caches are released on Library close.
+
+These are synthetic timings with in-memory storage, excluding userscript-manager storage overhead, actual site activity, paint/compositing and input scheduling. CPU slowdown is not a device guarantee. GC-assisted heap snapshots are not peak process memory or a leak proof. Reproduce using `TIERSCOPE_BENCH_COMPARE=1`, `TIERSCOPE_BENCH_ROUNDS=1` and `TIERSCOPE_SOURCE` with the same fixture for each build, alternating order three times at normal and `TIERSCOPE_CPU_THROTTLE=4` settings. There is no machine-dependent timing gate.

@@ -11,7 +11,7 @@ export function libraryShell() {
 #tierscope-session-tools button,#tierscope-session-tools summary{cursor:pointer}
 #tierscope-session-tools button:hover,#tierscope-session-tools summary:hover{border-color:var(--panel-accent)}
 #tierscope-session-tools button:disabled{opacity:.45;cursor:default}
-#tierscope-session-tools :is(button,select,input,summary):focus-visible{outline:2px solid #ff69b4;outline-offset:2px}
+#tierscope-session-tools :is(button,select,input,textarea,summary):focus-visible{outline:2px solid #ff69b4;outline-offset:2px}
 #tierscope-session-tools .tools-primary{background:#ff69b420;border-color:#ff69b4;color:var(--panel-accent);font-weight:bold}
 #tierscope-session-tools .tools-danger{color:var(--panel-negative)}
 #tierscope-session-tools .tools-head{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid #ff69b4;background:rgba(255,105,180,.06);flex-shrink:0}
@@ -71,10 +71,13 @@ export function libraryShell() {
 #tierscope-session-tools .tools-chart-legend .tools-series-swatch{width:13px;flex-shrink:0;border-top:2px solid currentColor}
 #tools-analysis-chart{touch-action:pan-y;cursor:crosshair}
 #tools-analysis-chart:focus-visible{outline:2px solid var(--panel-accent);outline-offset:2px}
+#tools-review-notes{margin:6px 12px 0;text-align:left;color:var(--panel-accent)!important;flex-shrink:0}
+#tools-review-notes[hidden]{display:none}
 #gif-export-controls{padding:8px 12px;gap:6px;align-items:center;flex-shrink:0;border-bottom:1px solid var(--panel-divider)}
 </style>
 <div class="tools-head"><div><h2 id="tools-title">LIBRARY</h2><div class="tools-subtitle">Recordings &amp; session tools</div></div><button id="tools-close" type="button" aria-label="Close library" title="Close library (Escape)">×</button></div>
 <nav aria-label="Session tools"><button data-tools-tab="library">Recordings</button><button data-tools-tab="summary">Summary</button><button data-tools-tab="compare">Compare</button><button data-tools-tab="backup">Backup</button></nav>
+<button id="tools-review-notes" type="button" hidden></button>
 <div id="tools-message" role="status" aria-live="polite"></div>
 <div id="gif-export-controls" style="display:none"><span id="gif-export-status" role="status"></span><button id="btn-cancel-gif" hidden type="button">Cancel</button></div>
 <div id="tools-content"></div>`;

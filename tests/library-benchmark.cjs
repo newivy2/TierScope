@@ -51,6 +51,9 @@ const source=prepareSource(fs.readFileSync(sourceFile,'utf8')).replaceAll('sched
   }
   const sorted=costs.slice().sort((a,b)=>a-b);results.cursor={meanMs:costs.reduce((a,b)=>a+b,0)/costs.length,p95Ms:sorted[Math.ceil(sorted.length*.95)-1],maxMs:sorted.at(-1)};
   measure('fullRange',()=>click('tools-chart-reset'));
+  measure('hideLine',()=>document.querySelector('[data-analysis-series="1"]').click());
+  measure('showLine',()=>document.querySelector('[data-analysis-series="1"]').click());
+  measure('threshold',()=>{document.getElementById('tools-threshold').value='200';click('tools-apply-threshold');});
   results.compareRecordings=document.querySelectorAll('#tools-chart-inspection tbody tr').length;
   results.nodes=document.getElementById('tierscope-session-tools').querySelectorAll('*').length;
   return results;

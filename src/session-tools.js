@@ -8,7 +8,8 @@ import { repaintHighMode } from './highs.js';
 import { attachLibraryDock } from './library-dock.js';
 import { libraryShell } from './library-shell.js';
 import { migrateRecordingFavorites, readModelFavorites, setModelFavorite } from './library-models.js';
-import { renderLibraryBrowser } from './library-browser-view.js';
+import { createLibraryDrafts } from './library-drafts.js';
+import { renderLibraryBrowser, renderRecordingNotes } from './library-browser-view.js';
 import { filterLibraryEntries } from './library-query.js';
 import { recordingFilters } from './tools-view-helpers.js';
 import { exportLibrarySelection, importLibraryBundle, libraryImportBundle } from './library-transfer.js';
@@ -29,6 +30,14 @@ import { LIBRARY_MAX_BYTES, LIBRARY_MAX_COUNT, LIBRARY_PREFIX, createLibraryRead
 import { openSessionReplay } from './session-replay.js';
 import { formatElapsedTime, getModelName } from './utils.js';
 
+const noteDrafts = createLibraryDrafts();
+let draftUnloadAttached = false;
+function warnUnsavedNotes(event) { if (noteDrafts.size) { event.preventDefault(); event.returnValue = ''; } }
+function syncDraftWarning() {
+    if (noteDrafts.size && !draftUnloadAttached) window.addEventListener('beforeunload', warnUnsavedNotes);
+    if (!noteDrafts.size && draftUnloadAttached) window.removeEventListener('beforeunload', warnUnsavedNotes);
+    draftUnloadAttached = noteDrafts.size > 0;
+}
 let closeSessionTools = null;
 let refreshSessionTools = null;
 
@@ -71,6 +80,8 @@ export function openSessionTools(focusTarget) {
     const libraryFilters = {room: '', query: '', from: '', to: '', sort: 'newest', favorites: false}, librarySelection = new Set();
     const analysisFilters = {room: '', query: '', from: '', to: ''};
     let filteredSources = null, chartDispose = null, pickerOpen = true;
+    let analysisView = null, analysisOutput = null, analysisSources = null;
+    const analysisStates = new Map();
     let libraryRoom = null, chartDraw = null, analysisPreferenceError = savedAnalysis.error;
     let observedSource = null, observedSignature = '';
     let detachDock = null;
@@ -91,7 +102,7 @@ export function openSessionTools(focusTarget) {
         tell('Recovery download requested. Originals were kept. This file is for manual recovery, not normal backup restore.' +
             (missing ? ' ' + missing + ' record(s) could not be exported; the file lists those errors.' : ''), !!missing);
     }
-    function action(fn) { return (...args) => { try { fn(...args); } catch (error) { tell(error.message, true); } }; }
+    function action(fn) { return (...args) => { try { return fn(...args); } catch (error) { tell(error.message, true); } }; }
     function button(parent, text, fn, id) {
         const element = document.createElement('button'); element.type = 'button'; element.textContent = text;
         if (id) element.id = id; element.onclick = action(fn); parent.appendChild(element); return element;
@@ -127,7 +138,44 @@ export function openSessionTools(focusTarget) {
             library.favoriteError = migrationError || (models.errors.length ? 'Some model favorites could not be read. Refresh to retry; recordings remain available.' : '');
         } catch (error) { library.favoriteModels = new Set(); library.favoriteError = 'Model favorites could not be read. Refresh to retry; recordings remain available.'; }
         library.entries = library.entries.map(entry => ({...entry, modelFavorite: library.favoriteModels.has(entry.archive.room.toLowerCase())}));
+        noteDrafts.reconcile(library.entries); updateDraftNotice();
         return library;
+    }
+    function updateDraftNotice() {
+        syncDraftWarning();
+        const notice = dialog.querySelector('#tools-review-notes');
+        notice.hidden = !noteDrafts.size;
+        notice.textContent = noteDrafts.size + ' unsaved ' + (noteDrafts.size === 1 ? 'note' : 'notes') + ' · Review';
+    }
+    const noteActions = {
+        note: entry => noteDrafts.read(entry),
+        editNote: (entry, value) => { noteDrafts.edit(entry, value); updateDraftNotice(); },
+        discardNote: entry => { noteDrafts.discard(entry.id); updateDraftNotice(); render(tab); },
+        saveNote: action(entry => {
+            const draft = noteDrafts.read(entry);
+            if (!draft.dirty) return;
+            const fresh = libraryReader.read();
+            const latest = fresh.entries.find(item => item.id === entry.id || item.records.some(record => record.key === LIBRARY_PREFIX + entry.id));
+            if (!latest) throw new Error('This recording changed or is unavailable. Your draft is kept in Review unsaved notes.');
+            if ((latest.notes || '') !== draft.base && latest.notes !== draft.value &&
+                !confirm('Saved notes for this recording changed in another tab. Replace them with your draft?')) return;
+            updateLibraryMetadata(latest.id, {notes: draft.value});
+            noteDrafts.discard(entry.id); updateDraftNotice(); render(tab); tell('Recording notes saved.');
+        })
+    };
+    function renderDrafts() {
+        const state = readLibrary();
+        button(content, '‹ Recordings', () => render('library'), 'tools-drafts-back');
+        node(content, 'h3', 'Unsaved notes');
+        node(content, 'p', 'Drafts stay in this tab when Library closes. Save them before refreshing or leaving the site.', 'tools-muted');
+        if (!noteDrafts.size) node(content, 'p', 'All notes are saved or discarded.', 'tools-muted');
+        for (const draft of noteDrafts.list()) {
+            const entry = state.entries.find(entry => entry.id === draft.id);
+            const card = node(content, 'section', undefined, 'tools-row');
+            node(card, 'strong', draft.title); node(card, 'p', draft.room + ' · ' + new Date(draft.time).toLocaleString(), 'tools-muted');
+            renderRecordingNotes(card, entry || {id: draft.id, title: draft.title, notes: draft.base,
+                archive: {room: draft.room, session: {history: {timestamps: [draft.time]}}}}, noteActions, !entry);
+        }
     }
     function sourceOptions() {
         if (optionsLibrary === library && optionsArchive === currentArchive) return options;
@@ -254,7 +302,7 @@ export function openSessionTools(focusTarget) {
             save: entry => downloadDataFile(entry.archive, archiveName(entry.archive)),
             txt: entry => downloadRecording(entry.archive, 'txt'), csv: entry => downloadRecording(entry.archive, 'csv'), gif: entry => generateGifFromHistory(entry.archive),
             highs: entry => addArchiveHighs(entry.archive),
-            metadata: (entry, patch) => { updateLibraryMetadata(entry.id, patch); render('library'); tell('Recording details saved.'); },
+            ...noteActions,
             rename: entry => { const title = window.prompt('Recording title (up to 80 characters):', entry.title); if (title !== null) { renameLibrarySession(entry.id, title); render('library'); } },
             delete: entry => { if (confirm('Delete this library recording: ' + (entry.title || entry.archive.room) + '?\n\nLive tracking, ATH and downloaded files are unchanged.')) { removeLibrarySession(entry.id); render('library'); tell('Library recording deleted.'); } }
         };
@@ -299,7 +347,7 @@ export function openSessionTools(focusTarget) {
         const controls = node(content, 'div', undefined, 'tools-actions');
         const label = node(controls, 'label', 'Metric '), metricSelect = node(label, 'select'); metricSelect.id = 'tools-metric';
         for (const [key, name] of Object.entries(ANALYSIS_METRICS)) { const option = node(metricSelect, 'option', name); option.value = key; }
-        metricSelect.value = metric; metricSelect.onchange = () => { rememberAnalysis({metric: metricSelect.value}); render(tab); };
+        metricSelect.value = metric; metricSelect.onchange = () => { rememberAnalysis({metric: metricSelect.value}); refreshAnalysis(); };
         const thresholdLabel = node(controls, 'label', comparing ? 'Threshold ' : 'Thresholds '), input = node(thresholdLabel, 'input');
         input.id = 'tools-threshold'; input.style.width = comparing ? '105px' : '200px';
         if (comparing) {
@@ -317,13 +365,13 @@ export function openSessionTools(focusTarget) {
                 } else rememberAnalysis({summaryThresholds: parseAnalysisThresholds(input.value)});
             } catch (error) { input.setCustomValidity(error.message); input.reportValidity(); return; }
             input.setCustomValidity('');
-            render(tab);
+            refreshAnalysis(false);
         }
         input.onkeydown = event => { if (event.key === 'Enter') { event.preventDefault(); applyThreshold(); } };
         button(controls, comparing ? 'Apply threshold' : 'Apply thresholds', applyThreshold, 'tools-apply-threshold');
         if (comparing) {
             const label = node(controls, 'label'), check = node(label, 'input'); check.type = 'checkbox'; check.checked = sharedLength; check.id = 'tools-shared-length';
-            node(label, 'span', 'Match shared length'); check.onchange = () => { rememberAnalysis({sharedLength: check.checked}); render(tab); };
+            node(label, 'span', 'Match shared length'); check.onchange = () => { rememberAnalysis({sharedLength: check.checked}); refreshAnalysis(); };
         }
         return sourceOptions();
     }
@@ -370,10 +418,10 @@ export function openSessionTools(focusTarget) {
     }
     function audienceOverview(archive) {
         const overview = summarizeAudience(archive), coverage = overview.audience[0];
-        node(content, 'h3', 'Audience overview');
-        node(content, 'p', archive.room + ' · ' + coverage.samples + ' samples · Covered time ' + formatElapsedTime(coverage.coveredMs) +
+        node(analysisOutput, 'h3', 'Audience overview');
+        node(analysisOutput, 'p', archive.room + ' · ' + coverage.samples + ' samples · Covered time ' + formatElapsedTime(coverage.coveredMs) +
             ' · Excluded gaps ' + formatElapsedTime(coverage.gapMs) + ' · Coverage ' + percent(coverage.coverage), 'tools-muted');
-        const scroll = node(content, 'div', undefined, 'tools-scroll'), table = node(scroll, 'table'); table.id = 'tools-audience-table';
+        const scroll = node(analysisOutput, 'div', undefined, 'tools-scroll'), table = node(scroll, 'table'); table.id = 'tools-audience-table';
         node(table, 'caption', 'Audience across the retained recording');
         const head = node(node(table, 'thead'), 'tr');
         ['Audience', 'Time-weighted average', 'Peak in recording', 'Full-session high'].forEach(label => { node(head, 'th', label).scope = 'col'; });
@@ -385,8 +433,8 @@ export function openSessionTools(focusTarget) {
             if (summary.peakTime !== null) peak.title = 'First recorded at ' + new Date(summary.peakTime).toLocaleString();
             node(row, 'td', number(summary.sessionPeak));
         }
-        node(content, 'p', 'Room audience = registered + anonymous viewers. A full-session high may predate retained history. Hover a recording peak for its first recorded time.', 'tools-muted');
-        const shares = node(content, 'div'); shares.id = 'tools-audience-shares';
+        node(analysisOutput, 'p', 'Room audience = registered + anonymous viewers. A full-session high may predate retained history. Hover a recording peak for its first recorded time.', 'tools-muted');
+        const shares = node(analysisOutput, 'div'); shares.id = 'tools-audience-shares';
         node(shares, 'h3', 'Audience proportions');
         node(shares, 'p', 'Token holders / registered viewers: ' + percent(overview.tokenShareRegistered));
         node(shares, 'p', 'Token holders / whole room: ' + percent(overview.tokenShareRoom));
@@ -394,7 +442,7 @@ export function openSessionTools(focusTarget) {
         node(shares, 'p', 'Shares use viewer-time over covered intervals. A crowded interval contributes more than a quiet interval of the same length; gaps contribute nothing.', 'tools-muted');
     }
     function thresholdTable(archive) {
-        const scroll = node(content, 'div', undefined, 'tools-scroll'), table = node(scroll, 'table'); table.id = 'tools-threshold-table';
+        const scroll = node(analysisOutput, 'div', undefined, 'tools-scroll'), table = node(scroll, 'table'); table.id = 'tools-threshold-table';
         node(table, 'caption', ANALYSIS_METRICS[metric] + ' — time at or above selected thresholds');
         const head = node(node(table, 'thead'), 'tr');
         ['Threshold', 'Time at or above', '% of covered time'].forEach(label => { node(head, 'th', label).scope = 'col'; });
@@ -404,10 +452,10 @@ export function openSessionTools(focusTarget) {
             node(row, 'td', result.durationMs === null ? 'Not enough data' : formatElapsedTime(result.durationMs));
             node(row, 'td', percent(result.percent));
         }
-        node(content, 'p', 'Includes samples equal to the threshold. Percentages use covered recording time; gaps and time after the final sample are excluded.', 'tools-muted');
+        node(analysisOutput, 'p', 'Includes samples equal to the threshold. Percentages use covered recording time; gaps and time after the final sample are excluded.', 'tools-muted');
     }
     function summaryTable(summaries, labels, comparing = true) {
-        const scroll = node(content, 'div', undefined, 'tools-scroll'), table = node(scroll, 'table'); table.id = 'tools-summary-table';
+        const scroll = node(analysisOutput, 'div', undefined, 'tools-scroll'), table = node(scroll, 'table'); table.id = 'tools-summary-table';
         node(table, 'caption', ANALYSIS_METRICS[metric] + ' — retained recording statistics');
         const head = node(table, 'thead'), headRow = node(head, 'tr'); node(headRow, 'th', 'Measure');
         labels.forEach(label => node(headRow, 'th', label));
@@ -422,33 +470,47 @@ export function openSessionTools(focusTarget) {
             const row = node(body, 'tr'); const cell = node(row, 'th', label); cell.scope = 'row';
             summaries.forEach(summary => node(row, 'td', value(summary)));
         }
-        node(content, 'p', 'The full-session high can predate retained history and is not limited by “Match shared length.” Token-holder share is weighted by recorded registered-viewer time.', 'tools-muted');
+        node(analysisOutput, 'p', 'The full-session high can predate retained history and is not limited by “Match shared length.” Token-holder share is weighted by recorded registered-viewer time.', 'tools-muted');
     }
-    function chart(archives, labels, endMs) {
+    function chart(archives, labels, endMs, ids) {
         const series = archives.map(archive => ({...analysisSeries(archive, metric), timestamps: archive.session.history.timestamps}));
-        const view = renderAnalysisChart(content, series, labels, endMs, ANALYSIS_METRICS[metric]);
+        if (analysisView) { analysisView.update(series, endMs, ANALYSIS_METRICS[metric]); return; }
+        const saved = analysisStates.get(tab);
+        const same = saved && saved.ids.length === ids.length && ids.every((id, index) => saved.archives[saved.ids.indexOf(id)] === archives[index]);
+        const restored = same ? {...saved.state, hidden: saved.state.hidden.map(index => ids.indexOf(saved.ids[index]))} : null;
+        const view = renderAnalysisChart(content, series, labels, endMs, ANALYSIS_METRICS[metric], restored);
+        content.appendChild(analysisOutput);
+        analysisView = view; analysisSources = {archives, ids};
         chartDraw = view.draw; chartDispose = view.dispose;
         if (window.ResizeObserver) { chartObserver = new window.ResizeObserver(view.draw); chartObserver.observe(view.canvas); }
     }
     function renderAnalysis(comparing) {
         const options = analysisControls(comparing); if (!options) return;
+        analysisOutput = node(content, 'div'); analysisOutput.id = 'tools-analysis-output';
+        refreshAnalysis();
+    }
+    function refreshAnalysis(redrawChart = true) {
+        const comparing = tab === 'compare', options = sourceOptions();
+        if (!analysisOutput) return;
+        analysisOutput.replaceChildren(); message.textContent = '';
         const a = options.find(item => item.id === selectedA), b = options.find(item => item.id === selectedB);
         if (!a || comparing && (!b || selectedExtra.some(id => !options.some(item => item.id === id)))) {
-            node(content, 'p', 'Choose available recordings in each slot. A previous selection may have changed or been removed; clear filters to find another recording.'); return;
+            node(analysisOutput, 'p', 'Choose available recordings in each slot. A previous selection may have changed or been removed; clear filters to find another recording.'); return;
         }
         if (comparing) {
-            if (new Set([selectedA, selectedB, ...selectedExtra]).size !== 2 + selectedExtra.length) { node(content, 'p', 'Choose a different recording in each comparison slot.'); return; }
+            if (new Set([selectedA, selectedB, ...selectedExtra]).size !== 2 + selectedExtra.length) { node(analysisOutput, 'p', 'Choose a different recording in each comparison slot.'); return; }
             const ids = [...new Set([selectedA, selectedB, ...selectedExtra])], recordings = ids.map(id => options.find(item => item.id === id)).filter(item => !!item);
             const result = compareRecordingSet(recordings.map(item => item.archive), metric, threshold, sharedLength);
-            chart(recordings.map(item => item.archive), recordings.map(item => item.title), result.axisMs);
+            if (redrawChart) chart(recordings.map(item => item.archive), recordings.map(item => item.title), result.axisMs, ids);
             summaryTable(result.summaries, recordings.map((item, index) => String.fromCharCode(65 + index)));
         } else {
             const summary = summarizeSession(a.archive, metric, threshold);
-            chart([a.archive], [a.title], summary.spanMs);
+            if (redrawChart) chart([a.archive], [a.title], summary.spanMs, [a.id]);
             audienceOverview(a.archive); thresholdTable(a.archive);
-            node(content, 'h3', ANALYSIS_METRICS[metric] + ' — details');
+            node(analysisOutput, 'h3', ANALYSIS_METRICS[metric] + ' — details');
             summaryTable([summary], [a.archive.room], false);
         }
+        if (analysisPreferenceError) tell(analysisPreferenceError, true);
     }
     function checkbox(parent, id, text, checked = true) {
         const label = node(parent, 'label'), input = node(label, 'input'); input.type = 'checkbox'; input.id = id; input.checked = checked; node(label, 'span', text); return input;
@@ -502,14 +564,16 @@ export function openSessionTools(focusTarget) {
         const focusedId = dialog.contains(document.activeElement) ? document.activeElement.id : '';
         const existingPicker = dialog.querySelector('#tools-recording-picker');
         if (existingPicker) pickerOpen = existingPicker.open;
+        if (analysisView) analysisStates.set(tab, {...analysisSources, state: analysisView.capture()});
+        analysisView = null; analysisSources = null; analysisOutput = null;
         if (next !== tab) library = null;
         tab = next; fileRequest++; chartDraw = null;
         if (chartDispose) { chartDispose(); chartDispose = null; }
         if (chartObserver) { chartObserver.disconnect(); chartObserver = null; }
         content.replaceChildren(); message.textContent = '';
-        dialog.querySelectorAll('[data-tools-tab]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.toolsTab === (tab === 'history' ? 'library' : tab))));
+        dialog.querySelectorAll('[data-tools-tab]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.toolsTab === (tab === 'history' || tab === 'drafts' ? 'library' : tab))));
         try {
-            if (tab === 'library') renderLibrary(); else if (tab === 'history') renderHistory(); else if (tab === 'backup') renderBackup(); else renderAnalysis(tab === 'compare');
+            if (tab === 'library') renderLibrary(); else if (tab === 'drafts') renderDrafts(); else if (tab === 'history') renderHistory(); else if (tab === 'backup') renderBackup(); else renderAnalysis(tab === 'compare');
             if ((tab === 'summary' || tab === 'compare' || tab === 'history') && analysisPreferenceError) tell(analysisPreferenceError, true);
         } catch (error) { tell(error.message, true); }
         if (focusedId) {
@@ -521,6 +585,7 @@ export function openSessionTools(focusTarget) {
     function close() {
         fileRequest++; refreshSessionTools = null; chartDraw = null;
         if (chartDispose) { chartDispose(); chartDispose = null; }
+        analysisStates.clear(); analysisView = null; analysisSources = null; analysisOutput = null;
         libraryReader.clear(); modelHistoryReader.clear(); options = []; optionsLibrary = null; optionsArchive = null; library = null; currentArchive = null;
         cancelGifExport();
         if (detachDock) detachDock();
@@ -548,6 +613,8 @@ export function openSessionTools(focusTarget) {
         const button = document.getElementById(id); if (button) button.setAttribute('aria-expanded', 'true');
     }
     dialog.querySelector('#tools-close').onclick = close;
+    dialog.querySelector('#tools-review-notes').onclick = () => render('drafts');
+    updateDraftNotice();
     dialog.addEventListener('cancel', event => { event.preventDefault(); close(); });
     dialog.addEventListener('close', () => { if (dialog.isConnected) close(); });
     dialog.querySelectorAll('[data-tools-tab]').forEach(button => { button.onclick = () => render(button.dataset.toolsTab); });

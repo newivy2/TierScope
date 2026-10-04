@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.14.0
+// @version      3.15.0
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -5101,7 +5101,7 @@ underlying system, so should run in the browser, Node, or Plask.
 #tierscope-session-tools button,#tierscope-session-tools summary{cursor:pointer}
 #tierscope-session-tools button:hover,#tierscope-session-tools summary:hover{border-color:var(--panel-accent)}
 #tierscope-session-tools button:disabled{opacity:.45;cursor:default}
-#tierscope-session-tools :is(button,select,input,summary):focus-visible{outline:2px solid #ff69b4;outline-offset:2px}
+#tierscope-session-tools :is(button,select,input,textarea,summary):focus-visible{outline:2px solid #ff69b4;outline-offset:2px}
 #tierscope-session-tools .tools-primary{background:#ff69b420;border-color:#ff69b4;color:var(--panel-accent);font-weight:bold}
 #tierscope-session-tools .tools-danger{color:var(--panel-negative)}
 #tierscope-session-tools .tools-head{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid #ff69b4;background:rgba(255,105,180,.06);flex-shrink:0}
@@ -5161,13 +5161,65 @@ underlying system, so should run in the browser, Node, or Plask.
 #tierscope-session-tools .tools-chart-legend .tools-series-swatch{width:13px;flex-shrink:0;border-top:2px solid currentColor}
 #tools-analysis-chart{touch-action:pan-y;cursor:crosshair}
 #tools-analysis-chart:focus-visible{outline:2px solid var(--panel-accent);outline-offset:2px}
+#tools-review-notes{margin:6px 12px 0;text-align:left;color:var(--panel-accent)!important;flex-shrink:0}
+#tools-review-notes[hidden]{display:none}
 #gif-export-controls{padding:8px 12px;gap:6px;align-items:center;flex-shrink:0;border-bottom:1px solid var(--panel-divider)}
 </style>
 <div class="tools-head"><div><h2 id="tools-title">LIBRARY</h2><div class="tools-subtitle">Recordings &amp; session tools</div></div><button id="tools-close" type="button" aria-label="Close library" title="Close library (Escape)">×</button></div>
 <nav aria-label="Session tools"><button data-tools-tab="library">Recordings</button><button data-tools-tab="summary">Summary</button><button data-tools-tab="compare">Compare</button><button data-tools-tab="backup">Backup</button></nav>
+<button id="tools-review-notes" type="button" hidden></button>
 <div id="tools-message" role="status" aria-live="polite"></div>
 <div id="gif-export-controls" style="display:none"><span id="gif-export-status" role="status"></span><button id="btn-cancel-gif" hidden type="button">Cancel</button></div>
 <div id="tools-content"></div>`;
+  }
+
+  // src/library-drafts.js
+  function createLibraryDrafts() {
+    const drafts = /* @__PURE__ */ new Map();
+    function read(entry) {
+      const draft = drafts.get(entry.id);
+      return draft ? __spreadProps(__spreadValues({}, draft), { conflict: draft.base !== (entry.notes || "") }) : { id: entry.id, value: entry.notes || "", base: entry.notes || "", dirty: false, conflict: false };
+    }
+    function edit(entry, value) {
+      const previous = drafts.get(entry.id);
+      if (value === (entry.notes || "")) drafts.delete(entry.id);
+      else drafts.set(entry.id, __spreadProps(__spreadValues({}, previous), {
+        id: entry.id,
+        title: entry.title || entry.archive.room,
+        room: entry.archive.room,
+        time: entry.archive.session.history.timestamps[0],
+        base: previous ? previous.base : entry.notes || "",
+        value,
+        dirty: true
+      }));
+    }
+    function reconcile(entries) {
+      for (const [id, draft] of drafts) {
+        const entry = entries.find((entry2) => {
+          var _a;
+          return entry2.id === id || ((_a = entry2.records) == null ? void 0 : _a.some((record) => record.key === "tierscope:library:v1:" + id));
+        });
+        if (!entry) continue;
+        if (entry.notes === draft.value) {
+          drafts.delete(id);
+          continue;
+        }
+        if (entry.id !== id && !drafts.has(entry.id)) {
+          drafts.delete(id);
+          drafts.set(entry.id, __spreadProps(__spreadValues({}, draft), { id: entry.id }));
+        }
+      }
+    }
+    return {
+      read,
+      edit,
+      reconcile,
+      list: () => [...drafts.values()].map((draft) => __spreadValues({}, draft)),
+      discard: (id) => drafts.delete(id),
+      get size() {
+        return drafts.size;
+      }
+    };
   }
 
   // src/library-query.js
@@ -5300,11 +5352,11 @@ underlying system, so should run in the browser, Node, or Plask.
     let matching = [];
     toolButton(bulk, "Select matching", () => {
       matching.forEach((entry) => selected.add(entry.id));
-      rows();
+      updateSelection();
     }, "tools-select-matching");
     toolButton(bulk, "Clear selection", () => {
       selected.clear();
-      rows();
+      updateSelection();
     }, "tools-clear-selection");
     const compare = toolButton(bulk, "Compare selected", () => actions.compare([...selected]), "tools-compare-selected");
     const download = toolButton(bulk, "Export selected", () => actions.export([...selected]), "tools-export-selected");
@@ -5319,6 +5371,13 @@ underlying system, so should run in the browser, Node, or Plask.
       control.title = (active ? "Unfavorite model " : "Favorite model ") + room;
       if (active) control.className = "tools-primary";
     }
+    function updateSelection() {
+      selection.textContent = selected.size + " selected (including hidden recordings)";
+      compare.disabled = selected.size < 2 || selected.size > 6;
+      compare.title = "Select 2–6 recordings to compare";
+      download.disabled = !selected.size;
+      for (const row of list.querySelectorAll("[data-library-id]")) row.querySelector("input[type=checkbox]").checked = selected.has(row.dataset.libraryId);
+    }
     function rows() {
       list.replaceChildren();
       matching = [];
@@ -5327,10 +5386,7 @@ underlying system, so should run in the browser, Node, or Plask.
       } catch (error) {
         toolNode(list, "p", error.message);
       }
-      selection.textContent = selected.size + " selected (including hidden recordings)";
-      compare.disabled = selected.size < 2 || selected.size > 6;
-      compare.title = "Select 2–6 recordings to compare";
-      download.disabled = !selected.size;
+      updateSelection();
       const folders = /* @__PURE__ */ new Map();
       for (const entry of matching) {
         const room2 = entry.archive.room.toLowerCase();
@@ -5385,8 +5441,7 @@ underlying system, so should run in the browser, Node, or Plask.
         check.onchange = () => {
           if (check.checked) selected.add(entry.id);
           else selected.delete(entry.id);
-          rows();
-          list.querySelector('[data-library-id="' + entry.id + '"] input').focus();
+          updateSelection();
         };
         toolNode(title, "strong", entry.title || entry.archive.room);
         toolNode(row, "div", entry.archive.room + " · " + new Date(entry.archive.session.history.timestamps[0]).toLocaleString() + " · " + entry.archive.session.history.timestamps.length + " samples", "tools-muted");
@@ -5401,11 +5456,7 @@ underlying system, so should run in the browser, Node, or Plask.
           const action = toolButton(extras, label, () => actions[key](entry));
           if (key === "delete") action.className = "tools-danger";
         }
-        const noteLabel = toolNode(more, "label", "Recording notes "), note = toolNode(noteLabel, "textarea");
-        note.maxLength = 2e3;
-        note.rows = 3;
-        note.value = entry.notes || "";
-        toolButton(more, "Save notes", () => actions.metadata(entry, { notes: note.value }), "tools-notes-save-" + entry.id);
+        renderRecordingNotes(more, entry, actions);
       }
       if (visible.length > 50) toolNode(list, "p", "Showing " + Math.min(shown, visible.length) + " of " + visible.length + (browsingFolders ? " model folders." : " matching recordings."), "tools-muted");
       if (shown < visible.length) toolButton(list, "Show " + Math.min(50, visible.length - shown) + " more", () => {
@@ -5415,6 +5466,28 @@ underlying system, so should run in the browser, Node, or Plask.
       }, "tools-library-more");
     }
     rows();
+  }
+  function renderRecordingNotes(parent, entry, actions, missing = false) {
+    const label = toolNode(parent, "label", "Recording notes "), note = toolNode(label, "textarea");
+    note.maxLength = 2e3;
+    note.rows = 3;
+    note.value = actions.note(entry).value;
+    const status = toolNode(parent, "p", "", "tools-muted");
+    status.setAttribute("role", "status");
+    const controls = toolNode(parent, "div", void 0, "tools-actions");
+    const save = toolButton(controls, "Save notes", () => actions.saveNote(entry), "tools-notes-save-" + entry.id);
+    const discard = toolButton(controls, "Discard changes", () => actions.discardNote(entry), "tools-notes-discard-" + entry.id);
+    function update() {
+      const draft = actions.note(entry);
+      save.disabled = missing || !draft.dirty;
+      discard.disabled = !draft.dirty;
+      status.textContent = missing ? "Recording changed or unavailable. Copy this draft before discarding it." : draft.conflict ? "Saved notes changed elsewhere. Your draft is still here; saving will ask before replacing them." : draft.dirty ? "Unsaved note — kept in this tab until you save or discard it." : "Notes saved.";
+    }
+    note.oninput = () => {
+      actions.editNote(entry, note.value);
+      update();
+    };
+    update();
   }
 
   // src/library-transfer.js
@@ -5528,9 +5601,18 @@ underlying system, so should run in the browser, Node, or Plask.
   }
 
   // src/analysis-chart-view.js
-  function renderAnalysisChart(parent, series, labels, axisMs, metricLabel) {
+  function renderAnalysisChart(parent, series, labels, axisMs, metricLabel, savedState = null) {
     let start = 0, end = axisMs, cursor = 0, pinned = false, drag = null, disposed = false;
     const hidden = /* @__PURE__ */ new Set(), controls = toolNode(parent, "div", void 0, "tools-actions");
+    if (savedState) {
+      ({ start, end, cursor, pinned } = savedState);
+      savedState.hidden.forEach((index) => {
+        if (index >= 0 && index < series.length) hidden.add(index);
+      });
+      if (hidden.size === series.length) hidden.delete(0);
+      fitWindow(savedState.axisMs);
+    }
+    let plotCache = null;
     const number = (value) => value.toLocaleString(void 0, { maximumFractionDigits: 2 });
     const elapsed = (ms) => number(ms / 6e4) + "m";
     const zoomIn = toolButton(controls, "Zoom +", () => zoom(0.5), "tools-chart-zoom-in");
@@ -5557,7 +5639,7 @@ underlying system, so should run in the browser, Node, or Plask.
     const legendLabels = labels.map((label, i) => {
       const control = toolNode(legend, "label"), check = toolNode(control, "input");
       check.type = "checkbox";
-      check.checked = true;
+      check.checked = !hidden.has(i);
       check.dataset.analysisSeries = String(i);
       const swatch = toolNode(control, "span", "", "tools-series-swatch");
       swatch.setAttribute("aria-hidden", "true");
@@ -5662,7 +5744,13 @@ underlying system, so should run in the browser, Node, or Plask.
       ctx.scale(ratio, ratio);
       const style = window.getComputedStyle(parent), isDark = ((_a = parent.closest("[data-theme]")) == null ? void 0 : _a.dataset.theme) !== "bright";
       const colors = isDark ? dark : bright;
-      const plots = series.map((s, j) => hidden.has(j) ? null : buildAnalysisPlot(s, start, end, right - left));
+      if (!plotCache || plotCache.series !== series || plotCache.start !== start || plotCache.end !== end || plotCache.width !== right - left) {
+        plotCache = { series, start, end, width: right - left, plots: new Array(series.length) };
+      }
+      const plots = series.map((s, j) => {
+        var _a2;
+        return hidden.has(j) ? null : (_a2 = plotCache.plots)[j] || (_a2[j] = buildAnalysisPlot(s, start, end, right - left));
+      });
       const maximum = Math.max(1, ...plots.map((plot) => plot ? plot.maximum : 1));
       ctx.strokeStyle = style.getPropertyValue("--panel-divider").trim();
       ctx.fillStyle = style.getPropertyValue("--panel-muted").trim();
@@ -5786,12 +5874,40 @@ underlying system, so should run in the browser, Node, or Plask.
       pinned = true;
       inspect();
     };
+    function fitWindow(previousAxis) {
+      if (start === 0 && end === previousAxis) {
+        start = 0;
+        end = axisMs;
+      } else {
+        const span = Math.min(Math.max(0, end - start), axisMs);
+        start = Math.max(0, Math.min(start, axisMs - span));
+        end = start + span;
+      }
+      cursor = Math.max(start, Math.min(end, cursor));
+    }
     draw();
-    return { canvas, draw, dispose() {
-      disposed = true;
-      drag = null;
-      bitmap.width = bitmap.height = 0;
-    } };
+    return {
+      canvas,
+      draw,
+      capture: () => ({ start, end, cursor, pinned, axisMs, hidden: [...hidden] }),
+      update(nextSeries, nextAxis, nextMetricLabel) {
+        if (disposed) return;
+        const previousAxis = axisMs;
+        series = nextSeries;
+        axisMs = nextAxis;
+        metricLabel = nextMetricLabel;
+        fitWindow(previousAxis);
+        drag = null;
+        canvas.setAttribute("aria-label", metricLabel + " by real elapsed time. Arrow keys inspect samples; plus and minus zoom; Home and End jump to visible endpoints.");
+        draw();
+      },
+      dispose() {
+        disposed = true;
+        drag = null;
+        plotCache = null;
+        bitmap.width = bitmap.height = 0;
+      }
+    };
   }
 
   // src/model-history.js
@@ -6394,6 +6510,19 @@ underlying system, so should run in the browser, Node, or Plask.
   }
 
   // src/session-tools.js
+  var noteDrafts = createLibraryDrafts();
+  var draftUnloadAttached = false;
+  function warnUnsavedNotes(event) {
+    if (noteDrafts.size) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+  }
+  function syncDraftWarning() {
+    if (noteDrafts.size && !draftUnloadAttached) window.addEventListener("beforeunload", warnUnsavedNotes);
+    if (!noteDrafts.size && draftUnloadAttached) window.removeEventListener("beforeunload", warnUnsavedNotes);
+    draftUnloadAttached = noteDrafts.size > 0;
+  }
   var closeSessionTools = null;
   var refreshSessionTools = null;
   function updateSessionToolsStatus() {
@@ -6442,6 +6571,8 @@ underlying system, so should run in the browser, Node, or Plask.
     const libraryFilters = { room: "", query: "", from: "", to: "", sort: "newest", favorites: false }, librarySelection = /* @__PURE__ */ new Set();
     const analysisFilters = { room: "", query: "", from: "", to: "" };
     let filteredSources = null, chartDispose = null, pickerOpen = true;
+    let analysisView = null, analysisOutput = null, analysisSources = null;
+    const analysisStates = /* @__PURE__ */ new Map();
     let libraryRoom = null, chartDraw = null, analysisPreferenceError = savedAnalysis.error;
     let observedSource = null, observedSignature = "";
     let detachDock = null;
@@ -6473,7 +6604,7 @@ underlying system, so should run in the browser, Node, or Plask.
     function action(fn) {
       return (...args) => {
         try {
-          fn(...args);
+          return fn(...args);
         } catch (error) {
           tell(error.message, true);
         }
@@ -6548,7 +6679,59 @@ underlying system, so should run in the browser, Node, or Plask.
         library.favoriteError = "Model favorites could not be read. Refresh to retry; recordings remain available.";
       }
       library.entries = library.entries.map((entry) => __spreadProps(__spreadValues({}, entry), { modelFavorite: library.favoriteModels.has(entry.archive.room.toLowerCase()) }));
+      noteDrafts.reconcile(library.entries);
+      updateDraftNotice();
       return library;
+    }
+    function updateDraftNotice() {
+      syncDraftWarning();
+      const notice = dialog.querySelector("#tools-review-notes");
+      notice.hidden = !noteDrafts.size;
+      notice.textContent = noteDrafts.size + " unsaved " + (noteDrafts.size === 1 ? "note" : "notes") + " · Review";
+    }
+    const noteActions = {
+      note: (entry) => noteDrafts.read(entry),
+      editNote: (entry, value) => {
+        noteDrafts.edit(entry, value);
+        updateDraftNotice();
+      },
+      discardNote: (entry) => {
+        noteDrafts.discard(entry.id);
+        updateDraftNotice();
+        render(tab);
+      },
+      saveNote: action((entry) => {
+        const draft = noteDrafts.read(entry);
+        if (!draft.dirty) return;
+        const fresh = libraryReader.read();
+        const latest = fresh.entries.find((item) => item.id === entry.id || item.records.some((record) => record.key === LIBRARY_PREFIX + entry.id));
+        if (!latest) throw new Error("This recording changed or is unavailable. Your draft is kept in Review unsaved notes.");
+        if ((latest.notes || "") !== draft.base && latest.notes !== draft.value && !confirm("Saved notes for this recording changed in another tab. Replace them with your draft?")) return;
+        updateLibraryMetadata(latest.id, { notes: draft.value });
+        noteDrafts.discard(entry.id);
+        updateDraftNotice();
+        render(tab);
+        tell("Recording notes saved.");
+      })
+    };
+    function renderDrafts() {
+      const state = readLibrary();
+      button(content, "‹ Recordings", () => render("library"), "tools-drafts-back");
+      node(content, "h3", "Unsaved notes");
+      node(content, "p", "Drafts stay in this tab when Library closes. Save them before refreshing or leaving the site.", "tools-muted");
+      if (!noteDrafts.size) node(content, "p", "All notes are saved or discarded.", "tools-muted");
+      for (const draft of noteDrafts.list()) {
+        const entry = state.entries.find((entry2) => entry2.id === draft.id);
+        const card = node(content, "section", void 0, "tools-row");
+        node(card, "strong", draft.title);
+        node(card, "p", draft.room + " · " + new Date(draft.time).toLocaleString(), "tools-muted");
+        renderRecordingNotes(card, entry || {
+          id: draft.id,
+          title: draft.title,
+          notes: draft.base,
+          archive: { room: draft.room, session: { history: { timestamps: [draft.time] } } }
+        }, noteActions, !entry);
+      }
     }
     function sourceOptions() {
       if (optionsLibrary === library && optionsArchive === currentArchive) return options;
@@ -6690,7 +6873,7 @@ underlying system, so should run in the browser, Node, or Plask.
       if (state.favoriteError) node(content, "p", state.favoriteError, "tools-muted");
       libraryFilters.room = libraryRoom || "";
       if (libraryRoom && libraryRoom !== "*" && !state.entries.some((entry) => entry.archive.room.toLowerCase() === libraryRoom)) libraryFilters.room = libraryRoom = "";
-      const callbacks = {
+      const callbacks = __spreadProps(__spreadValues({
         room: (room) => {
           libraryRoom = room;
         },
@@ -6726,12 +6909,8 @@ underlying system, so should run in the browser, Node, or Plask.
         txt: (entry) => downloadRecording(entry.archive, "txt"),
         csv: (entry) => downloadRecording(entry.archive, "csv"),
         gif: (entry) => generateGifFromHistory(entry.archive),
-        highs: (entry) => addArchiveHighs(entry.archive),
-        metadata: (entry, patch) => {
-          updateLibraryMetadata(entry.id, patch);
-          render("library");
-          tell("Recording details saved.");
-        },
+        highs: (entry) => addArchiveHighs(entry.archive)
+      }, noteActions), {
         rename: (entry) => {
           const title = window.prompt("Recording title (up to 80 characters):", entry.title);
           if (title !== null) {
@@ -6746,7 +6925,7 @@ underlying system, so should run in the browser, Node, or Plask.
             tell("Library recording deleted.");
           }
         }
-      };
+      });
       renderLibraryBrowser(content, state.entries, libraryFilters, librarySelection, Object.fromEntries(Object.entries(callbacks).map(([key, fn]) => [key, action(fn)])));
       if (state.damaged.length) {
         node(content, "p", state.damaged.length + " unreadable library record(s) were retained.", "tools-muted");
@@ -6825,7 +7004,7 @@ underlying system, so should run in the browser, Node, or Plask.
       metricSelect.value = metric;
       metricSelect.onchange = () => {
         rememberAnalysis({ metric: metricSelect.value });
-        render(tab);
+        refreshAnalysis();
       };
       const thresholdLabel = node(controls, "label", comparing ? "Threshold " : "Thresholds "), input = node(thresholdLabel, "input");
       input.id = "tools-threshold";
@@ -6856,7 +7035,7 @@ underlying system, so should run in the browser, Node, or Plask.
           return;
         }
         input.setCustomValidity("");
-        render(tab);
+        refreshAnalysis(false);
       }
       input.onkeydown = (event) => {
         if (event.key === "Enter") {
@@ -6873,7 +7052,7 @@ underlying system, so should run in the browser, Node, or Plask.
         node(label2, "span", "Match shared length");
         check.onchange = () => {
           rememberAnalysis({ sharedLength: check.checked });
-          render(tab);
+          refreshAnalysis();
         };
       }
       return sourceOptions();
@@ -6955,9 +7134,9 @@ underlying system, so should run in the browser, Node, or Plask.
     }
     function audienceOverview(archive) {
       const overview = summarizeAudience(archive), coverage = overview.audience[0];
-      node(content, "h3", "Audience overview");
-      node(content, "p", archive.room + " · " + coverage.samples + " samples · Covered time " + formatElapsedTime(coverage.coveredMs) + " · Excluded gaps " + formatElapsedTime(coverage.gapMs) + " · Coverage " + percent(coverage.coverage), "tools-muted");
-      const scroll = node(content, "div", void 0, "tools-scroll"), table = node(scroll, "table");
+      node(analysisOutput, "h3", "Audience overview");
+      node(analysisOutput, "p", archive.room + " · " + coverage.samples + " samples · Covered time " + formatElapsedTime(coverage.coveredMs) + " · Excluded gaps " + formatElapsedTime(coverage.gapMs) + " · Coverage " + percent(coverage.coverage), "tools-muted");
+      const scroll = node(analysisOutput, "div", void 0, "tools-scroll"), table = node(scroll, "table");
       table.id = "tools-audience-table";
       node(table, "caption", "Audience across the retained recording");
       const head = node(node(table, "thead"), "tr");
@@ -6973,8 +7152,8 @@ underlying system, so should run in the browser, Node, or Plask.
         if (summary.peakTime !== null) peak.title = "First recorded at " + new Date(summary.peakTime).toLocaleString();
         node(row, "td", number(summary.sessionPeak));
       }
-      node(content, "p", "Room audience = registered + anonymous viewers. A full-session high may predate retained history. Hover a recording peak for its first recorded time.", "tools-muted");
-      const shares = node(content, "div");
+      node(analysisOutput, "p", "Room audience = registered + anonymous viewers. A full-session high may predate retained history. Hover a recording peak for its first recorded time.", "tools-muted");
+      const shares = node(analysisOutput, "div");
       shares.id = "tools-audience-shares";
       node(shares, "h3", "Audience proportions");
       node(shares, "p", "Token holders / registered viewers: " + percent(overview.tokenShareRegistered));
@@ -6983,7 +7162,7 @@ underlying system, so should run in the browser, Node, or Plask.
       node(shares, "p", "Shares use viewer-time over covered intervals. A crowded interval contributes more than a quiet interval of the same length; gaps contribute nothing.", "tools-muted");
     }
     function thresholdTable(archive) {
-      const scroll = node(content, "div", void 0, "tools-scroll"), table = node(scroll, "table");
+      const scroll = node(analysisOutput, "div", void 0, "tools-scroll"), table = node(scroll, "table");
       table.id = "tools-threshold-table";
       node(table, "caption", ANALYSIS_METRICS[metric] + " — time at or above selected thresholds");
       const head = node(node(table, "thead"), "tr");
@@ -6997,10 +7176,10 @@ underlying system, so should run in the browser, Node, or Plask.
         node(row, "td", result.durationMs === null ? "Not enough data" : formatElapsedTime(result.durationMs));
         node(row, "td", percent(result.percent));
       }
-      node(content, "p", "Includes samples equal to the threshold. Percentages use covered recording time; gaps and time after the final sample are excluded.", "tools-muted");
+      node(analysisOutput, "p", "Includes samples equal to the threshold. Percentages use covered recording time; gaps and time after the final sample are excluded.", "tools-muted");
     }
     function summaryTable(summaries, labels, comparing = true) {
-      const scroll = node(content, "div", void 0, "tools-scroll"), table = node(scroll, "table");
+      const scroll = node(analysisOutput, "div", void 0, "tools-scroll"), table = node(scroll, "table");
       table.id = "tools-summary-table";
       node(table, "caption", ANALYSIS_METRICS[metric] + " — retained recording statistics");
       const head = node(table, "thead"), headRow = node(head, "tr");
@@ -7025,11 +7204,21 @@ underlying system, so should run in the browser, Node, or Plask.
         cell.scope = "row";
         summaries.forEach((summary) => node(row, "td", value(summary)));
       }
-      node(content, "p", "The full-session high can predate retained history and is not limited by “Match shared length.” Token-holder share is weighted by recorded registered-viewer time.", "tools-muted");
+      node(analysisOutput, "p", "The full-session high can predate retained history and is not limited by “Match shared length.” Token-holder share is weighted by recorded registered-viewer time.", "tools-muted");
     }
-    function chart(archives, labels, endMs) {
+    function chart(archives, labels, endMs, ids) {
       const series = archives.map((archive) => __spreadProps(__spreadValues({}, analysisSeries(archive, metric)), { timestamps: archive.session.history.timestamps }));
-      const view = renderAnalysisChart(content, series, labels, endMs, ANALYSIS_METRICS[metric]);
+      if (analysisView) {
+        analysisView.update(series, endMs, ANALYSIS_METRICS[metric]);
+        return;
+      }
+      const saved = analysisStates.get(tab);
+      const same = saved && saved.ids.length === ids.length && ids.every((id, index) => saved.archives[saved.ids.indexOf(id)] === archives[index]);
+      const restored = same ? __spreadProps(__spreadValues({}, saved.state), { hidden: saved.state.hidden.map((index) => ids.indexOf(saved.ids[index])) }) : null;
+      const view = renderAnalysisChart(content, series, labels, endMs, ANALYSIS_METRICS[metric], restored);
+      content.appendChild(analysisOutput);
+      analysisView = view;
+      analysisSources = { archives, ids };
       chartDraw = view.draw;
       chartDispose = view.dispose;
       if (window.ResizeObserver) {
@@ -7040,28 +7229,38 @@ underlying system, so should run in the browser, Node, or Plask.
     function renderAnalysis(comparing) {
       const options2 = analysisControls(comparing);
       if (!options2) return;
+      analysisOutput = node(content, "div");
+      analysisOutput.id = "tools-analysis-output";
+      refreshAnalysis();
+    }
+    function refreshAnalysis(redrawChart = true) {
+      const comparing = tab === "compare", options2 = sourceOptions();
+      if (!analysisOutput) return;
+      analysisOutput.replaceChildren();
+      message.textContent = "";
       const a = options2.find((item) => item.id === selectedA), b = options2.find((item) => item.id === selectedB);
       if (!a || comparing && (!b || selectedExtra.some((id) => !options2.some((item) => item.id === id)))) {
-        node(content, "p", "Choose available recordings in each slot. A previous selection may have changed or been removed; clear filters to find another recording.");
+        node(analysisOutput, "p", "Choose available recordings in each slot. A previous selection may have changed or been removed; clear filters to find another recording.");
         return;
       }
       if (comparing) {
         if ((/* @__PURE__ */ new Set([selectedA, selectedB, ...selectedExtra])).size !== 2 + selectedExtra.length) {
-          node(content, "p", "Choose a different recording in each comparison slot.");
+          node(analysisOutput, "p", "Choose a different recording in each comparison slot.");
           return;
         }
         const ids = [.../* @__PURE__ */ new Set([selectedA, selectedB, ...selectedExtra])], recordings = ids.map((id) => options2.find((item) => item.id === id)).filter((item) => !!item);
         const result = compareRecordingSet(recordings.map((item) => item.archive), metric, threshold, sharedLength);
-        chart(recordings.map((item) => item.archive), recordings.map((item) => item.title), result.axisMs);
+        if (redrawChart) chart(recordings.map((item) => item.archive), recordings.map((item) => item.title), result.axisMs, ids);
         summaryTable(result.summaries, recordings.map((item, index) => String.fromCharCode(65 + index)));
       } else {
         const summary = summarizeSession(a.archive, metric, threshold);
-        chart([a.archive], [a.title], summary.spanMs);
+        if (redrawChart) chart([a.archive], [a.title], summary.spanMs, [a.id]);
         audienceOverview(a.archive);
         thresholdTable(a.archive);
-        node(content, "h3", ANALYSIS_METRICS[metric] + " — details");
+        node(analysisOutput, "h3", ANALYSIS_METRICS[metric] + " — details");
         summaryTable([summary], [a.archive.room], false);
       }
+      if (analysisPreferenceError) tell(analysisPreferenceError, true);
     }
     function checkbox(parent, id, text, checked = true) {
       const label = node(parent, "label"), input = node(label, "input");
@@ -7122,6 +7321,10 @@ underlying system, so should run in the browser, Node, or Plask.
       const focusedId = dialog.contains(document.activeElement) ? document.activeElement.id : "";
       const existingPicker = dialog.querySelector("#tools-recording-picker");
       if (existingPicker) pickerOpen = existingPicker.open;
+      if (analysisView) analysisStates.set(tab, __spreadProps(__spreadValues({}, analysisSources), { state: analysisView.capture() }));
+      analysisView = null;
+      analysisSources = null;
+      analysisOutput = null;
       if (next !== tab) library = null;
       tab = next;
       fileRequest++;
@@ -7136,9 +7339,10 @@ underlying system, so should run in the browser, Node, or Plask.
       }
       content.replaceChildren();
       message.textContent = "";
-      dialog.querySelectorAll("[data-tools-tab]").forEach((button2) => button2.setAttribute("aria-pressed", String(button2.dataset.toolsTab === (tab === "history" ? "library" : tab))));
+      dialog.querySelectorAll("[data-tools-tab]").forEach((button2) => button2.setAttribute("aria-pressed", String(button2.dataset.toolsTab === (tab === "history" || tab === "drafts" ? "library" : tab))));
       try {
         if (tab === "library") renderLibrary();
+        else if (tab === "drafts") renderDrafts();
         else if (tab === "history") renderHistory();
         else if (tab === "backup") renderBackup();
         else renderAnalysis(tab === "compare");
@@ -7163,6 +7367,10 @@ underlying system, so should run in the browser, Node, or Plask.
         chartDispose();
         chartDispose = null;
       }
+      analysisStates.clear();
+      analysisView = null;
+      analysisSources = null;
+      analysisOutput = null;
       libraryReader.clear();
       modelHistoryReader.clear();
       options = [];
@@ -7202,6 +7410,8 @@ underlying system, so should run in the browser, Node, or Plask.
       if (button2) button2.setAttribute("aria-expanded", "true");
     }
     dialog.querySelector("#tools-close").onclick = close;
+    dialog.querySelector("#tools-review-notes").onclick = () => render("drafts");
+    updateDraftNotice();
     dialog.addEventListener("cancel", (event) => {
       event.preventDefault();
       close();
@@ -8421,7 +8631,7 @@ underlying system, so should run in the browser, Node, or Plask.
       var t = runtime.TIERS[key];
       html += '<div id="tier-row-' + key + '" data-tier="' + key + '" style="display:flex;align-items:center;padding:1px 3px;margin:1px 0;background:rgba(var(--panel-row-rgb),calc(0.05 * var(--tier-background-scale, 1)));border-radius:3px;border-left:3px solid ' + t.color + ';"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml(key) + '</div><canvas id="spark-' + key + '" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-' + key + '" style="font-weight:bold;color:' + t.color + ';font-size:14px;">0</span><div id="high-' + key + '" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div>';
     });
-    html += '<div id="summary-tier-rows" style="border-top:1px solid var(--panel-divider);margin-top:4px;padding-top:4px;"><div id="tier-row-withtokens" data-tier="withtokens" style="display:flex;align-items:center;padding:2px 3px;background:rgba(255,105,180,0.15);border-radius:3px;border:1px solid #ff69b4;margin-bottom:3px;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("withtokens") + '</div><canvas id="spark-withtokens" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-withtokens" style="font-weight:bold;color:#ff69b4;font-size:14px;">0</span><span id="pct-withtokens" style="font-size:8px;color:#ff69b4;margin-left:2px;">0%</span><div id="high-withtokens" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div><div id="tier-row-total" data-tier="total" style="display:flex;align-items:center;padding:2px 3px;background:rgba(var(--panel-row-rgb),0.1);border-radius:3px;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("total") + '</div><canvas id="spark-total" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-total" style="font-weight:bold;color:var(--panel-text);font-size:14px;">0</span><div id="high-total" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div></div><div id="tier-row-anon" data-tier="anonymous" style="margin-top:5px;padding:5px;background:rgba(136,136,136,0.15);border-radius:3px;border:1px solid #888;"><div style="display:flex;align-items:center;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("anon") + '</div><canvas id="spark-anon" width="105" height="50" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="anon-ratio-full" style="font-size:13px;font-weight:bold;color:#ff69b4;">--</span><div id="high-anon" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div></div></div><div id="trend-section" style="position:relative;border-top:1px solid #4169E1;margin-top:5px;padding-top:5px;"><div id="live-trend"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;flex-wrap:wrap;gap:2px;"><span id="trend-header-label" style="font-size:9px;font-weight:bold;color:#4169E1;">📈 TREND</span><div style="display:flex;gap:2px;flex-wrap:wrap;"><button class="trend-preset-btn" data-mode="last" style="background:#4169E1;border:1px solid #4169E1;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Last</button><button class="trend-preset-btn" data-mode="5min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">5m</button><button class="trend-preset-btn" data-mode="15min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">15m</button><button class="trend-preset-btn" data-mode="30min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">30m</button><button class="trend-preset-btn" data-mode="1hour" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">1h</button><button class="trend-preset-btn" data-mode="start" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Start</button><button id="btn-trend-auto" style="background:#32CD32;border:1px solid #32CD32;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;" title="Auto-escalation ON - Click to disable">AUTO</button></div></div><div id="trend-container" style="min-height:30px;"><div style="font-size:8px;color:var(--panel-faint);text-align:center;padding:8px;">Waiting for scan...</div></div></div><div id="playback-controls" style="display:none;position:absolute;top:5px;left:0;right:0;bottom:0;padding:0 2px;box-sizing:border-box;grid-template-rows:minmax(14px,1fr) 14px 12px;gap:2px;" aria-label="Playback controls"><div style="display:flex;flex-direction:column;justify-content:center;gap:4px;min-width:0;"><div id="playback-file-controls" style="display:none;align-items:center;gap:4px;min-width:0;"><div id="playback-room" style="display:none;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;line-height:12px;font-weight:bold;color:var(--panel-text);"></div></div><div style="display:flex;align-items:center;justify-content:space-between;gap:3px;"><strong id="playback-label" style="font-size:9px;color:var(--panel-warning);">PLAYBACK</strong><button id="playback-play" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#4169E1;color:white;border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Pause</button><select id="playback-speed" aria-label="Playback speed" style="font-size:8px;height:15px;margin:0;padding:0;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select><button type="button" id="btn-playback-library" aria-label="Open session library" aria-expanded="false" aria-controls="tierscope-session-tools" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-accent);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Library</button><button id="playback-return" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Return to Live</button></div></div><div style="display:flex;align-items:center;gap:4px;min-width:0;"><button type="button" id="playback-previous" title="Previous recorded sample (pauses Replay)" aria-label="Previous recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">|&#9664;</button><input id="playback-scrubber" type="range" min="0" max="0" value="0" step="any" aria-label="Playback timeline" style="flex:1;min-width:0;width:100%;height:12px;margin:0;accent-color:var(--panel-warning);cursor:pointer;"><button type="button" id="playback-next" title="Next recorded sample (pauses Replay)" aria-label="Next recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">&#9654;|</button></div><div id="playback-file-actions" style="display:flex;justify-content:center;min-width:0;"><div id="playback-position" style="font-size:9px;line-height:12px;text-align:center;white-space:nowrap;color:var(--panel-secondary);font-family:monospace;">00:00:00 / 00:00:00</div></div></div></div><div id="control-field" style="margin-top:5px;padding:4px;background:rgba(65,105,225,0.15);border-radius:3px;border:1px solid #4169E1;"><div id="control-session-row" style="display:grid;grid-template-columns:max-content max-content minmax(0,1fr);align-items:center;gap:3px;margin-bottom:4px;white-space:nowrap;"><span style="font-size:9px;font-weight:bold;color:#4169E1;">🎛️ CONTROLS</span><span style="font-size:12px;color:var(--panel-warning);font-family:monospace;font-weight:bold;width:9ch;text-align:center;font-variant-numeric:tabular-nums;" id="control-tracking-timer">00:00:00</span><span style="min-width:0;text-align:right;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums;font-size:11px;color:var(--panel-positive);font-weight:bold;" id="control-next-scan">Next: 60s</span></div><div id="control-action-row" style="display:grid;grid-template-columns:minmax(max-content,1fr) auto minmax(0,1fr);align-items:center;gap:3px;"><div id="control-session-buttons" style="display:flex;gap:2px;align-items:center;"><button type="button" id="btn-control-library" aria-expanded="false" aria-controls="tierscope-session-tools" aria-label="Open session library" title="Open model folders, session summaries, comparisons and backups" style="font-size:8px;line-height:10px;height:14px;min-width:38px;box-sizing:border-box;margin:0;padding:2px 3px;background:var(--panel-button);color:var(--panel-accent);border:none;border-radius:3px;cursor:pointer;">Library</button><button id="btn-replay" style="font-size:8px;line-height:10px;height:14px;min-width:38px;box-sizing:border-box;margin:0;padding:2px 3px;background:var(--panel-button);color:var(--panel-warning);border:none;border-radius:3px;cursor:pointer;" title="Replay recorded history">Replay</button></div><div id="control-action-buttons" style="display:flex;gap:2px;align-items:center;"><button id="btn-control-auto" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#32CD32;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 4px;min-width:24px;" title="Auto-Refresh ON">⏸</button><button type="button" id="btn-control-stop" aria-label="Stop this session" title="Stop this session and freeze its history and elapsed time" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;white-space:nowrap;">■ Stop</button><button id="btn-main-reset" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Reset all tracking data"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12"/><path d="M3 3v9h9"/></svg>Reset</button></div><style>#dark-mode-control #dark-mode-track{position:relative;display:block;flex:0 0 22px;width:22px;height:12px;box-sizing:border-box;border:1px solid #9b701d;border-radius:7px;background:#e8b444;transition:background-color .16s ease;}#dark-mode-control #dark-mode-thumb{position:absolute;left:1px;top:1px;width:8px;height:8px;border-radius:50%;background:#4c3300;transform:translateX(10px);transition:transform .16s ease,background-color .16s ease;}#dark-mode-control #dark-mode-moon{color:var(--panel-muted);opacity:.55;}#dark-mode-control #dark-mode-sun{color:#825d00;}#dark-mode-control #dark-mode-toggle:checked~#dark-mode-track{background:#4169e1;border-color:#8ca8ff;}#dark-mode-control #dark-mode-toggle:checked~#dark-mode-track #dark-mode-thumb{transform:translateX(0);background:#fff;}#dark-mode-control #dark-mode-toggle:checked~#dark-mode-moon{color:#b4c5ff;opacity:1;}#dark-mode-control #dark-mode-toggle:checked~#dark-mode-sun{color:var(--panel-muted);opacity:.55;}#dark-mode-control #dark-mode-toggle:focus-visible~#dark-mode-track{outline:2px solid var(--panel-accent);outline-offset:2px;}@media(prefers-reduced-motion:reduce){#dark-mode-control #dark-mode-track,#dark-mode-control #dark-mode-thumb{transition:none;}}</style><label id="dark-mode-control" style="position:relative;justify-self:end;display:inline-flex;align-items:center;gap:2px;height:14px;cursor:pointer;line-height:1;"><input type="checkbox" role="switch" id="dark-mode-toggle" checked aria-label="Dark mode" style="position:absolute;inset:0;z-index:1;width:100%;height:100%;box-sizing:border-box;margin:0;padding:0;border:0;opacity:0;cursor:pointer;"><svg id="dark-mode-moon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" style="flex:none;"><path d="M21 13a9 9 0 0 1-10-10 9 9 0 1 0 10 10Z"/></svg><span id="dark-mode-track" aria-hidden="true"><span id="dark-mode-thumb"></span></span><svg id="dark-mode-sun" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" style="flex:none;"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg></label></div></div><div id="tracker-footer" style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:4px;margin-top:5px;min-height:14px;"><div id="acquisition-status" style="max-width:80px;font-size:7px;color:var(--panel-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="No accepted sample yet">No sample</div><div id="background-slider-controls" style="display:flex;align-items:center;gap:3px;min-width:0;"><svg width="11" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--panel-warning)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink:0;"><path d="M9 18h6M10 22h4M8 14a6 6 0 1 1 8 0c-1 1-1 2-1 4H9c0-2 0-3-1-4Z"/></svg><input type="range" id="opacity-slider" min="30" max="100" value="95" aria-label="Background opacity" style="flex:1;min-width:0;width:100%;height:12px;margin:0;cursor:pointer;accent-color:#ff69b4;" title="Main and standard tier background opacity"><span id="opacity-value" style="font-size:8px;color:var(--panel-secondary);min-width:23px;">95%</span></div><div id="tierscope-logo" style="justify-self:end;display:flex;align-items:center;gap:3px;white-space:nowrap;opacity:0.6;transition:opacity 0.2s;" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0.6"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#ff69b4" stroke-width="2" style="flex-shrink:0;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="2" x2="12" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/></svg><span title="TierScope ' + runtime.TIERSCOPE_VERSION + `" style="font-size:7px;font-family:'Courier New',monospace;font-weight:bold;color:var(--panel-accent);letter-spacing:1px;">TIERSCOPE</span></div></div></div>`;
+    html += '<div id="summary-tier-rows" style="border-top:1px solid var(--panel-divider);margin-top:4px;padding-top:4px;"><div id="tier-row-withtokens" data-tier="withtokens" style="display:flex;align-items:center;padding:2px 3px;background:rgba(255,105,180,0.15);border-radius:3px;border:1px solid #ff69b4;margin-bottom:3px;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("withtokens") + '</div><canvas id="spark-withtokens" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-withtokens" style="font-weight:bold;color:#ff69b4;font-size:14px;">0</span><span id="pct-withtokens" style="font-size:8px;color:#ff69b4;margin-left:2px;">0%</span><div id="high-withtokens" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div><div id="tier-row-total" data-tier="total" style="display:flex;align-items:center;padding:2px 3px;background:rgba(var(--panel-row-rgb),0.1);border-radius:3px;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("total") + '</div><canvas id="spark-total" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-total" style="font-weight:bold;color:var(--panel-text);font-size:14px;">0</span><div id="high-total" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div></div><div id="tier-row-anon" data-tier="anonymous" style="margin-top:5px;padding:5px;background:rgba(136,136,136,0.15);border-radius:3px;border:1px solid #888;"><div style="display:flex;align-items:center;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("anon") + '</div><canvas id="spark-anon" width="105" height="50" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="anon-ratio-full" style="font-size:13px;font-weight:bold;color:#ff69b4;">--</span><div id="high-anon" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div></div></div><div id="trend-section" style="position:relative;border-top:1px solid #4169E1;margin-top:5px;padding-top:5px;"><div id="live-trend"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;flex-wrap:wrap;gap:2px;"><span id="trend-header-label" style="font-size:9px;font-weight:bold;color:#4169E1;">📈 TREND</span><div style="display:flex;gap:2px;flex-wrap:wrap;"><button class="trend-preset-btn" data-mode="last" style="background:#4169E1;border:1px solid #4169E1;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Last</button><button class="trend-preset-btn" data-mode="5min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">5m</button><button class="trend-preset-btn" data-mode="15min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">15m</button><button class="trend-preset-btn" data-mode="30min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">30m</button><button class="trend-preset-btn" data-mode="1hour" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">1h</button><button class="trend-preset-btn" data-mode="start" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Start</button><button id="btn-trend-auto" style="background:#32CD32;border:1px solid #32CD32;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;" title="Auto-escalation ON - Click to disable">AUTO</button></div></div><div id="trend-container" style="min-height:30px;"><div style="font-size:8px;color:var(--panel-faint);text-align:center;padding:8px;">Waiting for scan...</div></div></div><div id="playback-controls" style="display:none;position:absolute;top:5px;left:0;right:0;bottom:0;padding:0 2px;box-sizing:border-box;grid-template-rows:minmax(14px,1fr) 14px 12px;gap:2px;" aria-label="Playback controls"><div style="display:flex;flex-direction:column;justify-content:center;gap:4px;min-width:0;"><div id="playback-file-controls" style="display:none;align-items:center;gap:4px;min-width:0;"><div id="playback-room" style="display:none;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;line-height:12px;font-weight:bold;color:var(--panel-text);"></div></div><div style="display:flex;align-items:center;justify-content:space-between;gap:3px;"><strong id="playback-label" style="font-size:9px;color:var(--panel-warning);">PLAYBACK</strong><button id="playback-play" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#4169E1;color:white;border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Pause</button><select id="playback-speed" aria-label="Playback speed" style="font-size:8px;height:15px;margin:0;padding:0;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select><button type="button" id="btn-playback-library" aria-label="Open session library" aria-expanded="false" aria-controls="tierscope-session-tools" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-accent);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Library</button><button id="playback-return" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Return to Live</button></div></div><div style="display:flex;align-items:center;gap:4px;min-width:0;"><button type="button" id="playback-previous" title="Previous recorded sample (pauses Replay)" aria-label="Previous recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">|&#9664;</button><input id="playback-scrubber" type="range" min="0" max="0" value="0" step="any" aria-label="Playback timeline" style="flex:1;min-width:0;width:100%;height:12px;margin:0;accent-color:var(--panel-warning);cursor:pointer;"><button type="button" id="playback-next" title="Next recorded sample (pauses Replay)" aria-label="Next recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">&#9654;|</button></div><div id="playback-file-actions" style="display:flex;justify-content:center;min-width:0;"><div id="playback-position" style="font-size:9px;line-height:12px;text-align:center;white-space:nowrap;color:var(--panel-secondary);font-family:monospace;">00:00:00 / 00:00:00</div></div></div></div><div id="control-field" style="margin-top:5px;padding:4px;background:rgba(65,105,225,0.15);border-radius:3px;border:1px solid #4169E1;"><div id="control-session-row" style="display:grid;grid-template-columns:max-content max-content minmax(0,1fr);align-items:center;gap:3px;margin-bottom:4px;white-space:nowrap;"><span style="font-size:9px;font-weight:bold;color:#4169E1;">🎛️ CONTROLS</span><span style="font-size:12px;color:var(--panel-warning);font-family:monospace;font-weight:bold;width:9ch;text-align:center;font-variant-numeric:tabular-nums;" id="control-tracking-timer">00:00:00</span><span style="min-width:0;text-align:right;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums;font-size:11px;color:var(--panel-positive);font-weight:bold;" id="control-next-scan">Next: 60s</span></div><div id="control-action-row" style="display:grid;grid-template-columns:minmax(max-content,1fr) auto minmax(0,1fr);align-items:center;gap:3px;"><div id="control-session-buttons" style="display:flex;gap:2px;align-items:center;"><button type="button" id="btn-control-library" aria-expanded="false" aria-controls="tierscope-session-tools" aria-label="Open session library" title="Open model folders, session summaries, comparisons and backups" style="font-size:8px;line-height:10px;height:14px;min-width:38px;box-sizing:border-box;margin:0;padding:2px 3px;background:var(--panel-button);color:var(--panel-accent);border:none;border-radius:3px;cursor:pointer;">Library</button><button id="btn-replay" style="font-size:8px;line-height:10px;height:14px;min-width:38px;box-sizing:border-box;margin:0;padding:2px 3px;background:var(--panel-button);color:var(--panel-warning);border:none;border-radius:3px;cursor:pointer;" title="Replay recorded history">Replay</button></div><div id="control-action-buttons" style="display:flex;gap:2px;align-items:center;"><button id="btn-control-auto" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#32CD32;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 4px;min-width:24px;" title="Auto-Refresh ON">⏸</button><button type="button" id="btn-control-stop" aria-label="Stop this session" title="Stop this session and freeze its history and elapsed time" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;white-space:nowrap;">■ Stop</button><button id="btn-main-reset" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Reset all tracking data"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12"/><path d="M3 3v9h9"/></svg>Reset</button></div><style>#dark-mode-control #dark-mode-track{position:relative;display:block;flex:0 0 22px;width:22px;height:12px;box-sizing:border-box;border:1px solid #9b701d;border-radius:7px;background:#e8b444;transition:background-color .16s ease;}#dark-mode-control #dark-mode-thumb{position:absolute;left:1px;top:1px;width:8px;height:8px;border-radius:50%;background:#4c3300;transform:translateX(10px);transition:transform .16s ease,background-color .16s ease;}#dark-mode-control #dark-mode-moon{color:var(--panel-muted);opacity:.55;}#dark-mode-control #dark-mode-sun{color:#825d00;}#dark-mode-control #dark-mode-toggle:checked~#dark-mode-track{background:#4169e1;border-color:#8ca8ff;}#dark-mode-control #dark-mode-toggle:checked~#dark-mode-track #dark-mode-thumb{transform:translateX(0);background:#fff;}#dark-mode-control #dark-mode-toggle:checked~#dark-mode-moon{color:#b4c5ff;opacity:1;}#dark-mode-control #dark-mode-toggle:checked~#dark-mode-sun{color:var(--panel-muted);opacity:.55;}#dark-mode-control #dark-mode-toggle:focus-visible~#dark-mode-track{outline:2px solid var(--panel-accent);outline-offset:2px;}@media(prefers-reduced-motion:reduce){#dark-mode-control #dark-mode-track,#dark-mode-control #dark-mode-thumb{transition:none;}}</style><label id="dark-mode-control" style="position:relative;justify-self:end;display:inline-flex;align-items:center;gap:2px;height:14px;cursor:pointer;line-height:1;"><input type="checkbox" role="switch" id="dark-mode-toggle" checked aria-label="Dark mode" style="position:absolute;inset:0;z-index:1;width:100%;height:100%;box-sizing:border-box;margin:0;padding:0;border:0;opacity:0;cursor:pointer;"><svg id="dark-mode-moon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" style="flex:none;"><path d="M21 13a9 9 0 0 1-10-10 9 9 0 1 0 10 10Z"/></svg><span id="dark-mode-track" aria-hidden="true"><span id="dark-mode-thumb"></span></span><svg id="dark-mode-sun" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" style="flex:none;"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg></label></div></div><div id="tracker-footer" style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:4px;margin-top:5px;min-height:14px;"><div id="acquisition-status" style="max-width:80px;font-size:7px;color:var(--panel-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="No accepted sample yet">No sample</div><div id="background-slider-controls" style="display:flex;align-items:center;gap:3px;min-width:0;"><svg width="11" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--panel-warning)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink:0;"><path d="M9 18h6M10 22h4M8 14a6 6 0 1 1 8 0c-1 1-1 2-1 4H9c0-2 0-3-1-4Z"/></svg><input type="range" id="opacity-slider" min="30" max="100" value="95" aria-label="Background opacity" style="flex:1;min-width:0;width:100%;height:12px;margin:0;cursor:pointer;accent-color:#ff69b4;" title="Main and standard tier background opacity"><span id="opacity-value" style="font-size:8px;color:var(--panel-secondary);min-width:23px;">95%</span></div><div id="tierscope-logo" style="justify-self:end;display:flex;flex-direction:column;align-items:center;gap:0;white-space:nowrap;opacity:0.6;transition:opacity 0.2s;" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0.6"><div style="display:flex;align-items:center;gap:3px;height:8px;"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#ff69b4" stroke-width="2" style="flex-shrink:0;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="2" x2="12" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/></svg><span title="TierScope ' + runtime.TIERSCOPE_VERSION + `" style="font-size:7px;line-height:8px;font-family:'Courier New',monospace;font-weight:bold;color:var(--panel-accent);letter-spacing:1px;">TIERSCOPE</span></div><span id="tierscope-version" style="font:5px/6px Arial,sans-serif;letter-spacing:.15px;color:var(--panel-muted);">` + runtime.TIERSCOPE_VERSION + "</span></div></div></div>";
     div.innerHTML = html;
     document.body.appendChild(div);
     applyPanelTheme(false);
@@ -8739,7 +8949,7 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/bootstrap.js
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.14.0";
+    runtime.TIERSCOPE_VERSION = "3.15.0";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;
