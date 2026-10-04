@@ -7,7 +7,8 @@ const testSource = source.replace('downloadTrackingReport: downloadTrackingRepor
   __owner: {runtime, LIVE_SESSION_FIELDS, acceptRoomSnapshot, commitAcceptedSample, abortAcceptedSample,
     resetLiveSession, stopLiveSession, stopTrackingTimer, parseGetChatUserListResponse,
     getSessionSaveState, readAllTimeHighs,
-    snapshot: () => Object.fromEntries(LIVE_SESSION_FIELDS.map(key => [key, runtime[key]])),
+    snapshot: () => Object.fromEntries(LIVE_SESSION_FIELDS.map(key => [key,
+      key === 'users' ? Array.from(runtime.users.values()) : runtime[key]])),
     renderer: fn => { updateTrendDisplay = fn; }},
   downloadTrackingReport: downloadTrackingReport,`);
 function setup() {
