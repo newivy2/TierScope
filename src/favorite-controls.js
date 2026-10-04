@@ -8,7 +8,7 @@ export function changeModelFavorite(room, enableOnly = false) {
         clearAutomaticLibraryStatus(room);
         return true;
     }
-    if (!confirm('Favorite ' + room + ' and automatically keep its live sessions?\n\n' +
+    if (!confirm('Favorite ' + room + ' and automatically keep their live sessions?\n\n' +
         'While TierScope is recording this model, sessions will be kept in this browser’s Library. ' +
         'The same session is updated as it grows, at most once per minute as samples arrive, and on pause, Stop or leaving the room. ' +
         'The current live session will be kept too. Replay files are never added automatically.\n\n' +

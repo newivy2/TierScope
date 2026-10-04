@@ -18,7 +18,7 @@ If you used the beta, install from the official link above to follow main releas
 
 **Current stable release: 3.15.0** · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.15.0)
 
-**Beta preview: 3.16.0-beta.1** — [Install the model-focused Library beta](https://raw.githubusercontent.com/newivy2/TierScope/beta/model-library/tierscope.user.js). Adds a model-name header, favorite stars with confirmed automatic keeping, a Room Total row, and a streamlined Sessions tab. Existing favorites require confirmation before automatic keeping starts. [Beta behavior and review notes](docs/model-library-beta.md).
+**Beta preview: 3.16.0-beta.2** — [Install the model-focused Library beta](https://raw.githubusercontent.com/newivy2/TierScope/beta/model-library/tierscope.user.js). Adds a model-name header, favorite stars with confirmed automatic keeping, a Room Total row, and a streamlined Sessions tab. Existing favorites require confirmation before automatic keeping starts. [Beta behavior and review notes](docs/model-library-beta.md).
 
 ---
 

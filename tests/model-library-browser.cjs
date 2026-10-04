@@ -36,7 +36,7 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
  const save=await page.locator('#tools-save-session').boundingBox(),history=await page.locator('#tools-room-history').boundingBox();
  assert(history.x>save.x&&Math.abs(history.y-save.y)<2,'History sits to the right of Save file');
  assert(await page.locator('#tools-enable-automatic').isVisible());assert.equal(await page.locator('#tools-current-favorite').textContent(),'★');
- page.once('dialog',async d=>{assert.match(d.message(),/automatically keep/);await d.dismiss();});await page.click('#tools-enable-automatic');
+ page.once('dialog',async d=>{assert.match(d.message(),/automatically keep their live sessions\?/);await d.dismiss();});await page.click('#tools-enable-automatic');
  assert.equal(await page.evaluate(()=>ViewerTracker.__models.favorite('live_model').autoKeep),false);
  page.once('dialog',d=>d.accept());await page.click('#tools-enable-automatic');
  assert.equal(await page.evaluate(()=>ViewerTracker.__models.favorite('live_model').autoKeep),true);
