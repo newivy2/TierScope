@@ -42,15 +42,15 @@ Charts use periodic room-data samples. Session history is stored locally through
 
 - **Session library** — Choose **Library → Keep in library** from live Controls or Replay. Recordings are organized into model folders. Keeping a fuller version of the same session updates its entry and preserves your custom name. Search, rename, replay, download or delete recordings; the library holds up to 500 recordings / 25 MB.
 
-- **Summaries and comparison** — See audience averages and peaks together, token-holder proportions, coverage and gaps. Choose several thresholds to see time at or above each count and its percentage of covered time. Statistics use real timestamps and exclude recording gaps. Compare two recordings from their first retained samples, optionally matching their shared duration. Metric, threshold and shared-length choices are remembered across rooms and refreshes.
+- **Summaries and comparison** — See audience averages and peaks together, token-holder proportions, coverage and gaps. Choose several thresholds to see time at or above each count and its percentage of covered time. Statistics use real timestamps and exclude recording gaps. Compare two recordings from their first retained samples, optionally matching their shared duration.
 
-- **Backups** — Export ATH for every room and saved preferences, optionally including the library. Restore with a preview and category selection; ATH merges without lowering records. If library entries are unreadable, explicitly choose a partial backup of healthy recordings and download the damaged values separately for manual recovery; originals are retained.
+- **Backups** — Export ATH for every room and saved preferences, optionally including the library. 
 
-- **Reports and exports** — Download a session file, CSV data, TXT summary, or animated GIF from Library. Each stored recording has these actions under **More…**, without loading it into replay.
+- **Reports and exports** — Download a session file, CSV data, TXT summary, or animated GIF from Library. 
 
-- **Flexible layout** — Choose compact or expanded views, collapse individual rows, resize and reposition the panel, and adjust its transparency. A moon–sun switch slides and changes color to show the active dark or bright theme.
+- **Flexible layout** — Choose compact or expanded views, collapse individual rows, resize and reposition the panel, and adjust its transparency. A moon–sun switch activate dark or bright theme.
 
-- **Session controls** — Keep elapsed time and scan status above Library, Replay, play/pause, Stop, Reset and the theme switch. Reserved timer space keeps controls steady as status changes. Automatic absence detection reduces scanning when the broadcaster is away.
+- **Session controls** —  Automatic absence detection reduces scanning when the broadcaster is away.
 
 Session history and all-time records are stored locally through your userscript manager. All-time highs remain separate for each room and survive session resets.
 
