@@ -38,7 +38,7 @@ function harness(storage = new Map(), sourceText = source) {
   const context = {
     crypto:require("crypto").webcrypto, document, location:new URL('https://chaturbate.com/testroom/'), Date:FakeDate,
     console:{log:(...a)=>logs.push(a.join(' ')),warn:(...a)=>logs.push(a.join(' ')),error:(...a)=>logs.push(a.join(' '))},
-    URL:FakeURL,Blob,AbortController, confirm:()=>true,alert:(x)=>logs.push('ALERT: '+x),
+    URL:FakeURL,Blob,TextEncoder,AbortController, confirm:()=>true,alert:(x)=>logs.push('ALERT: '+x),
     GM_listValues:()=>Array.from(storage.keys()),GM_getValue:(k,d)=>storage.has(k)?storage.get(k):d,GM_setValue:(k,v)=>storage.set(k,v),GM_deleteValue:k=>storage.delete(k),
     setTimeout(fn,ms){const id=++timerId;timers.set(id,{fn,ms,repeat:false});return id;},
     setInterval(fn,ms){const id=++timerId;timers.set(id,{fn,ms,repeat:true});return id;},

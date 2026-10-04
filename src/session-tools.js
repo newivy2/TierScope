@@ -17,7 +17,7 @@ import { ANALYSIS_METRICS, analysisSeries, compareSessions, parseAnalysisThresho
 import { captureSessionFile } from './session-capture.js';
 import { validateSessionFile } from './session-file-format.js';
 import { getSessionSaveState } from './session-health.js';
-import { LIBRARY_MAX_BYTES, LIBRARY_MAX_COUNT, LIBRARY_PREFIX, keepSessionInLibrary, readSessionLibrary, removeLibrarySession, renameLibrarySession } from './session-library.js';
+import { LIBRARY_MAX_BYTES, LIBRARY_MAX_COUNT, LIBRARY_PREFIX, createLibraryReader, keepSessionInLibrary, removeLibrarySession, renameLibrarySession } from './session-library.js';
 import { openSessionReplay } from './session-replay.js';
 import { formatElapsedTime, getModelName } from './utils.js';
 
@@ -53,6 +53,8 @@ export function openSessionTools(focusTarget) {
     dialog.innerHTML = libraryShell();
     document.body.appendChild(dialog);
     let currentArchive = null, library = null, tab = 'library', fileRequest = 0, chartObserver = null;
+    const libraryReader = createLibraryReader();
+    let optionsLibrary = null, optionsArchive = null, options = [];
     const savedAnalysis = readAnalysisPreferences();
     let {metric, threshold, sharedLength, summaryThresholds} = savedAnalysis.preferences;
     let selectedA = 'current', selectedB = '', pendingBackup = null;
@@ -99,12 +101,17 @@ export function openSessionTools(focusTarget) {
         };
         input.addEventListener('cancel', () => input.remove(), { once: true }); input.click();
     }
-    function readLibrary() { library = readSessionLibrary(); return library; }
+    function readLibrary() {
+        library = libraryReader.read(); options = []; optionsLibrary = null; optionsArchive = null;
+        return library;
+    }
     function sourceOptions() {
+        if (optionsLibrary === library && optionsArchive === currentArchive) return options;
         const items = [];
         if (currentArchive) items.push({ id: 'current', title: 'Current / replayed snapshot — ' + currentArchive.room, archive: currentArchive });
         for (const entry of library.entries) items.push({ id: entry.id, title: (entry.title || entry.archive.room) + ' — ' + new Date(entry.archive.session.history.timestamps[0]).toLocaleString(), archive: entry.archive });
-        return items;
+        optionsLibrary = library; optionsArchive = currentArchive; options = items;
+        return options;
     }
     function selectSource(parent, label, id, selected, changed) {
         const wrapper = node(parent, 'label', label), select = node(wrapper, 'select'); select.id = id;
@@ -423,7 +430,7 @@ export function openSessionTools(focusTarget) {
         node(content, 'h3', 'Back up this browser');
         node(content, 'p', 'Download ATH for every room and your saved preferences: theme, panel size/position, collapsed rows, compact metric, chart window, SH/ATH mode and analysis choices. Keep this file somewhere safe. Session-only controls such as the scan interval are not saved preferences.', 'tools-muted');
         const include = checkbox(content, 'tools-backup-library', 'Include library recordings');
-        const state = readSessionLibrary();
+        const state = readLibrary();
         let partial = null;
         if (state.damaged.length) {
             node(content, 'p', state.damaged.length + ' unreadable library record(s) are retained. You can back up healthy recordings and download the unreadable values separately for recovery.', 'tools-muted');
@@ -481,6 +488,7 @@ export function openSessionTools(focusTarget) {
     }
     function close() {
         fileRequest++; refreshSessionTools = null;
+        libraryReader.clear(); options = []; optionsLibrary = null; optionsArchive = null; library = null; currentArchive = null;
         cancelGifExport();
         if (detachDock) detachDock();
         document.removeEventListener('keydown', escape);

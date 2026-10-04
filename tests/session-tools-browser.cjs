@@ -16,7 +16,8 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
 (async()=>{
  const browser=await require('playwright')[engine].launch({headless:true,executablePath:process.env.TIERSCOPE_CHROMIUM_PATH,args:JSON.parse(process.env.TIERSCOPE_CHROMIUM_ARGS||'[]')});
  try{
-  const page=await browser.newPage({viewport:{width:1100,height:1000},acceptDownloads:true}),errors=[];
+  const context=await browser.newContext({viewport:{width:1100,height:1000},acceptDownloads:true});
+  const page=await context.newPage(),errors=[];
   page.on('pageerror',e=>errors.push(e.message));
   await page.route('https://tierscope.test/**',r=>r.fulfill({contentType:'text/html',body:'<!doctype html><body style="background:#303846"></body>'}));
   await page.addInitScript(()=>{
@@ -128,6 +129,24 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
   await page.evaluate(()=>{for(let i=0;i<55;i++)GM_deleteValue('tierscope:library:v1:paged_'+i);GM_deleteValue('tierscope:library:v1:nested');});
   await page.locator('#tools-refresh-library').click();
   assert.equal(await page.locator('.tools-folder').count(),1);
+  // A warm Library must see changes made in another tab, including corruption.
+  const storedKey=await page.evaluate(()=>ViewerTracker.__tools.library().entries[0].records[0].key);
+  const sibling=await page.context().newPage();
+  await sibling.route('https://tierscope.test/**',r=>r.fulfill({contentType:'text/html',body:'<!doctype html><body></body>'}));
+  await sibling.goto('https://tierscope.test/testroom/');
+  const originalRaw=await sibling.evaluate(key=>{
+   const original=localStorage.getItem(key),record=JSON.parse(JSON.parse(original));record.title='Updated in another tab';
+   localStorage.setItem(key,JSON.stringify(JSON.stringify(record)));return original;
+  },storedKey);
+  await page.click('#tools-refresh-library');await page.click('#tools-folder-testroom');
+  assert.match(await page.locator('.tools-row').textContent(),/Updated in another tab/);
+  await nav('summary').click();assert.match(await page.locator('#tools-source-a').textContent(),/Updated in another tab/);
+  await nav('library').click();
+  await sibling.evaluate(key=>localStorage.setItem(key,JSON.stringify('{broken')),storedKey);
+  await page.click('#tools-refresh-library');assert.equal(await page.locator('.tools-row').count(),0);
+  assert.match(await page.locator('#tools-content').textContent(),/1 unreadable library record/);
+  await sibling.evaluate(([key,value])=>localStorage.setItem(key,value),[storedKey,originalRaw]);await sibling.close();
+  await page.click('#tools-refresh-library');assert.equal(await page.locator('.tools-folder').count(),1);
   // A damaged entry must not trap healthy recordings or disappear from storage.
   const damagedKey='tierscope:library:v1:damaged';
   await page.evaluate(key=>GM_setValue(key,'{"broken'),damagedKey);

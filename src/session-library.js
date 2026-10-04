@@ -1,5 +1,6 @@
 import { makeStorageId } from './record-validation.js';
 import { validateSessionFile } from './session-file-format.js';
+import { freezeRecordingData } from './immutable-data.js';
 
 export const LIBRARY_PREFIX = 'tierscope:library:v1:';
 export const LIBRARY_MAX_COUNT = 500;
@@ -53,22 +54,59 @@ export function compareLibrarySessions(existing, incoming) {
     return newer ? 1 : older ? -1 : null;
 }
 
-export function readSessionLibrary() {
+// One reader belongs to one open Library. Always re-read keys/raw values so a
+// changed, deleted or unreadable record in another tab cannot reuse stale data.
+export function createLibraryReader() {
+    const cache = new Map();
+    return {read: () => readSessionLibrary(cache), clear: () => cache.clear()};
+}
+
+export function readSessionLibrary(cache = null) {
     const entries = [], damaged = [], unavailable = [], sessions = new Map();
-    let bytes = 0;
-    for (const key of GM_listValues().filter(key => key.startsWith(LIBRARY_PREFIX))) {
+    let bytes = 0, cachedBytes = 0, cachedCount = 0;
+    let keys;
+    try { keys = GM_listValues().filter(key => key.startsWith(LIBRARY_PREFIX)); }
+    catch (error) { if (cache) cache.clear(); throw error; }
+    if (cache) {
+        const present = new Set(keys);
+        for (const key of cache.keys()) if (!present.has(key)) cache.delete(key);
+    }
+    for (const key of keys) {
         let raw;
         try { raw = GM_getValue(key, undefined); }
-        catch (error) { damaged.push(key); unavailable.push(key); continue; }
-        if (raw === undefined) continue;
-        try { bytes += new Blob([typeof raw === 'string' ? raw : JSON.stringify(raw)]).size; }
-        catch (error) { damaged.push(key); unavailable.push(key); continue; }
+        catch (error) { if (cache) cache.delete(key); damaged.push(key); unavailable.push(key); continue; }
+        let cached = cache && cache.get(key);
+        if (cached && cached.raw !== raw) { cache.delete(key); cached = null; }
+        if (raw === undefined) { if (cache) cache.delete(key); continue; }
+        let recordBytes;
         try {
-            const record = JSON.parse(raw);
-            if (record.schemaVersion !== 1 || !Number.isSafeInteger(record.addedAt) || record.addedAt < 0) throw new Error('Invalid library record.');
+            recordBytes = cached ? cached.bytes : new TextEncoder().encode(typeof raw === 'string' ? raw : JSON.stringify(raw)).byteLength;
+            bytes += recordBytes;
+        } catch (error) { if (cache) cache.delete(key); damaged.push(key); unavailable.push(key); continue; }
+        try {
             const id = key.slice(LIBRARY_PREFIX.length);
-            libraryRecordKey(id);
-            const entry = { id, title: libraryTitle(record.title), addedAt: record.addedAt, archive: validateSessionFile(record.archive), records: [{ key, value: raw }] };
+            let data = cached && cached.data;
+            if (!data) {
+                const record = JSON.parse(raw);
+                if (record.schemaVersion !== 1 || !Number.isSafeInteger(record.addedAt) || record.addedAt < 0) throw new Error('Invalid library record.');
+                libraryRecordKey(id);
+                data = {title: libraryTitle(record.title), addedAt: record.addedAt, archive: validateSessionFile(record.archive)};
+            }
+            if (cache) {
+                if (typeof raw === 'string' && cachedCount < LIBRARY_MAX_COUNT && cachedBytes + recordBytes <= LIBRARY_MAX_BYTES) {
+                    if (!cached) {
+                        // Validation copied these arrays and checked every item
+                        // as a primitive. Freeze them without visiting every
+                        // sample again, then freeze the small enclosing record.
+                        for (const values of Object.values(data.archive.session.history)) Object.freeze(values);
+                        cache.set(key, {raw, bytes: recordBytes, data: freezeRecordingData(data)});
+                    }
+                    cachedBytes += recordBytes; cachedCount++;
+                } else cache.delete(key);
+            }
+            // Grouping and callers receive fresh containers; only validated,
+            // frozen recording data can be shared with a later read.
+            const entry = { id, ...data, records: [{ key, value: raw }] };
             const sessionKey = librarySessionKey(entry.archive), siblings = sessions.get(sessionKey) || [];
             const previous = siblings.find(other => compareLibrarySessions(other.archive, entry.archive) !== null);
             if (previous) {
@@ -76,7 +114,7 @@ export function readSessionLibrary() {
                 if (compareLibrarySessions(previous.archive, entry.archive) === 1) Object.assign(previous, entry);
                 previous.records = records; previous.addedAt = addedAt;
             } else { entries.push(entry); siblings.push(entry); sessions.set(sessionKey, siblings); }
-        } catch (error) { damaged.push(key); }
+        } catch (error) { if (cache) cache.delete(key); damaged.push(key); }
     }
     entries.sort((a, b) => b.archive.session.history.timestamps[0] - a.archive.session.history.timestamps[0] || b.addedAt - a.addedAt || a.id.localeCompare(b.id));
     return { entries, damaged, unavailable, bytes, count: entries.length + damaged.length };

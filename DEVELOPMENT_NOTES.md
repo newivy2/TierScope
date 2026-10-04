@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **3.11.0**. This release retains valid samples through drawing failures, adds explicit partial backups and raw library recovery downloads, and remembers analysis choices. Positioning, scale, tracking, replay and existing recordings remain compatible with 3.10.1; retention limits are unchanged. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation links, see the [README](readme.md).
+Detailed reference for **3.12.0**. This release improves large-library browsing while preserving the panel, recordings, exports and retention limits. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation links, see the [README](readme.md).
 
 ## Contents
 
@@ -267,6 +267,8 @@ The current/replayed card names its source and provides **Keep in library**, **S
 
 The library opens with alphabetically ordered **model folders**, each showing its recording count and most recent recording date. Open a folder to see that model's recordings, newest first by their first retained sample; **All models** returns to the folder list. Existing recordings are grouped automatically without moving stored data. Keep/import opens the matching model folder. Search by model or title always covers the whole library, including other folders. Each recording shows **Replay** and **Summary**; **More…** contains Save file, TXT, CSV, GIF, Add to all-time highs, Rename and confirmed Delete. These exports use that recording without opening it in replay. Large lists show 50 folders or recordings at a time with **Show more**. Library Replay keeps the library open and uses the existing file Replay controls; explicit Add to ATH is available in the recording card. The library persists across session Reset and the temporary session's three-hour expiry. It is kept only in this browser's userscript storage, up to **500 recordings / 25 MB**. Either limit can fill the library; updates also need temporary space to save the replacement safely. Nothing is automatically archived or evicted; a full library asks you to export and remove entries. Unreadable entries are retained. **Download unreadable records** keeps their raw stored values for manual recovery before any explicit removal. If a value cannot be read, its size is unknown and library additions wait until it can be read or you explicitly remove it.
 
+While Library is open, unchanged recordings are validated once and reused across its tabs. **Refresh**, switching tabs and reopening still check stored values, so additions, changes and deletions from another tab are visible. An unreadable record never falls back to its cached copy. Closing Library discards the cache; reopening performs a fresh read. This does not change library capacity, automatic retention, or file contents.
+
 ### Summary and comparison
 
 Choose the current/replayed snapshot or a library recording. **Refresh current / replayed snapshot** captures newer data without saving it to the library. The individual **Summary** starts with the selected metric's chart below the controls, matching Compare. The audience overview follows: room audience (registered + anonymous), registered viewers, viewers with tokens and anonymous viewers, each with a time-weighted average, peak within retained history and full-session high. Hover a recording peak for its first recorded time. Audience proportions show token holders as a share of registered viewers and the whole room, plus the anonymous share of the whole room.
@@ -459,6 +461,7 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
+| **3.12.0** | Speed up repeated Library reads with bounded, per-opening reuse of validated records; preserve refresh and cross-tab changes, avoid repeated source-label formatting, and measure large-library performance and memory. |
 | **3.11.0** | Retain committed samples through drawing failures and retry presentation independently; add explicit healthy-recording partial backups with omission notices and separate raw recovery downloads; remember analysis metric, thresholds and shared-length choices, including in backups. |
 | **3.10.1** | Keep the main panel above Library in both attached and narrow-window sheet layouts, so overlap cannot hide Scope or intercept its controls. Preserve positioning, scale and the sheet breakpoint. |
 | **3.10.0** | Give acquisition and panel preferences explicit state owners; eliminate application import cycles; cache immutable chart data for faster long replays. Group timers above Library, Replay and the other actions, keep control positions stable, match button sizes and the pink Library accent, and add an accessible moon–sun theme switch. Preserve saved-data compatibility. |

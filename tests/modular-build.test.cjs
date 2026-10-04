@@ -123,7 +123,7 @@ test('runtime initialization preserves preference loading and startup order', ()
 });
 
 test('module dependencies are explicit and the built script preserves userscript permissions', () => {
-  const allowed = new Set([...baseline.browserGlobals, '__TIERSCOPE_VERSION__', 'Symbol']);
+  const allowed = new Set([...baseline.browserGlobals, '__TIERSCOPE_VERSION__', 'Symbol', 'TextEncoder']);
   for (const {file,ast} of modules) {
     const scope = eslintScope.analyze(ast, {ecmaVersion: 2022, sourceType: 'module'});
     const unresolved = [...new Set(scope.globalScope.through.map(ref => ref.identifier.name))].filter(name => !allowed.has(name));

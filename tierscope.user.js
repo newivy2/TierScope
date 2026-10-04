@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.11.0
+// @version      3.12.0
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -4514,32 +4514,73 @@ underlying system, so should run in the browser, Node, or Plask.
     if (newer && older) return b.timestamp > a.timestamp ? 1 : -1;
     return newer ? 1 : older ? -1 : null;
   }
-  function readSessionLibrary() {
+  function createLibraryReader() {
+    const cache = /* @__PURE__ */ new Map();
+    return { read: () => readSessionLibrary(cache), clear: () => cache.clear() };
+  }
+  function readSessionLibrary(cache = null) {
     const entries = [], damaged = [], unavailable = [], sessions = /* @__PURE__ */ new Map();
-    let bytes = 0;
-    for (const key of GM_listValues().filter((key2) => key2.startsWith(LIBRARY_PREFIX))) {
+    let bytes = 0, cachedBytes = 0, cachedCount = 0;
+    let keys;
+    try {
+      keys = GM_listValues().filter((key) => key.startsWith(LIBRARY_PREFIX));
+    } catch (error) {
+      if (cache) cache.clear();
+      throw error;
+    }
+    if (cache) {
+      const present = new Set(keys);
+      for (const key of cache.keys()) if (!present.has(key)) cache.delete(key);
+    }
+    for (const key of keys) {
       let raw;
       try {
         raw = GM_getValue(key, void 0);
       } catch (error) {
+        if (cache) cache.delete(key);
         damaged.push(key);
         unavailable.push(key);
         continue;
       }
-      if (raw === void 0) continue;
+      let cached = cache && cache.get(key);
+      if (cached && cached.raw !== raw) {
+        cache.delete(key);
+        cached = null;
+      }
+      if (raw === void 0) {
+        if (cache) cache.delete(key);
+        continue;
+      }
+      let recordBytes;
       try {
-        bytes += new Blob([typeof raw === "string" ? raw : JSON.stringify(raw)]).size;
+        recordBytes = cached ? cached.bytes : new TextEncoder().encode(typeof raw === "string" ? raw : JSON.stringify(raw)).byteLength;
+        bytes += recordBytes;
       } catch (error) {
+        if (cache) cache.delete(key);
         damaged.push(key);
         unavailable.push(key);
         continue;
       }
       try {
-        const record = JSON.parse(raw);
-        if (record.schemaVersion !== 1 || !Number.isSafeInteger(record.addedAt) || record.addedAt < 0) throw new Error("Invalid library record.");
         const id = key.slice(LIBRARY_PREFIX.length);
-        libraryRecordKey(id);
-        const entry = { id, title: libraryTitle(record.title), addedAt: record.addedAt, archive: validateSessionFile(record.archive), records: [{ key, value: raw }] };
+        let data = cached && cached.data;
+        if (!data) {
+          const record = JSON.parse(raw);
+          if (record.schemaVersion !== 1 || !Number.isSafeInteger(record.addedAt) || record.addedAt < 0) throw new Error("Invalid library record.");
+          libraryRecordKey(id);
+          data = { title: libraryTitle(record.title), addedAt: record.addedAt, archive: validateSessionFile(record.archive) };
+        }
+        if (cache) {
+          if (typeof raw === "string" && cachedCount < LIBRARY_MAX_COUNT && cachedBytes + recordBytes <= LIBRARY_MAX_BYTES) {
+            if (!cached) {
+              for (const values of Object.values(data.archive.session.history)) Object.freeze(values);
+              cache.set(key, { raw, bytes: recordBytes, data: freezeRecordingData(data) });
+            }
+            cachedBytes += recordBytes;
+            cachedCount++;
+          } else cache.delete(key);
+        }
+        const entry = __spreadProps(__spreadValues({ id }, data), { records: [{ key, value: raw }] });
         const sessionKey = librarySessionKey(entry.archive), siblings = sessions.get(sessionKey) || [];
         const previous = siblings.find((other) => compareLibrarySessions(other.archive, entry.archive) !== null);
         if (previous) {
@@ -4553,6 +4594,7 @@ underlying system, so should run in the browser, Node, or Plask.
           sessions.set(sessionKey, siblings);
         }
       } catch (error) {
+        if (cache) cache.delete(key);
         damaged.push(key);
       }
     }
@@ -5361,6 +5403,8 @@ underlying system, so should run in the browser, Node, or Plask.
     dialog.innerHTML = libraryShell();
     document.body.appendChild(dialog);
     let currentArchive = null, library = null, tab = "library", fileRequest = 0, chartObserver = null;
+    const libraryReader = createLibraryReader();
+    let optionsLibrary = null, optionsArchive = null, options = [];
     const savedAnalysis = readAnalysisPreferences();
     let { metric, threshold, sharedLength, summaryThresholds } = savedAnalysis.preferences;
     let selectedA = "current", selectedB = "", pendingBackup = null;
@@ -5444,14 +5488,21 @@ underlying system, so should run in the browser, Node, or Plask.
       input.click();
     }
     function readLibrary() {
-      library = readSessionLibrary();
+      library = libraryReader.read();
+      options = [];
+      optionsLibrary = null;
+      optionsArchive = null;
       return library;
     }
     function sourceOptions() {
+      if (optionsLibrary === library && optionsArchive === currentArchive) return options;
       const items = [];
       if (currentArchive) items.push({ id: "current", title: "Current / replayed snapshot — " + currentArchive.room, archive: currentArchive });
       for (const entry of library.entries) items.push({ id: entry.id, title: (entry.title || entry.archive.room) + " — " + new Date(entry.archive.session.history.timestamps[0]).toLocaleString(), archive: entry.archive });
-      return items;
+      optionsLibrary = library;
+      optionsArchive = currentArchive;
+      options = items;
+      return options;
     }
     function selectSource(parent, label, id, selected, changed) {
       const wrapper = node(parent, "label", label), select = node(wrapper, "select");
@@ -5892,9 +5943,9 @@ underlying system, so should run in the browser, Node, or Plask.
       }
     }
     function renderAnalysis(comparing) {
-      const options = analysisControls(comparing);
-      if (!options) return;
-      const a = options.find((item) => item.id === selectedA), b = options.find((item) => item.id === selectedB);
+      const options2 = analysisControls(comparing);
+      if (!options2) return;
+      const a = options2.find((item) => item.id === selectedA), b = options2.find((item) => item.id === selectedB);
       if (comparing) {
         if (a.id === b.id) node(content, "p", "Choose a second recording to make a comparison.", "tools-muted");
         const result = compareSessions(a.archive, b.archive, metric, threshold, sharedLength);
@@ -5921,7 +5972,7 @@ underlying system, so should run in the browser, Node, or Plask.
       node(content, "h3", "Back up this browser");
       node(content, "p", "Download ATH for every room and your saved preferences: theme, panel size/position, collapsed rows, compact metric, chart window, SH/ATH mode and analysis choices. Keep this file somewhere safe. Session-only controls such as the scan interval are not saved preferences.", "tools-muted");
       const include = checkbox(content, "tools-backup-library", "Include library recordings");
-      const state = readSessionLibrary();
+      const state = readLibrary();
       let partial = null;
       if (state.damaged.length) {
         node(content, "p", state.damaged.length + " unreadable library record(s) are retained. You can back up healthy recordings and download the unreadable values separately for recovery.", "tools-muted");
@@ -5991,6 +6042,12 @@ underlying system, so should run in the browser, Node, or Plask.
     function close() {
       fileRequest++;
       refreshSessionTools = null;
+      libraryReader.clear();
+      options = [];
+      optionsLibrary = null;
+      optionsArchive = null;
+      library = null;
+      currentArchive = null;
       cancelGifExport();
       if (detachDock) detachDock();
       document.removeEventListener("keydown", escape);
@@ -7560,7 +7617,7 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/bootstrap.js
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.11.0";
+    runtime.TIERSCOPE_VERSION = "3.12.0";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;
