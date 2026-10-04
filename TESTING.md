@@ -110,11 +110,11 @@ Run `TIERSCOPE_CPU_THROTTLE=4 npm run test:performance` for a Chromium CPU-slowd
 
 `model-history-browser.cjs` runs in both engines as part of the full suite. It exercises exact displayed statistics, chart/table/keyboard selection, Summary and previous-recording Compare, Replay without live/ATH changes, both themes, narrow layouts and Scope stacking, cross-tab rename/corruption/removal/replacement, empty history, large-folder pagination, range selection, close/reopen and navigation cleanup. Fixture screenshots are saved under `/tmp/tierscope-model-history-<engine>-<theme>.png`.
 
-The 3.14 beta adds coverage for the first-position page-model shortcut (including empty history, a different replay model and directory pages), a visible comparison action above the chart, and automatic selection of the chosen recording plus up to five earlier recordings from the same model. Unit/browser cases verify selection across the latest-10/30 chart boundary, fewer available recordings, stable timestamp ties and the collapsed picker on entry to Compare.
+Release 3.14.0 adds coverage for the first-position page-model shortcut (including empty history, a different replay model and directory pages), a visible comparison action above the chart, and automatic selection of the chosen recording plus up to five earlier recordings from the same model. Unit/browser cases verify selection across the latest-10/30 chart boundary, fewer available recordings, stable timestamp ties and the collapsed picker on entry to Compare.
 
 For history costs, set `TIERSCOPE_BENCH_HISTORY=1 npm run test:library-performance`. This groups every recording in one model folder and measures its first overview, a new/cached metric, latest-10/all ranges, refresh and repeated entry. Existing normal and 4× CPU-slowdown settings apply. This is a synthetic cost measurement, not a user-input latency guarantee.
 
-## Organization and interactive comparison (3.14.0 beta)
+## Organization and interactive comparison (3.14.0)
 
 `library-analysis.test.cjs` covers combined model/date/text/favorite filters and sorting, local-day inclusion through São Paulo's midnight DST transition, shared cursor behavior at gaps/duplicate timestamps/endpoints, bounded zoom, plot reduction with extrema/gaps/clipped holds and six-record coverage calculations. `library-metadata.test.cjs` exercises model favorites surviving recording deletion, beta 1 star migration, explicit unfavorite choices, recording-note persistence through growth/rename/backup/bundles, failed redundant writes, concurrent foreign writes, complete-batch validation and rollback of recordings/model favorites without ATH/preferences changes.
 

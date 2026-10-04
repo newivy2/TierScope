@@ -98,7 +98,7 @@ The tools coordinator clears the reader and source-label choices on close. Sourc
 
 `npm run test:library-performance` measures small, 500-record and long-recording libraries. It supports the same source and CPU-throttle environment settings as the replay benchmark. Results, methodology and limitations are in [PERFORMANCE.md](PERFORMANCE.md). No benchmark hooks ship in the installed script.
 
-## Library organization and chart interaction (3.14.0 beta)
+## Library organization and chart interaction (3.14.0)
 
 `library-query.js` is a typed pure helper for local calendar dates, filtering and sorting. `library-browser-view.js` and `tools-view-helpers.js` render supplied entries and request operations via callbacks. The coordinator owns transient filters, recording selections and file-request invalidation. `library-models.js` owns one favorite choice per normalized model, separately from recordings, and migrates beta 1's recording stars without overriding explicit model choices. Notes belong to library entries. `library-transfer.js` validates complete import batches and reuses backup restore's preflight/rollback path with ATH/preferences disabled; selected exports read fresh records. Optional notes and root-level `favoriteModels` extend backup format 1 without changing session files. Existing versions can read the aggregate recordings but do not manage the new metadata.
 

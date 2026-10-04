@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **3.14.0-beta.4**. This beta adds Library organization and interactive comparisons of up to six recordings. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For stable and beta installation links, see the [README](readme.md).
+Detailed reference for **3.14.0**. This release adds Library organization and interactive comparisons of up to six recordings. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation instructions, see the [README](readme.md).
 
 ## Contents
 
@@ -486,6 +486,7 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
+| **3.14.0** | Release model/date Library filters, favorite models, recording notes and bulk import/export; interactive Summary/Compare charts for up to six recordings; direct page-model history and comparison with up to five earlier recordings. The newest recording is solid pink and older recordings are dashed. Preserve the reviewed beta behavior and explicit saving. |
 | **3.14.0-beta.4** | Use longer dashed lines for older recordings, keeping the newest recording solid pink and matching the legend styles. |
 | **3.14.0-beta.3** | Add a direct page-model history shortcut, promote history comparison above the chart, and automatically compare the selected recording with up to five earlier recordings from that model. Use solid pink for the newest selected recording and dotted lines for older recordings. |
 | **3.14.0-beta.2** | Favorite model folders and all their recordings, preserve model choices across recording changes and imports, migrate beta 1 stars, and remove repeated model names from comparison labels. |
