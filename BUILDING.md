@@ -137,6 +137,6 @@ Keep, automatic checkpoints, import, restore and metadata writes read fresh limi
 
 Transfer validation has independent limits of 10,000 sessions and 300 MiB, including an increased 10,000-room ATH bound, so backups remain accessible on a fresh browser or after reducing local limits. Restoring never changes this browser's Library limits and preflights the selected Library additions before any write. Current file downloads already use compact JSON. Cache admission stays at 500 records / 25 MiB rather than expanding with the user's allowance. Automatic checkpoint feedback refreshes only the usage/notice nodes and preserves pending settings inputs.
 
-## Follow live analysis (3.21 beta)
+## Follow live analysis (3.21.0)
 
 `analysis-follow.js` owns per-view frozen/following snapshots and expiry without storage, DOM or runtime dependencies. `session-tools.js` binds eligible sources by room, session start and live reset epoch, validates their initial compatibility, and captures one frozen live archive per accepted revision. Existing presentation notifications drive updates; no polling, acquisition or persistence hooks are added. Only verified Library lineage carries selections through Auto replacements. Views receive derived values: the analysis chart updates in place, and model history preserves controls and table paging while replacing statistics. Dependency gates and the analysis type check include the new owner.

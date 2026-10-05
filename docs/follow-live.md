@@ -1,6 +1,6 @@
-# Follow live — 3.21.0-beta.1
+# Follow live — 3.21.0
 
-[Install the beta](https://raw.githubusercontent.com/newivy2/TierScope/beta/follow-live-analysis/tierscope.user.js). Keep one enabled copy and refresh room tabs after updating. Main remains on 3.20.0 during review.
+[Install TierScope](https://raw.githubusercontent.com/newivy2/TierScope/main/tierscope.user.js). Keep one enabled copy and refresh room tabs after updating. [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.21.0).
 
 **Follow live** appears above the chart in Summary, Compare and Model History. It starts on when the view includes the actively tracked session of a model whose favorite/automatic-keeping setting has been confirmed.
 
@@ -16,7 +16,7 @@ Chart updates do not trigger extra scans or Library writes. Automatic keeping ke
 
 In **Current Live Session**, **Compare with previous** is now the primary pink-bordered button. **Keep in Library** has no visible border. Both retain their positions.
 
-To review:
+To try Follow live:
 
 1. Open a confirmed favorite with a current session. Open Summary and watch its sample count after a scan.
 2. Use Compare with previous, turn off Match shared length if needed, and zoom or hide a line. Check that new scans preserve those controls.

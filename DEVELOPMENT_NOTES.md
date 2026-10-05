@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **3.21.0-beta.1** ([Follow live beta guide](docs/follow-live-beta.md)); stable remains **3.20.0**. [Audience trends and ratio guide](docs/audience-trends.md). [Sessions Book guide](docs/sessions-book.md). The simplified Current Live Session card provides Keep in Library, Auto, Compare with previous, and History. File controls are below the session list, and exports remain on stored-session menus and the separate replay card. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation instructions, see the [README](readme.md).
+Detailed reference for **3.21.0** ([Follow live guide](docs/follow-live.md)). [Audience trends and ratio guide](docs/audience-trends.md). [Sessions Book guide](docs/sessions-book.md). The simplified Current Live Session card provides Keep in Library, Auto, Compare with previous, and History. File controls are below the session list, and exports remain on stored-session menus and the separate replay card. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation instructions, see the [README](readme.md).
 
 ## Contents
 
@@ -330,7 +330,7 @@ Summary and Compare charts now support shared inspection. Move over the chart to
 
 Use **Zoom +/−**, drag a horizontal range, or press +/− with the chart focused. The arrow buttons pan and **Full range** resets zoom. Checkboxes show/hide lines, retaining at least one visible recording. Colors and dash patterns distinguish A–F; hover a legend label for its complete recording name/date. Zoom and hidden lines affect presentation only: statistics and **Match shared length** still use the selected recordings' complete comparison range. With Follow live off, new scans leave the comparison frozen. With it on, only the matching current live session updates; earlier recordings remain fixed. Switching sources, metric or analysis view builds a new chart; the zoom, visibility and cursor state are temporary.
 
-### Follow live (beta)
+### Follow live (3.21.0)
 
 Summary, Compare and Model History offer **Follow live** for the active session of a confirmed favorite. It defaults on for an eligible source and keeps a separate choice per view until Library closes. Updates follow accepted scans in this tab, independently of the Library save cadence. They do not scan other rooms or save additional records. The status distinguishes a pending Library save from the newer live data being displayed.
 
@@ -526,7 +526,7 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
-| **3.21.0-beta.1** | Add Follow live to Summary, Compare and Model History for the active session of confirmed favorites; preserve chart controls, frozen views, session identity and independent save feedback. Promote Compare with previous in Current Live Session. |
+| **3.21.0** | Add Follow live to Summary, Compare and Model History for the active session of confirmed favorites; preserve chart controls, frozen views, session identity and independent save feedback. Promote Compare with previous in Current Live Session. |
 | **3.20.0** | Match the With Tokens trend border to yellow, add a pink Room Total trend box to the larger four-column bottom row, adjust delta fonts, and show an Anons/registered ratio from the displayed sample with a 5% equality band. |
 | **3.19.0** | Add a collapsed Sessions Book with nested Search & sort. Default Moderators/Anons/Room Total to collapsed, preserve saved layouts, and give the model header room beside the resize handle. Start Summary with its picker collapsed and derive thresholds from the displayed session’s time-weighted metric average. |
 | **3.18.0** | Default to 1,000 sessions / 50 MB, add local configurable storage limits and capacity notices, preserve prior recordings on failed updates, and support backups/imports through 300 MB / 10,000 sessions with capacity preflight. |
