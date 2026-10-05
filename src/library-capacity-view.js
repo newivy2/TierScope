@@ -42,3 +42,21 @@ export function renderLibraryCapacity(parent, usage, limits, error, save) {
     };
     return refresh;
 }
+
+export function renderAutomaticKeepingSettings(parent, minutes, error, save) {
+    const settings = toolNode(parent, 'details'); settings.id = 'tools-automatic-settings';
+    toolNode(settings, 'summary', 'Automatic keeping');
+    const form = toolNode(settings, 'form');
+    toolNode(form, 'p', 'For favorite models in this browser. Short sessions stay live without being added automatically. Manual Keep in Library works at any length.', 'tools-muted');
+    const label = toolNode(form, 'label', 'Minimum recorded duration (minutes) '), input = toolNode(label, 'input');
+    label.style.display = 'grid'; input.style.width = '100%';
+    input.id = 'tools-automatic-minutes'; input.type = 'number'; input.min = '0'; input.max = '1440'; input.step = '1'; input.required = true; input.value = String(minutes ?? 5);
+    toolNode(form, 'p', 'Default: 5 minutes of retained sample coverage. Pauses and recording gaps do not count. Use 0 to keep from the first sample. Existing saved sessions are never removed.', 'tools-muted');
+    const submit = toolButton(form, 'Save automatic keeping', null, 'tools-automatic-save'); submit.type = 'submit';
+    const feedback = toolNode(form, 'p', error || '', 'tools-capacity-warning'); feedback.setAttribute('role', 'alert'); feedback.hidden = !error;
+    form.onsubmit = event => {
+        event.preventDefault(); if (!form.reportValidity()) return;
+        try { save(input.valueAsNumber); }
+        catch (failure) { feedback.textContent = failure.message; feedback.hidden = false; }
+    };
+}

@@ -31,3 +31,33 @@ export function saveLibraryLimits(value) {
     }
     return limits;
 }
+
+// Local automatic-keeping preference; imports/backups do not enable or alter it.
+export const AUTOMATIC_KEEPING_KEY = 'tierscope:automatic-keeping:v1';
+export function readAutomaticKeepingMinutes() {
+    try {
+        const raw = GM_getValue(AUTOMATIC_KEEPING_KEY, undefined);
+        if (raw === undefined) return 5;
+        const record = JSON.parse(raw);
+        if (record.schemaVersion !== 1) throw new Error('Unsupported automatic keeping settings.');
+        return validateAutomaticKeepingMinutes(record.minimumMinutes);
+    } catch (error) { throw new Error('Automatic keeping settings could not be read. Save them again in Library → Automatic keeping.'); }
+}
+function validateAutomaticKeepingMinutes(value) {
+    if (!Number.isInteger(value) || value < 0 || value > 1440) throw new Error('Choose a whole number from 0 to 1,440 minutes.');
+    return value;
+}
+export function saveAutomaticKeepingMinutes(value) {
+    const minutes = validateAutomaticKeepingMinutes(value), before = GM_getValue(AUTOMATIC_KEEPING_KEY, undefined);
+    const raw = JSON.stringify({schemaVersion: 1, minimumMinutes: minutes});
+    try {
+        GM_setValue(AUTOMATIC_KEEPING_KEY, raw);
+        if (GM_getValue(AUTOMATIC_KEEPING_KEY, undefined) !== raw) throw new Error('Automatic keeping settings could not be verified.');
+    } catch (error) {
+        if (GM_getValue(AUTOMATIC_KEEPING_KEY, undefined) === raw) {
+            if (before === undefined) GM_deleteValue(AUTOMATIC_KEEPING_KEY); else GM_setValue(AUTOMATIC_KEEPING_KEY, before);
+        }
+        throw error;
+    }
+    return minutes;
+}

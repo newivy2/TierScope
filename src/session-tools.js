@@ -13,8 +13,8 @@ import { readAllTimeHighs, sessionAllTimeHighs, storeAllTimeHighs } from './high
 import { repaintHighMode } from './highs.js';
 import { attachLibraryDock } from './library-dock.js';
 import { LIBRARY_TRANSFER_MAX_COUNT } from './library-capacity-data.js';
-import { readLibraryLimits, saveLibraryLimits } from './library-capacity.js';
-import { renderLibraryCapacity } from './library-capacity-view.js';
+import { readAutomaticKeepingMinutes, saveAutomaticKeepingMinutes, readLibraryLimits, saveLibraryLimits } from './library-capacity.js';
+import { renderAutomaticKeepingSettings, renderLibraryCapacity } from './library-capacity-view.js';
 import { libraryShell } from './library-shell.js';
 import { migrateRecordingFavorites, readModelFavorites, readModelFavorite } from './library-models.js';
 import { createLibraryDrafts } from './library-drafts.js';
@@ -383,7 +383,7 @@ export function openSessionTools(focusTarget) {
             const status = automaticLibraryStatus(room);
             info.textContent = replay ? 'Replay is a snapshot. Keep it explicitly to add or update it in Library.' :
                 preference.error || (status.error ? 'Automatic keep pending: ' + status.error :
-                preference.autoKeep ? status.savedAt ? 'Automatically kept at ' + new Date(status.savedAt).toLocaleTimeString() + '. Updates as you record.' :
+                preference.autoKeep ? status.waiting ? 'Automatic keeping requires ' + status.minimumMinutes + ' minutes of recorded coverage · ' + formatElapsedTime(status.coveredMs) + ' recorded.' : status.savedAt ? 'Automatically kept at ' + new Date(status.savedAt).toLocaleTimeString() + '. Updates as you record.' :
                     'Automatic keeping on · waiting for a recorded sample.' : preference.favorite ? 'Favorite · automatic keeping is off until you confirm.' : 'Favorite this model to automatically keep their live sessions.');
             info.style.color = !replay && status.error ? 'var(--panel-warning)' : 'var(--panel-muted)';
             const automatic = card.querySelector('#tools-auto-keep');
@@ -490,6 +490,13 @@ export function openSessionTools(focusTarget) {
         refreshCapacity = renderLibraryCapacity(content, state, limits, capacityError, value => {
             saveLibraryLimits(value); render('library'); tell('Storage limits saved for this browser. Existing sessions were kept.');
             dialog.querySelector('#tools-storage-settings > summary').focus();
+        });
+        let automaticMinutes = null, automaticError = '';
+        try { automaticMinutes = readAutomaticKeepingMinutes(); } catch (error) { automaticError = error.message; }
+        renderAutomaticKeepingSettings(dialog.querySelector('#tools-library-storage'), automaticMinutes, automaticError, value => {
+            saveAutomaticKeepingMinutes(value); keepFavoriteSession(getModelName(), true);
+            render('library'); tell('Automatic keeping minimum saved for this browser. Existing sessions were kept.');
+            dialog.querySelector('#tools-automatic-settings > summary').focus();
         });
         if (state.favoriteError) node(content, 'p', state.favoriteError, 'tools-muted');
         libraryFilters.room = libraryRoom || '';

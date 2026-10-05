@@ -1,3 +1,15 @@
+/** Recorded timestamp coverage, excluding marked gaps and clock regressions. */
+export function recordedCoverageMs(history) {
+    let previous = 0, coveredMs = 0;
+    const origin = history.timestamps[0];
+    for (let i = 1; i < history.timestamps.length; i++) {
+        const next = Math.max(previous, history.timestamps[i] - origin, 0);
+        if (!history.breaks?.[i]) coveredMs += next - previous;
+        previous = next;
+    }
+    return coveredMs;
+}
+
 // One reader per Library opening. Only immutable histories reuse covered time;
 // model cards aggregate sessions matching the active filters, including overlaps.
 export function createModelCardReader() {
@@ -8,13 +20,7 @@ export function createModelCardReader() {
         const immutable = Object.isFrozen(history) && Object.isFrozen(history.timestamps) &&
             (!history.breaks || Object.isFrozen(history.breaks));
         if (immutable && cache.has(history)) return cache.get(history);
-        let previous = 0, coveredMs = 0;
-        const origin = history.timestamps[0];
-        for (let i = 1; i < history.timestamps.length; i++) {
-            const next = Math.max(previous, history.timestamps[i] - origin, 0);
-            if (!history.breaks?.[i]) coveredMs += next - previous;
-            previous = next;
-        }
+        const coveredMs = recordedCoverageMs(history);
         if (immutable) cache.set(history, coveredMs);
         return coveredMs;
     }

@@ -4,7 +4,7 @@ const extra = source.replace('downloadTrackingReport: downloadTrackingReport,', 
  captureSessionFile,keepSessionInLibrary,readSessionLibrary,planLibraryAdditions,createTierScopeBackup,restoreTierScopeBackup,validateTierScopeBackup,
  libraryImportBundle,importLibraryBundle,exportLibrarySelection,setModelFavorite,keepFavoriteSession,automaticLibraryStatus},downloadTrackingReport: downloadTrackingReport,`);
 const clean = value => JSON.parse(JSON.stringify(value));
-function fresh(storage = new Map()) { const h = harness(storage, extra); h.t.initPanel(); h.t.sample(2); h.d = h.api.__capacity; return h; }
+function fresh(storage = new Map()) { const h = harness(storage, extra); h.context.GM_setValue('tierscope:automatic-keeping:v1', JSON.stringify({schemaVersion:1,minimumMinutes:0})); h.t.initPanel(); h.t.sample(2); h.d = h.api.__capacity; return h; }
 const limits = (maxSessions = 1000, maxMegabytes = 50) => ({maxSessions, maxMegabytes});
 function archive(h, room = 'testroom') { return {...clean(h.d.captureSessionFile()), room}; }
 const snapshot = h => JSON.stringify([...h.storage].sort(([a], [b]) => a.localeCompare(b)));

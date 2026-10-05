@@ -7,7 +7,7 @@ const source = prepareSource(fs.readFileSync(path.join(__dirname, '../tierscope.
  STORAGE_HISTORY_SERIES.forEach(k=>h[k]=[2,4]);h.total=[14,28];h.withTokens=[12,24];
  restoreSessionState(normalizeStoredSession({timestamp:now,history:h,isPaused:true,pausedElapsedTime:60000}));
  isAutoRefreshOn=false;isMinimized=true;createPanel();toggleView();repaintLivePresentation();},
- readLibraryLimits,readSessionLibrary,keepSessionInLibrary,captureLiveSessionFile,createTierScopeBackup,
+ readAutomaticKeepingMinutes,readLibraryLimits,readSessionLibrary,keepSessionInLibrary,captureLiveSessionFile,createTierScopeBackup,
  sample(){users=new Map([['viewer',{tier:'red',gender:'male'}]]);saveToHistory();saveSession(getModelName(),true);updateDisplay();},
  state:()=>({history:JSON.stringify(history),mode:presentationMode})},downloadTrackingReport: downloadTrackingReport,`);
 (async () => {
@@ -23,6 +23,16 @@ const source = prepareSource(fs.readFileSync(path.join(__dirname, '../tierscope.
   await page.goto('https://tierscope.test/testroom/');await page.addScriptTag({content:instrument(source)});await page.evaluate(()=>ViewerTracker.__capacity.setup());await page.waitForTimeout(350);
   await page.click('#btn-control-library');
   const initial = await page.evaluate(()=>ViewerTracker.__capacity.state());
+  if (!await page.locator('#tools-automatic-settings').evaluate(e=>e.open)) await page.locator('#tools-automatic-settings > summary').click();
+  assert.equal(await page.locator('#tools-automatic-minutes').inputValue(),'5');
+  await page.locator('#tools-automatic-minutes').fill('-1');await page.click('#tools-automatic-save');
+  assert.equal(await page.evaluate(()=>ViewerTracker.__capacity.readAutomaticKeepingMinutes()),5);
+  await page.locator('#tools-automatic-minutes').fill('10');await page.click('#tools-automatic-save');
+  assert.equal(await page.evaluate(()=>ViewerTracker.__capacity.readAutomaticKeepingMinutes()),10);
+  if (!await page.locator('#tools-automatic-settings').evaluate(e=>e.open)) await page.locator('#tools-automatic-settings > summary').click();
+  await page.locator('#tools-automatic-minutes').fill('5');await page.locator('#tools-automatic-minutes').press('Enter');
+  assert.equal(await page.evaluate(()=>ViewerTracker.__capacity.readAutomaticKeepingMinutes()),5);
+
   assert.match(await page.locator('#tools-library-usage').textContent(),/0 \/ 1,000 sessions.*0.00 \/ 50 MB/);
   assert.equal(await page.locator('#tools-storage-settings').getAttribute('open'),null);
   assert(await page.locator('#tools-library-capacity-warning').isHidden());
@@ -56,8 +66,14 @@ const source = prepareSource(fs.readFileSync(path.join(__dirname, '../tierscope.
   await save(3,25);assert.match(await page.locator('#tools-library-capacity-warning').textContent(),/limit reached/);
   await page.click('#tools-keep');assert.match(await page.locator('#tools-message').textContent(),/Library full/);
   assert.equal(await page.evaluate(()=>ViewerTracker.__capacity.readSessionLibrary().count),4);
+  // Five-minute default keeps a one-minute favorite out, even when capacity is full.
+  page.once('dialog',d=>d.accept());await page.click('#tools-auto-keep');
+  assert.match(await page.locator('[data-card-auto]').first().textContent(),/requires 5 minutes/);
+  assert.equal(await page.evaluate(()=>ViewerTracker.__capacity.readSessionLibrary().count),4);
+  if (!await page.locator('#tools-automatic-settings').evaluate(e=>e.open)) await page.locator('#tools-automatic-settings > summary').click();
+  await page.locator('#tools-automatic-minutes').fill('0');await page.click('#tools-automatic-save');
   // Auto uses the configured allowance and can retry after it is raised.
-  page.once('dialog',async dialog=>{assert.match(dialog.message(),/3 sessions \/ 25 MB/);await dialog.accept();});await page.click('#tools-auto-keep');
+
   assert.match(await page.locator('[data-card-auto]').first().textContent(),/pending.*Library full/);
   await save(6,50);await openSettings();await page.locator('#tools-storage-sessions').fill('7');
   await page.evaluate(()=>window.capacityInput=document.getElementById('tools-storage-sessions'));
