@@ -83,7 +83,7 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
   await page.evaluate(archive=>{const a=JSON.parse(JSON.stringify(archive));for(const key of Object.keys(a.session.history))a.session.history[key]=a.session.history[key].slice(-1);a.session.history.breaks=[false];GM_setValue('tierscope:library:v1:no_duration',JSON.stringify({schemaVersion:1,addedAt:Date.now(),title:'No covered interval',archive:a}));},other.archive);
   await nav('library').click();await nav('summary').click();await page.selectOption('#tools-source-a','no_duration');
   assert.equal(await page.locator('#tools-threshold').inputValue(),'');assert(await page.locator('#tools-average-thresholds').isDisabled());assert.equal(await page.locator('#tools-threshold-table').count(),0);
-  assert.match(await page.locator('#tools-analysis-output').textContent(),/Not enough covered recording time/);
+  assert.match(await page.locator('#tools-analysis-output').textContent(),/Not enough covered session time/);
   await page.evaluate(()=>GM_deleteValue('tierscope:library:v1:no_duration'));
   await nav('library').click();await nav('summary').click();await page.selectOption('#tools-source-a',first.id);
   await nav('compare').click();await page.selectOption('#tools-source-a',first.id);await page.selectOption('#tools-source-b',other.id);

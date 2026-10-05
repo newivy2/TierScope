@@ -20,7 +20,7 @@ export function validateLibraryLimits(value) {
 /** @param {{count: number, bytes: number, unavailable?: string[]}} usage
  * @param {{maxSessions: number, maxMegabytes: number}} limits */
 export function libraryCapacityNotice(usage, limits) {
-    if (usage.unavailable?.length) return 'Some recordings could not be read. Storage usage is incomplete; new saves wait until they can be read or removed.';
+    if (usage.unavailable?.length) return 'Some sessions could not be read. Storage usage is incomplete; new saves wait until they can be read or removed.';
     const ratio = Math.max(usage.count / limits.maxSessions, usage.bytes / (limits.maxMegabytes * LIBRARY_MEGABYTE));
     if (ratio >= 1) return 'Library limit reached. Existing sessions are kept. Raise the limits or export and remove sessions to make room.';
     if (ratio >= 0.8) return 'Library is nearing its limit. Raise the limits or export and remove sessions before it fills up.';

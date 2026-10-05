@@ -33,7 +33,7 @@ export function renderLibraryBrowser(parent, entries, filters, selected, actions
     function updateSelection() {
         if (selected.size) selectionTools.open = true;
         selection.textContent = selected.size + ' selected' + ([...selected].some(id => !matching.some(entry => entry.id === id)) ? ' · includes hidden sessions' : '');
-        compare.disabled = selected.size < 2 || selected.size > 6; compare.title = 'Select 2–6 recordings to compare'; download.disabled = !selected.size;
+        compare.disabled = selected.size < 2 || selected.size > 6; compare.title = 'Select 2–6 sessions to compare'; download.disabled = !selected.size;
         for (const row of list.querySelectorAll('[data-library-id]')) row.querySelector('input[type=checkbox]').checked = selected.has(row.dataset.libraryId);
     }
     function rows() {
@@ -58,15 +58,18 @@ export function renderLibraryBrowser(parent, entries, filters, selected, actions
             favoriteButton(heading, room);
             button(heading, 'History overview', () => actions.history(room), 'tools-model-history').className = 'tools-primary';
         }
-        if (!matching.length) node(list, 'p', entries.length ? 'No matching recordings.' : 'Your library is empty. Keep a recording above or import a session file.', 'tools-muted');
+        if (!matching.length) node(list, 'p', entries.length ? 'No matching sessions.' : 'Your library is empty. Keep a session above or import a session file.', 'tools-muted');
         if (browsingFolders) for (const room of visible.slice(0, shown)) {
             const recordings = folders.get(room), row = node(list, 'div', undefined, 'tools-folder');
             const open = button(row, '', () => { filters.room = room; inputs.model.value = room; shown = 50; actions.room(room); rows(); document.getElementById('tools-library-all-models').focus(); }, 'tools-folder-' + room);
             open.className = 'tools-folder-open';
-            open.setAttribute('aria-label', 'Open recordings for ' + room);
+            open.setAttribute('aria-label', 'Open sessions for ' + room);
             node(open, 'span', '▱  ' + room, 'tools-folder-name');
-            const latest = Math.max(...recordings.map(entry => entry.archive.session.history.timestamps[0]));
-            node(open, 'span', recordings.length + (recordings.length === 1 ? ' recording' : ' recordings') + ' · Latest ' + new Date(latest).toLocaleDateString(), 'tools-folder-meta');
+            const summary = actions.cardSummary(recordings);
+            node(open, 'span', recordings.length + (recordings.length === 1 ? ' session' : ' sessions') +
+                ' · First ' + new Date(summary.first).toLocaleDateString() + ' · Latest ' + new Date(summary.latest).toLocaleDateString(), 'tools-folder-meta');
+            const covered = node(open, 'span', 'Total covered time ' + actions.duration(summary.coveredMs), 'tools-folder-meta');
+            covered.title = 'Sum of covered intervals in sessions matching the current filters. Gaps and time after the final sample are excluded; overlapping sessions are counted separately.';
             favoriteButton(row, room, true);
         } else for (const entry of visible.slice(0, shown)) {
             const row = node(list, 'article', undefined, 'tools-row'); row.dataset.libraryId = entry.id;
@@ -86,7 +89,7 @@ export function renderLibraryBrowser(parent, entries, filters, selected, actions
             }
             renderRecordingNotes(more, entry, actions);
         }
-        if (visible.length > 50) node(list, 'p', 'Showing ' + Math.min(shown, visible.length) + ' of ' + visible.length + (browsingFolders ? ' model folders.' : ' matching recordings.'), 'tools-muted');
+        if (visible.length > 50) node(list, 'p', 'Showing ' + Math.min(shown, visible.length) + ' of ' + visible.length + (browsingFolders ? ' model folders.' : ' matching sessions.'), 'tools-muted');
         if (shown < visible.length) button(list, 'Show ' + Math.min(50, visible.length - shown) + ' more', () => {
             shown += 50; rows(); (document.getElementById('tools-library-more') || bookSummary).focus();
         }, 'tools-library-more');
@@ -96,7 +99,7 @@ export function renderLibraryBrowser(parent, entries, filters, selected, actions
 
 // The coordinator supplies draft values and explicit Save/Discard operations.
 export function renderRecordingNotes(parent, entry, actions, missing = false) {
-    const label = node(parent, 'label', 'Recording notes '), note = node(label, 'textarea');
+    const label = node(parent, 'label', 'Session notes '), note = node(label, 'textarea');
     note.maxLength = 2000; note.rows = 3; note.value = actions.note(entry).value;
     const status = node(parent, 'p', '', 'tools-muted'); status.setAttribute('role', 'status');
     const controls = node(parent, 'div', undefined, 'tools-actions');
@@ -105,7 +108,7 @@ export function renderRecordingNotes(parent, entry, actions, missing = false) {
     function update() {
         const draft = actions.note(entry);
         save.disabled = missing || !draft.dirty; discard.disabled = !draft.dirty;
-        status.textContent = missing ? 'Recording changed or unavailable. Copy this draft before discarding it.' :
+        status.textContent = missing ? 'Session changed or unavailable. Copy this draft before discarding it.' :
             draft.conflict ? 'Saved notes changed elsewhere. Your draft is still here; saving will ask before replacing them.' :
             draft.dirty ? 'Unsaved note — kept in this tab until you save or discard it.' : 'Notes saved.';
     }

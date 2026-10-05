@@ -16,11 +16,11 @@ export function renderModelHistoryView(parent, overview, actions) {
         if (id) element.id = id; return element;
     }
     if (!recordings.length) {
-        node(parent, 'p', 'No saved recordings for this model. Return to Recordings to keep or import one.', 'tools-muted');
+        node(parent, 'p', 'No saved sessions for this model. Return to Sessions to keep or import one.', 'tools-muted');
         return null;
     }
     const controls = node(parent, 'div', undefined, 'tools-actions');
-    const label = node(controls, 'label', 'Recording '), select = node(label, 'select'); select.id = 'tools-history-recording';
+    const label = node(controls, 'label', 'Session '), select = node(label, 'select'); select.id = 'tools-history-recording';
     // Newest first in the selector/table; chronological positions on the chart.
     for (const record of [...recordings].reverse()) {
         const option = node(select, 'option', date(record.time) + ' · ' + record.title); option.value = record.id;
@@ -38,28 +38,28 @@ export function renderModelHistoryView(parent, overview, actions) {
     const comparisonHint = node(parent, 'p', '', 'tools-muted'); comparisonHint.id = 'tools-history-compare-hint';
     compare.setAttribute('aria-describedby', comparisonHint.id);
     if (actions.metricControl) actions.metricControl(parent);
-    const legend = node(parent, 'p', '● Average · ◆ Peak in recording', 'tools-history-legend'); legend.id = 'tools-history-legend';
+    const legend = node(parent, 'p', '● Average · ◆ Peak in session', 'tools-history-legend'); legend.id = 'tools-history-legend';
     const canvas = node(parent, 'canvas'); canvas.id = 'tools-history-chart'; canvas.setAttribute('role', 'img');
-    canvas.setAttribute('aria-label', actions.metricLabel + ' across saved recordings, positioned by the date of their first retained sample. Use the recording selector above or the table below for the values.');
+    canvas.setAttribute('aria-label', actions.metricLabel + ' across saved sessions, positioned by the date of their first retained sample. Use the session selector above or the table below for the values.');
     canvas.setAttribute('aria-describedby', legend.id);
-    node(parent, 'p', 'One point per recording, using its first retained sample date. Averages use real covered time; gaps and time after the final sample are excluded. Select a point or use the recording selector above.', 'tools-muted');
-    node(parent, 'h3', 'Across these recordings');
+    node(parent, 'p', 'One point per session, using its first retained sample date. Averages use real covered time; gaps and time after the final sample are excluded. Select a point or use the session selector above.', 'tools-muted');
+    node(parent, 'h3', 'Across these sessions');
     const cards = node(parent, 'dl', undefined, 'tools-history-stats'); cards.id = 'tools-history-stats';
     function updateCards() {
         cards.replaceChildren();
         for (const [label, value] of [
-            ['Recordings', recordings.length + ' / ' + overview.totalCount],
-            ['Time-weighted average', number(overview.mean)], ['Peak in recordings', number(overview.peak)],
+            ['Sessions', recordings.length + ' / ' + overview.totalCount],
+            ['Time-weighted average', number(overview.mean)], ['Peak in sessions', number(overview.peak)],
             ['Token holders / registered', percent(overview.tokenShare)],
             ['Covered time (sum)', actions.duration(overview.coveredMs)], ['Excluded gaps (sum)', actions.duration(overview.gapMs)]
         ]) { const card = node(cards, 'div'); node(card, 'dt', label); node(card, 'dd', value); }
     }
     updateCards();
-    node(parent, 'p', 'Based on the recordings shown here, including new scans while Follow live is on. Token share uses registered-viewer time. These peaks are not ATH. Full-session highs may predate retained samples.', 'tools-muted');
-    const warning = node(parent, 'p', 'Some recording time ranges overlap. Totals sum recordings and may count the same period more than once.', 'tools-muted');
+    node(parent, 'p', 'Based on the sessions shown here, including new scans while Follow live is on. Token share uses registered-viewer time. These peaks are not ATH. Full-session highs may predate retained samples.', 'tools-muted');
+    const warning = node(parent, 'p', 'Some session time ranges overlap. Totals sum sessions and may count the same period more than once.', 'tools-muted');
     warning.id = 'tools-history-overlap'; warning.hidden = !overview.overlaps;
     const detail = node(parent, 'section', undefined, 'tools-current'); detail.id = 'tools-history-detail';
-    detail.setAttribute('aria-label', 'Selected recording');
+    detail.setAttribute('aria-label', 'Selected session');
     const heading = node(detail, 'strong'), meta = node(detail, 'p', undefined, 'tools-muted');
     const values = node(detail, 'p'); values.setAttribute('aria-live', 'polite');
     let positions = [], shown = 50;
@@ -101,19 +101,19 @@ export function renderModelHistoryView(parent, overview, actions) {
         }
         legend.style.color = accent;
         legend.replaceChildren(); node(legend, 'span', '● Average');
-        node(legend, 'span', ' ◆ Peak in recording').style.color = secondary;
+        node(legend, 'span', ' ◆ Peak in session').style.color = secondary;
     }
     function updateSelection() {
         const record = selected();
         actions.select(record.id);
         heading.textContent = record.title; meta.textContent = date(record.time) + ' · ' + record.samples.toLocaleString() + ' samples';
-        values.textContent = 'Average ' + number(record.mean) + ' · Peak in recording ' + number(record.peak) +
+        values.textContent = 'Average ' + number(record.mean) + ' · Peak in session ' + number(record.peak) +
             ' · Full-session high ' + number(record.sessionPeak) + ' · Token holders / registered ' + percent(record.tokenShare) +
             ' · Covered ' + actions.duration(record.coveredMs) + ' · Gaps ' + actions.duration(record.gapMs);
         const previousCount = record.comparisonIds.length - 1;
         compare.disabled = previousCount === 0;
-        comparisonHint.textContent = previousCount ? 'Compare this recording with ' + previousCount + ' earlier ' +
-            (previousCount === 1 ? 'recording' : 'recordings') + ' from this model (' + (previousCount + 1) + ' total).' : 'No earlier saved recordings for this model.';
+        comparisonHint.textContent = previousCount ? 'Compare this session with ' + previousCount + ' earlier ' +
+            (previousCount === 1 ? 'session' : 'sessions') + ' from this model (' + (previousCount + 1) + ' total).' : 'No earlier saved sessions for this model.';
         table.querySelectorAll('button[data-history-id]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.historyId === record.id)));
         draw();
     }
@@ -130,11 +130,11 @@ export function renderModelHistoryView(parent, overview, actions) {
         if (closest) { select.value = closest.id; updateSelection(); }
     };
     const scroll = node(parent, 'div', undefined, 'tools-scroll'), table = node(scroll, 'table'); table.id = 'tools-history-table';
-    node(table, 'caption', actions.metricLabel + ' · newest recording first');
+    node(table, 'caption', actions.metricLabel + ' · newest session first');
     const head = node(node(table, 'thead'), 'tr');
-    ['Recording', 'Average', 'Peak', 'Token share¹', 'Covered'].forEach(text => { node(head, 'th', text).scope = 'col'; });
+    ['Session', 'Average', 'Peak', 'Token share¹', 'Covered'].forEach(text => { node(head, 'th', text).scope = 'col'; });
     const body = node(table, 'tbody');
-    const more = button(parent, 'Show more recordings', () => {
+    const more = button(parent, 'Show more sessions', () => {
         shown += 50; rows(); updateSelection(); if (more.hidden) select.focus();
     }, 'tools-history-more');
     function rows() {
@@ -163,7 +163,7 @@ export function renderModelHistoryView(parent, overview, actions) {
         more.hidden = shown >= recordings.length;
         more.textContent = 'Show ' + Math.min(50, recordings.length - shown) + ' more (' + Math.min(shown, recordings.length) + ' / ' + recordings.length + ')';
     }
-    node(parent, 'p', '¹ Token holders as a proportion of registered viewers. Recordings with no covered interval have no average; recorded peaks remain available. Overlapping dates can be selected individually in the list.', 'tools-muted');
+    node(parent, 'p', '¹ Token holders as a proportion of registered viewers. Sessions with no covered interval have no average; recorded peaks remain available. Overlapping dates can be selected individually in the list.', 'tools-muted');
     rows(); updateSelection();
     return { canvas, draw, update(next, selectedId = select.value) {
         overview = next; recordings = next.recordings;

@@ -8,7 +8,7 @@ The book starts with a separate collapsed **Search & sort** menu. All existing m
 
 Expanded sections and browsing choices survive Refresh and tab changes while Library is open. Closing and reopening Library starts both sections collapsed. Keeping/importing a session opens the book to show it; returning from model history also reveals the relevant folder. These layout changes do not migrate or rewrite saved sessions.
 
-Summary opens with **Choose recordings & filters** collapsed. Thresholds follow the displayed metric’s time-weighted session average: 25% below, the average, and 25% above, rounded to whole viewers. Gaps are excluded. Custom values apply to that snapshot and metric; **Use average** restores the calculated values. A different recording or metric gets fresh defaults.
+Summary opens with **Choose sessions & filters** collapsed. Thresholds follow the displayed metric’s time-weighted session average: 25% below, the average, and 25% above, rounded to whole viewers. Gaps are excluded. Custom values apply to that snapshot and metric; **Use average** restores the calculated values. A different recording or metric gets fresh defaults.
 
 New layouts collapse Moderators, Anons and Room Total, with all other tiers expanded; saved row choices are preserved. The model name has extra clearance beside the resize handle.
 

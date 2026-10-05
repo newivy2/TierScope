@@ -112,7 +112,7 @@ const file=(name,value)=>({name,mimeType:'application/json',buffer:Buffer.from(J
   await page.selectOption('#tools-source-a',thirdSlot);await page.selectOption('#tools-source-c',firstSlot);
   assert.equal(await page.locator('.tools-chart-legend label').nth(2).locator('.tools-series-swatch').evaluate(e=>e.style.borderTopStyle),'solid');
   assert.equal(await page.locator('.tools-chart-legend label').nth(0).locator('.tools-series-swatch').evaluate(e=>e.style.borderTopStyle),'dashed');
-  assert.match(await page.locator('.tools-chart-legend label').nth(2).getAttribute('title'),/Latest recording — solid pink/);
+  assert.match(await page.locator('.tools-chart-legend label').nth(2).getAttribute('title'),/Latest session — solid pink/);
   await page.evaluate(()=>window.analysisStrokes=[]);await page.click('#tools-chart-reset');
   const darkStrokes=await page.evaluate(()=>window.analysisStrokes.filter(s=>['#ff69b4','#79baff','#68d391','#ffd166','#c4a3ff','#ff987d'].includes(s.color)));
   assert(darkStrokes.some(s=>s.color==='#ff69b4'));assert(darkStrokes.some(s=>s.color!=='#ff69b4'));
@@ -151,7 +151,7 @@ const file=(name,value)=>({name,mimeType:'application/json',buffer:Buffer.from(J
   await page.click('#tools-chart-pin');await page.locator('#tools-analysis-chart').evaluate(canvas=>{
    const b=canvas.getBoundingClientRect(),w=Math.max(260,canvas.clientWidth);canvas.dispatchEvent(new PointerEvent('pointermove',{clientX:b.left+(52+(w-14-52)*.5)/w*b.width,clientY:b.top+50,bubbles:true}));
   });
-  assert.equal(await page.locator('#tools-chart-inspection').getByText('Recording gap — no sample',{exact:true}).count(),6);
+  assert.equal(await page.locator('#tools-chart-inspection').getByText('Session gap — no sample',{exact:true}).count(),6);
   await page.click('#tools-chart-zoom-in');assert.match(await page.locator('#tools-chart-range').textContent(),/0.75m – 2.25m/);
   assert.equal(await page.locator('#tools-summary-table').textContent(),summaryBefore,'zoom does not silently change analysis totals');
   const rangeBefore=await page.locator('#tools-chart-range').textContent();await page.evaluate(()=>ViewerTracker.__organized.changedLive());
@@ -162,7 +162,7 @@ const file=(name,value)=>({name,mimeType:'application/json',buffer:Buffer.from(J
   // Drag to zoom uses scaled pointer positions; keyboard and pan can recover the full range.
   const box=await page.locator('#tools-analysis-chart').boundingBox();
   await page.mouse.move(box.x+box.width*.35,box.y+box.height*.5);await page.mouse.down();await page.mouse.move(box.x+box.width*.75,box.y+box.height*.5);await page.mouse.up();
-  assert.notEqual(await page.locator('#tools-chart-range').textContent(),'Chart window 0m – 3m · full comparison/recording range 3m');
+  assert.notEqual(await page.locator('#tools-chart-range').textContent(),'Chart window 0m – 3m · full comparison/session range 3m');
   await page.click('#tools-chart-pan-right');await page.click('#tools-chart-reset');
   await page.locator('#tools-content').evaluate(e=>e.scrollTop=0);await page.screenshot({path:'/tmp/tierscope-314-'+engine+'-compare-dark.png'});
   await page.evaluate(()=>{window.analysisStrokes=[];ViewerTracker.__organized.theme();});await page.waitForTimeout(80);await page.screenshot({path:'/tmp/tierscope-314-'+engine+'-compare-bright.png'});
@@ -176,7 +176,7 @@ const file=(name,value)=>({name,mimeType:'application/json',buffer:Buffer.from(J
   await page.setViewportSize({width:1200,height:1000});await page.waitForTimeout(80);
   await page.locator('#tools-recording-picker > summary').click();
   const originalB=await page.locator('#tools-source-b').inputValue(),originalA=await page.locator('#tools-source-a').inputValue();
-  await page.selectOption('#tools-source-b',originalA);assert.equal(await page.locator('#tools-analysis-chart').count(),0);assert.match(await page.locator('#tools-content').textContent(),/different recording in each/);
+  await page.selectOption('#tools-source-b',originalA);assert.equal(await page.locator('#tools-analysis-chart').count(),0);assert.match(await page.locator('#tools-content').textContent(),/different session in each/);
   await page.selectOption('#tools-source-b',originalB);
   const removed=await page.evaluate(id=>{const key='tierscope:library:v1:'+id,raw=GM_getValue(key);GM_deleteValue(key);return {key,raw};},originalB);
   await page.click('[data-tools-tab=library]');await page.click('[data-tools-tab=compare]');

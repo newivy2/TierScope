@@ -47,6 +47,8 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
  const foldedState=await page.evaluate(()=>({live:ViewerTracker.__models.state(),stored:Object.entries(localStorage)}));
  await page.locator('#tools-sessions-book-toggle').focus();await page.keyboard.press('Enter');
  assert(await page.locator('#tools-folder-saved_model_1').isVisible());assert(await page.locator('#tools-library-search').isHidden());
+ assert.match(await page.locator('#tools-folder-saved_model_1').textContent(),/1 session · First .+ · Latest .+Total covered time 00:01:00/);
+ assert.equal(await page.locator('#tools-folder-saved_model_1').getAttribute('aria-label'),'Open sessions for saved_model_1');
  await page.locator('#tools-library-search-toggle').focus();await page.keyboard.press('Space');
  await page.locator('#tools-library-search').fill('saved_model_1');assert.equal(await page.locator('[data-library-id]').count(),1);
  const filteredRow=page.locator('[data-library-id]');await filteredRow.locator('input[type=checkbox]').check();

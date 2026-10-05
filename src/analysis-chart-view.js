@@ -45,7 +45,7 @@ export function renderAnalysisChart(parent, series, labels, axisMs, metricLabel,
         const swatch = node(control, 'span', '', 'tools-series-swatch'); swatch.setAttribute('aria-hidden', 'true');
         swatch.style.borderTopStyle = i === newest ? 'solid' : 'dashed';
         node(control, 'span', String.fromCharCode(65 + i) + (series.length > 1 && i === newest ? ' · Latest' : '') + ' · ' + label);
-        control.title = (series.length > 1 ? (i === newest ? 'Latest recording — solid pink: ' : 'Earlier recording — dashed: ') : '') + label;
+        control.title = (series.length > 1 ? (i === newest ? 'Latest session — solid pink: ' : 'Earlier session — dashed: ') : '') + label;
         check.onchange = () => {
             if (!check.checked && hidden.size === series.length - 1) { check.checked = true; return; }
             if (check.checked) hidden.delete(i); else hidden.add(i); draw();
@@ -61,7 +61,7 @@ export function renderAnalysisChart(parent, series, labels, axisMs, metricLabel,
     const hint = node(parent, 'p', '', 'tools-muted');
     const scroll = node(parent, 'div', undefined, 'tools-scroll'), table = node(scroll, 'table'); table.id = 'tools-chart-inspection';
     const caption = node(table, 'caption');
-    const header = node(node(table, 'thead'), 'tr'); ['Recording','Count','Sample timestamp / status'].forEach(text => { node(header, 'th', text).scope = 'col'; });
+    const header = node(node(table, 'thead'), 'tr'); ['Session','Count','Sample timestamp / status'].forEach(text => { node(header, 'th', text).scope = 'col'; });
     const body = node(table, 'tbody');
     const rows = series.map((s, i) => {
         const row = node(body, 'tr'); node(row, 'th', String.fromCharCode(65 + i)).scope = 'row';
@@ -90,11 +90,11 @@ export function renderAnalysisChart(parent, series, labels, axisMs, metricLabel,
                 row.detail.textContent = sample.matches.length ? sample.matches.map(match =>
                     new Date(match.timestamp).toLocaleString(undefined, {timeZoneName: 'shortOffset'}) + ' · sample ' + (match.index + 1) +
                     (match.kind === 'held' ? ' (held until next sample)' : '')).join(' ; ') :
-                    sample.kind === 'gap' ? 'Recording gap — no sample' : 'Outside recording at this clock time';
+                    sample.kind === 'gap' ? 'Session gap — no sample' : 'Outside session at this clock time';
             } else {
                 const sample = inspectAnalysisSample(s, cursor);
                 row.value.textContent = sample.value === null ? '—' : number(sample.value);
-                row.detail.textContent = sample.kind === 'gap' ? 'Recording gap — no sample' : sample.kind === 'outside' ? 'Outside recording' :
+                row.detail.textContent = sample.kind === 'gap' ? 'Session gap — no sample' : sample.kind === 'outside' ? 'Outside session' :
                     new Date(sample.timestamp).toLocaleString() + ' · sample ' + (sample.index + 1) + (sample.kind === 'held' ? ' (held until next sample)' : '');
             }
         });
@@ -155,10 +155,10 @@ export function renderAnalysisChart(parent, series, labels, axisMs, metricLabel,
             ctx.stroke();ctx.setLineDash([]);dots.forEach(([x,y])=>{ctx.beginPath();ctx.arc(x,y,2.5,0,Math.PI*2);ctx.fill();});
         }
         range.textContent = 'Chart window ' + axisLabel(start) + ' – ' + axisLabel(end) +
-            (axisMode === 'clock' ? ' · 24h local clock' : ' · full comparison/recording range ' + elapsed(axisMs));
+            (axisMode === 'clock' ? ' · 24h local clock' : ' · full comparison/session range ' + elapsed(axisMs));
         hint.textContent = (axisMode === 'clock' ?
-            'Aligned by local time of day. Midnight crossings continue at the start of the chart. Clock changes are separate segments; repeated clock times can show multiple dated values. Statistics use full recordings.' :
-            'Aligned from each recording’s first retained sample, using real elapsed time. Hidden lines and zoom do not change summary totals or the shared comparison length.') +
+            'Aligned by local time of day. Midnight crossings continue at the start of the chart. Clock changes are separate segments; repeated clock times can show multiple dated values. Statistics use full sessions.' :
+            'Aligned from each session’s first retained sample, using real elapsed time. Hidden lines and zoom do not change summary totals or the shared comparison length.') +
             ' Move to inspect; click to pin, drag to zoom, or use the buttons and arrow keys. Gaps have no assumed samples.';
         zoomIn.disabled = end-start <= Math.min(1000,axisMs); zoomOut.disabled = end-start >= axisMs;
         panLeft.disabled = start <= 0; panRight.disabled = end >= axisMs; inspect();

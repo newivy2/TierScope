@@ -44,7 +44,7 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   assert.match(await page.locator('#tools-room-history').getAttribute('title'),/live_room/);
   assert.match(await page.locator('#tools-room-shortcuts').textContent(),/History · 0/);
   assert(await page.evaluate(()=>document.querySelector('.tools-current').contains(document.getElementById('tools-room-shortcuts'))));
-  await page.click('#tools-room-history');assert.match(await page.locator('#tools-content').textContent(),/No saved recordings for this model/);
+  await page.click('#tools-room-history');assert.match(await page.locator('#tools-content').textContent(),/No saved sessions for this model/);
   await page.click('#tools-history-back');assert.equal(await page.evaluate(()=>document.activeElement.id),'tools-sessions-book-toggle');await openLibraryBook(page,false);await page.click('#tools-folder-history_model');
   await page.locator('#tools-model-history').focus();await page.keyboard.press('Enter');
   assert.equal(await page.evaluate(()=>document.activeElement.id),'tools-history-back');
@@ -58,7 +58,7 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   assert(await page.evaluate(()=>Boolean(document.getElementById('tools-history-actions').compareDocumentPosition(document.getElementById('tools-history-chart'))&Node.DOCUMENT_POSITION_FOLLOWING)));
   const primaryAction=await page.locator('#tools-history-compare').boundingBox(),contentBounds=await page.locator('#tools-content').boundingBox();
   assert(primaryAction.y>=contentBounds.y&&primaryAction.y+primaryAction.height<=contentBounds.y+contentBounds.height,'Compare with previous is visible without scrolling');
-  assert.match(await page.locator('#tools-history-compare-hint').textContent(),/2 earlier recordings.*3 total/);
+  assert.match(await page.locator('#tools-history-compare-hint').textContent(),/2 earlier sessions.*3 total/);
   assert(await page.evaluate(()=>Boolean(document.getElementById('tools-history-chart').compareDocumentPosition(document.getElementById('tools-history-stats'))&Node.DOCUMENT_POSITION_FOLLOWING)));
   await page.locator('#tools-history-chart').evaluate(canvas=>{
    const box=canvas.getBoundingClientRect(),width=Math.max(240,canvas.clientWidth);
@@ -69,7 +69,7 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   assert.equal(await page.locator('#tools-history-recording').inputValue(),'history_1','table selection works by keyboard');
   assert.equal(await page.evaluate(()=>document.activeElement.id),'tools-history-recording');
   await page.selectOption('#tools-history-recording','history_0');
-  assert.match(await page.locator('#tools-history-detail').textContent(),/Average 22.5 · Peak in recording 104/);
+  assert.match(await page.locator('#tools-history-detail').textContent(),/Average 22.5 · Peak in session 104/);
   assert(await page.locator('#tools-history-compare').isDisabled());
   await page.click('#tools-history-metric-withTokens');
   assert.equal(await page.locator('#tools-history-recording').inputValue(),'history_0','metric preserves selected recording');
@@ -119,7 +119,7 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   });
   await page.click('#tools-history-refresh');assert.match(await page.locator('#tools-history-overlap').textContent(),/may count the same period more than once/);
   await second.evaluate(()=>{for(const k of GM_listValues())if(k.startsWith('tierscope:library:v1:history_'))GM_deleteValue(k);});
-  await page.click('#tools-history-refresh');assert.match(await page.locator('#tools-content').textContent(),/No saved recordings for this model/);
+  await page.click('#tools-history-refresh');assert.match(await page.locator('#tools-content').textContent(),/No saved sessions for this model/);
   // Large folder: chart retains every recording; the list is paginated and windows change statistics.
   await page.evaluate(()=>ViewerTracker.__modelHistory.seed(55));await page.click('#tools-history-refresh');
   assert.equal(await page.locator('#tools-history-recording option').count(),55);assert.equal(await page.locator('#tools-history-table tbody tr').count(),50);

@@ -61,11 +61,11 @@ const source = prepareSource(fs.readFileSync(path.join(__dirname, '../tierscope.
   await mode('elapsed');assert(!(await page.locator('#tools-shared-length').isDisabled()));assert(await page.locator('#tools-shared-length').isChecked());assert.match(await page.locator('#tools-chart-inspection caption').textContent(),/Cursor 0m$/);
   assert(!(await page.locator('[data-analysis-series="1"]').isChecked()),'changing axis retains visibility');
   await mode('clock');await page.check('[data-analysis-series="1"]');await page.click('#tools-metric-room');
-  await choose('b','Midnight gap');assert.match(await page.locator('#tools-chart-inspection tbody tr').nth(1).textContent(),/Recording gap/);
+  await choose('b','Midnight gap');assert.match(await page.locator('#tools-chart-inspection tbody tr').nth(1).textContent(),/Session gap/);
   await choose('b','Exactly 24h');assert.equal(await page.locator('#tools-analysis-chart').count(),1);await key('Home');await key('ArrowRight');await key('ArrowRight');
   assert.match(await page.locator('#tools-chart-inspection tbody tr').nth(1).textContent(),/35 \/ 55/,'24h endpoint has two dated accepted values');
   for(const title of ['Over 24h','Retained tail']){
-   await choose('b',title);assert.equal(await page.locator('#tools-analysis-chart').count(),0);assert.match(await page.locator('#tools-analysis-output').textContent(),/recording B exceeds 24 hours/);assert.equal(await page.locator('#tools-summary-table').count(),1);
+   await choose('b',title);assert.equal(await page.locator('#tools-analysis-chart').count(),0);assert.match(await page.locator('#tools-analysis-output').textContent(),/session B exceeds 24 hours/);assert.equal(await page.locator('#tools-summary-table').count(),1);
    await page.fill('#tools-threshold','25');await page.click('#tools-apply-threshold');assert.equal(await page.locator('#tools-analysis-chart').count(),0);
    await mode('elapsed');assert.equal(await page.locator('#tools-analysis-chart').count(),1);await mode('clock');assert.equal(await page.locator('#tools-analysis-chart').count(),0);
   }
@@ -93,7 +93,7 @@ const source = prepareSource(fs.readFileSync(path.join(__dirname, '../tierscope.
   const scan=async(ms)=>{registered+=10;await page.evaluate(ms=>{window.testNow+=ms;return ViewerTracker.__clock.scan();},ms);};
   const samples=()=>page.locator('#tools-summary-table tbody tr').first().locator('td').first().textContent();
   await scan(10000);assert.equal(await samples(),'4');assert.equal(await page.locator('#tools-chart-range').textContent(),liveRange);assert.equal(await page.locator('#tools-chart-inspection caption').textContent(),liveCursor);assert.equal(await page.locator('#tools-threshold').inputValue(),'12');assert(await page.evaluate(()=>liveClockCanvas===document.getElementById('tools-analysis-chart')));
-  await key('Home');await scan(24*3600000);assert.equal(await samples(),'5');assert.equal(await page.locator('#tools-analysis-chart').count(),0);assert.match(await page.locator('#tools-analysis-output').textContent(),/recording A exceeds 24 hours/);assert.equal(await page.evaluate(()=>document.activeElement.id),'tools-compare-axis','removed chart returns focus to the axis control');
+  await key('Home');await scan(24*3600000);assert.equal(await samples(),'5');assert.equal(await page.locator('#tools-analysis-chart').count(),0);assert.match(await page.locator('#tools-analysis-output').textContent(),/session A exceeds 24 hours/);assert.equal(await page.evaluate(()=>document.activeElement.id),'tools-compare-axis','removed chart returns focus to the axis control');
   await scan(10000);assert.equal(await samples(),'6','blocked clock chart still follows live reports');await mode('elapsed');assert.equal(await page.locator('#tools-analysis-chart').count(),1);assert.equal(await samples(),'3','restored shared length clips the elapsed report');await page.uncheck('#tools-shared-length');assert.equal(await samples(),'6');
   assert.deepEqual(errors,[]);console.log('PASS 24h comparison: local axis, midnight/gaps/dated cursor, 24h limits, six lines, statistics, axis/metric/visibility state, live growth, themes/scales/layout and session isolation');
  } finally {await browser.close();}
