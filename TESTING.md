@@ -142,6 +142,6 @@ The comparison benchmark additionally measures hiding/showing a line and applyin
 
 `TIERSCOPE_BENCH_CAPACITY=1 npm run test:library-performance` adds a 1,000 × 750-sample dataset (~40 MiB). It measures a backup beyond the former 32-MiB input bound, parsing/validation and duplicate restore as well as browsing. Add `TIERSCOPE_CPU_THROTTLE=4` for simulated slowdown. These are synthetic, informational timings with in-memory GM storage and no machine-dependent pass/fail timing gate.
 
-## Audience display beta
+## Audience display (3.20.0)
 
 `audience-display.test.cjs` checks ratio rounding, the inclusive 5% equality band and zero/invalid denominators. Presentation boundary tests check supplied-frame and replay ratios against later live updates. `audience-browser.cjs` checks four subtotal trend boxes, registered-plus-anonymous deltas across Last/Start baselines, theme-matched yellow/pink borders, larger bottom boxes, adaptive numbers without clipping at 50–150% scale, the ratio’s count/high placement and zero denominator, SH/ATH independence, restored/live/ordinary/file-replay isolation, and narrow layout. The browser suites now include 16 fixtures per engine.

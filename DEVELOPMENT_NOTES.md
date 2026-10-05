@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **3.20.0-beta.1** ([beta guide](docs/audience-trends-beta.md)); stable remains **3.19.0**. [Sessions Book guide](docs/sessions-book.md). The simplified Current Live Session card provides Keep in Library, Auto, Compare with previous, and History. File controls are below the session list, and exports remain on stored-session menus and the separate replay card. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation instructions, see the [README](readme.md).
+Detailed reference for **3.20.0** ([audience trends and ratio guide](docs/audience-trends.md)). [Sessions Book guide](docs/sessions-book.md). The simplified Current Live Session card provides Keep in Library, Auto, Compare with previous, and History. File controls are below the session list, and exports remain on stored-session menus and the separate replay card. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation instructions, see the [README](readme.md).
 
 ## Contents
 
@@ -516,7 +516,7 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
-| **3.20.0-beta.1** | Match the With Tokens trend border to yellow, add a pink Room Total trend box to the larger four-column bottom row, adjust delta fonts, and show an Anons/registered ratio from the displayed sample with a 5% equality band. |
+| **3.20.0** | Match the With Tokens trend border to yellow, add a pink Room Total trend box to the larger four-column bottom row, adjust delta fonts, and show an Anons/registered ratio from the displayed sample with a 5% equality band. |
 | **3.19.0** | Add a collapsed Sessions Book with nested Search & sort. Default Moderators/Anons/Room Total to collapsed, preserve saved layouts, and give the model header room beside the resize handle. Start Summary with its picker collapsed and derive thresholds from the displayed session’s time-weighted metric average. |
 | **3.18.0** | Default to 1,000 sessions / 50 MB, add local configurable storage limits and capacity notices, preserve prior recordings on failed updates, and support backups/imports through 300 MB / 10,000 sessions with capacity preflight. |
 | **3.17.0** | Simplify Current Live Session to Keep in Library, Auto, Compare with previous and History. Keep exports on individual sessions, move file/import/refresh controls below the list, and compare a fixed live snapshot with up to five earlier sessions without including saved copies of the current start. Auto reflects confirmed favorites and locks when enabled. |
