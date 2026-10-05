@@ -1,5 +1,6 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const {instrument,prepareSource}=require('./helpers/instrument.cjs');
+const {openLibraryBook}=require('./helpers/library.cjs');
 const engine=process.env.TIERSCOPE_BROWSER||'chromium';
 const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8')).replaceAll('scheduleInit(2000);','')
  .replace('downloadTrackingReport: downloadTrackingReport,',`__models:{setup(){
@@ -34,6 +35,37 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
  assert.equal(await page.locator('#tools-title').textContent(),'Library');assert.equal(await page.locator('.tools-subtitle').textContent(),'Session Storage and Analysis');
  assert.deepEqual(await page.locator('[data-tools-tab]').allTextContents(),['Sessions','Summary','Compare','Backup']);
  assert.equal(await page.locator('#tools-content > :first-child #tools-current-kind').textContent(),'Current Live Session');
+ // The book starts closed independently of storage settings and current controls.
+ const book=page.locator('#tools-sessions-book'),searchMenu=page.locator('#tools-library-search-menu');
+ assert.equal(await book.evaluate(e=>e.open),false);assert.equal(await searchMenu.evaluate(e=>e.open),false);
+ assert(await page.locator('#tools-folder-saved_model_1').isHidden());assert(await page.locator('#tools-library-search').isHidden());
+ for(const id of ['tools-current-card','tools-library-storage','tools-open-session','tools-import-session','tools-refresh-library'])assert(await page.locator('#'+id).isVisible());
+ const foldedState=await page.evaluate(()=>({live:ViewerTracker.__models.state(),stored:Object.entries(localStorage)}));
+ await page.locator('#tools-sessions-book-toggle').focus();await page.keyboard.press('Enter');
+ assert(await page.locator('#tools-folder-saved_model_1').isVisible());assert(await page.locator('#tools-library-search').isHidden());
+ await page.locator('#tools-library-search-toggle').focus();await page.keyboard.press('Space');
+ await page.locator('#tools-library-search').fill('saved_model_1');assert.equal(await page.locator('[data-library-id]').count(),1);
+ const filteredRow=page.locator('[data-library-id]');await filteredRow.locator('input[type=checkbox]').check();
+ await filteredRow.locator('summary').click();await filteredRow.locator('textarea').fill('Draft inside the book');
+ await page.evaluate(()=>window.bookEditor=document.querySelector('[data-library-id] textarea'));
+ await page.click('#tools-library-search-toggle');assert.match(await page.locator('#tools-library-search-toggle').textContent(),/Filters active/);
+ await page.click('#tools-sessions-book-toggle');await page.click('#tools-sessions-book-toggle');
+ assert(await page.evaluate(()=>window.bookEditor===document.querySelector('[data-library-id] textarea')),'folding preserves the editor node');
+ assert.equal(await filteredRow.locator('textarea').inputValue(),'Draft inside the book');assert(await filteredRow.locator('input[type=checkbox]').isChecked());
+ assert.equal(await searchMenu.evaluate(e=>e.open),false,'opening the book does not expand search');
+ await page.click('#tools-sessions-book-toggle');
+ // A refresh triggered while the closed summary retains focus must not reopen it.
+ await page.locator('#tools-refresh-library').evaluate(e=>e.click());
+ assert.equal(await book.evaluate(e=>e.open),false);assert.equal(await page.evaluate(()=>document.activeElement.id),'tools-sessions-book-toggle');
+ await page.click('[data-tools-tab=summary]');await page.click('[data-tools-tab=library]');
+ assert.equal(await book.evaluate(e=>e.open),false);assert.equal(await searchMenu.evaluate(e=>e.open),false);
+ await openLibraryBook(page);assert.equal(await page.locator('#tools-library-search').inputValue(),'saved_model_1');
+ assert.equal(await filteredRow.locator('textarea').inputValue(),'Draft inside the book');assert(await filteredRow.locator('input[type=checkbox]').isChecked());
+ await filteredRow.locator('summary').click();await filteredRow.getByRole('button',{name:'Discard changes',exact:true}).click();
+ await page.click('#tools-clear-selection');await page.click('#tools-library-clear');
+ assert.deepEqual(await page.evaluate(()=>({live:ViewerTracker.__models.state(),stored:Object.entries(localStorage)})),foldedState,'folds, filters and drafts do not change session storage or playback');
+ await page.click('#tools-close');await page.click('#btn-control-library');
+ assert.equal(await book.evaluate(e=>e.open),false);assert.equal(await searchMenu.evaluate(e=>e.open),false,'a fresh Library starts collapsed');
  const compare=await page.locator('#tools-compare-previous').boundingBox(),history=await page.locator('#tools-room-history').boundingBox();
  assert(history.x>compare.x&&Math.abs(history.y-compare.y)<2,'History follows Compare with previous');
  assert.equal(await page.locator('#tools-current-card').getByRole('button').allTextContents().then(names=>names.filter(n=>['Save file','TXT','CSV','GIF','Add to ATH'].includes(n))).then(names=>names.length),0);
@@ -45,7 +77,7 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
  assert.equal(await page.evaluate(()=>ViewerTracker.__models.favorite('live_model').autoKeep),true);
  assert.equal(await page.locator('#tools-room-history').textContent(),'History · 1');assert(await page.locator('#tools-auto-keep').isChecked());assert(await page.locator('#tools-auto-keep').isDisabled());
  assert(await page.locator('#tools-compare-previous').isDisabled(),'the saved copy of the current session is not previous');
- await page.locator('#tools-library-search').scrollIntoViewIfNeeded();
+ await openLibraryBook(page);await page.locator('#tools-library-search').scrollIntoViewIfNeeded();
  const controls=await page.evaluate(()=>{
   const box=id=>{const r=document.getElementById(id).getBoundingClientRect();return {x:r.x,y:r.y,right:r.right};};
   return {model:box('tools-library-model'),sort:box('tools-library-sort'),from:box('tools-library-from'),to:box('tools-library-to'),overflow:document.getElementById('tools-content').scrollWidth>document.getElementById('tools-content').clientWidth};
@@ -58,8 +90,10 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
  const scopeBounds=await page.locator('#tracker-container').boundingBox(),libraryBounds=await page.locator('#tierscope-session-tools').boundingBox();
  const padding=16,x=Math.floor(Math.min(scopeBounds.x,libraryBounds.x))-padding,y=Math.floor(Math.min(scopeBounds.y,libraryBounds.y))-padding;
  const clip={x,y,width:Math.ceil(Math.max(scopeBounds.x+scopeBounds.width,libraryBounds.x+libraryBounds.width))-x+padding,height:Math.ceil(Math.max(scopeBounds.y+scopeBounds.height,libraryBounds.y+libraryBounds.height))-y+padding};
- await page.screenshot({path:'/tmp/tierscope-317-'+engine+'-dark.png',clip});
- await page.uncheck('#dark-mode-toggle');await page.waitForTimeout(100);await page.screenshot({path:'/tmp/tierscope-317-'+engine+'-bright.png',clip});await page.check('#dark-mode-toggle');
+ await page.screenshot({path:'/tmp/tierscope-319-'+engine+'-collapsed-dark.png',clip});
+ await page.uncheck('#dark-mode-toggle');await page.waitForTimeout(100);await page.screenshot({path:'/tmp/tierscope-319-'+engine+'-collapsed-bright.png',clip});await page.check('#dark-mode-toggle');
+ await openLibraryBook(page,false);await page.screenshot({path:'/tmp/tierscope-319-'+engine+'-expanded-dark.png',clip});
+ await page.uncheck('#dark-mode-toggle');await page.waitForTimeout(100);await page.screenshot({path:'/tmp/tierscope-319-'+engine+'-expanded-bright.png',clip});await page.check('#dark-mode-toggle');
  // Header consent on a new model; cancel must leave its state and the Library intact.
  await page.evaluate(()=>ViewerTracker.__models.replay());
  assert.equal(await page.locator('#header-text').textContent(),'replay_model');
@@ -68,7 +102,9 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
  page.once('dialog',d=>d.accept());await page.click('#btn-model-favorite');assert.equal(await page.locator('#btn-model-favorite').textContent(),'★');
  assert.equal(await page.evaluate(()=>ViewerTracker.__models.library().entries.filter(e=>e.archive.room==='replay_model').length),0,'starring replay model never imports its snapshot');
  const download=page.waitForEvent('download');await page.click('#tools-save-session-replay');assert.equal(JSON.parse(fs.readFileSync(await(await download).path(),'utf8')).room,'replay_model');
+ if(await book.evaluate(e=>e.open))await page.click('#tools-sessions-book-toggle');
  await page.click('#tools-keep');await page.locator('[data-library-id] summary').click();
+ assert.equal(await book.evaluate(e=>e.open),true,'Keep reveals its session');assert.equal(await searchMenu.evaluate(e=>e.open),false,'Keep leaves search collapsed');
  const liveDownload=page.waitForEvent('download');await page.locator('[data-library-id]').getByRole('button',{name:'Save file',exact:true}).click();assert.equal(JSON.parse(fs.readFileSync(await(await liveDownload).path(),'utf8')).room,'live_model');
  await page.click('#playback-return');
  await page.evaluate(()=>{window.originalSet=GM_setValue;window.GM_setValue=(k,v)=>{if(k.startsWith('tierscope:library:v1:'))throw Error('Storage blocked');return originalSet(k,v);};ViewerTracker.__models.sample();});
@@ -84,7 +120,7 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
  assert.equal(await page.evaluate(()=>ViewerTracker.__models.favorite('live_model').favorite),false);assert(!(await page.locator('#tools-auto-keep').isChecked()));
  // A draft in a growing session follows the verified replacement, even if its card remains open.
  page.once('dialog',d=>d.accept());await page.locator('#tools-auto-keep').focus();await page.keyboard.press('Space');
- await page.selectOption('#tools-library-model','live_model');const session=page.locator('[data-library-id]');
+ await openLibraryBook(page);await page.selectOption('#tools-library-model','live_model');const session=page.locator('[data-library-id]');
  await session.locator('summary').click();await session.locator('textarea').fill('Draft while this session grows');
  await page.evaluate(()=>ViewerTracker.__models.sample());
  await session.getByRole('button',{name:'Save notes',exact:true}).click();
@@ -104,12 +140,12 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
  await page.evaluate(()=>ViewerTracker.__models.sample());assert.equal(await page.locator('#tools-summary-table').textContent(),tableBefore,'live comparison keeps its snapshot when another sample arrives');
  await page.click('#playback-return');assert.equal(await page.locator('#tools-summary-table').textContent(),tableBefore,'closing replay cannot replace the live comparison');
  await page.click('[data-tools-tab=library]');
- const layout=await page.evaluate(()=>{const c=document.getElementById('tools-content');const ids=Array.from(c.children).map(e=>e.id||e.className);return {storage:ids.indexOf('tools-library-storage'),filters:ids.indexOf('tools-filters'),list:ids.indexOf('tools-library-list'),actions:ids.indexOf('tools-library-management'),last:c.lastElementChild.id};});
- assert.equal(layout.filters,layout.storage+1);assert(layout.actions>layout.list);assert.equal(layout.last,'tools-library-management');
+ const layout=await page.evaluate(()=>{const c=document.getElementById('tools-content');const ids=Array.from(c.children).map(e=>e.id||e.className);return {storage:ids.indexOf('tools-library-storage'),book:ids.indexOf('tools-sessions-book'),searchFirst:document.getElementById('tools-sessions-book').children[1].id,listInside:document.getElementById('tools-library-list').parentElement.id,actions:ids.indexOf('tools-library-management'),last:c.lastElementChild.id};});
+ assert.equal(layout.book,layout.storage+1);assert.equal(layout.searchFirst,'tools-library-search-menu');assert.equal(layout.listInside,'tools-sessions-book');assert(layout.actions>layout.book);assert.equal(layout.last,'tools-library-management');
  await page.setViewportSize({width:640,height:700});await page.waitForTimeout(200);
  assert(await page.evaluate(()=>{const r=document.getElementById('tracker-container').getBoundingClientRect();return document.getElementById('tracker-container').contains(document.elementFromPoint(r.x+10,r.y+10));}));
  assert.equal(await page.locator('#tools-content').evaluate(e=>e.scrollWidth<=e.clientWidth),true);
  await page.screenshot({path:'/tmp/tierscope-317-'+engine+'-narrow.png'});
- assert.deepEqual(errors,[]);console.log('PASS simplified live card, locked favorite consent checkbox, frozen six-session live comparison, footer file controls, automatic updates/retry, drafts, themes and isolation');
+ assert.deepEqual(errors,[]);console.log('PASS collapsed Sessions Book and search, keyboard/focus, fold and tab state, draft/selection retention, simplified live card, favorite consent, six-session comparison, footer controls, themes and isolation');
  } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

@@ -1,5 +1,6 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const {instrument,prepareSource}=require('./helpers/instrument.cjs');
+const {openLibraryBook}=require('./helpers/library.cjs');
 const engine=process.env.TIERSCOPE_BROWSER||'chromium';
 const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8')).replaceAll('scheduleInit(2000);','')
 .replace('downloadTrackingReport: downloadTrackingReport,',`__modelHistory:{checkUrlChange,
@@ -44,7 +45,7 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   assert.match(await page.locator('#tools-room-shortcuts').textContent(),/History · 0/);
   assert(await page.evaluate(()=>document.querySelector('.tools-current').contains(document.getElementById('tools-room-shortcuts'))));
   await page.click('#tools-room-history');assert.match(await page.locator('#tools-content').textContent(),/No saved recordings for this model/);
-  await page.click('#tools-history-back');await page.click('#tools-folder-history_model');
+  await page.click('#tools-history-back');assert.equal(await page.evaluate(()=>document.activeElement.id),'tools-sessions-book-toggle');await openLibraryBook(page,false);await page.click('#tools-folder-history_model');
   await page.locator('#tools-model-history').focus();await page.keyboard.press('Enter');
   assert.equal(await page.evaluate(()=>document.activeElement.id),'tools-history-back');
   const stats=()=>page.locator('#tools-history-stats dd').allTextContents();
@@ -132,7 +133,7 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   await page.selectOption('#tools-history-range','30');assert.equal(await page.locator('#tools-history-table tbody tr').count(),30);
   await page.click('#tools-history-back');assert.equal(await page.evaluate(()=>document.activeElement.id),'tools-model-history');
   await page.click('#tools-model-history');await page.keyboard.press('Escape');assert.equal(await page.locator('#tierscope-session-tools').count(),0);assert.equal(await page.evaluate(()=>document.activeElement.id),'btn-control-library');
-  await page.click('#btn-control-library');await page.click('#tools-folder-history_model');await page.click('#tools-model-history');
+  await page.click('#btn-control-library');await openLibraryBook(page,false);await page.click('#tools-folder-history_model');await page.click('#tools-model-history');
   await page.evaluate(()=>{history.pushState({},'', '/next_room/');ViewerTracker.__modelHistory.checkUrlChange();});
   assert.equal(await page.locator('#tierscope-session-tools').count(),0,'navigation disposes history view');
   // Opening Library on this model's actual page offers its saved history directly.

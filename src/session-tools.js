@@ -84,6 +84,7 @@ export function openSessionTools(focusTarget) {
     let {metric, threshold, sharedLength, summaryThresholds} = savedAnalysis.preferences;
     let selectedA = 'current', selectedB = '', selectedExtra = [], pendingBackup = null;
     const libraryFilters = {room: '', query: '', from: '', to: '', sort: 'newest', favorites: false}, librarySelection = new Set();
+    const libraryDisclosures = {book: false, search: false};
     const analysisFilters = {room: '', query: '', from: '', to: ''};
     let filteredSources = null, chartDispose = null, pickerOpen = true;
     let analysisView = null, analysisOutput = null, analysisSources = null;
@@ -326,7 +327,7 @@ export function openSessionTools(focusTarget) {
         currentButton(actions, 'Keep in Library', archive => {
             const result = keepSessionInLibrary(archive); libraryRoom = archive.room.toLowerCase();
             Object.assign(libraryFilters, {room: libraryRoom, query: '', from: '', to: '', favorites: false});
-            render('library'); tell(result.added ? 'Session kept in the library.' : result.updated ? 'Library session updated; its name and notes were preserved.' : 'An equal or fuller session is already in the library.');
+            render('library', true); tell(result.added ? 'Session kept in the library.' : result.updated ? 'Library session updated; its name and notes were preserved.' : 'An equal or fuller session is already in the library.');
         }, 'tools-keep').className = 'tools-primary';
         if (replay) currentButton(actions, 'Save file', archive => downloadDataFile(archive, archiveName(archive)), 'tools-save-session');
         else {
@@ -406,7 +407,7 @@ export function openSessionTools(focusTarget) {
             rename: entry => { const title = window.prompt('Recording title (up to 80 characters):', entry.title); if (title !== null) { renameLibrarySession(entry.id, title); render('library'); } },
             delete: entry => { if (confirm('Delete this library recording: ' + (entry.title || entry.archive.room) + '?\n\nLive tracking, ATH and downloaded files are unchanged.')) { removeLibrarySession(entry.id); render('library'); tell('Library recording deleted.'); } }
         };
-        renderLibraryBrowser(content, state.entries, libraryFilters, librarySelection, Object.fromEntries(Object.entries(callbacks).map(([key, fn]) => [key, action(fn)])));
+        renderLibraryBrowser(content, state.entries, libraryFilters, librarySelection, Object.fromEntries(Object.entries(callbacks).map(([key, fn]) => [key, action(fn)])), libraryDisclosures);
         if (state.damaged.length) {
             node(content, 'p', state.damaged.length + ' unreadable library record(s) were retained.', 'tools-muted');
             if (state.unavailable.length) node(content, 'p', 'Some records could not be read. The displayed storage size excludes them; saving new recordings waits until they can be read.', 'tools-muted');
@@ -427,7 +428,7 @@ export function openSessionTools(focusTarget) {
             const rooms = new Set(bundle.library.map(entry => entry.archive.room.toLowerCase()));
             libraryRoom = rooms.size === 1 ? [...rooms][0] : '*';
             Object.assign(libraryFilters, {room: libraryRoom, query: '', from: '', to: '', favorites: false});
-            render('library'); tell('Imported: ' + result.recordings + ' new, ' + result.updatedRecordings + ' updated, ' + result.favoriteModels + ' favorite models added; existing recordings and model choices were preserved.');
+            render('library', true); tell('Imported: ' + result.recordings + ' new, ' + result.updatedRecordings + ' updated, ' + result.favoriteModels + ' favorite models added; existing recordings and model choices were preserved.');
         }, true), 'tools-import-session').title = 'Import session files or Library bundles. Imported favorites need confirmation before automatic keeping.';
         button(actions, 'Refresh', () => render('library'), 'tools-refresh-library').title = 'Refresh list from this browser';
     }
@@ -495,7 +496,7 @@ export function openSessionTools(focusTarget) {
         if (!library) readLibrary();
         const heading = node(content, 'div', undefined, 'tools-actions');
         button(heading, '‹ Sessions', () => {
-            render('library'); (dialog.querySelector('#tools-model-history') || dialog.querySelector('#tools-library-search')).focus();
+            render('library', true); (dialog.querySelector('#tools-model-history') || dialog.querySelector('#tools-sessions-book-toggle')).focus();
         }, 'tools-history-back');
         node(heading, 'h3', 'Model history · ' + libraryRoom);
         const controls = node(content, 'div', undefined, 'tools-actions');
@@ -674,9 +675,15 @@ export function openSessionTools(focusTarget) {
             }, 'tools-backup-restore');
         }
     }
-    function render(next) {
+    function render(next, revealSessions = false) {
         refreshCapacity = null;
         const focusedId = dialog.contains(document.activeElement) ? document.activeElement.id : '';
+        // Read synchronously before replacing nodes: native toggle events can be queued.
+        for (const [key, id] of [['book', 'tools-sessions-book'], ['search', 'tools-library-search-menu']]) {
+            const details = dialog.querySelector('#' + id);
+            if (details) libraryDisclosures[key] = details.open;
+        }
+        if (revealSessions) libraryDisclosures.book = true;
         const existingPicker = dialog.querySelector('#tools-recording-picker');
         if (existingPicker) pickerOpen = existingPicker.open;
         if (analysisView) analysisStates.set(tab, {...analysisSources, state: analysisView.capture()});
@@ -693,8 +700,13 @@ export function openSessionTools(focusTarget) {
         } catch (error) { tell(error.message, true); }
         if (focusedId) {
             const target = document.getElementById(focusedId);
-            if (target && dialog.contains(target)) { const details = target.closest('details'); if (details) details.open = true; target.focus(); }
-            else if (focusedId.startsWith('tools-model-favorite-')) dialog.querySelector('#tools-library-model')?.focus();
+            if (target && dialog.contains(target)) {
+                // Reveal controls through every enclosing disclosure, but preserve
+                // a summary's own open/closed choice when restoring its focus.
+                let ancestor = target.tagName === 'SUMMARY' ? target.parentElement.parentElement : target;
+                for (let details = ancestor.closest('details'); details; details = details.parentElement.closest('details')) details.open = true;
+                target.focus();
+            } else if (focusedId.startsWith('tools-model-favorite-')) dialog.querySelector('#tools-sessions-book-toggle')?.focus();
         }
     }
     function close() {

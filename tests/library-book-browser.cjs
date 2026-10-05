@@ -1,6 +1,7 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const {GifReader}=require('omggif');
 const {instrument,prepareSource}=require('./helpers/instrument.cjs');
+const {openLibraryBook}=require('./helpers/library.cjs');
 const engine=process.env.TIERSCOPE_BROWSER||'chromium';
 const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8')).replaceAll('scheduleInit(2000);','').replace('downloadTrackingReport: downloadTrackingReport,',`
  __book:{setup(){loadSession(getModelName());const now=Date.now(),h={timestamps:[now-240000,now-180000,now-60000,now],breaks:[false,false,true,false]};
@@ -29,7 +30,7 @@ async function download(page,action){const [d]=await Promise.all([page.waitForEv
  await page.uncheck('#dark-mode-toggle');await page.waitForFunction(()=>document.getElementById('tierscope-session-tools').dataset.theme==='bright');
  assert.equal(await library.evaluate(e=>getComputedStyle(e).getPropertyValue('--panel-solid')),await panel.evaluate(e=>getComputedStyle(e).getPropertyValue('--panel-solid')));
  await page.check('#dark-mode-toggle');
- await page.click('#tools-folder-another_model');await page.locator('.tools-row summary').click();
+ await openLibraryBook(page);await page.click('#tools-folder-another_model');await page.locator('.tools-row summary').click();
  const row=page.locator('.tools-row'),saved=await page.evaluate(()=>ViewerTracker.__book.library().entries.find(e=>e.archive.room==='another_model').archive);
  for(const format of ['TXT','CSV','Save file']){
   const d=await download(page,()=>row.getByRole('button',{name:format,exact:true}).click());assert(d.name.startsWith('another_model-'));

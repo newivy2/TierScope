@@ -49,6 +49,8 @@ const source=prepareSource(fs.readFileSync(sourceFile,'utf8')).replaceAll('sched
  }
  const click=id=>document.getElementById(id).click();const tab=name=>document.querySelector('[data-tools-tab="'+name+'"]').click();
  measure('open',()=>click('btn-control-library'));
+ measure('openBook',()=>click('tools-sessions-book-toggle'));
+ measure('openSearch',()=>click('tools-library-search-toggle'));
  measure('folder',()=>click('tools-folder-model000'));
  if(${compareMode}){
   const choose=(id,value)=>{const input=document.getElementById(id);input.value=value;input.dispatchEvent(new Event('change'));};

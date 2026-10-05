@@ -87,6 +87,11 @@ export function libraryShell() {
 #tierscope-session-tools .tools-capacity-warning{color:var(--panel-warning);font-size:.95em}
 #tools-library-selected{flex-basis:100%}
 #tools-library-selection{margin-top:8px}
+#tierscope-session-tools #tools-sessions-book{margin-top:10px}
+#tierscope-session-tools #tools-sessions-book>summary{padding:7px 9px;color:var(--panel-accent);font-weight:bold;background:#ff69b412;border-color:#ff69b470}
+#tools-library-search-menu{margin-top:8px}
+#tierscope-session-tools #tools-library-search-menu>summary{background:transparent;color:var(--panel-muted)}
+#tierscope-session-tools #tools-library-search-menu .tools-filters{margin-top:0;border-top:0}
 #tierscope-session-tools .tools-auto-keep{display:inline-flex;align-items:center;gap:5px;margin:0 0 0 5px;font-size:.92em}
 #tierscope-session-tools .tools-auto-keep[data-locked=true]{color:var(--panel-accent)}
 #tierscope-session-tools .tools-auto-keep input:disabled{opacity:1}

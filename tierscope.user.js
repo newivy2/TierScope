@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.18.0
+// @version      3.19.0-beta.1
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -5533,6 +5533,11 @@ underlying system, so should run in the browser, Node, or Plask.
 #tierscope-session-tools .tools-capacity-warning{color:var(--panel-warning);font-size:.95em}
 #tools-library-selected{flex-basis:100%}
 #tools-library-selection{margin-top:8px}
+#tierscope-session-tools #tools-sessions-book{margin-top:10px}
+#tierscope-session-tools #tools-sessions-book>summary{padding:7px 9px;color:var(--panel-accent);font-weight:bold;background:#ff69b412;border-color:#ff69b470}
+#tools-library-search-menu{margin-top:8px}
+#tierscope-session-tools #tools-library-search-menu>summary{background:transparent;color:var(--panel-muted)}
+#tierscope-session-tools #tools-library-search-menu .tools-filters{margin-top:0;border-top:0}
 #tierscope-session-tools .tools-auto-keep{display:inline-flex;align-items:center;gap:5px;margin:0 0 0 5px;font-size:.92em}
 #tierscope-session-tools .tools-auto-keep[data-locked=true]{color:var(--panel-accent)}
 #tierscope-session-tools .tools-auto-keep input:disabled{opacity:1}
@@ -5644,16 +5649,26 @@ underlying system, so should run in the browser, Node, or Plask.
   }
 
   // src/library-browser-view.js
-  function renderLibraryBrowser(parent, entries, filters, selected, actions) {
+  function renderLibraryBrowser(parent, entries, filters, selected, actions, disclosures) {
     const present = new Set(entries.map((entry) => entry.id));
     for (const id of selected) if (!present.has(id)) selected.delete(id);
     let shown = 50;
-    const inputs = recordingFilters(parent, entries, filters, "tools-library", () => {
+    const book = toolNode(parent, "details");
+    book.id = "tools-sessions-book";
+    book.open = disclosures.book;
+    const bookSummary = toolNode(book, "summary", "Sessions Book");
+    bookSummary.id = "tools-sessions-book-toggle";
+    const search = toolNode(book, "details");
+    search.id = "tools-library-search-menu";
+    search.open = disclosures.search;
+    const searchSummary = toolNode(search, "summary", "Search & sort");
+    searchSummary.id = "tools-library-search-toggle";
+    const inputs = recordingFilters(search, entries, filters, "tools-library", () => {
       shown = 50;
       actions.room(filters.room);
       rows();
     }, true);
-    const selectionTools = toolNode(parent, "details");
+    const selectionTools = toolNode(book, "details");
     selectionTools.id = "tools-library-selection";
     selectionTools.open = selected.size > 0;
     toolNode(selectionTools, "summary", "Select sessions for Compare or export");
@@ -5671,7 +5686,7 @@ underlying system, so should run in the browser, Node, or Plask.
     const compare = toolButton(bulk, "Compare", () => actions.compare([...selected]), "tools-compare-selected");
     const download = toolButton(bulk, "Export", () => actions.export([...selected]), "tools-export-selected");
     download.title = "Download one library bundle, including titles, notes and favorite models";
-    const list = toolNode(parent, "div");
+    const list = toolNode(book, "div");
     list.id = "tools-library-list";
     function favoriteButton(parent2, room, compact = false) {
       const active = entries.some((entry) => entry.archive.room.toLowerCase() === room && entry.modelFavorite);
@@ -5700,6 +5715,7 @@ underlying system, so should run in the browser, Node, or Plask.
       } catch (error) {
         toolNode(list, "p", error.message);
       }
+      searchSummary.textContent = "Search & sort" + (filters.query || filters.from || filters.to || filters.favorites ? " · Filters active" : "");
       updateSelection();
       const folders = /* @__PURE__ */ new Map();
       for (const entry of matching) {
@@ -5719,7 +5735,7 @@ underlying system, so should run in the browser, Node, or Plask.
         shown = 50;
         actions.room(null);
         rows();
-        (document.getElementById("tools-folder-" + previous) || inputs.search).focus();
+        (document.getElementById("tools-folder-" + previous) || searchSummary).focus();
       }, "tools-library-all-models");
       const room = filters.room && filters.room !== "*" ? filters.room : null;
       toolNode(heading, "h3", room ? "Folder: " + room : browsingFolders ? "Model folders" : "Search results — all models");
@@ -5776,7 +5792,7 @@ underlying system, so should run in the browser, Node, or Plask.
       if (shown < visible.length) toolButton(list, "Show " + Math.min(50, visible.length - shown) + " more", () => {
         shown += 50;
         rows();
-        (document.getElementById("tools-library-more") || inputs.search).focus();
+        (document.getElementById("tools-library-more") || bookSummary).focus();
       }, "tools-library-more");
     }
     rows();
@@ -6887,6 +6903,7 @@ underlying system, so should run in the browser, Node, or Plask.
     let { metric, threshold, sharedLength, summaryThresholds } = savedAnalysis.preferences;
     let selectedA = "current", selectedB = "", selectedExtra = [], pendingBackup = null;
     const libraryFilters = { room: "", query: "", from: "", to: "", sort: "newest", favorites: false }, librarySelection = /* @__PURE__ */ new Set();
+    const libraryDisclosures = { book: false, search: false };
     const analysisFilters = { room: "", query: "", from: "", to: "" };
     let filteredSources = null, chartDispose = null, pickerOpen = true;
     let analysisView = null, analysisOutput = null, analysisSources = null;
@@ -7227,7 +7244,7 @@ underlying system, so should run in the browser, Node, or Plask.
         const result = keepSessionInLibrary(archive);
         libraryRoom = archive.room.toLowerCase();
         Object.assign(libraryFilters, { room: libraryRoom, query: "", from: "", to: "", favorites: false });
-        render("library");
+        render("library", true);
         tell(result.added ? "Session kept in the library." : result.updated ? "Library session updated; its name and notes were preserved." : "An equal or fuller session is already in the library.");
       }, "tools-keep").className = "tools-primary";
       if (replay) currentButton(actions, "Save file", (archive) => downloadDataFile(archive, archiveName(archive)), "tools-save-session");
@@ -7377,7 +7394,7 @@ underlying system, so should run in the browser, Node, or Plask.
           }
         }
       });
-      renderLibraryBrowser(content, state.entries, libraryFilters, librarySelection, Object.fromEntries(Object.entries(callbacks).map(([key, fn]) => [key, action(fn)])));
+      renderLibraryBrowser(content, state.entries, libraryFilters, librarySelection, Object.fromEntries(Object.entries(callbacks).map(([key, fn]) => [key, action(fn)])), libraryDisclosures);
       if (state.damaged.length) {
         node(content, "p", state.damaged.length + " unreadable library record(s) were retained.", "tools-muted");
         if (state.unavailable.length) node(content, "p", "Some records could not be read. The displayed storage size excludes them; saving new recordings waits until they can be read.", "tools-muted");
@@ -7401,7 +7418,7 @@ underlying system, so should run in the browser, Node, or Plask.
         const rooms = new Set(bundle.library.map((entry) => entry.archive.room.toLowerCase()));
         libraryRoom = rooms.size === 1 ? [...rooms][0] : "*";
         Object.assign(libraryFilters, { room: libraryRoom, query: "", from: "", to: "", favorites: false });
-        render("library");
+        render("library", true);
         tell("Imported: " + result.recordings + " new, " + result.updatedRecordings + " updated, " + result.favoriteModels + " favorite models added; existing recordings and model choices were preserved.");
       }, true), "tools-import-session").title = "Import session files or Library bundles. Imported favorites need confirmation before automatic keeping.";
       button(actions, "Refresh", () => render("library"), "tools-refresh-library").title = "Refresh list from this browser";
@@ -7535,8 +7552,8 @@ underlying system, so should run in the browser, Node, or Plask.
       if (!library) readLibrary();
       const heading = node(content, "div", void 0, "tools-actions");
       button(heading, "‹ Sessions", () => {
-        render("library");
-        (dialog.querySelector("#tools-model-history") || dialog.querySelector("#tools-library-search")).focus();
+        render("library", true);
+        (dialog.querySelector("#tools-model-history") || dialog.querySelector("#tools-sessions-book-toggle")).focus();
       }, "tools-history-back");
       node(heading, "h3", "Model history · " + libraryRoom);
       const controls = node(content, "div", void 0, "tools-actions");
@@ -7788,10 +7805,15 @@ underlying system, so should run in the browser, Node, or Plask.
         }, "tools-backup-restore");
       }
     }
-    function render(next) {
+    function render(next, revealSessions = false) {
       var _a;
       refreshCapacity = null;
       const focusedId = dialog.contains(document.activeElement) ? document.activeElement.id : "";
+      for (const [key, id] of [["book", "tools-sessions-book"], ["search", "tools-library-search-menu"]]) {
+        const details = dialog.querySelector("#" + id);
+        if (details) libraryDisclosures[key] = details.open;
+      }
+      if (revealSessions) libraryDisclosures.book = true;
       const existingPicker = dialog.querySelector("#tools-recording-picker");
       if (existingPicker) pickerOpen = existingPicker.open;
       if (analysisView) analysisStates.set(tab, __spreadProps(__spreadValues({}, analysisSources), { state: analysisView.capture() }));
@@ -7826,10 +7848,10 @@ underlying system, so should run in the browser, Node, or Plask.
       if (focusedId) {
         const target = document.getElementById(focusedId);
         if (target && dialog.contains(target)) {
-          const details = target.closest("details");
-          if (details) details.open = true;
+          let ancestor = target.tagName === "SUMMARY" ? target.parentElement.parentElement : target;
+          for (let details = ancestor.closest("details"); details; details = details.parentElement.closest("details")) details.open = true;
           target.focus();
-        } else if (focusedId.startsWith("tools-model-favorite-")) (_a = dialog.querySelector("#tools-library-model")) == null ? void 0 : _a.focus();
+        } else if (focusedId.startsWith("tools-model-favorite-")) (_a = dialog.querySelector("#tools-sessions-book-toggle")) == null ? void 0 : _a.focus();
       }
     }
     function close() {
@@ -9453,7 +9475,7 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/bootstrap.js
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.18.0";
+    runtime.TIERSCOPE_VERSION = "3.19.0-beta.1";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;

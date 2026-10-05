@@ -1,12 +1,16 @@
 import { filterLibraryEntries } from './library-query.js';
 import { recordingFilters, toolButton as button, toolNode as node } from './tools-view-helpers.js';
 
-export function renderLibraryBrowser(parent, entries, filters, selected, actions) {
+export function renderLibraryBrowser(parent, entries, filters, selected, actions, disclosures) {
     const present = new Set(entries.map(entry => entry.id));
     for (const id of selected) if (!present.has(id)) selected.delete(id);
     let shown = 50;
-    const inputs = recordingFilters(parent, entries, filters, 'tools-library', () => { shown = 50; actions.room(filters.room); rows(); }, true);
-    const selectionTools = node(parent, 'details'); selectionTools.id = 'tools-library-selection'; selectionTools.open = selected.size > 0;
+    const book = node(parent, 'details'); book.id = 'tools-sessions-book'; book.open = disclosures.book;
+    const bookSummary = node(book, 'summary', 'Sessions Book'); bookSummary.id = 'tools-sessions-book-toggle';
+    const search = node(book, 'details'); search.id = 'tools-library-search-menu'; search.open = disclosures.search;
+    const searchSummary = node(search, 'summary', 'Search & sort'); searchSummary.id = 'tools-library-search-toggle';
+    const inputs = recordingFilters(search, entries, filters, 'tools-library', () => { shown = 50; actions.room(filters.room); rows(); }, true);
+    const selectionTools = node(book, 'details'); selectionTools.id = 'tools-library-selection'; selectionTools.open = selected.size > 0;
     node(selectionTools, 'summary', 'Select sessions for Compare or export');
     const bulk = node(selectionTools, 'div', undefined, 'tools-actions tools-library-bulk'), selection = node(bulk, 'span'); selection.id = 'tools-library-selected';
     let matching = [];
@@ -15,7 +19,7 @@ export function renderLibraryBrowser(parent, entries, filters, selected, actions
     const compare = button(bulk, 'Compare', () => actions.compare([...selected]), 'tools-compare-selected');
     const download = button(bulk, 'Export', () => actions.export([...selected]), 'tools-export-selected');
     download.title = 'Download one library bundle, including titles, notes and favorite models';
-    const list = node(parent, 'div'); list.id = 'tools-library-list';
+    const list = node(book, 'div'); list.id = 'tools-library-list';
     function favoriteButton(parent, room, compact = false) {
         const active = entries.some(entry => entry.archive.room.toLowerCase() === room && entry.modelFavorite);
         const control = button(parent, (active ? '★' : '☆') + (compact ? '' : ' Favorite model'), () => actions.favoriteModel(room), 'tools-model-favorite-' + room);
@@ -35,6 +39,7 @@ export function renderLibraryBrowser(parent, entries, filters, selected, actions
     function rows() {
         list.replaceChildren(); matching = [];
         try { matching = filterLibraryEntries(entries, filters); } catch (error) { node(list, 'p', error.message); }
+        searchSummary.textContent = 'Search & sort' + (filters.query || filters.from || filters.to || filters.favorites ? ' · Filters active' : '');
         updateSelection();
         const folders = new Map();
         for (const entry of matching) {
@@ -45,7 +50,7 @@ export function renderLibraryBrowser(parent, entries, filters, selected, actions
         const heading = node(list, 'div', undefined, 'tools-actions');
         if (!browsingFolders) button(heading, '‹ All models', () => {
             const previous = filters.room; filters.room = ''; filters.query = ''; inputs.model.value = ''; inputs.search.value = ''; shown = 50;
-            actions.room(null); rows(); (document.getElementById('tools-folder-' + previous) || inputs.search).focus();
+            actions.room(null); rows(); (document.getElementById('tools-folder-' + previous) || searchSummary).focus();
         }, 'tools-library-all-models');
         const room = filters.room && filters.room !== '*' ? filters.room : null;
         node(heading, 'h3', room ? 'Folder: ' + room : browsingFolders ? 'Model folders' : 'Search results — all models');
@@ -83,7 +88,7 @@ export function renderLibraryBrowser(parent, entries, filters, selected, actions
         }
         if (visible.length > 50) node(list, 'p', 'Showing ' + Math.min(shown, visible.length) + ' of ' + visible.length + (browsingFolders ? ' model folders.' : ' matching recordings.'), 'tools-muted');
         if (shown < visible.length) button(list, 'Show ' + Math.min(50, visible.length - shown) + ' more', () => {
-            shown += 50; rows(); (document.getElementById('tools-library-more') || inputs.search).focus();
+            shown += 50; rows(); (document.getElementById('tools-library-more') || bookSummary).focus();
         }, 'tools-library-more');
     }
     rows();
