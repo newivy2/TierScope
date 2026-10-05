@@ -13,6 +13,20 @@ test('summaries weight by actual time, exclude gaps, and never extend the final 
   assert.equal(s.mean,25);assert.equal(s.atOrAboveMs,2000);assert.equal(s.tokenShare,50);
   assert.equal(s.peak,100);assert.equal(s.samples,5);assert.equal(s.coverage,37.5);
 });
+test('average-based thresholds follow the displayed metric with real-time weighting and no gap or final-sample weight', async()=>{
+  const {summarizeSession,averageAnalysisThresholds,summarizeThresholds}=await analysis;
+  const a=archive([0,1000,5000,15000,17000],[10,30,999,50,100],[false,false,false,true,false]);
+  a.session.history.anonymous=[10,10,999,0,0];
+  const defaults=averageAnalysisThresholds(summarizeSession(a,'room').mean);
+  assert.deepEqual(defaults,[30,40,50]);
+  assert.deepEqual(summarizeThresholds(a,'room',defaults).map(row=>row.durationMs),[6000,6000,2000]);
+  assert.deepEqual(averageAnalysisThresholds(summarizeSession(a,'total').mean),[25,33,41]);
+  assert.deepEqual(averageAnalysisThresholds(0),[0]);
+  assert.deepEqual(averageAnalysisThresholds(1),[1]);
+  for(const empty of [archive([0],[100]),archive([0,1000],[100,999],[false,true])])assert.deepEqual(averageAnalysisThresholds(summarizeSession(empty).mean),[]);
+  for(const invalid of [-1,NaN,Infinity])assert.throws(()=>averageAnalysisThresholds(invalid));
+  assert(averageAnalysisThresholds(Number.MAX_SAFE_INTEGER).every(Number.isSafeInteger));
+});
 test('audience overview and multiple thresholds share real-time weighting and exclude long gaps',async()=>{
   const {summarizeAudience,summarizeThresholds}=await analysis;
   const a=archive([0,1000,5000,15000,17000],[10,30,999,50,100],[false,false,false,true,false]);

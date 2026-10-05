@@ -27,7 +27,11 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
  await page.evaluate(()=>GM_setValue('tierscope:library-model:v1:live_model',JSON.stringify({schemaVersion:1,room:'live_model',favorite:true})));
  await page.addScriptTag({content:instrument(source)});await page.evaluate(()=>ViewerTracker.__models.setup());await page.waitForTimeout(350);
  assert.equal(await page.locator('#header-text').textContent(),'live_model');
- for(const row of ['red','green','female-trans'])assert(await page.locator('#tier-row-'+row).isHidden());
+ for(const row of ['red','anon','roomTotal'])assert(await page.locator('#tier-row-'+row).isHidden());
+ for(const row of ['green','purple','pink','dark-blue','light-blue','gray','female-trans','withtokens','total'])assert(await page.locator('#tier-row-'+row).isVisible());
+ const headerSpacing=await page.evaluate(()=>{const name=document.getElementById('header-text').getBoundingClientRect(),handle=document.getElementById('resize-handle').getBoundingClientRect();return name.left-handle.right;});
+ assert(headerSpacing>=3,'the model name clears the resize handle');
+ await page.click('#restore-row-roomTotal');await page.click('#restore-row-anon');
  assert.equal(await page.locator('#count-roomTotal').textContent(),'45');assert.equal(await page.locator('#high-roomTotal').textContent(),'SH:45');
  assert(await page.evaluate(()=>document.getElementById('tier-row-anon').nextElementSibling.id==='tier-row-roomTotal'));
  const series=await page.locator('#spark-roomTotal').evaluate(c=>c._tierScopeChart.values);assert.deepEqual(series,[15,30,45]);

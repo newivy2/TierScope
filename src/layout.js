@@ -22,7 +22,7 @@ export function loadCollapsedRows() {
     } catch (error) {
         log('Could not restore row preferences: ' + error.message);
     }
-    return new Set(['red', 'green', 'female-trans']);
+    return new Set(['red', 'anon', 'roomTotal']);
 }
 
 export function setRowCollapsed(key, collapsed) {

@@ -1,6 +1,8 @@
 import { ANALYSIS_METRICS, ANALYSIS_MAX_THRESHOLDS } from './session-analysis.js';
 
 export const ANALYSIS_PREFERENCE_KEY = 'tierscope:ui:analysis:v1';
+// Keep the legacy summaryThresholds field readable for compatible backups.
+// Summary now derives its defaults from the displayed recording and metric.
 export const DEFAULT_ANALYSIS_PREFERENCES = Object.freeze({metric: 'room', threshold: 100,
     summaryThresholds: Object.freeze([25, 50, 100]), sharedLength: true});
 

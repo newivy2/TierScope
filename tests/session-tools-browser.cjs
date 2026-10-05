@@ -43,11 +43,13 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
   await page.click('#tools-keep');assert.match(await page.locator('#tools-message').textContent(),/already/);
   const first=await page.evaluate(()=>ViewerTracker.__tools.library().entries[0]);
   await nav('summary').click();assert.equal(await rowValue('Time-weighted average'),'23');assert.equal(await rowValue('Excluded gaps'),'00:10:00');
+  assert.equal(await page.locator('#tools-recording-picker').evaluate(e=>e.open),false,'Summary opens on its chart with the picker collapsed');
+  assert.equal(await page.locator('#tools-threshold').inputValue(),'17, 23, 29');
   assert.deepEqual(await page.locator('#tools-audience-table tbody tr').first().locator('td').allTextContents(),['23','85','85']);
   assert.match(await page.locator('#tools-audience-table tbody tr').first().locator('td').nth(1).getAttribute('title'),/First recorded at/);
   assert.match(await page.locator('#tools-audience-shares').textContent(),/Token holders \/ registered viewers: 100%/);
   assert.match(await page.locator('#tools-audience-shares').textContent(),/Token holders \/ whole room: 78.3%/);
-  assert.deepEqual(await thresholdValues(25),['00:04:00','80%']);
+  assert.deepEqual(await thresholdValues(23),['00:04:00','80%']);assert.deepEqual(await thresholdValues(29),['00:00:00','0%']);
   await page.locator('#tools-threshold').fill('35');await page.click('#tools-apply-threshold');
   assert.deepEqual(await thresholdValues(35),['00:00:00','0%']);
   await page.locator('#tools-threshold').fill('35, 0, 25, 25');await page.locator('#tools-threshold').press('Enter');
@@ -56,8 +58,12 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
   await page.locator('#tools-threshold').fill('25,');await page.click('#tools-apply-threshold');
   assert.equal(await page.locator('#tools-threshold').evaluate(e=>e.validity.valid),false);assert.equal(await page.locator('#tools-threshold-table tbody tr').count(),3);
   await page.locator('#tools-threshold').fill('0, 25, 35');await page.locator('#tools-threshold').press('Enter');
-  await page.selectOption('#tools-metric','withTokens');assert.deepEqual(await thresholdValues(25),['00:00:00','0%']);
+  await page.selectOption('#tools-metric','withTokens');assert.equal(await page.locator('#tools-threshold').inputValue(),'14, 18, 23');assert.deepEqual(await thresholdValues(23),['00:00:00','0%']);
   await page.selectOption('#tools-metric','room');
+  assert.equal(await page.locator('#tools-threshold').inputValue(),'17, 23, 29');
+  await page.locator('#tools-threshold').fill('0, 25, 35');await page.click('#tools-apply-threshold');
+  await nav('library').click();await nav('summary').click();assert.equal(await page.locator('#tools-threshold').inputValue(),'0, 25, 35','custom thresholds stay with the same snapshot across tabs');
+  await page.click('#tools-average-thresholds');assert.equal(await page.locator('#tools-threshold').inputValue(),'17, 23, 29');
   await page.screenshot({path:'/tmp/tierscope-360-beta2-'+engine+'-summary.png'});
   const second=JSON.parse(JSON.stringify(first.archive));second.room='secondroom';
   second.session.history.timestamps[3]=second.session.history.timestamps[2];
@@ -67,6 +73,19 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
   await page.waitForFunction(()=>ViewerTracker.__tools.library().count===2);
   assert.equal(await page.locator('#tools-sessions-book').evaluate(e=>e.open),true,'import reveals the stored session');assert.equal(await page.locator('#tools-library-search-menu').evaluate(e=>e.open),false);
   const entries=await page.evaluate(()=>ViewerTracker.__tools.library().entries),other=entries.find(e=>e.archive.room==='secondroom');
+  await nav('summary').click();assert.equal(await page.locator('#tools-recording-picker').evaluate(e=>e.open),false);
+  await page.locator('#tools-recording-picker > summary').focus();await page.keyboard.press('Enter');
+  await page.selectOption('#tools-source-a',other.id);assert.equal(await page.locator('#tools-threshold').inputValue(),'11, 14, 18','thresholds follow the graphed recording');
+  await page.selectOption('#tools-metric','green');assert.equal(await page.locator('#tools-threshold').inputValue(),'0');assert.deepEqual(await thresholdValues(0),['00:05:00','100%']);
+  await page.selectOption('#tools-metric','room');
+  await page.locator('#tools-threshold').fill('999');await page.click('#tools-apply-threshold');
+  await page.selectOption('#tools-source-a',first.id);assert.equal(await page.locator('#tools-threshold').inputValue(),'17, 23, 29','another recording never inherits custom thresholds');
+  await page.evaluate(archive=>{const a=JSON.parse(JSON.stringify(archive));for(const key of Object.keys(a.session.history))a.session.history[key]=a.session.history[key].slice(-1);a.session.history.breaks=[false];GM_setValue('tierscope:library:v1:no_duration',JSON.stringify({schemaVersion:1,addedAt:Date.now(),title:'No covered interval',archive:a}));},other.archive);
+  await nav('library').click();await nav('summary').click();await page.selectOption('#tools-source-a','no_duration');
+  assert.equal(await page.locator('#tools-threshold').inputValue(),'');assert(await page.locator('#tools-average-thresholds').isDisabled());assert.equal(await page.locator('#tools-threshold-table').count(),0);
+  assert.match(await page.locator('#tools-analysis-output').textContent(),/Not enough covered recording time/);
+  await page.evaluate(()=>GM_deleteValue('tierscope:library:v1:no_duration'));
+  await nav('library').click();await nav('summary').click();await page.selectOption('#tools-source-a',first.id);
   await nav('compare').click();await page.selectOption('#tools-source-a',first.id);await page.selectOption('#tools-source-b',other.id);
   assert.equal(await rowValue('Time-weighted average',0),'23');assert.equal(await rowValue('Time-weighted average',1),'14');
   assert.equal(await rowValue('Peak in range',0),'35');assert.equal(await rowValue('Full-session high',0),'85');
@@ -104,7 +123,8 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
   await page.screenshot({path:'/tmp/tierscope-360-'+engine+'-narrow.png'});
   // Select the next view with room for both panels; Scope covers Library controls when narrow.
   await page.setViewportSize({width:1100,height:1000});await page.waitForTimeout(150);await nav('summary').click();
-  assert.equal(await page.locator('#tools-threshold').inputValue(),'0, 25, 35','summary thresholds survive reload');
+  assert.equal(await page.locator('#tools-threshold').inputValue(),'17, 23, 29','Summary recalculates after reload instead of applying global thresholds');
+  assert.equal(await page.locator('#tools-recording-picker').evaluate(e=>e.open),false,'Compare does not expand the Summary picker');
   await page.setViewportSize({width:380,height:740});await page.waitForTimeout(150);
   assert(await page.locator('#tierscope-session-tools').evaluate(e=>e.scrollWidth-e.clientWidth<=1));
   await page.screenshot({path:'/tmp/tierscope-360-beta2-'+engine+'-narrow-summary.png'});
@@ -184,6 +204,7 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
   await page.keyboard.press('Escape');await openTools();await nav('summary').click();
   assert.equal(await page.locator('#tools-metric').inputValue(),'red');assert.match(await page.locator('#tools-message').textContent(),/this tab only/);
   await page.evaluate(()=>{window.GM_setValue=window.realSet;});
+  await page.selectOption('#tools-metric','withTokens');await page.selectOption('#tools-metric','red');
   await page.locator('#tools-threshold').fill('30, 60');await page.click('#tools-apply-threshold');
   assert.equal(await page.locator('#tools-message').textContent(),'');
   assert.equal(await page.evaluate(()=>JSON.parse(GM_getValue('tierscope:ui:analysis:v1')).metric),'red');

@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **3.19.0-beta.1** ([review guide](docs/sessions-book-beta.md)); stable is **3.18.0**. The simplified Current Live Session card provides Keep in Library, Auto, Compare with previous, and History. File controls are below the session list, and exports remain on stored-session menus and the separate replay card. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation instructions, see the [README](readme.md).
+Detailed reference for **3.19.0** ([Sessions Book guide](docs/sessions-book.md)). The simplified Current Live Session card provides Keep in Library, Auto, Compare with previous, and History. File controls are below the session list, and exports remain on stored-session menus and the separate replay card. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation instructions, see the [README](readme.md).
 
 ## Contents
 
@@ -115,15 +115,15 @@ Restoration, window resizing, and expansion from compact view adjust the positio
 
 ### Collapsible rows
 
-All **12 panel rows** can be collapsed independently. **Room Total (👥)** sits below Anons and includes registered and anonymous viewers, with its own chart and SH/ATH high. The header identifies the displayed model and has its favorite star; during file Replay it identifies the file’s model. The compact view keeps a separate room count below that header.
+All **12 panel rows** can be collapsed independently. **Room Total (👥)** sits below Anons and includes registered and anonymous viewers, with its own chart and SH/ATH high. The header identifies the displayed model and has its favorite star, with left spacing clear of the resize handle; during file Replay it identifies the file’s model. The compact view keeps a separate room count below that header.
 
 1. Click a row’s circle or icon to hide its full row.
 2. Its marker appears as a small bordered button in the strip below the header.
 3. Click that button to restore the row to its original position. The buttons also support keyboard focus and Enter/Space.
 
-**Moderators (red), Fan Club (green), and Female/Trans start collapsed** when no valid visibility preference has been saved. After you customize the layout, your choices apply across rooms and full page refreshes. Restoring every row is also remembered. Reset clears session data, not these preferences.
+**Moderators (red), Anons, and Room Total start collapsed; all other tiers start expanded** when no valid visibility preference has been saved. After you customize the layout, your choices apply across rooms and full page refreshes. Restoring every row is also remembered. Reset clears session data, not these preferences.
 
-With at least one row open, the chart area keeps its original height and gives the remaining charts more vertical space. Collapsing all 11 rows shrinks it to the strip above Trends; restoring any row returns it to its original height. The separate compact/expanded toggle and resize handle still work normally.
+With at least one row open, the chart area keeps its original height and gives the remaining charts more vertical space. Collapsing all 12 rows shrinks it to the strip above Trends; restoring any row returns it to its original height. The separate compact/expanded toggle and resize handle still work normally.
 
 Hover over a collapsed marker to see its count, high, and whether the displayed sample is saved, live, or from Replay. Green high-value highlights also appear on collapsed markers.
 
@@ -315,9 +315,9 @@ The list shows 50 recordings at a time with **Show more**; the chart and totals 
 
 **Compare with previous** on Current Live Session captures the live recording and selects up to five earlier sessions for that model, six total. Saved copies with the same session start are excluded, including after retained-history rollover. This temporary snapshot does not save a Library record and stays fixed through new samples and replay changes. **Refresh live snapshot** in the recording picker captures newer live data explicitly. The button is disabled with an explanation when no earlier sessions are available.
 
-Open **Choose recordings & filters** to find the current/replayed snapshot or a saved recording by model, date, title or notes. Labels show the model once and the recording date/time; a custom title appears only when different from the model name. Collapse this picker to make room for the chart. Existing selections stay in their slots when outside the filters, labeled accordingly. A removed/replaced recording must be reselected instead of being silently substituted. **Refresh current / replayed snapshot** captures newer data without saving it to the library. The individual **Summary** starts with the selected metric's chart below the controls, matching Compare. The audience overview follows: room audience (registered + anonymous), registered viewers, viewers with tokens and anonymous viewers, each with a time-weighted average, peak within retained history and full-session high. Hover a recording peak for its first recorded time. Audience proportions show token holders as a share of registered viewers and the whole room, plus the anonymous share of the whole room.
+Open **Choose recordings & filters** to find the current/replayed snapshot or a saved recording by model, date, title or notes. Labels show the model once and the recording date/time; a custom title appears only when different from the model name. Summary starts with this picker collapsed to make room for the chart. Summary and Compare retain separate open/closed choices while Library stays open. Existing selections stay in their slots when outside the filters, labeled accordingly. A removed/replaced recording must be reselected instead of being silently substituted. **Refresh current / replayed snapshot** captures newer data without saving it to the library. The individual **Summary** starts with the selected metric's chart below the controls, matching Compare. The audience overview follows: room audience (registered + anonymous), registered viewers, viewers with tokens and anonymous viewers, each with a time-weighted average, peak within retained history and full-session high. Hover a recording peak for its first recorded time. Audience proportions show token holders as a share of registered viewers and the whole room, plus the anonymous share of the whole room.
 
-Select a metric and enter up to eight non-negative whole-number thresholds, separated by commas (for example, `25, 50, 100`), then choose **Apply thresholds** or press Enter. Duplicates are removed and the thresholds are sorted. The table shows time at or above each count and its percentage of **covered recording time**. Counts equal to a threshold are included. Detailed statistics for the selected metric follow the overview and threshold table. These thresholds are analysis controls, not live alerts. The selected metric, summary thresholds, comparison threshold and **Match shared length** choice are remembered across rooms, Library reopenings and refreshes. Recording selections are not remembered. If saving choices fails, a warning explains that they remain in this tab only; the next choice change retries saving.
+Summary defaults to the displayed metric’s time-weighted session average **−25%, average, and +25%**, rounded to whole viewers. Repeated values after rounding are combined. A session without covered recording time has no automatic thresholds. Changing the recording, metric or captured snapshot recalculates the defaults; zoom does not change the session-wide statistics. You can enter up to eight non-negative whole-number thresholds, separated by commas (for example, `25, 50, 100`), then choose **Apply thresholds** or press Enter. **Use average** restores the calculated values. Custom thresholds stay with the same snapshot and metric while Library is open; they do not become defaults for other sessions or later reopenings. Duplicates are removed and the thresholds are sorted. The table shows time at or above each count and its percentage of **covered recording time**. Counts equal to a threshold are included. Detailed statistics for the selected metric follow the overview and threshold table. These thresholds are analysis controls, not live alerts. The selected metric, comparison threshold and **Match shared length** choice are remembered across rooms, Library reopenings and refreshes. Recording selections are not remembered. If saving choices fails, a warning explains that they remain in this tab only; the next choice change retries saving.
 
 Time calculations use original timestamps, not evenly paced Replay time. Each sample's count is held until the next sample; marked gaps and zero-duration intervals contribute no weight. The last sample adds no assumed duration. With no covered interval, averages, proportions and threshold durations are shown as unavailable. A measured zero remains zero. Audience proportions divide the relevant viewer-time totals; a crowded interval contributes more than a quiet interval of the same length. They are not averages of per-sample percentages. A zero denominator is shown as unavailable.
 
@@ -468,11 +468,11 @@ TierScope has restored a previous sample and has not yet accepted a fresh one. C
 
 **Some rows are missing**
 
-Look for their boxed markers below the header and click to restore them. Moderators and Fan Club are collapsed by default. Your chosen layout persists across rooms and reloads, and Reset does not clear it.
+Look for their boxed markers below the header and click to restore them. Moderators, Anons and Room Total are collapsed by default; all other tiers start expanded. Your chosen layout persists across rooms and reloads, and Reset does not clear it.
 
 **The panel shrank after collapsing rows**
 
-This is expected only when all 11 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only one TierScope version is enabled, refresh the tab, and report the version, browser, and steps that reproduce it.
+This is expected only when all 12 rows are collapsed. Restoring any row brings back the original chart-area height. If it changes size while a row remains open, confirm that only one TierScope version is enabled, refresh the tab, and report the version, browser, and steps that reproduce it.
 
 **The panel is too large or near a screen edge**
 
@@ -512,7 +512,7 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
-| **3.19.0-beta.1** | Add a collapsed Sessions Book below storage controls, with nested Search & sort, preserved browsing choices while open, and accessible keyboard/focus handling. |
+| **3.19.0** | Add a collapsed Sessions Book with nested Search & sort. Default Moderators/Anons/Room Total to collapsed, preserve saved layouts, and give the model header room beside the resize handle. Start Summary with its picker collapsed and derive thresholds from the displayed session’s time-weighted metric average. |
 | **3.18.0** | Default to 1,000 sessions / 50 MB, add local configurable storage limits and capacity notices, preserve prior recordings on failed updates, and support backups/imports through 300 MB / 10,000 sessions with capacity preflight. |
 | **3.17.0** | Simplify Current Live Session to Keep in Library, Auto, Compare with previous and History. Keep exports on individual sessions, move file/import/refresh controls below the list, and compare a fixed live snapshot with up to five earlier sessions without including saved copies of the current start. Auto reflects confirmed favorites and locks when enabled. |
 | **3.16.1** | Use yellow for With Tokens and pink for Room Total, including charts, counts and collapsed-row borders. Match the compact chart colors and use theme-adjusted shades in bright mode. |

@@ -71,9 +71,10 @@ test('fresh consent and Reset epochs from another tab take effect before a new L
  const before=JSON.stringify(records(h));scan(h,6,60000);assert.equal(JSON.stringify(records(h)),before,'stale owner cannot checkpoint after another tab reset');
 });
 
-test('new default collapses Female/Trans but respects stored row choices; Room Total series is derived without mutation', () => {
- const h=fresh();assert.deepEqual(clean([...h.d.loadCollapsedRows()]),['red','green','female-trans']);
+test('new default collapses Mods/Anons/Room Total but respects stored row choices; Room Total series is derived without mutation', () => {
+ const h=fresh();assert.deepEqual(clean([...h.d.loadCollapsedRows()]),['red','anon','roomTotal']);
  h.storage.set('tierscope:ui:collapsedRows:v1','[]');assert.deepEqual(clean([...h.d.loadCollapsedRows()]),[]);
+ h.storage.set('tierscope:ui:collapsedRows:v1','["red","green","female-trans"]');assert.deepEqual(clean([...h.d.loadCollapsedRows()]),['red','green','female-trans']);
  const data=Object.freeze({total:Object.freeze([1,5]),anonymous:Object.freeze([3,4])}), series=h.d.roomTotalSeries(data);
  assert.deepEqual(clean(series),[4,9]);assert.equal(h.d.roomTotalSeries(data),series);assert(Object.isFrozen(series));
 });

@@ -1,6 +1,6 @@
-# Sessions Book — 3.19.0-beta.1
+# Sessions Book — 3.19.0
 
-[Install the beta](https://raw.githubusercontent.com/newivy2/TierScope/beta/sessions-book/tierscope.user.js). Keep one enabled copy of TierScope and refresh room tabs after updating. The official main release remains 3.18.0.
+[Install 3.19.0](https://raw.githubusercontent.com/newivy2/TierScope/main/tierscope.user.js). Keep one enabled copy of TierScope and refresh room tabs after updating. [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.19.0).
 
 The Sessions tab keeps **Current Live Session**, the session/storage counters and **Storage limits** at the top. Below them, **Sessions Book** starts collapsed. Expand it to browse your existing model folders and stored sessions.
 
@@ -8,7 +8,11 @@ The book starts with a separate collapsed **Search & sort** menu. All existing m
 
 Expanded sections and browsing choices survive Refresh and tab changes while Library is open. Closing and reopening Library starts both sections collapsed. Keeping/importing a session opens the book to show it; returning from model history also reveals the relevant folder. These layout changes do not migrate or rewrite saved sessions.
 
-To review:
+Summary opens with **Choose recordings & filters** collapsed. Thresholds follow the displayed metric’s time-weighted session average: 25% below, the average, and 25% above, rounded to whole viewers. Gaps are excluded. Custom values apply to that snapshot and metric; **Use average** restores the calculated values. A different recording or metric gets fresh defaults.
+
+New layouts collapse Moderators, Anons and Room Total, with all other tiers expanded; saved row choices are preserved. The model name has extra clearance beside the resize handle.
+
+To try the layout:
 
 1. Open Library. Expand Sessions Book, then Search & sort using a click or Enter/Space. Check that every existing filter remains available.
 2. Choose a model, apply filters, select sessions or write a note draft. Fold and reopen the sections, switch tabs, and Refresh; verify your choices and draft remain available. Close and reopen Library to check the collapsed starting layout.
