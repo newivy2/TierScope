@@ -1,6 +1,6 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const {instrument,prepareSource}=require('./helpers/instrument.cjs');
-const {openLibraryBook}=require('./helpers/library.cjs');
+const {openLibraryBook,clickControl,revealControl}=require('./helpers/library.cjs');
 const engine=process.env.TIERSCOPE_BROWSER||'chromium';
 const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8')).replaceAll('scheduleInit(2000);','')
  .replace('downloadTrackingReport: downloadTrackingReport,',`__models:{setup(){
@@ -36,16 +36,17 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
  assert(await page.evaluate(()=>document.getElementById('tier-row-anon').nextElementSibling.id==='tier-row-roomTotal'));
  const series=await page.locator('#spark-roomTotal').evaluate(c=>c._tierScopeChart.values);assert.deepEqual(series,[15,30,45]);
  await page.click('#btn-control-library');
- assert.equal(await page.locator('#tools-title').textContent(),'Library');assert.equal(await page.locator('.tools-subtitle').textContent(),'Session Storage and Analysis');
- assert.deepEqual(await page.locator('[data-tools-tab]').allTextContents(),['Sessions','Summary','Compare','Backup']);
- assert.equal(await page.locator('#tools-content > :first-child #tools-current-kind').textContent(),'Current Live Session');
+ assert.equal(await page.locator('#tools-title').textContent(),'Saved sessions');assert.equal(await page.locator('.tools-subtitle').textContent(),'Library · Session storage and analysis');
+ assert.deepEqual(await page.locator('[data-tools-tab]').allTextContents(),['Saved sessions','Summary','Compare','Backup']);
+ assert.equal(await page.locator('#tools-current-kind').textContent(),'Current Live Session');
  // The book starts closed independently of storage settings and current controls.
  const book=page.locator('#tools-sessions-book'),searchMenu=page.locator('#tools-library-search-menu');
- assert.equal(await book.evaluate(e=>e.open),false);assert.equal(await searchMenu.evaluate(e=>e.open),false);
+ assert.equal(await book.evaluate(e=>e.open),true);assert.equal(await searchMenu.evaluate(e=>e.open),false);
  assert(await page.locator('#tools-folder-saved_model_1').isHidden());assert(await page.locator('#tools-library-search').isHidden());
- for(const id of ['tools-current-card','tools-library-storage','tools-open-session','tools-import-session','tools-refresh-library'])assert(await page.locator('#'+id).isVisible());
- const foldedState=await page.evaluate(()=>({live:ViewerTracker.__models.state(),stored:Object.entries(localStorage)}));
- await page.locator('#tools-sessions-book-toggle').focus();await page.keyboard.press('Enter');
+ assert(await page.locator('#tools-current-card').isHidden());
+ for(const id of ['tools-library-storage','tools-open-session','tools-import-session','tools-refresh-library'])assert(await page.locator('#'+id).isVisible());
+ const foldedState=await page.evaluate(()=>({live:ViewerTracker.__models.state(),stored:Object.entries(localStorage).filter(([key])=>!key.startsWith('tierscope:ui:disclosure:'))}));
+ await page.locator('#tools-model-browser > summary').focus();await page.keyboard.press('Enter');
  assert(await page.locator('#tools-folder-saved_model_1').isVisible());assert(await page.locator('#tools-library-search').isHidden());
  assert.match(await page.locator('#tools-folder-saved_model_1').textContent(),/1 session · First .+ · Latest .+Total covered time 00:01:00/);
  assert.equal(await page.locator('#tools-folder-saved_model_1').getAttribute('aria-label'),'Open sessions for saved_model_1');
@@ -63,23 +64,24 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
  // A refresh triggered while the closed summary retains focus must not reopen it.
  await page.locator('#tools-refresh-library').evaluate(e=>e.click());
  assert.equal(await book.evaluate(e=>e.open),false);assert.equal(await page.evaluate(()=>document.activeElement.id),'tools-sessions-book-toggle');
- await page.click('[data-tools-tab=summary]');await page.click('[data-tools-tab=library]');
+ await clickControl(page,'[data-tools-tab=summary]');await page.click('[data-tools-tab=library]');
  assert.equal(await book.evaluate(e=>e.open),false);assert.equal(await searchMenu.evaluate(e=>e.open),false);
  await openLibraryBook(page);assert.equal(await page.locator('#tools-library-search').inputValue(),'saved_model_1');
  assert.equal(await filteredRow.locator('textarea').inputValue(),'Draft inside the book');assert(await filteredRow.locator('input[type=checkbox]').isChecked());
  await filteredRow.locator('summary').click();await filteredRow.getByRole('button',{name:'Discard changes',exact:true}).click();
  await page.click('#tools-clear-selection');await page.click('#tools-library-clear');
- assert.deepEqual(await page.evaluate(()=>({live:ViewerTracker.__models.state(),stored:Object.entries(localStorage)})),foldedState,'folds, filters and drafts do not change session storage or playback');
+ assert.deepEqual(await page.evaluate(()=>({live:ViewerTracker.__models.state(),stored:Object.entries(localStorage).filter(([key])=>!key.startsWith('tierscope:ui:disclosure:'))})),foldedState,'folds, filters and drafts do not change session storage or playback');
  await page.click('#tools-close');await page.click('#btn-control-library');
- assert.equal(await book.evaluate(e=>e.open),false);assert.equal(await searchMenu.evaluate(e=>e.open),false,'a fresh Library starts collapsed');
+ assert.equal(await book.evaluate(e=>e.open),true);assert.equal(await searchMenu.evaluate(e=>e.open),true,'a fresh Library remembers the search opened during the previous visit');
+ await revealControl(page,'#tools-compare-previous');
  const compare=await page.locator('#tools-compare-previous').boundingBox(),history=await page.locator('#tools-room-history').boundingBox();
  assert(history.x>compare.x&&Math.abs(history.y-compare.y)<2,'History follows Compare with previous');
  assert.equal(await page.locator('#tools-current-card').getByRole('button').allTextContents().then(names=>names.filter(n=>['Save file','TXT','CSV','GIF','Add to ATH'].includes(n))).then(names=>names.length),0);
  assert(await page.locator('#tools-auto-keep').isEnabled());assert(!(await page.locator('#tools-auto-keep').isChecked()));
  assert(await page.locator('#tools-compare-previous').isDisabled());assert.equal(await page.locator('#tools-current-favorite').textContent(),'★');
- page.once('dialog',async d=>{assert.match(d.message(),/automatically keep their live sessions\?/);await d.dismiss();});await page.click('#tools-auto-keep');
+ page.once('dialog',async d=>{assert.match(d.message(),/automatically keep their live sessions\?/);await d.dismiss();});await clickControl(page,'#tools-auto-keep');
  assert.equal(await page.evaluate(()=>ViewerTracker.__models.favorite('live_model').autoKeep),false);
- page.once('dialog',d=>d.accept());await page.click('#tools-auto-keep');
+ page.once('dialog',d=>d.accept());await clickControl(page,'#tools-auto-keep');
  assert.equal(await page.evaluate(()=>ViewerTracker.__models.favorite('live_model').autoKeep),true);
  assert.equal(await page.locator('#tools-room-history').textContent(),'History · 1');assert(await page.locator('#tools-auto-keep').isChecked());assert(await page.locator('#tools-auto-keep').isDisabled());
  assert(await page.locator('#tools-compare-previous').isDisabled(),'the saved copy of the current session is not previous');
@@ -109,13 +111,13 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
  assert.equal(await page.evaluate(()=>ViewerTracker.__models.library().entries.filter(e=>e.archive.room==='replay_model').length),0,'starring replay model never imports its snapshot');
  const download=page.waitForEvent('download');await page.click('#tools-save-session-replay');assert.equal(JSON.parse(fs.readFileSync(await(await download).path(),'utf8')).room,'replay_model');
  if(await book.evaluate(e=>e.open))await page.click('#tools-sessions-book-toggle');
- await page.click('#tools-keep');await page.locator('[data-library-id] summary').click();
- assert.equal(await book.evaluate(e=>e.open),true,'Keep reveals its session');assert.equal(await searchMenu.evaluate(e=>e.open),false,'Keep leaves search collapsed');
+ await clickControl(page,'#tools-keep');await page.locator('[data-library-id] summary').click();
+ assert.equal(await book.evaluate(e=>e.open),true,'Keep reveals its session');assert.equal(await searchMenu.evaluate(e=>e.open),true,'Keep preserves the remembered search choice');
  const liveDownload=page.waitForEvent('download');await page.locator('[data-library-id]').getByRole('button',{name:'Save file',exact:true}).click();assert.equal(JSON.parse(fs.readFileSync(await(await liveDownload).path(),'utf8')).room,'live_model');
  await page.click('#playback-return');
  await page.evaluate(()=>{window.originalSet=GM_setValue;window.GM_setValue=(k,v)=>{if(k.startsWith('tierscope:library:v1:'))throw Error('Storage blocked');return originalSet(k,v);};ViewerTracker.__models.sample();});
  assert.match(await page.locator('[data-card-auto]').first().textContent(),/pending.*Storage blocked/);
- await page.evaluate(()=>window.GM_setValue=window.originalSet);await page.click('#tools-retry-automatic');assert(await page.locator('#tools-retry-automatic').isHidden());
+ await page.evaluate(()=>window.GM_setValue=window.originalSet);await clickControl(page,'#tools-retry-automatic');assert(await page.locator('#tools-retry-automatic').isHidden());
  // Fresh choices from another tab stop automatic updates.
  const other=await context.newPage();await other.goto('https://tierscope.test/other_model/');await other.evaluate(()=>GM_setValue('tierscope:library-model:v1:live_model',JSON.stringify({schemaVersion:1,room:'live_model',favorite:false,autoKeep:false})));
  const kept=await page.evaluate(()=>JSON.stringify(ViewerTracker.__models.library().entries.find(e=>e.archive.room==='live_model').archive));

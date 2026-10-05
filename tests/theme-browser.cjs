@@ -1,3 +1,4 @@
+const {clickControl}=require('./helpers/library.cjs');
 const checkControlLayout = require('./helpers/control-layout.cjs');
 const {instrument, prepareSource} = require('./helpers/instrument.cjs');
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
@@ -83,8 +84,8 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   if(process.env.TIERSCOPE_THEME_SHOTS)await panel.screenshot({path:path.join(process.env.TIERSCOPE_THEME_SHOTS,'bright-expanded.png')});
   await page.locator('#opacity-slider').evaluate(e=>{e.value='30';e.dispatchEvent(new Event('input'));});
   const translucent=await styles();assert.equal(translucent.panel,'rgba(248, 249, 252, 0.3)');assert.notEqual(translucent.row,bright.row);assert.equal(translucent.highlight,bright.highlight);assert.equal(translucent.text,bright.text);
-  await page.locator('#btn-main-reset').focus();await page.keyboard.press('Tab');
-  assert(await checkbox.evaluate(e=>e===document.activeElement),'Tab reaches the theme switch after Reset');
+  await page.locator('#btn-control-stop').focus();await page.keyboard.press('Tab');
+  assert(await checkbox.evaluate(e=>e===document.activeElement),'Tab reaches the theme switch after Stop');
   await page.keyboard.press('Space');
   assert.equal(await page.locator('#dark-mode-track').evaluate(e=>getComputedStyle(e).outlineStyle),'solid','keyboard focus stays visible');assert(await checkbox.isChecked());assert.equal((await styles()).panel,'rgba(20, 20, 30, 0.3)');
   await page.keyboard.press('Space');assert(!(await checkbox.isChecked()));
@@ -96,7 +97,7 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   await page.locator('#opacity-slider').evaluate(e=>{e.value='95';e.dispatchEvent(new Event('input'));});
   await page.locator('#spark-purple').focus();await page.keyboard.press('End');
   assert.equal(await page.locator('#tierscope-chart-tooltip').evaluate(e=>getComputedStyle(e).backgroundColor),'rgb(255, 255, 255)');
-  await page.click('#btn-replay');await page.evaluate(()=>ViewerTracker.__theme.pause());
+  await clickControl(page,'#btn-replay');await page.evaluate(()=>ViewerTracker.__theme.pause());
   const replay=await page.evaluate(()=>ViewerTracker.__theme.state());
   await page.evaluate(()=>ViewerTracker.__theme.theme(false));await page.evaluate(()=>ViewerTracker.__theme.theme(true));
   assert.deepEqual(await page.evaluate(()=>ViewerTracker.__theme.state()),replay,'theme repaint preserves exact Replay frame');
@@ -109,7 +110,7 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   assert.equal(await page.locator('#mini-settings').evaluate(e=>getComputedStyle(e).backgroundColor),'rgb(240, 242, 247)');
   if(process.env.TIERSCOPE_THEME_SHOTS)await panel.screenshot({path:path.join(process.env.TIERSCOPE_THEME_SHOTS,'bright-compact.png')});
   await setup('https://tierscope.test/anotherroom/');assert(!(await checkbox.isChecked()),'theme survives reload and another room');
-  await page.click('#btn-main-reset');assert(!(await checkbox.isChecked()),'Reset retains the theme');
+  await clickControl(page,'#btn-main-reset');assert(!(await checkbox.isChecked()),'Reset retains the theme');
   await page.evaluate(()=>{window.GM_setValue=()=>{throw new Error('fixture storage failure');};});
   await checkbox.check();assert.equal(await panel.getAttribute('data-theme'),'dark','storage failures do not block local switching');
   await page.evaluate(()=>localStorage.setItem('tierscope:ui:theme:v1',JSON.stringify({bad:true})));

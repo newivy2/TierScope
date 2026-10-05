@@ -1,6 +1,6 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const {instrument,prepareSource}=require('./helpers/instrument.cjs');
-const {openLibraryBook}=require('./helpers/library.cjs');
+const {openLibraryBook,clickControl}=require('./helpers/library.cjs');
 const engine=process.env.TIERSCOPE_BROWSER||'chromium';
 const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8')).replaceAll('scheduleInit(2000);','')
 .replace('downloadTrackingReport: downloadTrackingReport,',`__organized:{checkUrlChange,
@@ -49,7 +49,7 @@ const file=(name,value)=>({name,mimeType:'application/json',buffer:Buffer.from(J
   assert(await page.evaluate(()=>{const event=new Event('beforeunload',{cancelable:true});window.dispatchEvent(event);return event.defaultPrevented;}));
   await page.locator('#tools-library-search').fill('no such recording');await page.locator('#tools-library-search').fill('');
   assert.equal(await draftRow.locator('textarea').inputValue(),'Unfinished note');
-  await page.click('[data-tools-tab=summary]');await page.click('[data-tools-tab=library]');
+  await clickControl(page,'[data-tools-tab=summary]');await page.click('[data-tools-tab=library]');
   assert.equal(await draftRow.locator('textarea').inputValue(),'Unfinished note');
   await page.click('#tools-close');await page.click('#btn-control-library');await page.click('#tools-review-notes');
   assert.equal(await page.locator('#tools-content textarea').inputValue(),'Unfinished note');
@@ -133,7 +133,7 @@ const file=(name,value)=>({name,mimeType:'application/json',buffer:Buffer.from(J
   assert(await page.evaluate(()=>window.keptPicker===document.getElementById('tools-source-a')));
   await page.locator('#tools-analysis-search').fill('Recording');
   assert.equal(await page.locator('#tools-chart-range').textContent(),keptRange);assert.equal(await page.locator('[data-analysis-series="1"]').isChecked(),false);
-  await page.click('[data-tools-tab=summary]');await page.click('[data-tools-tab=compare]');
+  await clickControl(page,'[data-tools-tab=summary]');await clickControl(page,'[data-tools-tab=compare]');
   assert.equal(await page.locator('#tools-chart-range').textContent(),keptRange);assert.equal(await page.locator('[data-analysis-series="1"]').isChecked(),false);
   await page.locator('#tools-analysis-search').fill('');await page.locator('[data-analysis-series="1"]').check();await page.click('#tools-chart-reset');await page.click('#tools-chart-pin');
   await page.click('#tools-metric-room');await page.locator('#tools-threshold').fill('100');await page.click('#tools-apply-threshold');
@@ -179,14 +179,14 @@ const file=(name,value)=>({name,mimeType:'application/json',buffer:Buffer.from(J
   await page.selectOption('#tools-source-b',originalA);assert.equal(await page.locator('#tools-analysis-chart').count(),0);assert.match(await page.locator('#tools-content').textContent(),/different session in each/);
   await page.selectOption('#tools-source-b',originalB);
   const removed=await page.evaluate(id=>{const key='tierscope:library:v1:'+id,raw=GM_getValue(key);GM_deleteValue(key);return {key,raw};},originalB);
-  await page.click('[data-tools-tab=library]');await page.click('[data-tools-tab=compare]');
+  await page.click('[data-tools-tab=library]');await clickControl(page,'[data-tools-tab=compare]');
   assert.equal(await page.locator('#tools-analysis-chart').count(),0);assert.match(await page.locator('#tools-source-b option:checked').textContent(),/changed or removed/);
-  await page.evaluate(({key,raw})=>GM_setValue(key,raw),removed);await page.click('[data-tools-tab=library]');await page.click('[data-tools-tab=compare]');
+  await page.evaluate(({key,raw})=>GM_setValue(key,raw),removed);await page.click('[data-tools-tab=library]');await clickControl(page,'[data-tools-tab=compare]');
   assert.equal(await page.locator('#tools-chart-inspection tbody tr').count(),6);
   // A shorter recording clamps a zoomed window when matching shared length;
   // changing the actual recording selection starts a fresh chart interaction.
   await page.evaluate(raw=>{const entry=JSON.parse(raw);entry.archive.room='short_model';for(const key of Object.keys(entry.archive.session.history))entry.archive.session.history[key]=entry.archive.session.history[key].slice(0,2);GM_setValue('tierscope:library:v1:short_fixture',JSON.stringify(entry));},removed.raw);
-  await page.click('[data-tools-tab=library]');await page.click('[data-tools-tab=compare]');
+  await page.click('[data-tools-tab=library]');await clickControl(page,'[data-tools-tab=compare]');
   await page.uncheck('#tools-shared-length');await page.selectOption('#tools-source-b','short_fixture');
   assert.equal(await page.locator('#tools-chart-pin').getAttribute('aria-pressed'),'false');
   await page.locator('#tools-analysis-chart').focus();await page.keyboard.press('End');await page.click('#tools-chart-zoom-in');
@@ -197,7 +197,7 @@ const file=(name,value)=>({name,mimeType:'application/json',buffer:Buffer.from(J
   assert.equal(await page.locator('#tools-chart-pin').getAttribute('aria-pressed'),'false');
   await page.evaluate(()=>GM_deleteValue('tierscope:library:v1:short_fixture'));
   // Summary shares the same inspection/zoom controls, with one recording.
-  await page.click('[data-tools-tab=summary]');assert.equal(await page.locator('#tools-chart-inspection tbody tr').count(),1);
+  await clickControl(page,'[data-tools-tab=summary]');assert.equal(await page.locator('#tools-chart-inspection tbody tr').count(),1);
   await page.locator('#tools-analysis-chart').focus();await page.keyboard.press('End');await page.keyboard.press('Escape');assert.equal(await page.locator('#tierscope-session-tools').count(),1,'chart Escape releases cursor before closing the Library');
   await page.click('[data-tools-tab=library]');await page.click('#tools-library-clear');
   // Bulk import is explicit, validates all files before writing, and keeps live data independent.

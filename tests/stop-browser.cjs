@@ -1,3 +1,4 @@
+const {clickControl}=require('./helpers/library.cjs');
 const {instrument, prepareSource} = require('./helpers/instrument.cjs');
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const engine=process.env.TIERSCOPE_BROWSER||'chromium';
@@ -30,10 +31,10 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   await page.waitForFunction(()=>ViewerTracker.__stop.state().history.length===1);await page.waitForTimeout(350);
   const panel=page.locator('#tracker-container'),before=await panel.boundingBox();
   const controls=await page.locator('#control-field').boundingBox();
-  for(const id of ['btn-replay','btn-control-library','btn-control-stop','control-next-scan']){
+  for(const id of ['btn-control-auto','btn-control-stop','control-next-scan']){
    const r=await page.locator('#'+id).boundingBox();assert(r.x>=controls.x&&r.x+r.width<=controls.x+controls.width);
   }
-  for(const row of [['btn-control-library','btn-replay','btn-control-auto','btn-control-stop','btn-main-reset']]){
+  for(const row of [['btn-control-auto','btn-control-stop','dark-mode-control']]){
    const boxes=await Promise.all(row.map(id=>page.locator('#'+id).boundingBox()));
    boxes.slice(1).forEach((r,i)=>{assert(r.x>=boxes[i].x+boxes[i].width,'buttons do not overlap');assert(Math.abs(r.y-boxes[i].y)<1,'buttons stay on one row: '+JSON.stringify({row,boxes}));});
   }
@@ -54,9 +55,9 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   await page.evaluate(()=>ViewerTracker.__stop.tick());await page.evaluate(()=>ViewerTracker.__stop.scan());await page.evaluate(()=>ViewerTracker.__stop.draw());
   assert.equal(requests,n);assert.deepEqual(await page.evaluate(()=>ViewerTracker.__stop.state()),stopped);
   assert.equal(await page.locator('#spark-light-blue').evaluate(c=>c.toDataURL()),frozen,'stopped chart keeps exactly the same pixels');
-  await page.click('#btn-replay');await page.evaluate(()=>ViewerTracker.__stop.pauseReplay());await page.click('#btn-playback-library');assert(await page.locator('#btn-export-gif-replay').isVisible());await page.click('#playback-return');
+  await clickControl(page,'#btn-replay');await page.evaluate(()=>ViewerTracker.__stop.pauseReplay());await page.click('#btn-playback-library');assert(await page.locator('#btn-export-gif-replay').isVisible());await page.click('#playback-return');
   assert.match(await page.locator('#header-text').getAttribute('title'),/^Stopped session:/);
-  await page.click('#tools-keep');await page.locator('[data-library-id] summary').click();
+  await clickControl(page,'#tools-keep');await page.locator('[data-library-id] summary').click();
   const downloadPromise=page.waitForEvent('download');await page.locator('[data-library-id]').first().getByRole('button',{name:'CSV',exact:true}).click();const download=await downloadPromise;assert(download.suggestedFilename().endsWith('.csv'));
   await page.reload();await page.addScriptTag({content:instrument(source)});await page.evaluate(()=>ViewerTracker.__stop.init());
   assert.equal(requests,n);assert((await page.evaluate(()=>ViewerTracker.__stop.state())).stopped);
@@ -80,7 +81,7 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   assert.deepEqual(await panel.boundingBox(),beforeAbsencePause,'automatic pause adds no panel height');
   if(process.env.TIERSCOPE_STOP_SHOT)await panel.screenshot({path:process.env.TIERSCOPE_STOP_SHOT});
   // Return checks must continue behind FILE REPLAY without changing its frame.
-  await page.click('#btn-control-library');await page.click('#tools-keep');await page.locator('[data-library-id]').first().locator('summary').click();const exported=page.waitForEvent('download');await page.locator('[data-library-id]').first().getByRole('button',{name:'Save file',exact:true}).click();
+  await page.click('#btn-control-library');await clickControl(page,'#tools-keep');await page.locator('[data-library-id]').first().locator('summary').click();const exported=page.waitForEvent('download');await page.locator('[data-library-id]').first().getByRole('button',{name:'Save file',exact:true}).click();
   const archive=JSON.parse(fs.readFileSync(await(await exported).path(),'utf8'));archive.room='different_archive';
   await page.locator('#session-file-input').setInputFiles({name:'absence.tierscope.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(archive))});
   await page.waitForFunction(()=>document.getElementById('playback-room').textContent==='Room: different_archive');

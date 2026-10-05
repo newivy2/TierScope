@@ -4,7 +4,7 @@ module.exports = async function checkControlLayout(page) {
     const status = document.getElementById('control-next-scan'), original = status.textContent;
     const timer = document.getElementById('control-tracking-timer'), originalTime = timer.textContent;
     const ids = ['control-session-row', 'control-tracking-timer', 'control-next-scan', 'control-action-row',
-      'btn-control-library', 'btn-replay', 'btn-control-auto', 'btn-control-stop', 'btn-main-reset', 'dark-mode-control'];
+      'btn-control-auto', 'btn-control-stop', 'dark-mode-control'];
     const measure = () => ids.map(id => {
       const r = document.getElementById(id).getBoundingClientRect();
       return {id, x: r.x, y: r.y, width: r.width, height: r.height};

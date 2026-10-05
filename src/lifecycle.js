@@ -53,7 +53,7 @@ export function updateStopControls() {
     ['btn-auto', 'btn-control-auto'].forEach(function(id) {
         var button = document.getElementById(id);
         if (!button) return;
-        button.innerHTML = runtime.isStopped ? 'Start' : runtime.isAutoRefreshOn && !isAbsencePaused() ? '⏸' : '▶';
+        button.textContent = runtime.isStopped ? 'Start' : runtime.isAutoRefreshOn && !isAbsencePaused() ? 'Pause' : 'Resume';
         button.title = runtime.isStopped ? 'Start a new session (keeps this stopped record until normal cleanup)' :
             isAbsencePaused() ? 'Resume recording now; cancel absence slowdown, automatic pause and Stop until the broadcaster returns' :
             runtime.isAutoRefreshOn ? 'Pause scans and elapsed time' : 'Resume this session';

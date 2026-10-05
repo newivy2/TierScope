@@ -1,3 +1,4 @@
+const {clickControl}=require('./helpers/library.cjs');
 const {instrument, prepareSource} = require('./helpers/instrument.cjs');
 const fs=require('fs'),path=require('path'),assert=require('assert/strict');
 const chromium=require('playwright')[process.env.TIERSCOPE_BROWSER || 'chromium'];
@@ -62,7 +63,7 @@ const injected=source.replaceAll('scheduleInit(2000);','/* fixture startup */').
   assert.equal((await active()).length,0,'changing motion preference cancels an active pulse');
   assert.equal((await scan(4)).length,0);await page.emulateMedia({reducedMotion:'no-preference'});await page.waitForTimeout(30);
   assert.equal((await calls()).length,0);
-  await scan(5);await page.click('#btn-replay');assert.equal((await active()).length,0);
+  await scan(5);await clickControl(page,'#btn-replay');assert.equal((await active()).length,0);
   assert.equal((await scan(6)).length,0,'live acquisition during Replay must not animate it');
   await page.click('#playback-return');assert.equal((await calls()).length,0);
   await page.click('#btn-toggle');assert.equal((await scan(7)).length,0);
@@ -80,7 +81,7 @@ const injected=source.replaceAll('scheduleInit(2000);','/* fixture startup */').
   assert.equal((await calls()).length,0,'redraw recovery must not generate delayed pulses');
   assert.equal((await scan(8)).length,0,'the retained high is a plateau on the next scan');
   assert((await scan(9)).some(e=>e.id==='tier-row-red'));
-  await page.click('#btn-main-reset');assert.equal((await active()).length,0);
+  await clickControl(page,'#btn-main-reset');assert.equal((await active()).length,0);
   assert.deepEqual(errors,[]);
   console.log('PASS failed acquisition and failed painting suppress pulses without dropping valid data; Reset cancels active animations');
  } finally {await browser.close();}

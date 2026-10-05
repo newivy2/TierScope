@@ -85,7 +85,7 @@ test('pause, reload, failed acquisition, Stop, file Replay and close preserve se
  assert.equal(archived.session.pausedElapsedTime,elapsed);assert.equal(archived.session.isStopped,true);
  f.openSessionReplay(archived);f.setChartWindow('hour');h.t.stepPlayback(1);h.t.leavePlayback(true);
  assert.equal(h.t.state().isStopped,true);assert.equal(h.t.state().pausedElapsedTime,elapsed);assert.equal(h.t.state().history.timestamps.length,samples);
- assert.match(h.e('header-text').title,/^Stopped session:/);assert.equal(h.e('btn-control-auto').innerHTML,'Start');
+ assert.match(h.e('header-text').title,/^Stopped session:/);assert.equal(h.e('btn-control-auto').textContent,'Start');
 });
 
 test('Reset, navigation, closing Replay and a newer file cancel an older asynchronous file read',async()=>{

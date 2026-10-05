@@ -1,3 +1,4 @@
+const {clickControl}=require('./helpers/library.cjs');
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
 const {instrument, prepareSource} = require('./helpers/instrument.cjs');
 const engine = process.env.TIERSCOPE_BROWSER || 'chromium';
@@ -34,7 +35,7 @@ const source = prepareSource(fs.readFileSync(path.join(__dirname, '../tierscope.
    window.axisLabels=[];const fill=CanvasRenderingContext2D.prototype.fillText;CanvasRenderingContext2D.prototype.fillText=function(text,...args){window.axisLabels.push(text);return fill.call(this,text,...args);};
   });
   await page.goto('https://tierscope.test/clock_model/');await page.addScriptTag({content:instrument(source)});await page.evaluate(()=>ViewerTracker.__clock.setup());
-  await page.click('#btn-control-library');await page.click('[data-tools-tab=compare]');
+  await page.click('#btn-control-library');await clickControl(page,'[data-tools-tab=compare]');
   const picker=async()=>{if(!(await page.locator('#tools-recording-picker').evaluate(e=>e.open)))await page.locator('#tools-recording-picker > summary').click();};
   const choose=async(slot,title)=>{await picker();const value=await page.locator('#tools-source-'+slot+' option').evaluateAll((es,title)=>es.find(e=>e.textContent.includes(title)).value,title);await page.selectOption('#tools-source-'+slot,value);};
   await choose('b','Earlier night');
@@ -70,8 +71,8 @@ const source = prepareSource(fs.readFileSync(path.join(__dirname, '../tierscope.
    await mode('elapsed');assert.equal(await page.locator('#tools-analysis-chart').count(),1);await mode('clock');assert.equal(await page.locator('#tools-analysis-chart').count(),0);
   }
   await choose('b','Earlier night');assert.equal(await page.locator('#tools-analysis-chart').count(),1);
-  await page.click('[data-tools-tab=summary]');assert.equal(await page.locator('#tools-compare-axis').count(),0);assert.match(await page.locator('#tools-analysis-chart').getAttribute('aria-label'),/elapsed time/);
-  await page.click('[data-tools-tab=compare]');assert.equal(await page.locator('#tools-compare-axis').inputValue(),'clock');
+  await clickControl(page,'[data-tools-tab=summary]');assert.equal(await page.locator('#tools-compare-axis').count(),0);assert.match(await page.locator('#tools-analysis-chart').getAttribute('aria-label'),/elapsed time/);
+  await clickControl(page,'[data-tools-tab=compare]');assert.equal(await page.locator('#tools-compare-axis').inputValue(),'clock');
   await picker();await page.fill('#tools-analysis-from','2026-10-01');assert.equal(await page.locator('#tools-compare-axis').inputValue(),'clock');
   // Six short recordings still use the existing line styles and shared inspection.
   while((await page.locator('[id^=tools-source-]').count())<6){await picker();await page.click('#tools-compare-add');}

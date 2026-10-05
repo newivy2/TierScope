@@ -1,3 +1,4 @@
+const {clickControl}=require('./helpers/library.cjs');
 const {instrument, prepareSource} = require('./helpers/instrument.cjs');
 const fs=require('fs');
 const assert=require('assert/strict');
@@ -70,7 +71,7 @@ const injected=source.replaceAll('scheduleInit(2000);','/* test controls initial
  const history=await page.evaluate(()=>ViewerTracker.__test.state().history);
  assert.equal(await page.locator('#btn-download-report,#btn-download-csv,#btn-control-save-session,#btn-control-open-session').count(),0);
  await page.click('#btn-control-library');
- await page.click('#tools-keep');await page.locator('[data-library-id] summary').click();
+ await clickControl(page,'#tools-keep');await page.locator('[data-library-id] summary').click();
  assert(await page.locator('[data-library-id]').getByRole('button',{name:'TXT',exact:true}).isVisible());
  if(process.env.TIERSCOPE_TRACE)console.log('TRACE before CSV');
  const csvDownload=page.waitForEvent('download');await page.locator('[data-library-id]').getByRole('button',{name:'CSV',exact:true}).click();
@@ -117,7 +118,7 @@ const injected=source.replaceAll('scheduleInit(2000);','/* test controls initial
  const saved=await page.evaluate(()=>JSON.parse(GM_getValue('tierscope:ui:geometry:v1')));
  await page.reload();await page.addScriptTag({content:instrument(injected)});await page.evaluate(()=>ViewerTracker.__test.init());await page.waitForTimeout(400);
  assert.equal((await page.evaluate(()=>ViewerTracker.__test.extra())).scale,scale);
- const restored=await page.locator('#tracker-container').boundingBox();assert(Math.abs(restored.x-saved.left)<1);assert(Math.abs(restored.y-saved.top)<1);
+ const restored=await page.locator('#tracker-container').boundingBox();assert(Math.abs(restored.x-saved.left)<1);assert(Math.abs(restored.y-Math.max(0,Math.min(saved.top,900-restored.height)))<1,'restored panel position clamps only as needed to fit its new footprint');
  await page.click('#btn-toggle');
  await page.reload();await page.addScriptTag({content:instrument(injected)});await page.evaluate(()=>ViewerTracker.__test.init());await page.waitForTimeout(400);
  assert.equal(await page.locator('#full-view').isVisible(),true);
@@ -130,7 +131,7 @@ const injected=source.replaceAll('scheduleInit(2000);','/* test controls initial
  await page.click('#btn-toggle');assert.match(await page.locator('#mini-metric').textContent(),/💎/);await page.click('#btn-expand');
  console.log('PASS drag/scale survive reload; 100% restores exact standard width and persists');
 
- await page.click('#btn-replay');await page.evaluate(()=>ViewerTracker.__test.pausePlayback());
+ await clickControl(page,'#btn-replay');await page.evaluate(()=>ViewerTracker.__test.pausePlayback());
  await page.click('#playback-next');
  assert.equal((await page.evaluate(()=>ViewerTracker.__test.extra())).index,1);
  assert.equal((await page.evaluate(()=>ViewerTracker.__test.state())).playing,false);
@@ -140,7 +141,7 @@ const injected=source.replaceAll('scheduleInit(2000);','/* test controls initial
  await page.click('#playback-next');await page.click('#collapse-row-purple');
  assert.equal((await page.evaluate(()=>ViewerTracker.__test.extra())).index,1);
  await page.evaluate(()=>ViewerTracker.__test.duplicateSamples());
- await page.click('#btn-replay');await page.evaluate(()=>ViewerTracker.__test.pausePlayback());
+ await clickControl(page,'#btn-replay');await page.evaluate(()=>ViewerTracker.__test.pausePlayback());
  assert.equal((await page.evaluate(()=>ViewerTracker.__test.extra())).index,0,'Replay starts at the first sample even when timestamps match');
  assert.equal(await page.locator('#playback-previous').isDisabled(),true);
  await page.evaluate(()=>ViewerTracker.__test.step(-1));assert.equal((await page.evaluate(()=>ViewerTracker.__test.extra())).index,0);
@@ -171,12 +172,12 @@ const injected=source.replaceAll('scheduleInit(2000);','/* test controls initial
  const alignment=await page.evaluate(()=>{
    const r=document.getElementById('control-action-row').getBoundingClientRect();
    const b=document.getElementById('control-action-buttons').getBoundingClientRect();
-   const t=document.getElementById('control-session-buttons').getBoundingClientRect();
+   const t=document.getElementById('journey-nav').getBoundingClientRect();
    const theme=document.getElementById('dark-mode-control').getBoundingClientRect();
-   return {expectedLeft:Math.max(r.left+(r.width-b.width)/2,t.right+3),left:b.left,right:b.right,themeLeft:theme.left};
+   return {expectedLeft:r.left,left:b.left,right:b.right,themeLeft:theme.left};
  });
  assert(Math.abs(alignment.expectedLeft-alignment.left)<1);assert(alignment.right<=alignment.themeLeft);
- console.log('PASS expansion clamping and Controls centered within available space');
+ console.log('PASS expansion clamping and routine controls fit beside theme toggle');
 
  const keys=['red','green','purple','pink','dark-blue','light-blue','gray','female-trans','withtokens','total','anon','roomTotal'];
  for(const lineHeight of ['normal','1.5']) {
@@ -215,7 +216,7 @@ const injected=source.replaceAll('scheduleInit(2000);','/* test controls initial
    };
  });
  await page.route('https://tierscope.test/api/**',r=>r.fulfill({contentType:'text/plain',body:'invalid response'}));
- await page.click('#btn-replay');await page.evaluate(()=>ViewerTracker.__test.pausePlayback());
+ await clickControl(page,'#btn-replay');await page.evaluate(()=>ViewerTracker.__test.pausePlayback());
  const replayBefore=await page.evaluate(()=>ViewerTracker.__test.state());
  await page.evaluate(()=>ViewerTracker.__test.scan());
  const afterFallback=await page.evaluate(()=>ViewerTracker.__test.state());

@@ -156,3 +156,7 @@ Transfer validation has independent limits of 10,000 sessions and 300 MiB, inclu
 `library-dock.js` copies the panel's computed background color on opening and observed style/theme changes, without reading the preference owner or applying element opacity. Text and controls retain their own alpha and the existing Scope stacking rules. A Library size container lets the twelve-icon strip wrap to six columns at narrow widths relative to the chosen font scale.
 
 Analysis reports have separate replaceable overview/results sections around a persistent threshold-control node. Live and threshold updates replace only report values, preserving input focus, caret and incomplete edits beside the results.
+
+## Journey beta (3.24)
+
+Live/Saved navigation and combined Library status use `library-journey.js`, the pure `journey-data.js` model and `journey-panel-view.js`. `disclosure-preferences.js` stores only allowlisted native-disclosure choices; no archive schema or existing preference migration is required. The new modules have behavior and boundary coverage rather than regenerated original-function fingerprints. `journey-browser.cjs` is included in both complete browser runners. The large-row-collapse, replay pacing, export, backup, multiple-tab and reproducible-build gates remain. Review details are in [the journey guide](docs/user-journey-beta.md).

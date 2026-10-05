@@ -1,6 +1,6 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const {instrument,prepareSource}=require('./helpers/instrument.cjs');
-const {openLibraryBook}=require('./helpers/library.cjs');
+const {openLibraryBook,openAnalysis,clickControl}=require('./helpers/library.cjs');
 const engine=process.env.TIERSCOPE_BROWSER||'chromium';
 const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8')).replaceAll('scheduleInit(2000);','')
 .replace('downloadTrackingReport: downloadTrackingReport,',`__tools:{init,checkUrlChange,
@@ -28,21 +28,22 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
   await page.goto('https://tierscope.test/testroom/');await page.addScriptTag({content:instrument(source)});await page.evaluate(()=>ViewerTracker.__tools.setup());await page.waitForTimeout(350);
   const before=await page.evaluate(()=>ViewerTracker.__tools.state()),panelBounds=await page.locator('#tracker-container').boundingBox();
   await page.locator('#btn-control-library').focus();await page.keyboard.press('Enter');await page.locator('#tierscope-session-tools').waitFor({state:'visible'});
-  for(const tab of ['library','summary','compare','backup'])assert(await page.locator('[data-tools-tab="'+tab+'"]').isVisible(),'Library opens all Session tools tabs');
-  assert.match(await page.locator('#tools-library-list').textContent(),/Model folders/);
+  assert(await page.locator('[data-tools-tab=library]').isVisible());assert(await page.locator('#tools-live').isVisible());
+  assert(await page.locator('[data-tools-tab=compare]').isHidden(),'analysis is revealed when useful');
+  assert.match(await page.locator('#tools-library-list').textContent(),/No saved sessions yet/);assert.equal(await page.locator('#tools-sessions-book-toggle').textContent(),'Recent sessions');
   assert.equal(await page.locator('#panel-options').isVisible(),false,'direct Library needs no header menu');
   await page.keyboard.press('Escape');assert.equal(await page.evaluate(()=>document.activeElement.id),'btn-control-library');
   assert.deepEqual(await page.locator('#tracker-container').boundingBox(),panelBounds);
-  async function openTools(){if(!await page.locator('#tierscope-session-tools').count())await page.locator('#btn-control-library:visible,#btn-playback-library:visible').click();await page.locator('#tierscope-session-tools').waitFor({state:'visible'});}
+  async function openTools(){if(!await page.locator('#tierscope-session-tools').count())await page.locator('#btn-control-library').click();await page.locator('#tierscope-session-tools').waitFor({state:'visible'});}
   const nav=name=>page.locator('[data-tools-tab="'+name+'"]');
   const rowValue=(label,column=0)=>page.locator('#tools-summary-table tbody tr').filter({has:page.getByRole('rowheader',{name:label,exact:true})}).locator('td').nth(column).textContent();
   const thresholdValues=count=>page.locator('#tools-threshold-table tbody tr').filter({has:page.getByRole('rowheader',{name:String(count),exact:true})}).locator('td').allTextContents();
   await openTools();assert.deepEqual(await page.locator('#tracker-container').boundingBox(),panelBounds);
   assert.match(await page.locator('#tools-content').textContent(),/0 \/ 1,000 sessions/);
-  await page.click('#tools-keep');assert.match(await page.locator('#tools-message').textContent(),/kept/);
-  await page.click('#tools-keep');assert.match(await page.locator('#tools-message').textContent(),/already/);
+  await clickControl(page,'#tools-keep');assert.match(await page.locator('#tools-message').textContent(),/Saved/);
+  await clickControl(page,'#tools-keep');assert.match(await page.locator('#tools-message').textContent(),/already/);
   const first=await page.evaluate(()=>ViewerTracker.__tools.library().entries[0]);
-  await nav('summary').click();assert.equal(await rowValue('Time-weighted average'),'23');assert.equal(await rowValue('Excluded gaps'),'00:10:00');
+  await openAnalysis(page,'summary');assert.equal(await rowValue('Time-weighted average'),'23');assert.equal(await rowValue('Excluded gaps'),'00:10:00');
   assert.equal(await page.locator('#tools-recording-picker').evaluate(e=>e.open),false,'Summary opens on its chart with the picker collapsed');
   assert.equal(await page.locator('#tools-threshold').inputValue(),'17, 23, 29');
   assert.deepEqual(await page.locator('#tools-audience-table tbody tr').first().locator('td').allTextContents(),['23','85','85']);
@@ -62,7 +63,7 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
   await page.click('#tools-metric-room');
   assert.equal(await page.locator('#tools-threshold').inputValue(),'17, 23, 29');
   await page.locator('#tools-threshold').fill('0, 25, 35');await page.click('#tools-apply-threshold');
-  await nav('library').click();await nav('summary').click();assert.equal(await page.locator('#tools-threshold').inputValue(),'0, 25, 35','custom thresholds stay with the same snapshot across tabs');
+  await nav('library').click();await openAnalysis(page,'summary');assert.equal(await page.locator('#tools-threshold').inputValue(),'0, 25, 35','custom thresholds stay with the same snapshot across tabs');
   await page.click('#tools-average-thresholds');assert.equal(await page.locator('#tools-threshold').inputValue(),'17, 23, 29');
   await page.screenshot({path:'/tmp/tierscope-360-beta2-'+engine+'-summary.png'});
   const second=JSON.parse(JSON.stringify(first.archive));second.room='secondroom';
@@ -73,7 +74,7 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
   await page.waitForFunction(()=>ViewerTracker.__tools.library().count===2);
   assert.equal(await page.locator('#tools-sessions-book').evaluate(e=>e.open),true,'import reveals the stored session');assert.equal(await page.locator('#tools-library-search-menu').evaluate(e=>e.open),false);
   const entries=await page.evaluate(()=>ViewerTracker.__tools.library().entries),other=entries.find(e=>e.archive.room==='secondroom');
-  await nav('summary').click();assert.equal(await page.locator('#tools-recording-picker').evaluate(e=>e.open),false);
+  await openAnalysis(page,'summary');assert.equal(await page.locator('#tools-recording-picker').evaluate(e=>e.open),false);
   await page.locator('#tools-recording-picker > summary').focus();await page.keyboard.press('Enter');
   await page.selectOption('#tools-source-a',other.id);assert.equal(await page.locator('#tools-threshold').inputValue(),'11, 14, 18','thresholds follow the graphed recording');
   await page.click('#tools-metric-green');assert.equal(await page.locator('#tools-threshold').inputValue(),'0');assert.deepEqual(await thresholdValues(0),['00:05:00','100%']);
@@ -81,12 +82,12 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
   await page.locator('#tools-threshold').fill('999');await page.click('#tools-apply-threshold');
   await page.selectOption('#tools-source-a',first.id);assert.equal(await page.locator('#tools-threshold').inputValue(),'17, 23, 29','another recording never inherits custom thresholds');
   await page.evaluate(archive=>{const a=JSON.parse(JSON.stringify(archive));for(const key of Object.keys(a.session.history))a.session.history[key]=a.session.history[key].slice(-1);a.session.history.breaks=[false];GM_setValue('tierscope:library:v1:no_duration',JSON.stringify({schemaVersion:1,addedAt:Date.now(),title:'No covered interval',archive:a}));},other.archive);
-  await nav('library').click();await nav('summary').click();await page.selectOption('#tools-source-a','no_duration');
+  await nav('library').click();await openAnalysis(page,'summary');await page.selectOption('#tools-source-a','no_duration');
   assert.equal(await page.locator('#tools-threshold').inputValue(),'');assert(await page.locator('#tools-average-thresholds').isDisabled());assert.equal(await page.locator('#tools-threshold-table').count(),0);
   assert.match(await page.locator('#tools-analysis-output').textContent(),/Not enough covered session time/);
   await page.evaluate(()=>GM_deleteValue('tierscope:library:v1:no_duration'));
-  await nav('library').click();await nav('summary').click();await page.selectOption('#tools-source-a',first.id);
-  await nav('compare').click();await page.selectOption('#tools-source-a',first.id);await page.selectOption('#tools-source-b',other.id);
+  await nav('library').click();await openAnalysis(page,'summary');await page.selectOption('#tools-source-a',first.id);
+  await openAnalysis(page,'compare');await page.selectOption('#tools-source-a',first.id);await page.selectOption('#tools-source-b',other.id);
   assert.equal(await rowValue('Time-weighted average',0),'23');assert.equal(await rowValue('Time-weighted average',1),'14');
   assert.equal(await rowValue('Peak in range',0),'35');assert.equal(await rowValue('Full-session high',0),'85');
   await page.locator('#tools-threshold').fill('25');await page.click('#tools-apply-threshold');assert.equal(await rowValue('Time at or above 25',0),'00:04:00');
@@ -96,7 +97,7 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
   await nav('library').click();await openLibraryBook(page);await page.selectOption('#tools-library-model','*');await page.locator('#tools-library-search').fill('secondroom');assert.equal(await page.locator('.tools-row').count(),1);
   await page.locator('.tools-row summary').click();page.once('dialog',d=>d.accept('<img src=x onerror="window.bad=1">'));await page.getByRole('button',{name:'Rename',exact:true}).click();
   assert.equal(await page.evaluate(()=>window.bad),undefined);assert.equal(await page.locator('#tools-library-list img').count(),0);
-  await nav('backup').click();const download=page.waitForEvent('download');await page.click('#tools-backup-download');
+  await openAnalysis(page,'backup');const download=page.waitForEvent('download');await page.click('#tools-backup-download');
   const backup=JSON.parse(fs.readFileSync(await(await download).path(),'utf8'));assert.equal(backup.library.length,2);assert.equal(backup.rooms[0].highs.red.value,80);
   backup.rooms[0].highs.red.value=999;backup.preferences.theme='bright';
   const backupPicker=page.waitForEvent('filechooser');await page.click('#tools-backup-open');await(await backupPicker).setFiles(file('backup.json',backup));
@@ -112,8 +113,8 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
   assert.equal(await page.locator('#tracker-container').getAttribute('data-theme'),'bright');await openTools();
   assert.equal(await page.locator('.tools-folder').count(),2,'recordings are organized by model on opening');
   await openLibraryBook(page);await page.locator('#tools-folder-testroom').focus();await page.keyboard.press('Enter');assert.equal(await page.locator('.tools-row').count(),1);
-  assert.match(await page.locator('#tools-library-list').textContent(),/Folder: testroom/);
-  await nav('compare').click();
+  assert.match(await page.locator('#tools-library-list').textContent(),/Sessions · testroom/);
+  await openAnalysis(page,'compare');
   assert.equal(await page.locator('#tools-metric [aria-checked=true]').getAttribute('data-metric'),'room');
   assert.equal(await page.locator('#tools-threshold').inputValue(),'25');
   assert.equal(await page.locator('#tools-shared-length').isChecked(),false,'comparison choice survives reload');
@@ -122,9 +123,9 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
   assert(overflow.width<=380);assert(overflow.overflow<=1,JSON.stringify(overflow));
   await page.screenshot({path:'/tmp/tierscope-360-'+engine+'-narrow.png'});
   // Select the next view with room for both panels; Scope covers Library controls when narrow.
-  await page.setViewportSize({width:1100,height:1000});await page.waitForTimeout(150);await nav('summary').click();
+  await page.setViewportSize({width:1100,height:1000});await page.waitForTimeout(150);await openAnalysis(page,'summary');
   assert.equal(await page.locator('#tools-threshold').inputValue(),'17, 23, 29','Summary recalculates after reload instead of applying global thresholds');
-  assert.equal(await page.locator('#tools-recording-picker').evaluate(e=>e.open),false,'Compare does not expand the Summary picker');
+  assert.equal(await page.locator('#tools-recording-picker').evaluate(e=>e.open),true,'Summary remembers the picker opened before reload independently of Compare');
   await page.setViewportSize({width:380,height:740});await page.waitForTimeout(150);
   assert(await page.locator('#tierscope-session-tools').evaluate(e=>e.scrollWidth-e.clientWidth<=1));
   await page.screenshot({path:'/tmp/tierscope-360-beta2-'+engine+'-narrow-summary.png'});
@@ -133,7 +134,7 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
   page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'Delete',exact:true}).click();assert.equal(await page.evaluate(()=>ViewerTracker.__tools.library().count),1);
   await page.locator('#tools-library-search').fill('');await openLibraryBook(page);await page.selectOption('#tools-library-model','testroom');
   await page.locator('.tools-row').getByRole('button',{name:'Replay',exact:true}).click();assert.equal(await page.locator('#tierscope-session-tools').count(),1);assert.match(await page.locator('#header-text').getAttribute('title'),/^Replay:/);
-  await openTools();await nav('backup').click();const badPicker=page.waitForEvent('filechooser');await page.click('#tools-backup-open');await(await badPicker).setFiles(file('future.json',{...backup,formatVersion:999}));
+  await openTools();await openAnalysis(page,'backup');const badPicker=page.waitForEvent('filechooser');await page.click('#tools-backup-open');await(await badPicker).setFiles(file('future.json',{...backup,formatVersion:999}));
   await page.waitForFunction(()=>document.getElementById('tools-message').textContent.includes('not a supported'));
   assert.equal(await page.locator('#tools-backup-restore').count(),0);
   await nav('library').click();
@@ -141,14 +142,14 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
    for(let i=0;i<55;i++)GM_setValue('tierscope:library:v1:paged_'+i,JSON.stringify({schemaVersion:1,addedAt:Date.now()+i,title:'Paged '+i,archive:{...archive,room:'paged'+i}}));
    const later=JSON.parse(JSON.stringify(archive));later.session.history.timestamps=later.session.history.timestamps.map(t=>t+86400000);later.session.sessionStartedAt+=86400000;later.session.timestamp+=86400000;
    GM_setValue('tierscope:library:v1:nested',JSON.stringify({schemaVersion:1,addedAt:Date.now(),title:'Another session for the same model',archive:later}));});
-  await page.locator('#tools-refresh-library').click();if(await page.locator('#tools-library-all-models').count())await page.click('#tools-library-all-models');assert.equal(await page.locator('.tools-folder').count(),50);
+  await page.locator('#tools-refresh-library').click();if(await page.locator('#tools-library-all-models').count())await page.click('#tools-library-clear');assert.equal(await page.locator('.tools-folder').count(),50);
   assert.match(await page.locator('#tools-content').textContent(),/57 \/ 1,000 sessions/);
   await page.click('#tools-library-more');assert.equal(await page.locator('.tools-folder').count(),56);assert.equal(await page.evaluate(()=>document.activeElement.id),'tools-sessions-book-toggle');
   await page.click('#tools-folder-testroom');assert.equal(await page.locator('.tools-row').count(),2);
   assert.equal(await page.locator('.tools-row').first().getAttribute('data-library-id'),'nested','model folders show newest recordings first');
   await page.screenshot({path:'/tmp/tierscope-beta3-'+engine+'-model-folder.png'});
   await openLibraryBook(page);await page.selectOption('#tools-library-model','*');await page.locator('#tools-library-search').fill('paged54');assert.equal(await page.locator('.tools-row').count(),1);assert.match(await page.locator('.tools-row').textContent(),/paged54/);
-  await page.click('#tools-library-all-models');assert.equal(await page.locator('.tools-folder').count(),50);
+  await page.click('#tools-library-clear');assert.equal(await page.locator('.tools-folder').count(),50);
   await page.evaluate(()=>{for(let i=0;i<55;i++)GM_deleteValue('tierscope:library:v1:paged_'+i);GM_deleteValue('tierscope:library:v1:nested');});
   await page.locator('#tools-refresh-library').click();
   assert.equal(await page.locator('.tools-folder').count(),1);
@@ -163,7 +164,7 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
   },storedKey);
   await page.click('#tools-refresh-library');await page.click('#tools-folder-testroom');
   assert.match(await page.locator('.tools-row').textContent(),/Updated in another tab/);
-  await nav('summary').click();assert.match(await page.locator('#tools-source-a').textContent(),/Updated in another tab/);
+  await openAnalysis(page,'summary');assert.match(await page.locator('#tools-source-a').textContent(),/Updated in another tab/);
   await nav('library').click();
   await sibling.evaluate(key=>localStorage.setItem(key,JSON.stringify('{broken')),storedKey);
   await page.click('#tools-refresh-library');assert.equal(await page.locator('.tools-row').count(),0);
@@ -179,7 +180,7 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
   const raw=JSON.parse(fs.readFileSync(await(await rawDownload).path(),'utf8'));
   assert.equal(raw.format,'TierScopeLibraryRecovery');assert.deepEqual(raw.records,[{key:damagedKey,value:'{"broken'}]);
   assert.match(await page.locator('#tools-message').textContent(),/manual recovery, not normal backup restore/);
-  await nav('backup').click();assert.equal(await page.locator('#tools-backup-partial').isChecked(),false);
+  await openAnalysis(page,'backup');assert.equal(await page.locator('#tools-backup-partial').isChecked(),false);
   await page.click('#tools-backup-download');assert.match(await page.locator('#tools-message').textContent(),/unreadable/);
   await page.check('#tools-backup-partial');
   const partialDownload=page.waitForEvent('download');await page.click('#tools-backup-download');const partialFile=await partialDownload;
@@ -199,9 +200,9 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
   await page.evaluate(key=>GM_deleteValue(key),damagedKey);
   // Failed preference persistence keeps working choices with explicit feedback.
   await page.evaluate(()=>{window.realSet=GM_setValue;window.GM_setValue=(key,value)=>{if(key==='tierscope:ui:analysis:v1')throw new Error('disk full');realSet(key,value);};});
-  await nav('summary').click();await page.click('#tools-metric-red');
+  await openAnalysis(page,'summary');await page.click('#tools-metric-red');
   assert.match(await page.locator('#tools-message').textContent(),/this tab only/);
-  await page.keyboard.press('Escape');await openTools();await nav('summary').click();
+  await page.keyboard.press('Escape');await openTools();await openAnalysis(page,'summary');
   assert.equal(await page.locator('#tools-metric [aria-checked=true]').getAttribute('data-metric'),'red');assert.match(await page.locator('#tools-message').textContent(),/this tab only/);
   await page.evaluate(()=>{window.GM_setValue=window.realSet;});
   await page.click('#tools-metric-withTokens');await page.click('#tools-metric-red');

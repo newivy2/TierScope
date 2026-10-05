@@ -5,7 +5,6 @@ import { getHistoryBreaks } from './history-data.js';
 import { renderStatus } from './status-view.js';
 
 export function updateCompactDashboard(frame) {
-    if (!frame.minimized) return;
     var comparison = frame.comparison;
     var mode = frame.comparisonLabel;
     function delta(id, value, old) {
@@ -46,7 +45,7 @@ export function updateCompactDashboard(frame) {
     if (!canvas) return;
     var ctx = canvas.getContext('2d');
     if (!ctx) return;
-    var width = 140, height = 36, scale = window.devicePixelRatio || 1;
+    var width = canvas.clientWidth || (frame.minimized ? 140 : 280), height = 48, scale = window.devicePixelRatio || 1;
     canvas.width = Math.ceil(width * scale); canvas.height = Math.ceil(height * scale);
     ctx.scale(scale, scale); ctx.clearRect(0, 0, width, height);
     var times = frame.history.timestamps;
@@ -84,5 +83,5 @@ export function updateCompactDashboard(frame) {
     ctx.save(); ctx.beginPath(); ctx.rect(2, 0, width - 2, height); ctx.clip();
     drawCanvasChart(ctx, points, color);
     ctx.restore();
-    renderStatus(document.getElementById('mini-freshness'), frame.freshness);
+    if (frame.freshness) renderStatus(document.getElementById('mini-freshness'), frame.freshness);
 }

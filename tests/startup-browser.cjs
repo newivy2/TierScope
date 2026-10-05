@@ -1,3 +1,4 @@
+const {clickControl}=require('./helpers/library.cjs');
 const {instrument, prepareSource} = require('./helpers/instrument.cjs');
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const engine=process.env.TIERSCOPE_BROWSER||'chromium';
@@ -47,15 +48,15 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   await page.addScriptTag({content:fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8')});
   await page.waitForFunction(()=>document.getElementById('header-text')?.title.startsWith('Live room:'));
   assert.deepEqual(await page.evaluate(()=>[typeof window.ViewerTracker,typeof window.GifWriter]),['undefined','undefined']);
-  await page.click('#btn-replay');
+  await clickControl(page,'#btn-replay');
   assert.match(await page.locator('#header-text').getAttribute('title'),/^Replay:/);
   await page.click('#playback-return');
   assert.match(await page.locator('#header-text').getAttribute('title'),/^Live room:/);
   const epoch=()=>page.evaluate(()=>localStorage.getItem('tierscope:epoch:v2:freshroom'));
   const beforeReset=await epoch();
-  page.once('dialog',dialog=>dialog.dismiss());await page.click('#btn-main-reset');
+  page.once('dialog',dialog=>dialog.dismiss());await clickControl(page,'#btn-main-reset');
   assert.equal(await epoch(),beforeReset,'Cancel preserves the session');
-  page.once('dialog',dialog=>dialog.accept());await page.click('#btn-main-reset');
+  page.once('dialog',dialog=>dialog.accept());await clickControl(page,'#btn-main-reset');
   assert.notEqual(await epoch(),beforeReset,'the panel can still Reset the session');
   assert.deepEqual(errors,[]);
   console.log('PASS unmodified userscript starts and panel Replay/confirmed Reset work without a page API or global GIF encoder');

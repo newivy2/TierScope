@@ -7,11 +7,11 @@ import { getRoomEpoch } from './storage.js';
 
 const checkpointInterval = 60000;
 const reader = createLibraryReader();
-let checkpoint = {room: '', identity: '', signature: '', phase: '', attemptedAt: null, savedAt: null, error: ''};
+let checkpoint = {room: '', identity: '', signature: '', phase: '', attemptedAt: null, savedAt: null, id: '', archive: null, error: ''};
 
 export function automaticLibraryStatus(room) {
     return checkpoint.room === room && checkpoint.identity === room + ':' + runtime.sessionStartedAt + ':' + runtime.activeRoomEpoch ?
-        {...checkpoint} : {savedAt: null, error: ''};
+        {...checkpoint} : {savedAt: null, id: '', archive: null, error: ''};
 }
 
 export function automaticLibraryWarning(room) {
@@ -21,7 +21,7 @@ export function automaticLibraryWarning(room) {
 }
 
 export function clearAutomaticLibraryStatus(room) {
-    if (checkpoint.room === room) checkpoint = {room, identity: '', signature: '', phase: '', attemptedAt: null, savedAt: null, error: ''};
+    if (checkpoint.room === room) checkpoint = {room, identity: '', signature: '', phase: '', attemptedAt: null, savedAt: null, id: '', archive: null, error: ''};
     reader.clear();
 }
 
@@ -34,7 +34,7 @@ export function keepFavoriteSession(room, force = false) {
         const key = getStorageKey(room);
         if (runtime.activeSessionStorageKey !== key) return;
         const identity = room + ':' + runtime.sessionStartedAt + ':' + runtime.activeRoomEpoch;
-        if (checkpoint.identity !== identity) checkpoint = {room, identity, signature: '', phase: '', attemptedAt: null, savedAt: null, error: ''};
+        if (checkpoint.identity !== identity) checkpoint = {room, identity, signature: '', phase: '', attemptedAt: null, savedAt: null, id: '', archive: null, error: ''};
         const preference = readModelFavorite(room);
         if (!preference.autoKeep) { clearAutomaticLibraryStatus(room); return; }
         if (getRoomEpoch(key) !== runtime.activeRoomEpoch) return;
@@ -49,7 +49,7 @@ export function keepFavoriteSession(room, force = false) {
         const archive = captureLiveSessionFile(room);
         // Capture and validation can fail without affecting the accepted sample.
         const result = keepSessionInLibrary(archive, '', reader);
-        checkpoint.signature = signature; checkpoint.savedAt = Date.now(); checkpoint.error = '';
+        checkpoint.signature = signature; checkpoint.savedAt = Date.now(); checkpoint.id = result.id; checkpoint.archive = archive; checkpoint.error = '';
         return result;
     } catch (error) {
         checkpoint.room = room; checkpoint.error = error.message || String(error);

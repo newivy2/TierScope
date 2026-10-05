@@ -1,3 +1,4 @@
+const {clickControl}=require('./helpers/library.cjs');
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
 const {instrument, prepareSource} = require('./helpers/instrument.cjs');
 const engine = process.env.TIERSCOPE_BROWSER || 'chromium';
@@ -54,10 +55,10 @@ const source = prepareSource(fs.readFileSync(path.join(__dirname, '../tierscope.
   await other.evaluate(()=>GM_setValue('tierscope:library-limits:v1',JSON.stringify({schemaVersion:1,maxSessions:5,maxMegabytes:25})));
   await page.click('#tools-refresh-library');assert.match(await page.locator('#tools-library-capacity-warning').textContent(),/nearing/);
   await save(3,25);assert.match(await page.locator('#tools-library-capacity-warning').textContent(),/limit reached/);
-  await page.click('#tools-keep');assert.match(await page.locator('#tools-message').textContent(),/Library full/);
+  await clickControl(page,'#tools-keep');assert.match(await page.locator('#tools-message').textContent(),/Library full/);
   assert.equal(await page.evaluate(()=>ViewerTracker.__capacity.readSessionLibrary().count),4);
   // Auto uses the configured allowance and can retry after it is raised.
-  page.once('dialog',async dialog=>{assert.match(dialog.message(),/3 sessions \/ 25 MB/);await dialog.accept();});await page.click('#tools-auto-keep');
+  page.once('dialog',async dialog=>{assert.match(dialog.message(),/3 sessions \/ 25 MB/);await dialog.accept();});await clickControl(page,'#tools-auto-keep');
   assert.match(await page.locator('[data-card-auto]').first().textContent(),/pending.*Library full/);
   await save(6,50);await openSettings();await page.locator('#tools-storage-sessions').fill('7');
   await page.evaluate(()=>window.capacityInput=document.getElementById('tools-storage-sessions'));
@@ -70,7 +71,7 @@ const source = prepareSource(fs.readFileSync(path.join(__dirname, '../tierscope.
   const afterSample=await page.evaluate(()=>ViewerTracker.__capacity.state());
   assert(await page.locator('#tools-auto-keep').isChecked());assert(await page.locator('#tools-retry-automatic').isHidden());
   // Exports remain available above the current allowance and don't change it on restore.
-  await save(2,50);await page.click('[data-tools-tab=backup]');
+  await save(2,50);await clickControl(page,'[data-tools-tab=backup]');
   const download=page.waitForEvent('download');await page.click('#tools-backup-download');const downloaded=await download;
   const bytes=fs.readFileSync(await downloaded.path()),backup=JSON.parse(bytes);assert.equal(backup.library.length,5);
   const picker=page.waitForEvent('filechooser');await page.click('#tools-backup-open');await(await picker).setFiles({name:'library.json',mimeType:'application/json',buffer:bytes});

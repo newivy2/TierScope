@@ -1,3 +1,4 @@
+const {revealControl}=require('./helpers/library.cjs');
 const {instrument, prepareSource} = require('./helpers/instrument.cjs');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -71,7 +72,7 @@ const source = prepareSource(fs.readFileSync(path.join(__dirname, '../tierscope.
         assert.equal((await state()).playing, false);
         await page.locator('#playback-play').click({force: true});
       } else {
-        await page.locator('#btn-replay').click({force: true});
+        await revealControl(page,'#btn-replay');await page.locator('#btn-replay').click({force: true});
       }
       await page.clock.runFor(1000);
       assert.equal((await state()).index, 1);

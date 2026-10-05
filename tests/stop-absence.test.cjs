@@ -94,7 +94,7 @@ test('delayed browser wake freezes active time at 15m and Stops at the later thr
 
 test('one-click Resume cancels auto-pause and its Stop deadline for the continuous absence',async()=>{
  const h=await autoPaused(),paused=h.t.state().pausedElapsedTime,n=h.t.state().history.timestamps.length;
- assert.equal(h.e('btn-control-auto').innerHTML,'▶');h.t.adjustTimer(60);
+ assert.equal(h.e('btn-control-auto').textContent,'Resume');h.t.adjustTimer(60);
  h.t.toggleAutoRefresh();await h.drain();assert.equal(h.t.state().isAutoRefreshOn,true);assert.equal(h.t.state().isPaused,false);
  assert.equal(h.t.state().absencePausedAt,null);assert.equal(h.t.state().absenceOverrideActive,true);
  assert.equal(h.t.state().history.timestamps.length,n+1);assert.equal(h.t.state().history.breaks.at(-1),true);
@@ -191,7 +191,7 @@ test('errors and DOM-only samples cannot establish absence; valid empty API resp
 test('Stop during a restored startup delay cannot be overwritten by its queued callbacks',async()=>{
  const h=await ready();const reload=harness(h.storage);reload.t.init();reload.t.stopTracking('manual');
  reload.runTimers(t=>t.repeat&&t.ms===1000);reload.runTimers(t=>!t.repeat&&t.ms===2002);await reload.drain();
- assert.equal(reload.fetchCount(),0);assert.equal(reload.e('btn-control-auto').innerHTML,'Start');assert.equal(reload.e('control-next-scan').textContent,'Stopped');
+ assert.equal(reload.fetchCount(),0);assert.equal(reload.e('btn-control-auto').textContent,'Start');assert.equal(reload.e('control-next-scan').textContent,'Stopped');
 });
 
 test('a confirmed return resumes timing even when its audience counts fail validation',async()=>{

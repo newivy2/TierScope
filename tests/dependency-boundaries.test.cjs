@@ -45,7 +45,7 @@ test('all application imports form an acyclic dependency graph', () => {
 });
 
 test('panel views have no dependency on owners, live selectors, controllers or storage', () => {
-  const views = ['library-capacity-view.js', 'favorite-view.js', 'panel-view.js', 'compact-view.js', 'trend-view.js', 'status-view.js', 'chart-view.js', 'library-dock.js', 'library-shell.js', 'model-history-view.js', 'library-browser-view.js', 'tools-view-helpers.js', 'analysis-chart-view.js', 'analysis-metric-view.js', 'recording-export-data.js'];
+  const views = ['journey-panel-view.js', 'library-capacity-view.js', 'favorite-view.js', 'panel-view.js', 'compact-view.js', 'trend-view.js', 'status-view.js', 'chart-view.js', 'library-dock.js', 'library-shell.js', 'model-history-view.js', 'library-browser-view.js', 'tools-view-helpers.js', 'analysis-chart-view.js', 'analysis-metric-view.js', 'recording-export-data.js'];
   const permitted = new Set([...views, 'library-capacity-data.js', 'library-query.js', 'analysis-chart-data.js', 'analysis-clock-data.js', 'display-values.js', 'format.js', 'history-data.js', 'theme-values.js', 'runtime.js']);
   for (const view of views) {
     assert.deepEqual([...dependencies(view)].filter(file => !permitted.has(file)), [], view);
@@ -85,7 +85,7 @@ test('owners and data/view layers remain outside every import cycle', () => {
 });
 
 test('drawing health and analysis preferences cannot depend on session or presentation controllers', () => {
-  const permitted = new Set(['presentation-health.js', 'analysis-preferences.js', 'analysis-preference-data.js', 'session-analysis.js', 'model-history.js', 'library-query.js', 'analysis-chart-data.js', 'analysis-clock-data.js', 'library-drafts.js', 'analysis-follow.js']);
+  const permitted = new Set(['journey-data.js', 'presentation-health.js', 'analysis-preferences.js', 'analysis-preference-data.js', 'session-analysis.js', 'model-history.js', 'library-query.js', 'analysis-chart-data.js', 'analysis-clock-data.js', 'library-drafts.js', 'analysis-follow.js']);
   for (const file of permitted) {
     assert.deepEqual([...dependencies(file)].filter(dependency => !permitted.has(dependency)), [], file);
     assert.deepEqual([...runtimeFields(modules[file].ast)], [], file);

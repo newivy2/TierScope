@@ -25,8 +25,9 @@ export function attachLibraryDock(panel, library, onTheme) {
             }
         }
         lastPosition = position();
-        const height = Math.min(window.innerHeight - margin * 2, Math.max(420, rect.height));
-        const top = Math.max(margin, Math.min(rect.top, window.innerHeight - height - margin));
+        const height = docked ? Math.min(Math.max(420, rect.height), window.innerHeight - rect.top) :
+            Math.min(window.innerHeight - margin * 2, Math.max(420, rect.height));
+        const top = docked ? rect.top : Math.max(margin, Math.min(rect.top, window.innerHeight - height - margin));
         const styles = {left: (docked ? rect.left - width + 1 : margin) + 'px', top: top + 'px',
             width: (docked ? width : Math.min(window.innerWidth - margin * 2, 520)) + 'px',
             height: height + 'px', fontSize: (11 * scale) + 'px'};

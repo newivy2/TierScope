@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.23.0
+// @version      3.24.0-beta.1
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -912,7 +912,7 @@ underlying system, so should run in the browser, Node, or Plask.
           if (data.epoch !== state.epoch) return;
           mergeAllTimeHighs(state.highs, data.highs);
           state.keys.push(key);
-        } catch (error) {
+        } catch (error2) {
           state.skipped++;
         }
       });
@@ -920,7 +920,7 @@ underlying system, so should run in the browser, Node, or Plask.
         mergeAllTimeHighs(state.highs, previous.highs);
         state.pending = true;
       }
-    } catch (error) {
+    } catch (error2) {
       if (previous) {
         state = Object.assign({}, previous, { highs: emptyAllTimeHighs() });
         mergeAllTimeHighs(state.highs, previous.highs);
@@ -935,7 +935,7 @@ underlying system, so should run in the browser, Node, or Plask.
     if (!state.room) return { state, changed: 0, saved: false };
     try {
       validateAllTimeRecord({ schemaVersion: 1, room: state.room, epoch: state.epoch, highs: incoming }, state.room);
-    } catch (error) {
+    } catch (error2) {
       state.error = "All-time highs were not updated: invalid record values.";
       return { state, changed: 0, saved: false };
     }
@@ -955,11 +955,11 @@ underlying system, so should run in the browser, Node, or Plask.
       state.keys.forEach(function(old) {
         try {
           GM_deleteValue(old);
-        } catch (error) {
+        } catch (error2) {
         }
       });
       state.keys = [key];
-    } catch (error) {
+    } catch (error2) {
       state.error = "All-time highs are local only: saving is unavailable. Keep this tab open to retry.";
     }
     return { state: state.pending ? state : readAllTimeHighs(state.room), changed, saved: !state.pending };
@@ -1154,9 +1154,9 @@ underlying system, so should run in the browser, Node, or Plask.
       receipt.counts = appendCurrentSessionSample(now, policy);
       state.hasTrendBaseline = true;
       return receipt;
-    } catch (error) {
+    } catch (error2) {
       abortAcceptedSample(receipt);
-      throw error;
+      throw error2;
     }
   }
   function commitAcceptedSample(receipt) {
@@ -1370,7 +1370,7 @@ underlying system, so should run in the browser, Node, or Plask.
   function diagnostic(level, message, ...details) {
     try {
       console[level]("[TierScope " + runtime.TIERSCOPE_VERSION + "] " + message, ...details);
-    } catch (error) {
+    } catch (error2) {
     }
   }
 
@@ -1411,7 +1411,7 @@ underlying system, so should run in the browser, Node, or Plask.
       const path = new URL(url).pathname;
       const match = path.match(/^\/b\/([a-z0-9_-]{1,100})\/?$/i) || path.match(/^\/([a-z0-9_-]{1,100})\/cam\/?$/i) || path.match(/^\/([a-z0-9_-]{1,100})\/?$/i);
       return match && !NON_ROOM_PATHS.has(match[1].toLowerCase()) ? match[1] : null;
-    } catch (error) {
+    } catch (error2) {
       return null;
     }
   }
@@ -1576,7 +1576,7 @@ underlying system, so should run in the browser, Node, or Plask.
     if (animation) {
       try {
         animation.cancel();
-      } catch (error) {
+      } catch (error2) {
       }
     }
   }
@@ -1626,8 +1626,8 @@ underlying system, so should run in the browser, Node, or Plask.
           if (runtime.highPulseAnimations.get(row.key) === animation) runtime.highPulseAnimations.delete(row.key);
         };
       });
-    } catch (error) {
-      log("High pulse unavailable: " + error.message);
+    } catch (error2) {
+      log("High pulse unavailable: " + error2.message);
     }
   }
 
@@ -1899,7 +1899,7 @@ underlying system, so should run in the browser, Node, or Plask.
         if (record.favorite) favorites.add(room);
         else favorites.delete(room);
         if (record.autoKeep) automatic.add(room);
-      } catch (error) {
+      } catch (error2) {
         favorites.delete(room);
         errors.push(room);
       }
@@ -1925,7 +1925,7 @@ underlying system, so should run in the browser, Node, or Plask.
     try {
       GM_setValue(key, value);
       if (GM_getValue(key, void 0) !== value) throw new Error("Favorite changed in another tab. Refresh the library.");
-    } catch (error) {
+    } catch (error2) {
       try {
         if (GM_getValue(key, void 0) === value) {
           if (before === void 0) GM_deleteValue(key);
@@ -1934,7 +1934,7 @@ underlying system, so should run in the browser, Node, or Plask.
       } catch (rollbackError) {
         throw new Error("The favorite could not be saved or restored. Refresh the library before retrying.");
       }
-      throw error;
+      throw error2;
     }
   }
   function migrateRecordingFavorites(entries) {
@@ -2111,7 +2111,7 @@ underlying system, so should run in the browser, Node, or Plask.
           reconcileRequestPolicy(value);
         }
       }
-    } catch (error) {
+    } catch (error2) {
     }
     return runtime.requestPolicyCache;
   }
@@ -2121,8 +2121,8 @@ underlying system, so should run in the browser, Node, or Plask.
     try {
       GM_setValue(runtime.REQUEST_POLICY_KEY, JSON.stringify(policy));
       confirmRequestPolicySaved(policy.revision);
-    } catch (error) {
-      log("Request restriction is local to this tab: " + error.message);
+    } catch (error2) {
+      log("Request restriction is local to this tab: " + error2.message);
     }
   }
   function retryAfterTime(value, now) {
@@ -2135,17 +2135,17 @@ underlying system, so should run in the browser, Node, or Plask.
     var parsed = Date.parse(value);
     return Number.isFinite(parsed) && parsed > now ? parsed : 0;
   }
-  function recordRequestFailure(error) {
+  function recordRequestFailure(error2) {
     var old = readRequestPolicy();
     var failures = Math.min(20, old.failures + 1);
-    var status = error.status || 0;
+    var status = error2.status || 0;
     var delay = Math.min(9e5, Math.max(6e4, runtime.scanIntervalSeconds * 1e3) * Math.pow(2, failures - 1));
     var policy = {
-      until: Math.max(old.until, Date.now() + delay, error.retryAt || 0),
+      until: Math.max(old.until, Date.now() + delay, error2.retryAt || 0),
       failures,
       blocked: status === 401 || status === 403 ? status : old.blocked,
       status,
-      serverUntil: Math.max(old.serverUntil || 0, error.retryAt || 0, status === 429 ? Date.now() + delay : 0),
+      serverUntil: Math.max(old.serverUntil || 0, error2.retryAt || 0, status === 429 ? Date.now() + delay : 0),
       revision: ""
     };
     writeRequestPolicy(policy);
@@ -2156,7 +2156,7 @@ underlying system, so should run in the browser, Node, or Plask.
     if (!clearOwnedRequestFailures(revision)) return;
     try {
       GM_deleteValue(runtime.REQUEST_POLICY_KEY);
-    } catch (error) {
+    } catch (error2) {
     }
   }
   function requestPolicyMessage(policy) {
@@ -2215,8 +2215,8 @@ underlying system, so should run in the browser, Node, or Plask.
             return v === selected.rank[j];
           });
         })) selected = { raw, rank };
-      } catch (error) {
-        warnings.push(candidate + ": " + error.message);
+      } catch (error2) {
+        warnings.push(candidate + ": " + error2.message);
       }
     });
     var previous = runtime.sessionRecordWarnings.get(key) || [];
@@ -2450,8 +2450,8 @@ underlying system, so should run in the browser, Node, or Plask.
         message: "Reset in another tab — local data only; export TXT/CSV before reloading"
       };
       return { status: "ready" };
-    } catch (error) {
-      return { status: "failed", error: error.message || String(error) };
+    } catch (error2) {
+      return { status: "failed", error: error2.message || String(error2) };
     }
   }
   function writeSessionRecord(model, saveData) {
@@ -2472,8 +2472,8 @@ underlying system, so should run in the browser, Node, or Plask.
       runtime.sessionStorageStatus.set(key, { protected: false, raw, producerVersion: saveData.producerVersion, legacy: false });
       log("Session saved for " + model + " (storage schema " + runtime.STORAGE_SCHEMA_VERSION + ", producer " + saveData.producerVersion + ")");
       return { status: "saved" };
-    } catch (error) {
-      return { status: "failed", error: error.message || String(error) };
+    } catch (error2) {
+      return { status: "failed", error: error2.message || String(error2) };
     }
   }
 
@@ -2605,7 +2605,7 @@ underlying system, so should run in the browser, Node, or Plask.
       const record = JSON.parse(raw);
       if (record.schemaVersion !== 1) throw new Error("Unsupported storage limits.");
       return validateLibraryLimits(record);
-    } catch (error) {
+    } catch (error2) {
       throw new Error("Library storage limits could not be read. Open Storage limits to save them again, or refresh to retry.");
     }
   }
@@ -2615,7 +2615,7 @@ underlying system, so should run in the browser, Node, or Plask.
     try {
       GM_setValue(LIBRARY_LIMITS_KEY, raw);
       if (GM_getValue(LIBRARY_LIMITS_KEY, void 0) !== raw) throw new Error("Storage limits could not be verified. Refresh and retry.");
-    } catch (error) {
+    } catch (error2) {
       try {
         if (GM_getValue(LIBRARY_LIMITS_KEY, void 0) === raw) {
           if (before === void 0) GM_deleteValue(LIBRARY_LIMITS_KEY);
@@ -2624,7 +2624,7 @@ underlying system, so should run in the browser, Node, or Plask.
       } catch (rollbackError) {
         throw new Error("Storage limits could not be saved or restored. Refresh to check the current limits.");
       }
-      throw error;
+      throw error2;
     }
     return limits;
   }
@@ -2688,9 +2688,9 @@ underlying system, so should run in the browser, Node, or Plask.
     let keys;
     try {
       keys = GM_listValues().filter((key) => key.startsWith(LIBRARY_PREFIX));
-    } catch (error) {
+    } catch (error2) {
       if (cache) cache.clear();
-      throw error;
+      throw error2;
     }
     if (cache) {
       const present = new Set(keys);
@@ -2700,7 +2700,7 @@ underlying system, so should run in the browser, Node, or Plask.
       let raw;
       try {
         raw = GM_getValue(key, void 0);
-      } catch (error) {
+      } catch (error2) {
         if (cache) cache.delete(key);
         damaged.push(key);
         unavailable.push(key);
@@ -2719,7 +2719,7 @@ underlying system, so should run in the browser, Node, or Plask.
       try {
         recordBytes = cached ? cached.bytes : new TextEncoder().encode(typeof raw === "string" ? raw : JSON.stringify(raw)).byteLength;
         bytes += recordBytes;
-      } catch (error) {
+      } catch (error2) {
         if (cache) cache.delete(key);
         damaged.push(key);
         unavailable.push(key);
@@ -2759,7 +2759,7 @@ underlying system, so should run in the browser, Node, or Plask.
           siblings.push(entry);
           sessions.set(sessionKey, siblings);
         }
-      } catch (error) {
+      } catch (error2) {
         if (cache) cache.delete(key);
         damaged.push(key);
       }
@@ -2798,12 +2798,12 @@ underlying system, so should run in the browser, Node, or Plask.
     for (const write of writes) for (const old of write.replaces) {
       try {
         if (GM_getValue(old.key, null) === old.value) GM_deleteValue(old.key);
-      } catch (error) {
+      } catch (error2) {
       }
     }
   }
-  function keepSessionInLibrary(archive, title = "", reader2 = null) {
-    const library = reader2 ? reader2.read() : readSessionLibrary(), clean = validateSessionFile(archive);
+  function keepSessionInLibrary(archive, title = "", reader3 = null) {
+    const library = reader3 ? reader3.read() : readSessionLibrary(), clean = validateSessionFile(archive);
     const writes = planLibraryAdditions([{ archive: clean, title }], library);
     if (!writes.length) return {
       added: false,
@@ -2819,21 +2819,21 @@ underlying system, so should run in the browser, Node, or Plask.
       unchangedSource();
       GM_setValue(writes[0].key, writes[0].value);
       if (GM_getValue(writes[0].key, void 0) !== writes[0].value) throw new Error("The library save could not be verified. Try again.");
-      verifyLibraryCapacity(reader2);
+      verifyLibraryCapacity(reader3);
       unchangedSource();
-    } catch (error) {
+    } catch (error2) {
       try {
         if (GM_getValue(writes[0].key, null) === writes[0].value) GM_deleteValue(writes[0].key);
       } catch (cleanupError) {
         throw new Error("Library save could not be completed or undone. Refresh the list before retrying.");
       }
-      throw error;
+      throw error2;
     }
     finalizeLibraryWrites(writes);
     return { added: !writes[0].updated, updated: writes[0].updated, id: writes[0].id };
   }
-  function verifyLibraryCapacity(reader2 = null) {
-    const limits = readLibraryLimits(), state = reader2 ? reader2.read() : readSessionLibrary();
+  function verifyLibraryCapacity(reader3 = null) {
+    const limits = readLibraryLimits(), state = reader3 ? reader3.read() : readSessionLibrary();
     if (state.unavailable.length) throw new Error("Library capacity could not be checked because some records could not be read.");
     if (state.count > limits.maxSessions || state.bytes > limits.maxMegabytes * LIBRARY_MEGABYTE) throw new Error("Library limit reached, possibly by another tab. Refresh the list, raise Storage limits or remove sessions before retrying.");
   }
@@ -2868,7 +2868,7 @@ underlying system, so should run in the browser, Node, or Plask.
         GM_setValue(write.key, write.next);
       }
       verifyLibraryCapacity();
-    } catch (error) {
+    } catch (error2) {
       let failed = false;
       for (const write of touched.reverse()) {
         try {
@@ -2878,16 +2878,16 @@ underlying system, so should run in the browser, Node, or Plask.
         }
       }
       if (failed) throw new Error("Some session edits could not be undone. Refresh the library before retrying.");
-      throw error;
+      throw error2;
     }
   }
 
   // src/automatic-library.js
   var checkpointInterval = 6e4;
   var reader = createLibraryReader();
-  var checkpoint = { room: "", identity: "", signature: "", phase: "", attemptedAt: null, savedAt: null, error: "" };
+  var checkpoint = { room: "", identity: "", signature: "", phase: "", attemptedAt: null, savedAt: null, id: "", archive: null, error: "" };
   function automaticLibraryStatus(room) {
-    return checkpoint.room === room && checkpoint.identity === room + ":" + runtime.sessionStartedAt + ":" + runtime.activeRoomEpoch ? __spreadValues({}, checkpoint) : { savedAt: null, error: "" };
+    return checkpoint.room === room && checkpoint.identity === room + ":" + runtime.sessionStartedAt + ":" + runtime.activeRoomEpoch ? __spreadValues({}, checkpoint) : { savedAt: null, id: "", archive: null, error: "" };
   }
   function automaticLibraryWarning(room) {
     const state = automaticLibraryStatus(room);
@@ -2899,7 +2899,7 @@ underlying system, so should run in the browser, Node, or Plask.
     } : null;
   }
   function clearAutomaticLibraryStatus(room) {
-    if (checkpoint.room === room) checkpoint = { room, identity: "", signature: "", phase: "", attemptedAt: null, savedAt: null, error: "" };
+    if (checkpoint.room === room) checkpoint = { room, identity: "", signature: "", phase: "", attemptedAt: null, savedAt: null, id: "", archive: null, error: "" };
     reader.clear();
   }
   function keepFavoriteSession(room, force = false) {
@@ -2907,8 +2907,8 @@ underlying system, so should run in the browser, Node, or Plask.
     try {
       const key = getStorageKey(room);
       if (runtime.activeSessionStorageKey !== key) return;
-      const identity = room + ":" + runtime.sessionStartedAt + ":" + runtime.activeRoomEpoch;
-      if (checkpoint.identity !== identity) checkpoint = { room, identity, signature: "", phase: "", attemptedAt: null, savedAt: null, error: "" };
+      const identity2 = room + ":" + runtime.sessionStartedAt + ":" + runtime.activeRoomEpoch;
+      if (checkpoint.identity !== identity2) checkpoint = { room, identity: identity2, signature: "", phase: "", attemptedAt: null, savedAt: null, id: "", archive: null, error: "" };
       const preference = readModelFavorite(room);
       if (!preference.autoKeep) {
         clearAutomaticLibraryStatus(room);
@@ -2933,19 +2933,21 @@ underlying system, so should run in the browser, Node, or Plask.
       const result = keepSessionInLibrary(archive, "", reader);
       checkpoint.signature = signature;
       checkpoint.savedAt = Date.now();
+      checkpoint.id = result.id;
+      checkpoint.archive = archive;
       checkpoint.error = "";
       return result;
-    } catch (error) {
+    } catch (error2) {
       checkpoint.room = room;
-      checkpoint.error = error.message || String(error);
+      checkpoint.error = error2.message || String(error2);
       return { error: checkpoint.error };
     }
   }
 
   // src/presentation-health.js
   var presentationFailure = null;
-  function notePresentationFailure(history, generation, url, error) {
-    presentationFailure = { history, generation, url, error: String(error && error.message || error) };
+  function notePresentationFailure(history, generation, url, error2) {
+    presentationFailure = { history, generation, url, error: String(error2 && error2.message || error2) };
   }
   function getPresentationFailure(history, generation, url) {
     if (presentationFailure && (presentationFailure.history !== history || presentationFailure.generation !== generation || presentationFailure.url !== url)) presentationFailure = null;
@@ -2956,20 +2958,20 @@ underlying system, so should run in the browser, Node, or Plask.
     presentationFailure = null;
   }
   function presentationWarningModel(history, generation, url) {
-    const error = getPresentationFailure(history, generation, url);
-    return error ? {
+    const error2 = getPresentationFailure(history, generation, url);
+    return error2 ? {
       saveWarning: true,
       text: "Display needs refresh",
       color: "var(--panel-warning)",
-      title: "Recorded data is retained in this tab. Drawing will retry automatically; saving is handled separately. " + error
+      title: "Recorded data is retained in this tab. Drawing will retry automatically; saving is handled separately. " + error2
     } : null;
   }
 
   // src/session-health.js
   var sessionSaveStates = /* @__PURE__ */ new Map();
-  function noteSessionSave(room, error = "") {
+  function noteSessionSave(room, error2 = "") {
     const previous = sessionSaveStates.get(room);
-    sessionSaveStates.set(room, { savedAt: error ? previous ? previous.savedAt : null : Date.now(), error });
+    sessionSaveStates.set(room, { savedAt: error2 ? previous ? previous.savedAt : null : Date.now(), error: error2 });
   }
   function getSessionSaveState(room) {
     return sessionSaveStates.get(room) || { savedAt: null, error: "" };
@@ -3089,7 +3091,7 @@ underlying system, so should run in the browser, Node, or Plask.
     if (modelName !== "unknown") {
       try {
         favorite = readModelFavorite(modelName);
-      } catch (error) {
+      } catch (error2) {
         favorite = __spreadProps(__spreadValues({}, favorite), { error: "Favorite unavailable. Open Library and refresh to retry." });
       }
     }
@@ -3415,7 +3417,6 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/compact-view.js
   function updateCompactDashboard(frame) {
-    if (!frame.minimized) return;
     var comparison = frame.comparison;
     var mode = frame.comparisonLabel;
     function delta(id, value, old) {
@@ -3467,7 +3468,7 @@ underlying system, so should run in the browser, Node, or Plask.
     if (!canvas) return;
     var ctx = canvas.getContext("2d");
     if (!ctx) return;
-    var width = 140, height = 36, scale = window.devicePixelRatio || 1;
+    var width = canvas.clientWidth || (frame.minimized ? 140 : 280), height = 48, scale = window.devicePixelRatio || 1;
     canvas.width = Math.ceil(width * scale);
     canvas.height = Math.ceil(height * scale);
     ctx.scale(scale, scale);
@@ -3520,7 +3521,7 @@ underlying system, so should run in the browser, Node, or Plask.
     ctx.clip();
     drawCanvasChart(ctx, points, color);
     ctx.restore();
-    renderStatus(document.getElementById("mini-freshness"), frame.freshness);
+    if (frame.freshness) renderStatus(document.getElementById("mini-freshness"), frame.freshness);
   }
 
   // src/favorite-view.js
@@ -3959,18 +3960,18 @@ underlying system, so should run in the browser, Node, or Plask.
     function line(x0, y0, x1, y1, strokeColor, dashed) {
       var dx = Math.abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
       var dy = -Math.abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
-      var error = dx + dy, step = 0;
+      var error2 = dx + dy, step = 0;
       var distancePerStep = Math.hypot(dx, dy) / Math.max(dx, -dy, 1);
       while (true) {
         if (!dashed || step * distancePerStep % 10 < 6) surface.rect(x0, y0, dashed ? 1 : 2, dashed ? 1 : 2, strokeColor);
         if (x0 === x1 && y0 === y1) break;
-        var twiceError = 2 * error;
+        var twiceError = 2 * error2;
         if (twiceError >= dy) {
-          error += dy;
+          error2 += dy;
           x0 += sx;
         }
         if (twiceError <= dx) {
-          error += dx;
+          error2 += dx;
           y0 += sy;
         }
         step++;
@@ -4127,10 +4128,10 @@ underlying system, so should run in the browser, Node, or Plask.
       }
       if (status) status.textContent = "GIF downloaded";
       log("GIF export complete: " + frameCount + " frames, " + length + " bytes");
-    } catch (error) {
-      if (status) status.textContent = error.message;
-      log("GIF export: " + error.message);
-      if (!job.cancelled && location.href === job.url && runtime.initGuard === job.generation) alert(error.message);
+    } catch (error2) {
+      if (status) status.textContent = error2.message;
+      log("GIF export: " + error2.message);
+      if (!job.cancelled && location.href === job.url && runtime.initGuard === job.generation) alert(error2.message);
     } finally {
       buttons.forEach((control) => {
         control.disabled = control.dataset.currentAvailable === "false";
@@ -4173,9 +4174,9 @@ underlying system, so should run in the browser, Node, or Plask.
       }
       updatePlaybackControls();
       return true;
-    } catch (error) {
+    } catch (error2) {
       pauseOwnedPlayback(state);
-      log("Playback paused after a presentation error: " + error.message);
+      log("Playback paused after a presentation error: " + error2.message);
       try {
         updatePlaybackControls();
       } catch (controlError) {
@@ -4206,11 +4207,11 @@ underlying system, so should run in the browser, Node, or Plask.
       if (!paintPlayback(runtime.playback)) return false;
       startPlaybackClock(runtime.playback);
       return true;
-    } catch (error) {
+    } catch (error2) {
       if (runtime.playback) {
         pauseOwnedPlayback(runtime.playback);
       }
-      log("Could not start playback: " + error.message);
+      log("Could not start playback: " + error2.message);
       return false;
     }
   }
@@ -4228,8 +4229,8 @@ underlying system, so should run in the browser, Node, or Plask.
       setPlaybackLayout(false);
       if (canRenderLive) repaintLivePresentation();
       else clearPlaybackPresentation();
-    } catch (error) {
-      log("Could not repaint after playback: " + error.message);
+    } catch (error2) {
+      log("Could not repaint after playback: " + error2.message);
     }
     return true;
   }
@@ -4446,7 +4447,7 @@ underlying system, so should run in the browser, Node, or Plask.
     if (isPlaybackCurrent(runtime.playback)) setPlaybackAllTimeState(runtime.playback, state);
     try {
       GM_setValue(runtime.HIGH_MODE_KEY, runtime.highMode);
-    } catch (error) {
+    } catch (error2) {
     }
     repaintHighMode();
   }
@@ -4461,8 +4462,8 @@ underlying system, so should run in the browser, Node, or Plask.
         result.saved ? (result.changed ? "Records updated for " : "No higher records in this file for ") + archive.room + "." : result.state.error || "Records changed in another tab. Try adding this file again.",
         result.saved ? result.changed ? "Added to ATH" : "Already in ATH" : "Retry adding to ATH"
       );
-    } catch (error) {
-      alert("Could not add all-time highs: " + error.message);
+    } catch (error2) {
+      alert("Could not add all-time highs: " + error2.message);
     }
   }
   function clearAllTimeHighs() {
@@ -4478,15 +4479,15 @@ underlying system, so should run in the browser, Node, or Plask.
       keys.forEach(function(key) {
         try {
           GM_deleteValue(key);
-        } catch (error) {
+        } catch (error2) {
         }
       });
       var state = readAllTimeHighs(room);
       if (isPlaybackCurrent(runtime.playback)) setPlaybackAllTimeState(runtime.playback, state);
       repaintHighMode();
       setAllTimeActionStatus("All-time highs cleared for " + room + ".");
-    } catch (error) {
-      alert("Could not clear all-time highs: " + error.message);
+    } catch (error2) {
+      alert("Could not clear all-time highs: " + error2.message);
     }
   }
   function updateHighControls() {
@@ -4539,8 +4540,8 @@ underlying system, so should run in the browser, Node, or Plask.
         })) throw new Error("Invalid collapsed-row preferences");
         return new Set(saved);
       }
-    } catch (error) {
-      log("Could not restore row preferences: " + error.message);
+    } catch (error2) {
+      log("Could not restore row preferences: " + error2.message);
     }
     return /* @__PURE__ */ new Set(["red", "anon", "roomTotal"]);
   }
@@ -4552,8 +4553,8 @@ underlying system, so should run in the browser, Node, or Plask.
     selectCollapsedRow(key, collapsed);
     try {
       GM_setValue(runtime.COLLAPSED_ROWS_KEY, JSON.stringify(Array.from(runtime.collapsedRows)));
-    } catch (error) {
-      log("Could not save row preferences: " + error.message);
+    } catch (error2) {
+      log("Could not save row preferences: " + error2.message);
     }
     applyRowLayout();
     if (runtime.presentationMode === "PLAYBACK") {
@@ -4610,7 +4611,7 @@ underlying system, so should run in the browser, Node, or Plask.
       var data = JSON.parse(raw);
       if (!data || !Number.isFinite(data.left) || !Number.isFinite(data.top) || !Number.isFinite(data.scale) || data.scale < 0.5 || data.scale > 3) return null;
       return { left: data.left, top: data.top, scale: data.scale };
-    } catch (error) {
+    } catch (error2) {
       return null;
     }
   }
@@ -4629,8 +4630,8 @@ underlying system, so should run in the browser, Node, or Plask.
     rememberPanelGeometry({ left: rect.left, top: rect.top, scale: runtime.currentScale });
     try {
       GM_setValue(runtime.PANEL_GEOMETRY_KEY, JSON.stringify(runtime.panelGeometry));
-    } catch (error) {
-      log("Could not save panel position/scale: " + error.message);
+    } catch (error2) {
+      log("Could not save panel position/scale: " + error2.message);
     }
   }
   function restorePanelGeometry() {
@@ -4657,6 +4658,7 @@ underlying system, so should run in the browser, Node, or Plask.
     if (!container) return;
     container.style.transform = "scale(" + scale + ")";
     container.style.transformOrigin = "top left";
+    container.style.setProperty("--journey-scale", String(scale));
     container.dataset.scale = scale;
   }
   function setupResizable() {
@@ -4836,9 +4838,223 @@ underlying system, so should run in the browser, Node, or Plask.
       if (!current()) return false;
       if (text.length > runtime.SESSION_FILE_MAX_BYTES) throw new Error("Session file is too large.");
       return openSessionReplay(JSON.parse(text.replace(/^\uFEFF/, "")));
-    } catch (error) {
-      if (current()) alert("Could not open session file: " + error.message);
+    } catch (error2) {
+      if (current()) alert("Could not open session file: " + error2.message);
       return false;
+    }
+  }
+
+  // src/disclosure-preferences.js
+  var keyPrefix = "tierscope:ui:disclosure:v1:";
+  var choices = /* @__PURE__ */ new Set(["trendSettings", "liveSettings", "librarySearch", "libraryModels", "summaryPicker", "comparePicker"]);
+  function readDisclosure(name, fallback = false) {
+    if (!choices.has(name)) return fallback;
+    try {
+      const saved = GM_getValue(keyPrefix + name, null);
+      return typeof saved === "boolean" ? saved : fallback;
+    } catch (error2) {
+      return fallback;
+    }
+  }
+  function rememberDisclosure(name, open) {
+    if (!choices.has(name)) return;
+    try {
+      GM_setValue(keyPrefix + name, !!open);
+    } catch (error2) {
+    }
+  }
+  function bindRememberedDisclosure(element, name, fallback = false) {
+    if (!element) return;
+    element.open = readDisclosure(name, fallback);
+    const summary = element.querySelector(":scope > summary");
+    if (summary) summary.addEventListener("click", (event) => {
+      if (!event.defaultPrevented) rememberDisclosure(name, !element.open);
+    });
+    element.ontoggle = () => {
+      if (element.isConnected) rememberDisclosure(name, element.open);
+    };
+  }
+
+  // src/journey-data.js
+  function buildJourneyModel(state) {
+    if (state.playback) return {
+      replaying: true,
+      text: "Viewing replay · Live tracking " + (state.stopped ? "stopped" : state.paused ? "paused" : "active") + " in " + state.room,
+      warning: !!state.error,
+      detail: state.error || "",
+      canKeep: false,
+      canView: false,
+      keepLabel: "Keep in Library"
+    };
+    const tracking = state.room === "unknown" ? "Open a room" : state.stopped ? "Tracking stopped" : state.paused ? "Tracking paused" : "Tracking live";
+    const saved = state.saved;
+    const keeping = state.error ? "Library save pending" : saved ? state.automatic ? "Automatically saved" : "Saved to Library" : state.automatic ? "Automatic saving on" : "Not saved to Library";
+    return {
+      text: tracking + " · " + keeping,
+      warning: !!state.error,
+      detail: state.error ? state.error : saved ? (state.automatic ? "Last confirmed save " : "Snapshot saved ") + new Date(saved.savedAt).toLocaleTimeString() + (state.newSamples ? state.automatic ? " · New scans will be saved at the next checkpoint." : " · New scans since this save. Keep again to update it." : "") : !state.samples ? state.room === "unknown" ? "Open a model’s room to start tracking automatically." : state.stopped ? "Start a new session to record this room." : state.paused ? "Resume tracking to capture the first audience sample." : "Waiting for the first audience scan. Tracking starts automatically." : state.automatic ? "Waiting for the first confirmed Library save." : "",
+      canKeep: state.samples > 0 && state.room !== "unknown",
+      canView: !!saved,
+      keepLabel: state.error ? "Retry keeping" : saved && state.newSamples ? "Update saved session" : "Keep in Library"
+    };
+  }
+  function resolveSavedReference(reference, entries, compatible) {
+    if (!reference) return null;
+    return entries.find((entry) => {
+      var _a;
+      return (entry.id === reference.id || ((_a = entry.lineage) == null ? void 0 : _a.includes(reference.id)) || entry.archive.room.toLowerCase() === reference.archive.room.toLowerCase() && entry.archive.session.sessionStartedAt === reference.archive.session.sessionStartedAt) && compatible(entry.archive, reference.archive) !== null;
+    }) || null;
+  }
+
+  // src/library-journey.js
+  var reader2 = createLibraryReader();
+  var verifiedRaw = null, verifiedId = "";
+  var manual = null, identity = "", discovered = false, checkedAt = 0, error = "", verified = null, checkedSource = null;
+  function liveIdentity() {
+    return getModelName() + ":" + runtime.sessionStartedAt + ":" + runtime.activeRoomEpoch;
+  }
+  function synchronize() {
+    const next = liveIdentity();
+    if (next !== identity) {
+      identity = next;
+      manual = null;
+      discovered = false;
+      checkedAt = 0;
+      error = "";
+      verified = null;
+      checkedSource = null;
+      verifiedRaw = null;
+      verifiedId = "";
+      reader2.clear();
+    }
+  }
+  function noteJourneySave(archive, result) {
+    synchronize();
+    if (archive.room.toLowerCase() !== getModelName().toLowerCase() || archive.session.sessionStartedAt !== runtime.sessionStartedAt) return;
+    manual = { id: result.id, archive, savedAt: Date.now() };
+    error = "";
+    discovered = true;
+    checkedAt = 0;
+  }
+  function keepLiveJourneySession() {
+    synchronize();
+    try {
+      const archive = captureLiveSessionFile(), result = keepSessionInLibrary(archive, "", reader2);
+      noteJourneySave(archive, result);
+      return result;
+    } catch (failure) {
+      error = failure.message || String(failure);
+      throw failure;
+    }
+  }
+  function journeyState() {
+    synchronize();
+    const room = getModelName(), samples = runtime.history.timestamps.length;
+    const available = samples > 0 && runtime.activeSessionStorageKey === getStorageKey(room) && runtime.lastUrl === location.href;
+    let automatic = false, preferenceError = "";
+    try {
+      automatic = readModelFavorite(room).autoKeep;
+    } catch (failure) {
+      preferenceError = "Saving preferences unavailable. You can still keep this session explicitly.";
+    }
+    const checkpoint2 = automaticLibraryStatus(room);
+    if (!discovered && available) {
+      discovered = true;
+      if (runtime.restoredDisplayFrame && !checkpoint2.id) try {
+        const archive = captureLiveSessionFile();
+        const entry = resolveSavedReference({ id: "", archive }, reader2.read().entries, compareLibrarySessions);
+        if (entry) manual = { id: entry.id, archive: entry.archive, savedAt: entry.archive.session.timestamp };
+      } catch (failure) {
+      }
+    }
+    let saved = checkpoint2.id ? { id: checkpoint2.id, archive: checkpoint2.archive, savedAt: checkpoint2.savedAt } : manual;
+    if (manual && saved && manual.savedAt > saved.savedAt) saved = manual;
+    if (saved && (checkedSource !== saved.archive || Date.now() - checkedAt >= 5e3)) {
+      checkedAt = Date.now();
+      checkedSource = saved.archive;
+      try {
+        const raw = GM_getValue(LIBRARY_PREFIX + saved.id, null);
+        let archive = raw === verifiedRaw && saved.id === verifiedId ? verified == null ? void 0 : verified.archive : null;
+        try {
+          if (!archive && typeof raw === "string") archive = validateSessionFile(JSON.parse(raw).archive);
+        } catch (failure) {
+        }
+        if (archive && (raw === verifiedRaw && saved.id === verifiedId || compareLibrarySessions(archive, saved.archive) !== null)) verified = __spreadProps(__spreadValues({}, saved), { archive });
+        else {
+          const entry = resolveSavedReference(saved, reader2.read().entries, compareLibrarySessions);
+          verified = entry ? __spreadProps(__spreadValues({}, saved), { id: entry.id, archive: entry.archive }) : null;
+        }
+        verifiedRaw = raw;
+        verifiedId = saved.id;
+      } catch (failure) {
+        verified = null;
+        preferenceError = "Saved session could not be checked. Open Saved sessions to retry.";
+      }
+    }
+    saved = saved ? verified : null;
+    if (saved) manual = saved;
+    const newSamples = !!saved && runtime.history.timestamps.at(-1) > saved.archive.session.history.timestamps.at(-1);
+    const state = {
+      room,
+      samples: available ? samples : 0,
+      stopped: runtime.isStopped,
+      paused: runtime.isPaused || !runtime.isAutoRefreshOn || runtime.absencePausedAt !== null,
+      playback: runtime.presentationMode === "PLAYBACK",
+      automatic,
+      saved,
+      newSamples,
+      error: error || checkpoint2.error || preferenceError
+    };
+    return __spreadProps(__spreadValues({}, state), { model: buildJourneyModel(state) });
+  }
+  function openJourneyReference(reference) {
+    const entry = resolveSavedReference(reference, reader2.read().entries, compareLibrarySessions);
+    if (!entry) throw new Error("This saved session was removed, changed or cannot be read. Open Saved sessions to refresh the list.");
+    return entry.id;
+  }
+
+  // src/journey-panel-view.js
+  function journeyPanelHtml() {
+    return `<style>
+#tracker-container{max-height:calc(100vh / var(--journey-scale,1) - 12px);overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:#ff69b470 transparent}
+#tracker-container #journey-nav{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin:5px 0}
+#tracker-container #journey-nav button{font: bold 10px/1.3 Arial,sans-serif;padding:5px 2px;min-width:0;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:4px;cursor:pointer}
+#tracker-container #journey-nav button[aria-current=page]{border-color:var(--panel-accent);color:var(--panel-accent);background:#ff69b418}
+#tracker-container #journey-status{font-size:10px;font-weight:bold;line-height:1.4;margin:6px 0 2px;overflow-wrap:anywhere;color:var(--panel-secondary)}
+#tracker-container #journey-detail{font-size:9px;line-height:1.4;color:var(--panel-muted);margin:2px 0 5px;overflow-wrap:anywhere}
+#tracker-container #journey-actions{display:flex;flex-wrap:wrap;gap:4px;margin:5px 0 7px}
+#tracker-container #journey-actions button{font:9px/1.3 Arial,sans-serif;background:var(--panel-button);color:var(--panel-accent);border:1px solid var(--panel-accent);border-radius:3px;padding:4px 5px;cursor:pointer}
+#tracker-container #journey-actions button:disabled{opacity:.45;cursor:default}
+#tracker-container #journey-audience{border-top:1px solid var(--panel-divider);padding-top:6px;margin-bottom:5px}
+#tracker-container #journey-compare,#tracker-container #journey-view{background:transparent!important;border-color:transparent!important;text-decoration:underline}
+#tracker-container #journey-actions[hidden],#tracker-container #journey-view[hidden],#tracker-container #journey-detail[hidden]{display:none}
+#tracker-container :is(#journey-nav,#journey-actions) button:focus-visible{outline:2px solid var(--panel-accent);outline-offset:2px}
+</style>
+<nav id="journey-nav" aria-label="TierScope destinations"><button id="btn-live" type="button" aria-current="page">Live</button><button id="btn-control-library" type="button" aria-expanded="false" aria-controls="tierscope-session-tools">Saved sessions</button></nav>
+<div id="journey-status" role="status" aria-live="polite">Tracking live · Not saved to Library</div>
+<div id="journey-detail"></div>
+<div id="journey-actions"><button id="journey-keep" type="button" disabled>Keep in Library</button><button id="journey-view" type="button" hidden>View session</button><button id="journey-compare" type="button" title="Compare this live session with up to five earlier saved sessions">Compare with previous</button></div>`;
+  }
+  function paintJourneyStatus(model, savedDestination) {
+    const status = document.getElementById("journey-status");
+    if (!status) return;
+    if (status.textContent !== model.text) status.textContent = model.text;
+    status.style.color = model.warning ? "var(--panel-warning)" : "var(--panel-secondary)";
+    const detail = document.getElementById("journey-detail");
+    detail.textContent = model.detail;
+    detail.hidden = !model.detail;
+    document.getElementById("journey-actions").hidden = !!model.replaying;
+    const keep = document.getElementById("journey-keep");
+    keep.disabled = !model.canKeep;
+    keep.textContent = model.keepLabel;
+    document.getElementById("journey-compare").disabled = !model.canKeep;
+    const view = document.getElementById("journey-view");
+    view.hidden = !model.canView;
+    for (const [id, active] of [["btn-live", !savedDestination], ["btn-control-library", savedDestination]]) {
+      const button = document.getElementById(id);
+      if (button) {
+        button.setAttribute("aria-current", active ? "page" : "false");
+      }
     }
   }
 
@@ -5029,7 +5245,7 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/analysis-follow.js
   function createAnalysisFollower() {
-    let enabled = true, identity = null, signature = "", expired = false;
+    let enabled = true, identity2 = null, signature = "", expired = false;
     const snapshots = /* @__PURE__ */ new Map();
     return {
       get enabled() {
@@ -5039,7 +5255,7 @@ underlying system, so should run in the browser, Node, or Plask.
         return expired;
       },
       get identity() {
-        return identity;
+        return identity2;
       },
       get(id) {
         return snapshots.get(id);
@@ -5052,13 +5268,13 @@ underlying system, so should run in the browser, Node, or Plask.
         signature = "";
       },
       reset() {
-        identity = null;
+        identity2 = null;
         signature = "";
         expired = false;
         snapshots.clear();
       },
       check(nextIdentity) {
-        if (identity !== null && identity !== nextIdentity) {
+        if (identity2 !== null && identity2 !== nextIdentity) {
           enabled = false;
           expired = true;
         }
@@ -5070,7 +5286,7 @@ underlying system, so should run in the browser, Node, or Plask.
           var _a;
           return ((_a = snapshots.get(entry.id)) == null ? void 0 : _a.archive) === archive;
         })) return false;
-        identity = nextIdentity;
+        identity2 = nextIdentity;
         signature = nextSignature;
         for (const entry of entries) snapshots.set(entry.id, __spreadProps(__spreadValues({}, entry), { archive }));
         return true;
@@ -5116,7 +5332,7 @@ underlying system, so should run in the browser, Node, or Plask.
     const label = toolNode(modelRow, "label", "Model ", "tools-model-filter"), model = toolNode(label, "select");
     model.id = prefix + "-model";
     const rooms = [...new Set(entries.map((entry) => entry.archive.room.toLowerCase()))].sort();
-    for (const [value, name] of [["", organization ? "All models (folders)" : "All models"], ...organization ? [["*", "All sessions"]] : [], ...rooms.map((room) => [room, room])]) {
+    for (const [value, name] of [["", organization ? "All sessions" : "All models"], ...organization ? [["*", "All sessions"]] : [], ...rooms.map((room) => [room, room])]) {
       const option = toolNode(model, "option", name);
       option.value = value;
     }
@@ -5186,7 +5402,7 @@ underlying system, so should run in the browser, Node, or Plask.
   }
 
   // src/analysis-metric-view.js
-  function renderMetricStrip(parent, choices, selected, changed, id = "tools-metric") {
+  function renderMetricStrip(parent, choices2, selected, changed, id = "tools-metric") {
     const group = toolNode(parent, "div", void 0, "tools-metric-strip");
     group.id = id;
     group.setAttribute("role", "radiogroup");
@@ -5200,10 +5416,10 @@ underlying system, so should run in the browser, Node, or Plask.
         radio.setAttribute("aria-checked", String(i === index));
         radio.tabIndex = i === index ? 0 : -1;
       });
-      caption.textContent = choices[index].label;
+      caption.textContent = choices2[index].label;
       if (focus) radios[index].focus();
     }
-    choices.forEach((choice, index) => {
+    choices2.forEach((choice, index) => {
       const radio = toolButton(group, "", () => {
         if (radio.getAttribute("aria-checked") === "true") return;
         select(index);
@@ -5219,17 +5435,17 @@ underlying system, so should run in the browser, Node, or Plask.
       icon.style.setProperty("--metric-color", choice.color);
       radio.onkeydown = (event) => {
         let next = index;
-        if (event.key === "ArrowRight" || event.key === "ArrowDown") next = (index + 1) % choices.length;
-        else if (event.key === "ArrowLeft" || event.key === "ArrowUp") next = (index + choices.length - 1) % choices.length;
+        if (event.key === "ArrowRight" || event.key === "ArrowDown") next = (index + 1) % choices2.length;
+        else if (event.key === "ArrowLeft" || event.key === "ArrowUp") next = (index + choices2.length - 1) % choices2.length;
         else if (event.key === "Home") next = 0;
-        else if (event.key === "End") next = choices.length - 1;
+        else if (event.key === "End") next = choices2.length - 1;
         else return;
         event.preventDefault();
         select(next, true);
-        changed(choices[next].key);
+        changed(choices2[next].key);
       };
     });
-    select(Math.max(0, choices.findIndex((choice) => choice.key === selected)));
+    select(Math.max(0, choices2.findIndex((choice) => choice.key === selected)));
     return group;
   }
 
@@ -5416,7 +5632,7 @@ underlying system, so should run in the browser, Node, or Plask.
     const clean = {};
     for (const [name, value] of Object.entries(preferences)) {
       if (!Object.prototype.hasOwnProperty.call(preferenceKeys, name)) throw new Error("Unknown saved preference: " + name);
-      const choices = {
+      const choices2 = {
         theme: ["dark", "bright"],
         highMode: ["sh", "ath"],
         miniMetric: ["room", "withTokens", "total"],
@@ -5429,7 +5645,7 @@ underlying system, so should run in the browser, Node, or Plask.
         if (!Array.isArray(value) || value.length > runtime.PANEL_ROWS.length || value.some((key) => !runtime.PANEL_ROWS.some((row) => row.key === key))) throw new Error("Invalid collapsed rows.");
         clean[name] = [...new Set(value)];
       } else {
-        if (!choices[name].includes(value)) throw new Error("Invalid preference: " + name);
+        if (!choices2[name].includes(value)) throw new Error("Invalid preference: " + name);
         clean[name] = value;
       }
     }
@@ -5517,8 +5733,8 @@ underlying system, so should run in the browser, Node, or Plask.
         if (value === void 0) return { key, error: "Record no longer present." };
         if (JSON.stringify(value) === void 0) throw new Error("Value is not JSON data.");
         return { key, value };
-      } catch (error) {
-        return { key, error: "Record could not be read or exported: " + String(error.message || error) };
+      } catch (error2) {
+        return { key, error: "Record could not be read or exported: " + String(error2.message || error2) };
       }
     });
     return { format: "TierScopeLibraryRecovery", formatVersion: 1, producerVersion: runtime.TIERSCOPE_VERSION, records };
@@ -5556,7 +5772,7 @@ underlying system, so should run in the browser, Node, or Plask.
         if (GM_getValue(runtime.ALL_TIME_EPOCH_PREFIX + room, "initial") !== epoch) throw new Error("ATH was cleared in another tab during restore.");
       }
       if (newLibrary.length) verifyLibraryCapacity();
-    } catch (error) {
+    } catch (error2) {
       let rollbackFailed = false;
       for (const write of touched.reverse()) {
         try {
@@ -5568,7 +5784,7 @@ underlying system, so should run in the browser, Node, or Plask.
         }
       }
       backup.rooms.forEach((record) => readAllTimeHighs(record.room));
-      throw new Error((rollbackFailed ? "Restore incomplete; some changes may remain. Keep the backup and retry. " : "Restore failed; its writes were rolled back. ") + error.message);
+      throw new Error((rollbackFailed ? "Restore incomplete; some changes may remain. Keep the backup and retry. " : "Restore failed; its writes were rolled back. ") + error2.message);
     }
     finalizeLibraryWrites(newLibrary);
     backup.rooms.forEach((record) => readAllTimeHighs(record.room));
@@ -5591,7 +5807,7 @@ underlying system, so should run in the browser, Node, or Plask.
         const raw = GM_getValue(ANALYSIS_PREFERENCE_KEY, null);
         analysisPreferences = raw === null ? DEFAULT_ANALYSIS_PREFERENCES : validateAnalysisPreferences(JSON.parse(raw));
         analysisPreferencesError = "";
-      } catch (error) {
+      } catch (error2) {
         analysisPreferencesError = "Saved analysis preferences could not be read. Using the choices available in this tab.";
       }
     }
@@ -5605,7 +5821,7 @@ underlying system, so should run in the browser, Node, or Plask.
       GM_setValue(ANALYSIS_PREFERENCE_KEY, JSON.stringify(analysisPreferences));
       analysisPreferencesPending = false;
       analysisPreferencesError = "";
-    } catch (error) {
+    } catch (error2) {
       analysisPreferencesError = "Analysis choices are kept in this tab only. Saving will retry when you change a choice.";
     }
     return { preferences: analysisPreferences, error: analysisPreferencesError };
@@ -5658,8 +5874,8 @@ underlying system, so should run in the browser, Node, or Plask.
         }
       }
       lastPosition = position();
-      const height = Math.min(window.innerHeight - margin * 2, Math.max(420, rect.height));
-      const top = Math.max(margin, Math.min(rect.top, window.innerHeight - height - margin));
+      const height = docked ? Math.min(Math.max(420, rect.height), window.innerHeight - rect.top) : Math.min(window.innerHeight - margin * 2, Math.max(420, rect.height));
+      const top = docked ? rect.top : Math.max(margin, Math.min(rect.top, window.innerHeight - height - margin));
       const styles = {
         left: (docked ? rect.left - width + 1 : margin) + "px",
         top: top + "px",
@@ -5705,7 +5921,7 @@ underlying system, so should run in the browser, Node, or Plask.
   }
 
   // src/library-capacity-view.js
-  function renderLibraryCapacity(parent, usage, limits, error, save) {
+  function renderLibraryCapacity(parent, usage, limits, error2, save) {
     const section = toolNode(parent, "section");
     section.id = "tools-library-storage";
     const counter = toolNode(section, "p", "", "tools-muted");
@@ -5718,7 +5934,7 @@ underlying system, so should run in the browser, Node, or Plask.
       notice.textContent = nextError || (nextLimits ? libraryCapacityNotice(nextUsage, nextLimits) : "");
       notice.hidden = !notice.textContent;
     }
-    refresh(usage, limits, error);
+    refresh(usage, limits, error2);
     const settings = toolNode(section, "details");
     settings.id = "tools-storage-settings";
     toolNode(settings, "summary", "Storage limits");
@@ -5789,6 +6005,18 @@ underlying system, so should run in the browser, Node, or Plask.
 #tierscope-session-tools nav{display:flex;gap:3px;padding:8px 10px 0;flex-shrink:0}
 #tierscope-session-tools nav button{flex:1;padding:5px 2px;font-size:.95em;background:transparent;border-color:transparent;border-bottom:2px solid transparent;border-radius:3px 3px 0 0}
 #tierscope-session-tools nav button[aria-pressed=true]{color:var(--panel-accent);background:#ff69b412;border-bottom-color:#ff69b4}
+#tierscope-session-tools #tools-analysis-navigation{margin:5px 12px 0;flex-shrink:0}
+#tierscope-session-tools #tools-analysis-navigation>summary{background:transparent;border:0;color:var(--panel-muted);padding:2px 0;font-size:.9em}
+#tierscope-session-tools .tools-selected-sessions{border:1px solid var(--panel-divider);border-radius:5px;padding:8px;margin:0 0 8px}
+#tierscope-session-tools .tools-selected-sessions h3{margin:0 0 6px;color:var(--panel-accent)}
+#tierscope-session-tools .tools-selected-sessions[data-comparing=true]{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px}
+#tierscope-session-tools .tools-selected-sessions[data-comparing=true]>h3{grid-column:1/-1}
+#tierscope-session-tools .tools-selected-sessions[data-comparing=true] .tools-selected-session{border:1px solid var(--panel-divider);border-radius:3px;padding:5px;overflow-wrap:anywhere}
+#tierscope-session-tools .tools-selected-session{padding:5px 0;border-top:1px solid var(--panel-divider)}
+#tierscope-session-tools .tools-selected-session:first-of-type{border-top:0}
+#tierscope-session-tools #tools-live-shortcuts{margin:12px 0}
+#tierscope-session-tools #tools-live-shortcuts>summary{background:transparent;color:var(--panel-muted)}
+#tierscope-session-tools #tools-live-shortcuts .tools-current{margin-top:7px}
 #tools-content{padding:10px 12px 14px;overflow:auto;min-height:0;flex:1;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#ff69b470 transparent}
 #tools-message:not(:empty){padding:7px 12px;border-bottom:1px solid var(--panel-divider);font-size:.95em;white-space:pre-line;overflow-wrap:anywhere;flex-shrink:0}
 #tierscope-session-tools .tools-actions{display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin:8px 0}
@@ -5892,8 +6120,9 @@ underlying system, so should run in the browser, Node, or Plask.
 #tools-review-notes[hidden]{display:none}
 #gif-export-controls{padding:8px 12px;gap:6px;align-items:center;flex-shrink:0;border-bottom:1px solid var(--panel-divider)}
 </style>
-<div class="tools-head"><div><h2 id="tools-title">Library</h2><div class="tools-subtitle">Session Storage and Analysis</div></div><button id="tools-close" type="button" aria-label="Close library" title="Close library (Escape)">×</button></div>
-<nav aria-label="Session tools"><button data-tools-tab="library">Sessions</button><button data-tools-tab="summary">Summary</button><button data-tools-tab="compare">Compare</button><button data-tools-tab="backup">Backup</button></nav>
+<div class="tools-head"><div><h2 id="tools-title">Saved sessions</h2><div class="tools-subtitle">Library · Session storage and analysis</div></div><button id="tools-close" type="button" aria-label="Close library" title="Close library (Escape)">×</button></div>
+<nav aria-label="TierScope destinations"><button id="tools-live">Live</button><button data-tools-tab="library">Saved sessions</button></nav>
+<details id="tools-analysis-navigation"><summary>Analysis &amp; backup</summary><nav aria-label="Analysis tools"><button data-tools-tab="summary">Summary</button><button data-tools-tab="compare">Compare</button><button data-tools-tab="backup">Backup</button></nav></details>
 <button id="tools-review-notes" type="button" hidden></button>
 <div id="tools-message" role="status" aria-live="polite"></div>
 <div id="gif-export-controls" style="display:none"><span id="gif-export-status" role="status"></span><button id="btn-cancel-gif" hidden type="button">Cancel</button></div>
@@ -6018,7 +6247,7 @@ underlying system, so should run in the browser, Node, or Plask.
     const book = toolNode(parent, "details");
     book.id = "tools-sessions-book";
     book.open = disclosures.book;
-    const bookSummary = toolNode(book, "summary", "Sessions Book");
+    const bookSummary = toolNode(book, "summary", "Recent sessions");
     bookSummary.id = "tools-sessions-book-toggle";
     const search = toolNode(book, "details");
     search.id = "tools-library-search-menu";
@@ -6052,7 +6281,7 @@ underlying system, so should run in the browser, Node, or Plask.
     list.id = "tools-library-list";
     function favoriteButton(parent2, room, compact = false) {
       const active = entries.some((entry) => entry.archive.room.toLowerCase() === room && entry.modelFavorite);
-      const control = toolButton(parent2, (active ? "★" : "☆") + (compact ? "" : " Favorite model"), () => actions.favoriteModel(room), "tools-model-favorite-" + room);
+      const control = toolButton(parent2, (active ? "★" : "☆") + (compact ? "" : " Favorite model"), () => actions.favoriteModel(room), (compact && filters.room === room ? "tools-folder-favorite-" : "tools-model-favorite-") + room);
       control.setAttribute("aria-pressed", String(active));
       control.setAttribute("aria-label", (active ? "Unfavorite " : "Favorite ") + room);
       control.title = (active ? "Unfavorite model " : "Favorite model ") + room;
@@ -6074,8 +6303,8 @@ underlying system, so should run in the browser, Node, or Plask.
       matching = [];
       try {
         matching = filterLibraryEntries(entries, filters);
-      } catch (error) {
-        toolNode(list, "p", error.message);
+      } catch (error2) {
+        toolNode(list, "p", error2.message);
       }
       searchSummary.textContent = "Search & sort" + (filters.query || filters.from || filters.to || filters.favorites ? " · Filters active" : "");
       updateSelection();
@@ -6085,11 +6314,9 @@ underlying system, so should run in the browser, Node, or Plask.
         if (!folders.has(room2)) folders.set(room2, []);
         folders.get(room2).push(entry);
       }
-      const browsingFolders = !filters.room && !filters.query;
-      const visible = browsingFolders ? [...folders.keys()] : matching;
+      const visible = matching;
       const heading = toolNode(list, "div", void 0, "tools-actions");
-      if (!browsingFolders) toolButton(heading, "‹ All models", () => {
-        const previous = filters.room;
+      if (filters.room && filters.room !== "*") toolButton(heading, "‹ All models", () => {
         filters.room = "";
         filters.query = "";
         inputs.model.value = "";
@@ -6097,17 +6324,27 @@ underlying system, so should run in the browser, Node, or Plask.
         shown = 50;
         actions.room(null);
         rows();
-        (document.getElementById("tools-folder-" + previous) || searchSummary).focus();
+        searchSummary.focus();
       }, "tools-library-all-models");
       const room = filters.room && filters.room !== "*" ? filters.room : null;
-      toolNode(heading, "h3", room ? "Folder: " + room : browsingFolders ? "Model folders" : "Search results — all models");
+      if (room || filters.query || filters.from || filters.to || filters.favorites) toolNode(heading, "h3", room ? "Sessions · " + room : "Matching sessions");
       if (room) {
         favoriteButton(heading, room);
         toolButton(heading, "History overview", () => actions.history(room), "tools-model-history").className = "tools-primary";
       }
-      if (!matching.length) toolNode(list, "p", entries.length ? "No matching sessions." : "Your library is empty. Keep a session above or import a session file.", "tools-muted");
-      if (browsingFolders) for (const room2 of visible.slice(0, shown)) {
-        const recordings = folders.get(room2), row = toolNode(list, "div", void 0, "tools-folder");
+      if (!matching.length) toolNode(list, "p", entries.length ? "No matching sessions." : "No saved sessions yet. In Live, choose Keep in Library after the first scan. Confirm a model’s favorite star to save their sessions automatically, or import a session file below.", "tools-muted");
+      const models = toolNode(list, "details");
+      models.id = "tools-model-browser";
+      models.open = disclosures.models;
+      toolNode(models, "summary", "Browse models · " + folders.size);
+      models.ontoggle = () => {
+        if (models.isConnected) {
+          disclosures.models = models.open;
+          actions.disclosure("libraryModels", models.open);
+        }
+      };
+      for (const room2 of [...folders.keys()].slice(0, shown)) {
+        const recordings = folders.get(room2), row = toolNode(models, "div", void 0, "tools-folder");
         const open = toolButton(row, "", () => {
           filters.room = room2;
           inputs.model.value = room2;
@@ -6125,7 +6362,7 @@ underlying system, so should run in the browser, Node, or Plask.
         covered.title = "Sum of covered intervals in sessions matching the current filters. Gaps and time after the final sample are excluded; overlapping sessions are counted separately.";
         favoriteButton(row, room2, true);
       }
-      else for (const entry of visible.slice(0, shown)) {
+      for (const entry of visible.slice(0, shown)) {
         const row = toolNode(list, "article", void 0, "tools-row");
         row.dataset.libraryId = entry.id;
         const title = toolNode(row, "label"), check = toolNode(title, "input");
@@ -6137,12 +6374,16 @@ underlying system, so should run in the browser, Node, or Plask.
           else selected.delete(entry.id);
           updateSelection();
         };
-        toolNode(title, "strong", entry.title || entry.archive.room);
-        toolNode(row, "div", entry.archive.room + " · " + new Date(entry.archive.session.history.timestamps[0]).toLocaleString() + " · " + entry.archive.session.history.timestamps.length + " samples", "tools-muted");
+        toolNode(title, "strong", entry.archive.room);
+        if (entry.title && entry.title !== entry.archive.room) toolNode(row, "div", entry.title, "tools-muted");
+        toolNode(row, "div", new Date(entry.archive.session.history.timestamps[0]).toLocaleString() + " · Covered " + actions.duration(actions.cardSummary([entry]).coveredMs), "tools-muted");
         if (entry.notes) toolNode(row, "p", entry.notes, "tools-recording-note");
         const controls = toolNode(row, "div", void 0, "tools-actions");
-        toolButton(controls, "Replay", () => actions.replay(entry)).className = "tools-primary";
-        toolButton(controls, "Summary", () => actions.summary(entry));
+        toolButton(controls, "Open session", () => actions.summary(entry)).className = "tools-primary";
+        toolButton(controls, "Replay", () => actions.replay(entry));
+        const previous = toolButton(controls, "Compare with previous", () => actions.comparePrevious(entry));
+        previous.disabled = !actions.previousCount(entry);
+        previous.title = previous.disabled ? "No earlier saved sessions for this model yet." : "Compare with up to five earlier sessions for this model.";
         const more = toolNode(controls, "details", void 0, "tools-more");
         toolNode(more, "summary", "More…");
         const extras = toolNode(more, "div", void 0, "tools-more-actions");
@@ -6152,7 +6393,7 @@ underlying system, so should run in the browser, Node, or Plask.
         }
         renderRecordingNotes(more, entry, actions);
       }
-      if (visible.length > 50) toolNode(list, "p", "Showing " + Math.min(shown, visible.length) + " of " + visible.length + (browsingFolders ? " model folders." : " matching sessions."), "tools-muted");
+      if (visible.length > 50) toolNode(list, "p", "Showing " + Math.min(shown, visible.length) + " of " + visible.length + " matching sessions.", "tools-muted");
       if (shown < visible.length) toolButton(list, "Show " + Math.min(50, visible.length - shown) + " more", () => {
         shown += 50;
         rows();
@@ -7237,6 +7478,7 @@ underlying system, so should run in the browser, Node, or Plask.
   var closeSessionTools = null;
   var refreshSessionTools = null;
   function updateSessionToolsStatus(reload = false) {
+    paintJourneyStatus(journeyState().model, !!closeSessionTools);
     if (refreshSessionTools) refreshSessionTools(reload);
     const element = document.getElementById("session-save-info");
     if (!element) return;
@@ -7254,11 +7496,39 @@ underlying system, so should run in the browser, Node, or Plask.
         else openSessionTools(button);
       };
     }
+    const live = document.getElementById("btn-live");
+    if (live) live.onclick = () => {
+      if (closeSessionTools) closeSessionTools();
+      leavePlayback(true);
+      updateSessionToolsStatus();
+    };
+    const keep = document.getElementById("journey-keep");
+    if (keep) keep.onclick = () => {
+      try {
+        keepLiveJourneySession();
+      } catch (error2) {
+      }
+      updateSessionToolsStatus(true);
+    };
+    const compare = document.getElementById("journey-compare");
+    if (compare) compare.onclick = () => openSessionTools(compare, "previous");
+    const view = document.getElementById("journey-view");
+    if (view) view.onclick = () => {
+      try {
+        const id = openJourneyReference(journeyState().saved);
+        openSessionTools(view, "summary", id);
+      } catch (error2) {
+        const detail = document.getElementById("journey-detail");
+        detail.hidden = false;
+        detail.textContent = error2.message;
+      }
+    };
+    updateSessionToolsStatus();
     return () => {
       if (closeSessionTools) closeSessionTools();
     };
   }
-  function openSessionTools(focusTarget) {
+  function openSessionTools(focusTarget, destination = "library", sessionId = "") {
     if (closeSessionTools) closeSessionTools();
     const origin = location.href, generation = runtime.initGuard, focusBefore = focusTarget || document.getElementById("btn-control-library") || document.activeElement;
     const dialog = document.createElement("dialog");
@@ -7276,12 +7546,12 @@ underlying system, so should run in the browser, Node, or Plask.
     const savedAnalysis = readAnalysisPreferences();
     let { metric, threshold, sharedLength } = savedAnalysis.preferences;
     let summaryThresholds = [], summaryThresholdSource = null, summaryAutomatic = true, thresholdDirty = false;
-    let selectedA = "current", selectedB = "", selectedExtra = [], pendingBackup = null;
+    let selectedA = sessionId || "current", selectedB = "", selectedExtra = [], pendingBackup = null;
     const libraryFilters = { room: "", query: "", from: "", to: "", sort: "newest", favorites: false }, librarySelection = /* @__PURE__ */ new Set();
-    const libraryDisclosures = { book: false, search: false };
+    const libraryDisclosures = { book: true, search: readDisclosure("librarySearch"), models: readDisclosure("libraryModels") };
     const analysisFilters = { room: "", query: "", from: "", to: "" };
     let filteredSources = null, chartDispose = null;
-    const pickerOpen = { summary: false, compare: true };
+    const pickerOpen = { summary: readDisclosure("summaryPicker"), compare: readDisclosure("comparePicker", true) };
     let analysisView = null, analysisOutput = null, analysisSources = null, analysisReports = null;
     const analysisStates = /* @__PURE__ */ new Map();
     let libraryRoom = null, chartDraw = null, analysisPreferenceError = savedAnalysis.error;
@@ -7292,13 +7562,13 @@ underlying system, so should run in the browser, Node, or Plask.
     const followers = { summary: createAnalysisFollower(), compare: createAnalysisFollower(), history: createAnalysisFollower() };
     try {
       currentArchive = captureSessionFile();
-    } catch (error) {
+    } catch (error2) {
     }
     const content = dialog.querySelector("#tools-content"), message = dialog.querySelector("#tools-message");
     const current = () => dialog.isConnected && dialog.open && origin === location.href && generation === runtime.initGuard;
-    function tell(text, error = false) {
+    function tell(text, error2 = false) {
       message.textContent = text;
-      message.style.color = error ? "var(--panel-negative)" : "var(--panel-positive)";
+      message.style.color = error2 ? "var(--panel-negative)" : "var(--panel-positive)";
     }
     function rememberAnalysis(patch) {
       const result = rememberAnalysisPreferences(patch);
@@ -7319,8 +7589,8 @@ underlying system, so should run in the browser, Node, or Plask.
       return (...args) => {
         try {
           return fn(...args);
-        } catch (error) {
-          tell(error.message, true);
+        } catch (error2) {
+          tell(error2.message, true);
         }
       };
     }
@@ -7364,8 +7634,8 @@ underlying system, so should run in the browser, Node, or Plask.
           }
           const value = multiple ? values : values[0];
           if (stillSelected()) accept(value);
-        } catch (error) {
-          if (stillSelected()) tell(error.message, true);
+        } catch (error2) {
+          if (stillSelected()) tell(error2.message, true);
         } finally {
           input.remove();
         }
@@ -7381,7 +7651,7 @@ underlying system, so should run in the browser, Node, or Plask.
       let migrationError = "";
       try {
         migrateRecordingFavorites(library.entries);
-      } catch (error) {
+      } catch (error2) {
         migrationError = "Previous stars could not yet be saved as model favorites. Refresh to retry.";
       }
       try {
@@ -7389,7 +7659,7 @@ underlying system, so should run in the browser, Node, or Plask.
         library.favoriteModels = models.favorites;
         library.automaticModels = models.automatic;
         library.favoriteError = migrationError || (models.errors.length ? "Some model favorites could not be read. Refresh to retry; sessions remain available." : "");
-      } catch (error) {
+      } catch (error2) {
         library.favoriteModels = /* @__PURE__ */ new Set();
         library.favoriteError = "Model favorites could not be read. Refresh to retry; sessions remain available.";
       }
@@ -7478,15 +7748,15 @@ underlying system, so should run in the browser, Node, or Plask.
     function selectSource(parent, label, id, selected, changed) {
       const wrapper = node(parent, "label", label), select = node(wrapper, "select");
       select.id = id;
-      const matches = filteredSources || sourceOptions(), choices = matches.slice();
+      const matches = filteredSources || sourceOptions(), choices2 = matches.slice();
       const retained = sourceOptions().find((item) => item.id === selected);
-      if (retained && !choices.some((item) => item.id === selected)) choices.unshift(__spreadProps(__spreadValues({}, retained), { title: retained.title + " (selected; outside filters)" }));
-      if (selected && selected !== "current" && selected !== "live" && !retained) choices.unshift({ id: selected, title: "Session changed or removed — choose another" });
-      for (const item of choices) {
+      if (retained && !choices2.some((item) => item.id === selected)) choices2.unshift(__spreadProps(__spreadValues({}, retained), { title: retained.title + " (selected; outside filters)" }));
+      if (selected && selected !== "current" && selected !== "live" && !retained) choices2.unshift({ id: selected, title: "Session changed or removed — choose another" });
+      for (const item of choices2) {
         const option = node(select, "option", item.title);
         option.value = item.id;
       }
-      if (choices.some((item) => item.id === selected)) select.value = selected;
+      if (choices2.some((item) => item.id === selected)) select.value = selected;
       select.onchange = () => changed(select.value);
       return select.value;
     }
@@ -7503,16 +7773,16 @@ underlying system, so should run in the browser, Node, or Plask.
     }
     function followContext() {
       const room = getModelName(), history = runtime.history;
-      const identity = room + ":" + runtime.sessionStartedAt + ":" + runtime.activeRoomEpoch;
+      const identity2 = room + ":" + runtime.sessionStartedAt + ":" + runtime.activeRoomEpoch;
       if (!current() || room === "unknown" || location.href !== runtime.lastUrl || runtime.activeSessionStorageKey !== getStorageKey(room) || !history.timestamps.length) {
-        return { identity, reason: "Waiting for a live session in this room." };
+        return { identity: identity2, reason: "Waiting for a live session in this room." };
       }
       try {
-        if (!readModelFavorite(room).autoKeep) return { identity, reason: "Confirm this model as a favorite to follow their live session." };
-      } catch (error) {
-        return { identity, reason: "Favorite setting unavailable; this view is frozen." };
+        if (!readModelFavorite(room).autoKeep) return { identity: identity2, reason: "Confirm this model as a favorite to follow their live session." };
+      } catch (error2) {
+        return { identity: identity2, reason: "Favorite setting unavailable; this view is frozen." };
       }
-      return { identity, room, signature: [identity, history.timestamps[0], history.timestamps.at(-1), history.timestamps.length, runtime.isPaused, runtime.isStopped, runtime.stoppedAt].join(":") };
+      return { identity: identity2, room, signature: [identity2, history.timestamps[0], history.timestamps.at(-1), history.timestamps.length, runtime.isPaused, runtime.isStopped, runtime.stoppedAt].join(":") };
     }
     function followedEntries() {
       return followers.history.project(library.entries);
@@ -7590,8 +7860,8 @@ underlying system, so should run in the browser, Node, or Plask.
         capacityCheckpoint = checkpointSignature;
         try {
           refreshCapacity(libraryReader.read(), readLibraryLimits(), "");
-        } catch (error) {
-          refreshCapacity(library, null, error.message);
+        } catch (error2) {
+          refreshCapacity(library, null, error2.message);
         }
       }
       const playback = isPlaybackCurrent(runtime.playback) ? runtime.playback : null;
@@ -7613,7 +7883,7 @@ underlying system, so should run in the browser, Node, or Plask.
           currentArchiveIsReplay = !!playback;
           try {
             currentArchive = captureSessionFile();
-          } catch (error) {
+          } catch (error2) {
             currentArchive = null;
           }
           if (replayChanged || playback) for (const follower of Object.values(followers)) follower.forget("current");
@@ -7653,12 +7923,13 @@ underlying system, so should run in the browser, Node, or Plask.
         let preference = { favorite: false, autoKeep: false };
         try {
           if (room !== "unknown") preference = readModelFavorite(room);
-        } catch (error) {
+        } catch (error2) {
           preference.error = "Favorites unavailable. Refresh to retry.";
         }
         paintFavoriteButton(star, room, preference);
         const status = automaticLibraryStatus(room);
         info.textContent = replay ? "Replay is a snapshot. Keep it explicitly to add or update it in Library." : preference.error || (status.error ? "Automatic keep pending: " + status.error : preference.autoKeep ? status.savedAt ? "Automatically kept at " + new Date(status.savedAt).toLocaleTimeString() + ". Updates as you record." : "Automatic keeping on · waiting for a recorded sample." : preference.favorite ? "Favorite · automatic keeping is off until you confirm." : "Favorite this model to automatically keep their live sessions.");
+        if (!replay) info.textContent = journeyState().model.text + (journeyState().model.detail ? " · " + journeyState().model.detail : "");
         info.style.color = !replay && status.error ? "var(--panel-warning)" : "var(--panel-muted)";
         const automatic = card.querySelector("#tools-auto-keep");
         if (automatic) {
@@ -7716,10 +7987,15 @@ underlying system, so should run in the browser, Node, or Plask.
       }
       currentButton(actions, "Keep in Library", (archive) => {
         const result = keepSessionInLibrary(archive);
+        if (!replay) noteJourneySave(archive, result);
         libraryRoom = archive.room.toLowerCase();
         Object.assign(libraryFilters, { room: libraryRoom, query: "", from: "", to: "", favorites: false });
         render("library", true);
-        tell(result.added ? "Session kept in the library." : result.updated ? "Library session updated; its name and notes were preserved." : "An equal or fuller session is already in the library.");
+        tell(result.added ? "Saved · " : result.updated ? "Saved · Updated session; name and notes preserved." : "Saved · An equal or fuller session is already in the library.");
+        button(message, "View session", () => {
+          selectedA = result.id;
+          render("summary");
+        }, "tools-view-saved").className = "tools-primary";
       }, "tools-keep").className = replay ? "tools-primary" : "tools-quiet";
       if (replay) currentButton(actions, "Save file", (archive) => downloadDataFile(archive, archiveName(archive)), "tools-save-session");
       else {
@@ -7795,16 +8071,22 @@ underlying system, so should run in the browser, Node, or Plask.
     }
     function renderLibrary() {
       const state = readLibrary();
+      const liveDetails = node(content, "details");
+      liveDetails.id = "tools-live-shortcuts";
+      node(liveDetails, "summary", "This room · Keep, Compare & history");
       currentCard();
       currentCard(true);
+      liveDetails.appendChild(dialog.querySelector("#tools-current-card"));
+      liveDetails.appendChild(dialog.querySelector("#tools-current-card-replay"));
+      if (isPlaybackCurrent(runtime.playback)) liveDetails.open = true;
       observedSignature = "";
       refreshCurrent();
       updateSessionToolsStatus();
       let limits = null, capacityError = "";
       try {
         limits = readLibraryLimits();
-      } catch (error) {
-        capacityError = error.message;
+      } catch (error2) {
+        capacityError = error2.message;
       }
       const checkpoint2 = automaticLibraryStatus(getModelName());
       capacityCheckpoint = [checkpoint2.identity, checkpoint2.signature, checkpoint2.savedAt, checkpoint2.error].join(":");
@@ -7842,14 +8124,20 @@ underlying system, so should run in the browser, Node, or Plask.
         enableAutomatic: (room) => favoriteAction(room, true),
         replay: (entry) => {
           openSessionReplay(entry.archive);
+          const shortcuts = dialog.querySelector("#tools-live-shortcuts");
+          if (shortcuts) shortcuts.open = true;
           observedSignature = "";
           refreshCurrent();
           tell("Replaying " + (entry.title || entry.archive.room) + ".");
         },
         summary: (entry) => {
           selectedA = entry.id;
+          pickerOpen.summary = false;
           render("summary");
         },
+        comparePrevious: (entry) => compareSavedWithPrevious(entry),
+        previousCount: (entry) => previousModelSessionIds(state.entries, entry.archive).length,
+        disclosure: (name, open) => rememberDisclosure(name, open),
         save: (entry) => downloadDataFile(entry.archive, archiveName(entry.archive)),
         txt: (entry) => downloadRecording(entry.archive, "txt"),
         csv: (entry) => downloadRecording(entry.archive, "csv"),
@@ -7872,6 +8160,7 @@ underlying system, so should run in the browser, Node, or Plask.
         }
       });
       renderLibraryBrowser(content, state.entries, libraryFilters, librarySelection, Object.fromEntries(Object.entries(callbacks).map(([key, fn]) => [key, action(fn)])), libraryDisclosures);
+      content.appendChild(liveDetails);
       if (state.damaged.length) {
         node(content, "p", state.damaged.length + " unreadable library record(s) were retained.", "tools-muted");
         if (state.unavailable.length) node(content, "p", "Some records could not be read. The displayed storage size excludes them; saving new sessions waits until they can be read.", "tools-muted");
@@ -7888,6 +8177,8 @@ underlying system, so should run in the browser, Node, or Plask.
         openSessionReplay(validateSessionFile(value));
         observedSignature = "";
         refreshCurrent();
+        const shortcuts = dialog.querySelector("#tools-live-shortcuts");
+        if (shortcuts) shortcuts.open = true;
         tell("File opened in replay. Use Keep in library to store it here.");
       }), "tools-open-session");
       button(actions, "Import to library…", () => chooseFile(BACKUP_MAX_BYTES, (values) => {
@@ -7902,7 +8193,7 @@ underlying system, so should run in the browser, Node, or Plask.
     }
     function metricStrip(parent, changed, id = "tools-metric") {
       const rowKeys = { room: "roomTotal", withTokens: "withtokens", anonymous: "anon" };
-      const choices = Object.entries(ANALYSIS_METRICS).map(([key, label]) => {
+      const choices2 = Object.entries(ANALYSIS_METRICS).map(([key, label]) => {
         const row = runtime.PANEL_ROWS.find((row2) => row2.key === (rowKeys[key] || key));
         return {
           key,
@@ -7911,7 +8202,7 @@ underlying system, so should run in the browser, Node, or Plask.
           color: key === "total" ? "var(--panel-secondary)" : row.color
         };
       });
-      return renderMetricStrip(parent, choices, metric, action((value) => {
+      return renderMetricStrip(parent, choices2, metric, action((value) => {
         rememberAnalysis({ metric: value });
         changed();
       }), id);
@@ -8007,8 +8298,8 @@ underlying system, so should run in the browser, Node, or Plask.
             summaryThresholds = parseAnalysisThresholds(input.value);
             summaryAutomatic = false;
           }
-        } catch (error) {
-          input.setCustomValidity(error.message);
+        } catch (error2) {
+          input.setCustomValidity(error2.message);
           input.reportValidity();
           return;
         }
@@ -8043,14 +8334,17 @@ underlying system, so should run in the browser, Node, or Plask.
       picker.open = pickerOpen[pickerTab];
       node(picker, "summary", "Choose sessions & filters");
       picker.ontoggle = () => {
-        if (picker.isConnected) pickerOpen[pickerTab] = picker.open;
+        if (picker.isConnected) {
+          pickerOpen[pickerTab] = picker.open;
+          rememberDisclosure(pickerTab + "Picker", picker.open);
+        }
       };
       recordingFilters(picker, sourceOptions(), analysisFilters, "tools-analysis", () => render(tab));
       try {
         filteredSources = filterLibraryEntries(sourceOptions(), analysisFilters);
-      } catch (error) {
+      } catch (error2) {
         filteredSources = [];
-        tell(error.message, true);
+        tell(error2.message, true);
       }
       node(picker, "p", filteredSources.length + " matching sessions. Existing selections stay available when outside the filters.", "tools-muted");
       const sourceControls = node(picker, "div", void 0, "tools-actions");
@@ -8098,6 +8392,8 @@ underlying system, so should run in the browser, Node, or Plask.
         }, "tools-compare-add").disabled = selectedExtra.length >= 4 || !next;
         node(sourceControls, "span", 2 + selectedExtra.length + " / 6 slots", "tools-muted");
       }
+      const context = selectedSessionContext(comparing);
+      content.insertBefore(context, picker);
       followControl(content);
       if (comparing) comparisonAxis(content);
       metricStrip(content, refreshAnalysis);
@@ -8276,6 +8572,65 @@ underlying system, so should run in the browser, Node, or Plask.
         chartObserver.observe(view.canvas);
       }
     }
+    function compareSavedWithPrevious(entry) {
+      const ids = previousModelSessionIds(readLibrary().entries, entry.archive);
+      if (!ids.length) {
+        tell("No earlier saved sessions for " + entry.archive.room + ". Keep another session to compare later.");
+        return;
+      }
+      selectedA = entry.id;
+      selectedB = ids[0];
+      selectedExtra = ids.slice(1);
+      pickerOpen.compare = false;
+      Object.assign(analysisFilters, { room: entry.archive.room.toLowerCase(), query: "", from: "", to: "" });
+      render("compare");
+    }
+    function selectedSessionContext(comparing) {
+      var _a;
+      const section = node(content, "section", void 0, "tools-selected-sessions");
+      section.id = "tools-selected-sessions";
+      section.dataset.comparing = String(comparing);
+      node(section, "h3", comparing ? "Comparing these sessions" : "Session");
+      const ids = comparing ? [selectedA, selectedB, ...selectedExtra] : [selectedA];
+      for (const [index, id] of ids.entries()) {
+        const entry = sourceOptions().find((item) => item.id === id);
+        const card = node(section, "div", void 0, "tools-selected-session");
+        card.dataset.selectedId = id;
+        if (!entry) {
+          node(card, "p", "Selected session unavailable. Choose another session.");
+          continue;
+        }
+        node(card, "strong", (comparing ? String.fromCharCode(65 + index) + " · " : "") + entry.archive.room);
+        node(card, "div", new Date(entry.archive.session.history.timestamps[0]).toLocaleString() + " · Covered " + formatElapsedTime(modelCardReader.read([entry]).coveredMs), "tools-muted");
+        const savedTitle = (_a = library == null ? void 0 : library.entries.find((saved) => saved.id === entry.id)) == null ? void 0 : _a.title;
+        if (savedTitle && savedTitle !== entry.archive.room) node(card, "div", savedTitle, "tools-muted");
+        if (!comparing) {
+          const actions = node(card, "div", void 0, "tools-actions");
+          button(actions, "Replay", () => {
+            openSessionReplay(entry.archive);
+            refreshCurrent();
+            tell("Replaying " + entry.archive.room + ". Live tracking continues.");
+          }, "tools-session-replay");
+          const previous = button(actions, "Compare with previous", () => compareSavedWithPrevious(entry), "tools-session-compare");
+          previous.className = "tools-primary";
+          const ids2 = previousModelSessionIds((library == null ? void 0 : library.entries) || [], entry.archive);
+          previous.disabled = !ids2.length;
+          if (!ids2.length) node(card, "div", "No earlier saved session for this model yet.", "tools-muted");
+          button(actions, "History", () => openHistory(entry.archive.room.toLowerCase()), "tools-session-history");
+          const exports = node(actions, "details", void 0, "tools-more");
+          node(exports, "summary", "Export & actions");
+          const formats = node(exports, "div", void 0, "tools-more-actions");
+          for (const format of ["Session file", "TXT", "CSV", "GIF"]) button(formats, format, () => {
+            if (format === "Session file") downloadDataFile(entry.archive, archiveName(entry.archive));
+            else if (format === "GIF") generateGifFromHistory(entry.archive);
+            else downloadRecording(entry.archive, format.toLowerCase());
+          });
+          button(formats, "Add to ATH", () => addArchiveHighs(entry.archive));
+          if (!["current", "live"].includes(entry.id)) renderRecordingNotes(exports, entry, noteActions);
+        }
+      }
+      return section;
+    }
     function renderAnalysis(comparing) {
       const options2 = analysisControls(comparing);
       if (!options2) return;
@@ -8381,8 +8736,8 @@ underlying system, so should run in the browser, Node, or Plask.
         if (pendingBackup.recovery) node(content, "p", "This is a partial backup. " + pendingBackup.recovery.omittedLibraryKeys.length + " unreadable library entries were excluded when it was created; they cannot be restored from this file.", "tools-muted");
         node(content, "p", pendingBackup.rooms.length + " rooms · " + (Object.keys(pendingBackup.preferences).length + (pendingBackup.analysisPreferences ? 1 : 0)) + " saved preferences · " + pendingBackup.library.length + " sessions", "tools-muted");
         node(content, "p", pendingBackup.favoriteModels.length + " favorite models. Restoring Library adds these where no local model choice exists.", "tools-muted");
-        const choices = node(content, "div", void 0, "tools-actions");
-        const highs = checkbox(choices, "tools-restore-highs", "Merge ATH"), preferences = checkbox(choices, "tools-restore-preferences", "Restore preferences"), recordings = checkbox(choices, "tools-restore-library", "Add sessions and favorite models");
+        const choices2 = node(content, "div", void 0, "tools-actions");
+        const highs = checkbox(choices2, "tools-restore-highs", "Merge ATH"), preferences = checkbox(choices2, "tools-restore-preferences", "Restore preferences"), recordings = checkbox(choices2, "tools-restore-library", "Add sessions and favorite models");
         button(content, "Restore selected data", () => {
           if (!highs.checked && !preferences.checked && !recordings.checked) throw new Error("Choose at least one kind of data to restore.");
           if (!confirm("Restore the selected backup data?\n\nATH will be merged, library sessions added or updated with fuller versions, and selected saved preferences replaced. Your live session is not replaced." + (pendingBackup.recovery ? "\n\nThis partial backup excludes " + pendingBackup.recovery.omittedLibraryKeys.length + " unreadable library entries." : ""))) return;
@@ -8400,7 +8755,7 @@ underlying system, so should run in the browser, Node, or Plask.
       historyView = null;
       followControls = null;
       const focusedId = dialog.contains(document.activeElement) ? document.activeElement.id : "";
-      for (const [key, id] of [["book", "tools-sessions-book"], ["search", "tools-library-search-menu"]]) {
+      for (const [key, id] of [["book", "tools-sessions-book"], ["search", "tools-library-search-menu"], ["models", "tools-model-browser"]]) {
         const details = dialog.querySelector("#" + id);
         if (details) libraryDisclosures[key] = details.open;
       }
@@ -8433,9 +8788,12 @@ underlying system, so should run in the browser, Node, or Plask.
         else if (tab === "history") renderHistory();
         else if (tab === "backup") renderBackup();
         else renderAnalysis(tab === "compare");
+        paintJourneyStatus(journeyState().model, true);
+        bindRememberedDisclosure(dialog.querySelector("#tools-library-search-menu"), "librarySearch", libraryDisclosures.search);
+        bindRememberedDisclosure(dialog.querySelector("#tools-model-browser"), "libraryModels", libraryDisclosures.models);
         if ((tab === "summary" || tab === "compare" || tab === "history") && analysisPreferenceError) tell(analysisPreferenceError, true);
-      } catch (error) {
-        tell(error.message, true);
+      } catch (error2) {
+        tell(error2.message, true);
       }
       if (focusedId) {
         const target = document.getElementById(focusedId);
@@ -8488,6 +8846,7 @@ underlying system, so should run in the browser, Node, or Plask.
         focus = document.getElementById(isPlaybackCurrent(runtime.playback) ? "btn-playback-library" : "btn-control-library");
       }
       if (focus) focus.focus();
+      paintJourneyStatus(journeyState().model, false);
     }
     function escape(event) {
       if (event.key === "Escape" && !event.defaultPrevented) {
@@ -8507,6 +8866,10 @@ underlying system, so should run in the browser, Node, or Plask.
       if (button2) button2.setAttribute("aria-expanded", "true");
     }
     dialog.querySelector("#tools-close").onclick = close;
+    dialog.querySelector("#tools-live").onclick = () => {
+      close();
+      leavePlayback(true);
+    };
     dialog.querySelector("#tools-review-notes").onclick = () => render("drafts");
     updateDraftNotice();
     dialog.addEventListener("cancel", (event) => {
@@ -8523,7 +8886,10 @@ underlying system, so should run in the browser, Node, or Plask.
     detachDock = attachLibraryDock(document.getElementById("tracker-container"), dialog, () => {
       if (chartDraw) chartDraw();
     });
-    render("library");
+    if (destination === "previous") {
+      render("library");
+      action(compareLiveWithPrevious)();
+    } else render(destination);
     dialog.querySelector("#tools-close").focus();
   }
 
@@ -8533,7 +8899,7 @@ underlying system, so should run in the browser, Node, or Plask.
     selectChartWindow(value);
     try {
       GM_setValue(runtime.CHART_WINDOW_KEY, value);
-    } catch (error) {
+    } catch (error2) {
       log("Could not save chart window preference");
     }
     runtime.chartLayoutRevision++;
@@ -8556,8 +8922,8 @@ underlying system, so should run in the browser, Node, or Plask.
           URL.revokeObjectURL(url);
         }, 6e4);
       }
-    } catch (error) {
-      alert("Could not save session file: " + error.message);
+    } catch (error2) {
+      alert("Could not save session file: " + error2.message);
     }
   }
   function updatePanelOptions() {
@@ -8566,7 +8932,7 @@ underlying system, so should run in the browser, Node, or Plask.
     var button = document.getElementById("btn-panel-options");
     if (button) {
       button.style.display = runtime.isMinimized ? "none" : "";
-      button.textContent = { full: "Full", fourHours: "4h", twoHours: "2h", hour: "1h", halfHour: "30m", quarter: "15m" }[runtime.chartWindowMode] + " ▾";
+      button.textContent = "Charts ▾";
       button.title = "Chart window and highs. Showing " + { full: "full history", fourHours: "the last 4 hours", twoHours: "the last 2 hours", hour: "the last hour", halfHour: "the last 30 minutes", quarter: "the last 15 minutes" }[runtime.chartWindowMode] + ".";
     }
     var select = document.getElementById("chart-window-select");
@@ -8703,8 +9069,8 @@ underlying system, so should run in the browser, Node, or Plask.
       try {
         updateAcquisitionStatus();
         refreshPanelOptions();
-      } catch (error) {
-        log("Save feedback unavailable: " + error.message);
+      } catch (error2) {
+        log("Save feedback unavailable: " + error2.message);
       }
     }
   }
@@ -8835,7 +9201,7 @@ underlying system, so should run in the browser, Node, or Plask.
     ["btn-auto", "btn-control-auto"].forEach(function(id) {
       var button = document.getElementById(id);
       if (!button) return;
-      button.innerHTML = runtime.isStopped ? "Start" : runtime.isAutoRefreshOn && !isAbsencePaused() ? "⏸" : "▶";
+      button.textContent = runtime.isStopped ? "Start" : runtime.isAutoRefreshOn && !isAbsencePaused() ? "Pause" : "Resume";
       button.title = runtime.isStopped ? "Start a new session (keeps this stopped record until normal cleanup)" : isAbsencePaused() ? "Resume recording now; cancel absence slowdown, automatic pause and Stop until the broadcaster returns" : runtime.isAutoRefreshOn ? "Pause scans and elapsed time" : "Resume this session";
       button.setAttribute("aria-label", runtime.isStopped ? "Start a new session" : isAbsencePaused() ? "Resume recording" : runtime.isAutoRefreshOn ? "Pause scans" : "Resume scans");
       button.style.background = runtime.isStopped ? "#4169E1" : isAbsencePaused() ? "#b86b00" : runtime.isAutoRefreshOn ? "#32CD32" : "#ff4444";
@@ -9282,10 +9648,10 @@ underlying system, so should run in the browser, Node, or Plask.
       clearPresentationFailure(history, generation, url);
       updateAcquisitionStatus();
       return current();
-    } catch (error) {
+    } catch (error2) {
       if (current()) {
         const previous = getPresentationFailure(history, generation, url);
-        notePresentationFailure(history, generation, url, error);
+        notePresentationFailure(history, generation, url, error2);
         const message = getPresentationFailure(history, generation, url);
         if (message !== previous) diagnostic("warn", "Display unavailable; committed data retained: " + message);
         try {
@@ -9384,10 +9750,10 @@ underlying system, so should run in the browser, Node, or Plask.
             signal: controller.signal
           });
           if (!response.ok) {
-            var error = new Error("API HTTP " + response.status);
-            error.status = response.status;
-            error.retryAt = retryAfterTime(response.headers && response.headers.get("Retry-After"), Date.now());
-            throw error;
+            var error2 = new Error("API HTTP " + response.status);
+            error2.status = response.status;
+            error2.retryAt = retryAfterTime(response.headers && response.headers.get("Retry-After"), Date.now());
+            throw error2;
           }
           return response.text();
         })(),
@@ -9471,13 +9837,13 @@ underlying system, so should run in the browser, Node, or Plask.
       updateStopControls();
       validateRoomSnapshot(snapshot);
       return snapshot;
-    } catch (error) {
+    } catch (error2) {
       if (!isAcquisitionCurrent(context)) return null;
       if (isAbsencePaused()) {
-        var policy = recordRequestFailure(error);
+        var policy = recordRequestFailure(error2);
         if (policy.blocked) pauseForAccessRestriction();
       }
-      log("Return check did not record a sample: " + error.message);
+      log("Return check did not record a sample: " + error2.message);
       return null;
     }
   }
@@ -9554,8 +9920,8 @@ underlying system, so should run in the browser, Node, or Plask.
     var statusEl = document.getElementById("auto-status");
     try {
       updateCountdownDisplay();
-    } catch (error) {
-      log("Countdown display unavailable: " + error.message);
+    } catch (error2) {
+      log("Countdown display unavailable: " + error2.message);
     }
     try {
       var snapshot = checkingReturn ? await checkBroadcasterReturn(context) : await acquireRoomSnapshot(context, returnToChat);
@@ -9579,20 +9945,20 @@ underlying system, so should run in the browser, Node, or Plask.
       priorState = sampleReceipt.before;
       try {
         priorState = Object.assign({}, priorState, { allTimeHighs: readAllTimeHighs(context.room).highs });
-      } catch (error) {
-        log("Could not read prior all-time highs: " + error.message);
+      } catch (error2) {
+        log("Could not read prior all-time highs: " + error2.message);
       }
       if (!isAcquisitionCurrent(context)) return;
       try {
         saveSession(context.room);
-      } catch (error) {
-        log("Could not save accepted sample: " + error.message);
+      } catch (error2) {
+        log("Could not save accepted sample: " + error2.message);
       }
       if (!isAcquisitionCurrent(context)) return;
       try {
         recordAcceptedAllTimeHighs(context.room);
-      } catch (error) {
-        log("Could not update all-time highs: " + error.message);
+      } catch (error2) {
+        log("Could not update all-time highs: " + error2.message);
       }
       if (!isAcquisitionCurrent(context)) return;
       if (presentAcceptedSample() && isAcquisitionCurrent(context)) pulseAcceptedHighs(priorState);
@@ -9607,13 +9973,13 @@ underlying system, so should run in the browser, Node, or Plask.
       if (finishAcquisition(context, location.href)) {
         try {
           resetCountdown();
-        } catch (error) {
-          log("Countdown refresh unavailable: " + error.message);
+        } catch (error2) {
+          log("Countdown refresh unavailable: " + error2.message);
         }
         try {
           updateAcquisitionStatus();
-        } catch (error) {
-          log("Status display unavailable: " + error.message);
+        } catch (error2) {
+          log("Status display unavailable: " + error2.message);
         }
         if (checkingReturn || !sampleReceipt && priorAbsence !== runtime.broadcasterAbsence) saveSession(context.room);
       }
@@ -9732,12 +10098,12 @@ underlying system, so should run in the browser, Node, or Plask.
     if (existing) existing.remove();
     var div = document.createElement("div");
     div.id = "cb-tier-tracker";
-    var html = '<div id="tracker-container" style="position:fixed;top:80px;right:20px;background:rgba(20,20,30,0.95);color:var(--panel-text);padding:5px;border-radius:6px;font-family:Arial,sans-serif;font-size:9px;z-index:999999;width:' + runtime.BASE_WIDTH_MINI + 'px;border:1px solid #ff69b4;transition:width 0.3s ease;cursor:default;user-select:none;"><div id="drag-handle" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;border-bottom:1px solid #ff69b4;padding-bottom:3px;cursor:move;"><div id="header-model" style="display:flex;flex:1;min-width:0;align-items:center;gap:3px;margin-left:14px;margin-right:4px;"><span id="header-text" style="flex:0 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:bold;color:var(--panel-accent);font-size:13px;line-height:18px;">TierScope</span><button type="button" id="btn-model-favorite" aria-label="Favorite model" style="flex:0 0 18px;padding:0;border:0;background:transparent;color:var(--panel-muted);font-size:14px;line-height:18px;cursor:pointer;">☆</button></div><div style="display:flex;align-items:center;gap:3px;flex-shrink:0;"><button type="button" id="btn-high-mode" aria-pressed="false" aria-label="Session highs. Switch to all-time highs" style="display:none;min-width:29px;background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;">SH</button><button type="button" id="btn-panel-options" aria-label="Chart window and highs" aria-expanded="false" aria-controls="panel-options" style="display:none;background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;white-space:nowrap;">Full ▾</button><button type="button" id="btn-standard-size" title="Restore standard panel size (100%)" aria-label="Restore standard panel size" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;">100%</button><button id="btn-toggle" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:9px;padding:1px 4px;flex-shrink:0;">+</button></div></div><div id="panel-options" role="group" aria-label="Chart and high options" style="display:none;position:absolute;right:5px;top:29px;width:190px;max-width:calc(100% - 10px);box-sizing:border-box;z-index:5;padding:8px;background:var(--panel-solid);color:var(--panel-text);border:1px solid #ff69b4;border-radius:4px;font-size:11px;box-shadow:0 3px 12px #0008;"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;"><strong>Charts &amp; highs</strong><button type="button" id="panel-options-close" aria-label="Close chart and high options" style="background:var(--panel-button);color:var(--panel-text);border:0;border-radius:3px;cursor:pointer;">×</button></div><label for="chart-window-select">Chart window</label><select id="chart-window-select" style="display:block;width:100%;margin:4px 0 6px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);font-size:11px;"><option value="full">Full history</option><option value="fourHours">Last 4 hours</option><option value="twoHours">Last 2 hours</option><option value="hour">Last hour</option><option value="halfHour">Last 30 minutes</option><option value="quarter">Last 15 minutes</option></select><div style="font-size:10px;color:var(--panel-muted);line-height:1.4;margin-bottom:8px;">Charts only. Downloads keep the full retained history.</div><input type="file" id="session-file-input" accept=".json,application/json" style="display:none;"><div id="session-file-info" style="display:none;margin-top:7px;font-size:10px;line-height:1.4;white-space:pre-line;overflow-wrap:anywhere;color:var(--panel-secondary);"></div><div style="border-top:1px solid var(--panel-divider);margin-top:8px;padding-top:6px;"><strong>All-time highs</strong><div id="all-time-info" style="font-size:10px;line-height:1.4;margin:4px 0;color:var(--panel-secondary);"></div><button type="button" id="btn-add-all-time" style="display:none;width:100%;margin:4px 0;padding:4px;background:#4169E1;color:#fff;border:0;border-radius:3px;cursor:pointer;">Add to all-time highs</button><button type="button" id="btn-clear-all-time" style="display:block;width:100%;margin:4px 0;padding:4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:3px;cursor:pointer;">Clear all-time highs…</button><div id="all-time-action-status" role="status" style="font-size:10px;line-height:1.4;overflow-wrap:anywhere;color:var(--panel-secondary);"></div></div></div><div id="minimized-view" style="display:block;position:relative;"><div style="display:flex;gap:4px;align-items:center;margin-bottom:3px;"><strong id="mini-room-count" style="color:var(--panel-accent);font-size:13px;">0</strong><span style="color:var(--panel-muted);font-size:8px;">in room</span><span id="mini-room-change" style="margin-left:auto;font-size:8px;"></span></div><div style="display:flex;align-items:center;justify-content:space-between;gap:3px;"><button type="button" id="mini-metric" style="background:transparent;border:0;color:var(--panel-secondary);font:inherit;cursor:pointer;padding:2px 0;" aria-label="Cycle chart metric">Room total ▾</button><button type="button" id="mini-high" style="background:transparent;border:0;padding:0;color:var(--panel-subtle);font-size:8px;cursor:pointer;"></button></div><canvas id="mini-chart" width="140" height="36" style="display:block;width:100%;height:36px;" role="img" aria-label="Recent audience history"></canvas><div style="display:flex;justify-content:space-between;gap:4px;margin:3px 0;"><span title="With Tokens">💎 <span id="mini-withtokens" style="color:var(--panel-warning);">0</span> <span id="mini-withtokens-change"></span></span><span title="Registered">📊 <span id="mini-total">0</span> <span id="mini-total-change"></span></span></div><div style="display:flex;align-items:center;gap:3px;"><span id="mini-freshness" style="flex:1;min-width:0;font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">No sample</span><button type="button" id="btn-auto" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;cursor:pointer;" title="Pause or resume scans">⏸</button><button type="button" id="mini-settings-toggle" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;cursor:pointer;" aria-label="Scan interval settings" title="Scan interval settings — adjust how often TierScope scans" aria-expanded="false" aria-controls="mini-settings">◷</button><button type="button" id="btn-expand" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;font-size:9px;cursor:pointer;" title="Expand panel" aria-label="Expand panel">↗</button></div><div id="mini-settings" style="display:none;position:absolute;left:0;right:0;top:17px;background:var(--panel-settings);border:1px solid #ff69b4;border-radius:4px;padding:5px;z-index:2;" role="group" aria-label="Scan interval"><div style="display:flex;justify-content:space-between;align-items:center;font-size:9px;color:var(--panel-secondary);">Scan interval <button type="button" id="mini-settings-close" aria-label="Close scan interval settings" title="Close (Escape)" style="background:var(--panel-button);color:var(--panel-text);border:0;border-radius:3px;cursor:pointer;padding:1px 5px;font-size:13px;">×</button></div><div style="display:flex;align-items:center;justify-content:center;gap:3px;margin:3px 0;padding:2px;background:rgba(var(--panel-row-rgb),0.05);border-radius:3px;"><button id="btn-timer-down" style="background:var(--panel-button-strong);border:none;color:var(--panel-text);border-radius:2px;cursor:pointer;font-size:9px;padding:1px 4px;font-weight:bold;">−</button><span id="timer-display" style="font-size:11px;color:var(--panel-warning);font-weight:bold;min-width:28px;">60s</span><button id="btn-timer-up" style="background:var(--panel-button-strong);border:none;color:var(--panel-text);border-radius:2px;cursor:pointer;font-size:9px;padding:1px 4px;font-weight:bold;">+</button></div><div style="display:flex;gap:2px;justify-content:center;margin-top:3px;"><button class="timer-preset" data-time="30" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">30s</button><button class="timer-preset" data-time="60" style="background:#ff69b4;border:1px solid #ff69b4;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">60s</button><button class="timer-preset" data-time="120" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">2m</button><button class="timer-preset" data-time="300" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">5m</button></div><div id="auto-status" style="margin-top:3px;font-size:8px;color:var(--panel-muted);">Starting...</div></div></div><div id="full-view" style="display:none;"><div id="tier-chart-region" style="display:flow-root;">' + collapsedTrayHtml();
+    var html = '<div id="tracker-container" style="position:fixed;top:80px;right:20px;background:rgba(20,20,30,0.95);color:var(--panel-text);padding:5px;border-radius:6px;font-family:Arial,sans-serif;font-size:9px;z-index:999999;width:' + runtime.BASE_WIDTH_MINI + 'px;border:1px solid #ff69b4;transition:width 0.3s ease;cursor:default;user-select:none;"><div id="drag-handle" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;border-bottom:1px solid #ff69b4;padding-bottom:3px;cursor:move;"><div id="header-model" style="display:flex;flex:1;min-width:0;align-items:center;gap:3px;margin-left:14px;margin-right:4px;"><span id="header-text" style="flex:0 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:bold;color:var(--panel-accent);font-size:13px;line-height:18px;">TierScope</span><button type="button" id="btn-model-favorite" aria-label="Favorite model" style="flex:0 0 18px;padding:0;border:0;background:transparent;color:var(--panel-muted);font-size:14px;line-height:18px;cursor:pointer;">☆</button></div><div style="display:flex;align-items:center;gap:3px;flex-shrink:0;"><button type="button" id="btn-high-mode" aria-pressed="false" aria-label="Session highs. Switch to all-time highs" style="display:none;min-width:29px;background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;">SH</button><button type="button" id="btn-panel-options" aria-label="Chart settings and highs" aria-expanded="false" aria-controls="panel-options" style="display:none;background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;white-space:nowrap;">Full ▾</button><button type="button" id="btn-standard-size" title="Restore standard panel size (100%)" aria-label="Restore standard panel size" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;">100%</button><button id="btn-toggle" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:9px;padding:1px 4px;flex-shrink:0;">+</button></div></div><div id="panel-options" role="group" aria-label="Chart and high options" style="display:none;position:absolute;right:5px;top:29px;width:190px;max-width:calc(100% - 10px);box-sizing:border-box;z-index:5;padding:8px;background:var(--panel-solid);color:var(--panel-text);border:1px solid #ff69b4;border-radius:4px;font-size:11px;box-shadow:0 3px 12px #0008;"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;"><strong>Charts &amp; highs</strong><button type="button" id="panel-options-close" aria-label="Close chart and high options" style="background:var(--panel-button);color:var(--panel-text);border:0;border-radius:3px;cursor:pointer;">×</button></div><label for="chart-window-select">Chart window</label><select id="chart-window-select" style="display:block;width:100%;margin:4px 0 6px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);font-size:11px;"><option value="full">Full history</option><option value="fourHours">Last 4 hours</option><option value="twoHours">Last 2 hours</option><option value="hour">Last hour</option><option value="halfHour">Last 30 minutes</option><option value="quarter">Last 15 minutes</option></select><div style="font-size:10px;color:var(--panel-muted);line-height:1.4;margin-bottom:8px;">Charts only. Downloads keep the full retained history.</div><input type="file" id="session-file-input" accept=".json,application/json" style="display:none;"><div id="session-file-info" style="display:none;margin-top:7px;font-size:10px;line-height:1.4;white-space:pre-line;overflow-wrap:anywhere;color:var(--panel-secondary);"></div><div style="border-top:1px solid var(--panel-divider);margin-top:8px;padding-top:6px;"><strong>All-time highs</strong><div id="all-time-info" style="font-size:10px;line-height:1.4;margin:4px 0;color:var(--panel-secondary);"></div><button type="button" id="btn-add-all-time" style="display:none;width:100%;margin:4px 0;padding:4px;background:#4169E1;color:#fff;border:0;border-radius:3px;cursor:pointer;">Add to all-time highs</button><button type="button" id="btn-clear-all-time" style="display:block;width:100%;margin:4px 0;padding:4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:3px;cursor:pointer;">Clear all-time highs…</button><div id="all-time-action-status" role="status" style="font-size:10px;line-height:1.4;overflow-wrap:anywhere;color:var(--panel-secondary);"></div></div></div>' + journeyPanelHtml() + '<section id="journey-audience" aria-label="Current audience"><div style="display:flex;gap:4px;align-items:center;margin-bottom:3px;"><strong id="mini-room-count" style="color:var(--panel-accent);font-size:21px;">0</strong><span style="color:var(--panel-muted);font-size:8px;">in room</span><span id="mini-room-change" style="margin-left:auto;font-size:8px;"></span></div><div style="display:flex;align-items:center;justify-content:space-between;gap:3px;"><button type="button" id="mini-metric" style="background:transparent;border:0;color:var(--panel-secondary);font:inherit;cursor:pointer;padding:2px 0;" aria-label="Cycle chart metric">Room total ▾</button><button type="button" id="mini-high" style="background:transparent;border:0;padding:0;color:var(--panel-subtle);font-size:8px;cursor:pointer;"></button></div><canvas id="mini-chart" width="140" height="48" style="display:block;width:100%;height:48px;" role="img" aria-label="Recent audience history"></canvas><div style="display:flex;justify-content:space-between;gap:4px;margin:3px 0;"><span title="With Tokens">💎 <span id="mini-withtokens" style="color:var(--panel-warning);">0</span> <span id="mini-withtokens-change"></span></span><span title="Registered">📊 <span id="mini-total">0</span> <span id="mini-total-change"></span></span></div></section><div id="minimized-view" style="display:block;position:relative;"><div style="display:flex;align-items:center;gap:3px;"><span id="mini-freshness" style="flex:1;min-width:0;font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">No sample</span><button type="button" id="btn-auto" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;cursor:pointer;" title="Pause or resume scans">⏸</button><button type="button" id="mini-settings-toggle" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;cursor:pointer;" aria-label="Scan interval settings" title="Scan interval settings — adjust how often TierScope scans" aria-expanded="false" aria-controls="mini-settings">◷</button><button type="button" id="btn-expand" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;font-size:9px;cursor:pointer;" title="Expand panel" aria-label="Expand panel">↗</button></div><div id="mini-settings" style="display:none;position:absolute;left:0;right:0;top:17px;background:var(--panel-settings);border:1px solid #ff69b4;border-radius:4px;padding:5px;z-index:2;" role="group" aria-label="Scan interval"><div style="display:flex;justify-content:space-between;align-items:center;font-size:9px;color:var(--panel-secondary);">Scan interval <button type="button" id="mini-settings-close" aria-label="Close scan interval settings" title="Close (Escape)" style="background:var(--panel-button);color:var(--panel-text);border:0;border-radius:3px;cursor:pointer;padding:1px 5px;font-size:13px;">×</button></div><div style="display:flex;align-items:center;justify-content:center;gap:3px;margin:3px 0;padding:2px;background:rgba(var(--panel-row-rgb),0.05);border-radius:3px;"><button id="btn-timer-down" style="background:var(--panel-button-strong);border:none;color:var(--panel-text);border-radius:2px;cursor:pointer;font-size:9px;padding:1px 4px;font-weight:bold;">−</button><span id="timer-display" style="font-size:11px;color:var(--panel-warning);font-weight:bold;min-width:28px;">60s</span><button id="btn-timer-up" style="background:var(--panel-button-strong);border:none;color:var(--panel-text);border-radius:2px;cursor:pointer;font-size:9px;padding:1px 4px;font-weight:bold;">+</button></div><div style="display:flex;gap:2px;justify-content:center;margin-top:3px;"><button class="timer-preset" data-time="30" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">30s</button><button class="timer-preset" data-time="60" style="background:#ff69b4;border:1px solid #ff69b4;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">60s</button><button class="timer-preset" data-time="120" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">2m</button><button class="timer-preset" data-time="300" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">5m</button></div><div id="auto-status" style="margin-top:3px;font-size:8px;color:var(--panel-muted);">Starting...</div></div></div><div id="full-view" style="display:none;"><div id="tier-chart-region" style="display:flow-root;">' + collapsedTrayHtml();
     Object.keys(runtime.TIERS).forEach(function(key) {
       var t = runtime.TIERS[key];
       html += '<div id="tier-row-' + key + '" data-tier="' + key + '" style="display:flex;align-items:center;padding:1px 3px;margin:1px 0;background:rgba(var(--panel-row-rgb),calc(0.05 * var(--tier-background-scale, 1)));border-radius:3px;border-left:3px solid ' + t.color + ';"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml(key) + '</div><canvas id="spark-' + key + '" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-' + key + '" style="font-weight:bold;color:' + t.color + ';font-size:14px;">0</span><div id="high-' + key + '" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div>';
     });
-    html += '<div id="summary-tier-rows" style="border-top:1px solid var(--panel-divider);margin-top:4px;padding-top:4px;"><div id="tier-row-withtokens" data-tier="withtokens" style="display:flex;align-items:center;padding:2px 3px;background:rgba(255,212,59,0.15);border-radius:3px;border:1px solid var(--panel-warning);margin-bottom:3px;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("withtokens") + '</div><canvas id="spark-withtokens" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-withtokens" style="font-weight:bold;color:var(--panel-warning);font-size:14px;">0</span><span id="pct-withtokens" style="font-size:8px;color:var(--panel-warning);margin-left:2px;">0%</span><div id="high-withtokens" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div><div id="tier-row-total" data-tier="total" style="display:flex;align-items:center;padding:2px 3px;background:rgba(var(--panel-row-rgb),0.1);border-radius:3px;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("total") + '</div><canvas id="spark-total" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-total" style="font-weight:bold;color:var(--panel-text);font-size:14px;">0</span><div id="high-total" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div></div><div id="tier-row-anon" data-tier="anonymous" style="margin-top:5px;padding:5px;background:rgba(136,136,136,0.15);border-radius:3px;border:1px solid #888;"><div style="display:flex;align-items:center;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("anon") + '</div><canvas id="spark-anon" width="105" height="50" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="anon-ratio-full" style="font-size:13px;font-weight:bold;color:#ff69b4;">--</span><div id="anon-registered-ratio" role="img" aria-label="Anons / registered viewers: unavailable" style="font-size:9px;line-height:12px;color:var(--panel-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">—</div><div id="high-anon" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div></div><div id="tier-row-roomTotal" data-tier="roomTotal" style="display:flex;align-items:center;padding:2px 3px;margin-top:3px;border:1px solid var(--panel-accent);border-radius:3px;background:rgba(255,105,180,.08);"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("roomTotal") + '</div><canvas id="spark-roomTotal" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-roomTotal" style="font-weight:bold;color:var(--panel-accent);font-size:14px;">0</span><div id="high-roomTotal" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div></div><div id="trend-section" style="position:relative;border-top:1px solid #4169E1;margin-top:5px;padding-top:5px;"><div id="live-trend"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;flex-wrap:wrap;gap:2px;"><span id="trend-header-label" style="font-size:9px;font-weight:bold;color:#4169E1;">📈 TREND</span><div style="display:flex;gap:2px;flex-wrap:wrap;"><button class="trend-preset-btn" data-mode="last" style="background:#4169E1;border:1px solid #4169E1;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Last</button><button class="trend-preset-btn" data-mode="5min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">5m</button><button class="trend-preset-btn" data-mode="15min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">15m</button><button class="trend-preset-btn" data-mode="30min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">30m</button><button class="trend-preset-btn" data-mode="1hour" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">1h</button><button class="trend-preset-btn" data-mode="start" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Start</button><button id="btn-trend-auto" style="background:#32CD32;border:1px solid #32CD32;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;" title="Auto-escalation ON - Click to disable">AUTO</button></div></div><div id="trend-container" style="min-height:30px;"><div style="font-size:8px;color:var(--panel-faint);text-align:center;padding:8px;">Waiting for scan...</div></div></div><div id="playback-controls" style="display:none;position:absolute;top:5px;left:0;right:0;bottom:0;padding:0 2px;box-sizing:border-box;grid-template-rows:minmax(14px,1fr) 14px 12px;gap:2px;" aria-label="Playback controls"><div style="display:flex;flex-direction:column;justify-content:center;gap:4px;min-width:0;"><div id="playback-file-controls" style="display:none;align-items:center;gap:4px;min-width:0;"><div id="playback-room" style="display:none;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;line-height:12px;font-weight:bold;color:var(--panel-text);"></div></div><div style="display:flex;align-items:center;justify-content:space-between;gap:3px;"><strong id="playback-label" style="font-size:9px;color:var(--panel-warning);">PLAYBACK</strong><button id="playback-play" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#4169E1;color:white;border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Pause</button><select id="playback-speed" aria-label="Playback speed" style="font-size:8px;height:15px;margin:0;padding:0;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select><button type="button" id="btn-playback-library" aria-label="Open session library" aria-expanded="false" aria-controls="tierscope-session-tools" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-accent);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Library</button><button id="playback-return" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Return to Live</button></div></div><div style="display:flex;align-items:center;gap:4px;min-width:0;"><button type="button" id="playback-previous" title="Previous recorded sample (pauses Replay)" aria-label="Previous recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">|&#9664;</button><input id="playback-scrubber" type="range" min="0" max="0" value="0" step="any" aria-label="Playback timeline" style="flex:1;min-width:0;width:100%;height:12px;margin:0;accent-color:var(--panel-warning);cursor:pointer;"><button type="button" id="playback-next" title="Next recorded sample (pauses Replay)" aria-label="Next recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">&#9654;|</button></div><div id="playback-file-actions" style="display:flex;justify-content:center;min-width:0;"><div id="playback-position" style="font-size:9px;line-height:12px;text-align:center;white-space:nowrap;color:var(--panel-secondary);font-family:monospace;">00:00:00 / 00:00:00</div></div></div></div><div id="control-field" style="margin-top:5px;padding:4px;background:rgba(65,105,225,0.15);border-radius:3px;border:1px solid #4169E1;"><div id="control-session-row" style="display:grid;grid-template-columns:max-content max-content minmax(0,1fr);align-items:center;gap:3px;margin-bottom:4px;white-space:nowrap;"><span style="font-size:9px;font-weight:bold;color:#4169E1;">🎛️ CONTROLS</span><span style="font-size:12px;color:var(--panel-warning);font-family:monospace;font-weight:bold;width:9ch;text-align:center;font-variant-numeric:tabular-nums;" id="control-tracking-timer">00:00:00</span><span style="min-width:0;text-align:right;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums;font-size:11px;color:var(--panel-positive);font-weight:bold;" id="control-next-scan">Next: 60s</span></div><div id="control-action-row" style="display:grid;grid-template-columns:minmax(max-content,1fr) auto minmax(0,1fr);align-items:center;gap:3px;"><div id="control-session-buttons" style="display:flex;gap:2px;align-items:center;"><button type="button" id="btn-control-library" aria-expanded="false" aria-controls="tierscope-session-tools" aria-label="Open session library" title="Open model folders, session summaries, comparisons and backups" style="font-size:8px;line-height:10px;height:14px;min-width:38px;box-sizing:border-box;margin:0;padding:2px 3px;background:var(--panel-button);color:var(--panel-accent);border:none;border-radius:3px;cursor:pointer;">Library</button><button id="btn-replay" style="font-size:8px;line-height:10px;height:14px;min-width:38px;box-sizing:border-box;margin:0;padding:2px 3px;background:var(--panel-button);color:var(--panel-warning);border:none;border-radius:3px;cursor:pointer;" title="Replay recorded history">Replay</button></div><div id="control-action-buttons" style="display:flex;gap:2px;align-items:center;"><button id="btn-control-auto" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#32CD32;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 4px;min-width:24px;" title="Auto-Refresh ON">⏸</button><button type="button" id="btn-control-stop" aria-label="Stop this session" title="Stop this session and freeze its history and elapsed time" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;white-space:nowrap;">■ Stop</button><button id="btn-main-reset" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Reset all tracking data"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12"/><path d="M3 3v9h9"/></svg>Reset</button></div><style>#dark-mode-control #dark-mode-track{position:relative;display:block;flex:0 0 22px;width:22px;height:12px;box-sizing:border-box;border:1px solid #9b701d;border-radius:7px;background:#e8b444;transition:background-color .16s ease;}#dark-mode-control #dark-mode-thumb{position:absolute;left:1px;top:1px;width:8px;height:8px;border-radius:50%;background:#4c3300;transform:translateX(10px);transition:transform .16s ease,background-color .16s ease;}#dark-mode-control #dark-mode-moon{color:var(--panel-muted);opacity:.55;}#dark-mode-control #dark-mode-sun{color:#825d00;}#dark-mode-control #dark-mode-toggle:checked~#dark-mode-track{background:#4169e1;border-color:#8ca8ff;}#dark-mode-control #dark-mode-toggle:checked~#dark-mode-track #dark-mode-thumb{transform:translateX(0);background:#fff;}#dark-mode-control #dark-mode-toggle:checked~#dark-mode-moon{color:#b4c5ff;opacity:1;}#dark-mode-control #dark-mode-toggle:checked~#dark-mode-sun{color:var(--panel-muted);opacity:.55;}#dark-mode-control #dark-mode-toggle:focus-visible~#dark-mode-track{outline:2px solid var(--panel-accent);outline-offset:2px;}@media(prefers-reduced-motion:reduce){#dark-mode-control #dark-mode-track,#dark-mode-control #dark-mode-thumb{transition:none;}}</style><label id="dark-mode-control" style="position:relative;justify-self:end;display:inline-flex;align-items:center;gap:2px;height:14px;cursor:pointer;line-height:1;"><input type="checkbox" role="switch" id="dark-mode-toggle" checked aria-label="Dark mode" style="position:absolute;inset:0;z-index:1;width:100%;height:100%;box-sizing:border-box;margin:0;padding:0;border:0;opacity:0;cursor:pointer;"><svg id="dark-mode-moon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" style="flex:none;"><path d="M21 13a9 9 0 0 1-10-10 9 9 0 1 0 10 10Z"/></svg><span id="dark-mode-track" aria-hidden="true"><span id="dark-mode-thumb"></span></span><svg id="dark-mode-sun" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" style="flex:none;"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg></label></div></div><div id="tracker-footer" style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:4px;margin-top:5px;min-height:18px;"><div id="acquisition-status" style="max-width:80px;font-size:7px;color:var(--panel-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="No accepted sample yet">No sample</div><div id="background-slider-controls" style="display:flex;align-items:center;gap:3px;min-width:0;"><svg width="11" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--panel-warning)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink:0;"><path d="M9 18h6M10 22h4M8 14a6 6 0 1 1 8 0c-1 1-1 2-1 4H9c0-2 0-3-1-4Z"/></svg><input type="range" id="opacity-slider" min="30" max="100" value="95" aria-label="Background opacity" style="flex:1;min-width:0;width:100%;height:12px;margin:0;cursor:pointer;accent-color:#ff69b4;" title="Panel, Library and standard tier background opacity"><span id="opacity-value" style="font-size:8px;color:var(--panel-secondary);min-width:23px;">95%</span></div><div id="tierscope-logo" style="justify-self:end;display:flex;flex-direction:column;align-items:center;gap:0;white-space:nowrap;" onmouseenter="this.firstElementChild.style.opacity=1" onmouseleave="this.firstElementChild.style.opacity=0.6"><div style="display:flex;align-items:center;gap:3px;height:8px;opacity:0.6;transition:opacity 0.2s;"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#ff69b4" stroke-width="2" style="flex-shrink:0;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="2" x2="12" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/></svg><span title="TierScope ' + runtime.TIERSCOPE_VERSION + `" style="font-size:7px;line-height:8px;font-family:'Courier New',monospace;font-weight:bold;color:var(--panel-accent);letter-spacing:1px;">TIERSCOPE</span></div><span id="tierscope-version" style="font:bold 8px/10px Arial,sans-serif;letter-spacing:.15px;color:var(--panel-secondary);">` + runtime.TIERSCOPE_VERSION + "</span></div></div></div>";
+    html += '<div id="summary-tier-rows" style="border-top:1px solid var(--panel-divider);margin-top:4px;padding-top:4px;"><div id="tier-row-withtokens" data-tier="withtokens" style="display:flex;align-items:center;padding:2px 3px;background:rgba(255,212,59,0.15);border-radius:3px;border:1px solid var(--panel-warning);margin-bottom:3px;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("withtokens") + '</div><canvas id="spark-withtokens" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-withtokens" style="font-weight:bold;color:var(--panel-warning);font-size:14px;">0</span><span id="pct-withtokens" style="font-size:8px;color:var(--panel-warning);margin-left:2px;">0%</span><div id="high-withtokens" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div><div id="tier-row-total" data-tier="total" style="display:flex;align-items:center;padding:2px 3px;background:rgba(var(--panel-row-rgb),0.1);border-radius:3px;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("total") + '</div><canvas id="spark-total" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-total" style="font-weight:bold;color:var(--panel-text);font-size:14px;">0</span><div id="high-total" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div></div><div id="tier-row-anon" data-tier="anonymous" style="margin-top:5px;padding:5px;background:rgba(136,136,136,0.15);border-radius:3px;border:1px solid #888;"><div style="display:flex;align-items:center;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("anon") + '</div><canvas id="spark-anon" width="105" height="50" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="anon-ratio-full" style="font-size:13px;font-weight:bold;color:#ff69b4;">--</span><div id="anon-registered-ratio" role="img" aria-label="Anons / registered viewers: unavailable" style="font-size:9px;line-height:12px;color:var(--panel-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">—</div><div id="high-anon" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div></div><div id="tier-row-roomTotal" data-tier="roomTotal" style="display:flex;align-items:center;padding:2px 3px;margin-top:3px;border:1px solid var(--panel-accent);border-radius:3px;background:rgba(255,105,180,.08);"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("roomTotal") + '</div><canvas id="spark-roomTotal" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-roomTotal" style="font-weight:bold;color:var(--panel-accent);font-size:14px;">0</span><div id="high-roomTotal" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div></div><div id="trend-section" style="position:relative;border-top:1px solid #4169E1;margin-top:5px;padding-top:5px;"><div id="live-trend"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;flex-wrap:wrap;gap:2px;"><span id="trend-header-label" style="font-size:9px;font-weight:bold;color:#4169E1;">📈 TREND</span><details id="trend-chart-settings" style="max-width:76%;"><summary style="cursor:pointer;font-size:9px;color:var(--panel-muted);">Trend settings</summary><div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:4px;"><button class="trend-preset-btn" data-mode="last" style="background:#4169E1;border:1px solid #4169E1;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Last</button><button class="trend-preset-btn" data-mode="5min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">5m</button><button class="trend-preset-btn" data-mode="15min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">15m</button><button class="trend-preset-btn" data-mode="30min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">30m</button><button class="trend-preset-btn" data-mode="1hour" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">1h</button><button class="trend-preset-btn" data-mode="start" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Start</button><button id="btn-trend-auto" style="background:#32CD32;border:1px solid #32CD32;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;" title="Auto-escalation ON - Click to disable">AUTO</button></div></details></div><div id="trend-container" style="min-height:30px;"><div style="font-size:8px;color:var(--panel-faint);text-align:center;padding:8px;">Waiting for scan...</div></div></div><div id="playback-controls" style="display:none;position:absolute;top:5px;left:0;right:0;bottom:0;padding:0 2px;box-sizing:border-box;grid-template-rows:minmax(14px,1fr) 14px 12px;gap:2px;" aria-label="Playback controls"><div style="display:flex;flex-direction:column;justify-content:center;gap:4px;min-width:0;"><div id="playback-file-controls" style="display:none;align-items:center;gap:4px;min-width:0;"><div id="playback-room" style="display:none;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;line-height:12px;font-weight:bold;color:var(--panel-text);"></div></div><div style="display:flex;align-items:center;justify-content:space-between;gap:3px;"><strong id="playback-label" style="font-size:9px;color:var(--panel-warning);">PLAYBACK</strong><button id="playback-play" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#4169E1;color:white;border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Pause</button><select id="playback-speed" aria-label="Playback speed" style="font-size:8px;height:15px;margin:0;padding:0;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select><button type="button" id="btn-playback-library" aria-label="Open session library" aria-expanded="false" aria-controls="tierscope-session-tools" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-accent);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Library</button><button id="playback-return" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Return to Live</button></div></div><div style="display:flex;align-items:center;gap:4px;min-width:0;"><button type="button" id="playback-previous" title="Previous recorded sample (pauses Replay)" aria-label="Previous recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">|&#9664;</button><input id="playback-scrubber" type="range" min="0" max="0" value="0" step="any" aria-label="Playback timeline" style="flex:1;min-width:0;width:100%;height:12px;margin:0;accent-color:var(--panel-warning);cursor:pointer;"><button type="button" id="playback-next" title="Next recorded sample (pauses Replay)" aria-label="Next recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">&#9654;|</button></div><div id="playback-file-actions" style="display:flex;justify-content:center;min-width:0;"><div id="playback-position" style="font-size:9px;line-height:12px;text-align:center;white-space:nowrap;color:var(--panel-secondary);font-family:monospace;">00:00:00 / 00:00:00</div></div></div></div><div id="control-field" style="margin-top:5px;padding:4px;background:rgba(65,105,225,0.15);border-radius:3px;border:1px solid #4169E1;"><div id="control-session-row" style="display:grid;grid-template-columns:max-content max-content minmax(0,1fr);align-items:center;gap:3px;margin-bottom:4px;white-space:nowrap;"><span style="font-size:9px;font-weight:bold;color:#4169E1;">LIVE</span><span style="font-size:12px;color:var(--panel-warning);font-family:monospace;font-weight:bold;width:9ch;text-align:center;font-variant-numeric:tabular-nums;" id="control-tracking-timer">00:00:00</span><span style="min-width:0;text-align:right;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums;font-size:11px;color:var(--panel-positive);font-weight:bold;" id="control-next-scan">Next: 60s</span></div><div id="control-action-row" style="display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:3px;"><div id="control-action-buttons" style="display:flex;gap:2px;align-items:center;"><button id="btn-control-auto" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#32CD32;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 4px;min-width:24px;" title="Auto-Refresh ON">⏸</button><button type="button" id="btn-control-stop" aria-label="Stop this session" title="Stop this session and freeze its history and elapsed time" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;white-space:nowrap;">■ Stop</button></div><style>#dark-mode-control #dark-mode-track{position:relative;display:block;flex:0 0 22px;width:22px;height:12px;box-sizing:border-box;border:1px solid #9b701d;border-radius:7px;background:#e8b444;transition:background-color .16s ease;}#dark-mode-control #dark-mode-thumb{position:absolute;left:1px;top:1px;width:8px;height:8px;border-radius:50%;background:#4c3300;transform:translateX(10px);transition:transform .16s ease,background-color .16s ease;}#dark-mode-control #dark-mode-moon{color:var(--panel-muted);opacity:.55;}#dark-mode-control #dark-mode-sun{color:#825d00;}#dark-mode-control #dark-mode-toggle:checked~#dark-mode-track{background:#4169e1;border-color:#8ca8ff;}#dark-mode-control #dark-mode-toggle:checked~#dark-mode-track #dark-mode-thumb{transform:translateX(0);background:#fff;}#dark-mode-control #dark-mode-toggle:checked~#dark-mode-moon{color:#b4c5ff;opacity:1;}#dark-mode-control #dark-mode-toggle:checked~#dark-mode-sun{color:var(--panel-muted);opacity:.55;}#dark-mode-control #dark-mode-toggle:focus-visible~#dark-mode-track{outline:2px solid var(--panel-accent);outline-offset:2px;}@media(prefers-reduced-motion:reduce){#dark-mode-control #dark-mode-track,#dark-mode-control #dark-mode-thumb{transition:none;}}</style><label id="dark-mode-control" style="position:relative;justify-self:end;display:inline-flex;align-items:center;gap:2px;height:14px;cursor:pointer;line-height:1;"><input type="checkbox" role="switch" id="dark-mode-toggle" checked aria-label="Dark mode" style="position:absolute;inset:0;z-index:1;width:100%;height:100%;box-sizing:border-box;margin:0;padding:0;border:0;opacity:0;cursor:pointer;"><svg id="dark-mode-moon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" style="flex:none;"><path d="M21 13a9 9 0 0 1-10-10 9 9 0 1 0 10 10Z"/></svg><span id="dark-mode-track" aria-hidden="true"><span id="dark-mode-thumb"></span></span><svg id="dark-mode-sun" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" style="flex:none;"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg></label></div></div><details id="live-session-actions" style="border-top:1px solid var(--panel-divider);margin-top:5px;padding-top:4px;"><summary style="cursor:pointer;color:var(--panel-muted);font-size:9px;">Session actions</summary><div style="display:flex;justify-content:space-between;gap:6px;margin:5px 0;"><button id="btn-replay" style="font-size:8px;line-height:10px;height:14px;min-width:38px;box-sizing:border-box;margin:0;padding:2px 3px;background:var(--panel-button);color:var(--panel-warning);border:none;border-radius:3px;cursor:pointer;" title="Replay this live session snapshot">Replay this session</button><button id="btn-main-reset" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Reset all tracking data"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12"/><path d="M3 3v9h9"/></svg>Reset</button></div></details><div id="tracker-footer" style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:4px;margin-top:5px;min-height:18px;"><div id="acquisition-status" style="max-width:80px;font-size:7px;color:var(--panel-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="No accepted sample yet">No sample</div><div id="background-slider-controls" style="display:flex;align-items:center;gap:3px;min-width:0;"><svg width="11" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--panel-warning)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink:0;"><path d="M9 18h6M10 22h4M8 14a6 6 0 1 1 8 0c-1 1-1 2-1 4H9c0-2 0-3-1-4Z"/></svg><input type="range" id="opacity-slider" min="30" max="100" value="95" aria-label="Background opacity" style="flex:1;min-width:0;width:100%;height:12px;margin:0;cursor:pointer;accent-color:#ff69b4;" title="Panel, Library and standard tier background opacity"><span id="opacity-value" style="font-size:8px;color:var(--panel-secondary);min-width:23px;">95%</span></div><div id="tierscope-logo" style="justify-self:end;display:flex;flex-direction:column;align-items:center;gap:0;white-space:nowrap;" onmouseenter="this.firstElementChild.style.opacity=1" onmouseleave="this.firstElementChild.style.opacity=0.6"><div style="display:flex;align-items:center;gap:3px;height:8px;opacity:0.6;transition:opacity 0.2s;"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#ff69b4" stroke-width="2" style="flex-shrink:0;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="2" x2="12" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/></svg><span title="TierScope ' + runtime.TIERSCOPE_VERSION + `" style="font-size:7px;line-height:8px;font-family:'Courier New',monospace;font-weight:bold;color:var(--panel-accent);letter-spacing:1px;">TIERSCOPE</span></div><span id="tierscope-version" style="font:bold 8px/10px Arial,sans-serif;letter-spacing:.15px;color:var(--panel-secondary);">` + runtime.TIERSCOPE_VERSION + "</span></div></div></div>";
     div.innerHTML = html;
     document.body.appendChild(div);
     applyPanelTheme(false);
@@ -9745,7 +10111,7 @@ underlying system, so should run in the browser, Node, or Plask.
       selectPanelTheme(this.checked);
       try {
         GM_setValue(runtime.PANEL_THEME_KEY, runtime.isDarkMode ? "dark" : "bright");
-      } catch (error) {
+      } catch (error2) {
         log("Could not save theme preference");
       }
       applyPanelTheme(true);
@@ -9770,6 +10136,8 @@ underlying system, so should run in the browser, Node, or Plask.
       if (!confirm("Stop this session?\n\nHistory will remain available for Replay and downloads, but this session cannot be resumed. Starting again begins a new session.")) return;
       stopTracking("manual");
     };
+    bindRememberedDisclosure(document.getElementById("live-session-actions"), "liveSettings");
+    bindRememberedDisclosure(document.getElementById("trend-chart-settings"), "trendSettings");
     updateContainerOpacity(runtime.panelBackgroundPercent);
     if (opacitySlider) {
       opacitySlider.addEventListener("input", function() {
@@ -9788,8 +10156,8 @@ underlying system, so should run in the browser, Node, or Plask.
           });
           updateSessionToolsStatus(true);
         }
-      } catch (error) {
-        alert("Favorite could not be changed: " + error.message);
+      } catch (error2) {
+        alert("Favorite could not be changed: " + error2.message);
       }
     };
     bindPanelOptions();
@@ -9809,7 +10177,7 @@ underlying system, so should run in the browser, Node, or Plask.
       cycleMiniMetric();
       try {
         GM_setValue(runtime.MINI_METRIC_KEY, runtime.miniMetric);
-      } catch (error) {
+      } catch (error2) {
         log("Could not save compact chart preference");
       }
       updateDisplay();
@@ -9968,8 +10336,8 @@ underlying system, so should run in the browser, Node, or Plask.
         if (!isAcquisitionCurrent(startupContext) || !runtime.isAutoRefreshOn || runtime.isPaused) return;
         startTrackingTimer();
         startCountdown();
-      }).catch(function(error) {
-        log("Could not finish initial scan setup: " + error.message);
+      }).catch(function(error2) {
+        log("Could not finish initial scan setup: " + error2.message);
       });
     } else {
       var attempts = 0;
@@ -10071,7 +10439,7 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/bootstrap.js
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.23.0";
+    runtime.TIERSCOPE_VERSION = "3.24.0-beta.1";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;
@@ -10119,7 +10487,7 @@ underlying system, so should run in the browser, Node, or Plask.
     runtime.highMode = "sh";
     try {
       if (GM_getValue(runtime.HIGH_MODE_KEY, "sh") === "ath") runtime.highMode = "ath";
-    } catch (error) {
+    } catch (error2) {
     }
     runtime.gifExportJob = null;
     runtime.DOM_SELECTORS = {
@@ -10240,7 +10608,7 @@ underlying system, so should run in the browser, Node, or Plask.
     runtime.isDarkMode = true;
     try {
       runtime.isDarkMode = GM_getValue(runtime.PANEL_THEME_KEY, "dark") !== "bright";
-    } catch (error) {
+    } catch (error2) {
     }
     runtime.PANEL_THEME_COLORS = {
       rgb: ["20,20,30", "248,249,252"],
@@ -10271,7 +10639,7 @@ underlying system, so should run in the browser, Node, or Plask.
     try {
       runtime.savedMiniMetric = GM_getValue(runtime.MINI_METRIC_KEY, "room");
       if (runtime.MINI_METRICS.indexOf(runtime.savedMiniMetric) !== -1) runtime.miniMetric = runtime.savedMiniMetric;
-    } catch (error) {
+    } catch (error2) {
     }
     runtime.BASE_WIDTH_MINI = 140;
     runtime.BASE_WIDTH_FULL = 280;
@@ -10354,7 +10722,7 @@ underlying system, so should run in the browser, Node, or Plask.
     try {
       runtime.savedWindow = GM_getValue(runtime.CHART_WINDOW_KEY, "full");
       if (typeof runtime.savedWindow === "string" && hasStorageField(runtime.CHART_WINDOWS, runtime.savedWindow)) runtime.chartWindowMode = runtime.savedWindow;
-    } catch (error) {
+    } catch (error2) {
     }
     runtime.playbackLayoutState = null;
     runtime.GIF_WIDTH = 480;

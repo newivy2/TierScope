@@ -1,3 +1,4 @@
+const {clickControl}=require('./helpers/library.cjs');
 const {instrument, prepareSource} = require('./helpers/instrument.cjs');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -73,7 +74,7 @@ const source = prepareSource(fs.readFileSync(path.join(__dirname, '../tierscope.
     assert.deepEqual(await panel.boundingBox(), bounds, 'changing high mode adds no panel height');
     await page.keyboard.press('Space');
     count = 2;
-    await page.click('#btn-main-reset');
+    await clickControl(page,'#btn-main-reset');
     await page.waitForFunction(() => document.getElementById('high-red').textContent === 'SH:2');
     assert.equal(await page.locator('#tier-row-red').evaluate(e => getComputedStyle(e).backgroundColor), 'rgba(50, 205, 50, 0.22)');
     await toggle.click();
@@ -145,7 +146,7 @@ const source = prepareSource(fs.readFileSync(path.join(__dirname, '../tierscope.
     await page.click('#playback-return');
     assert.equal(await high.textContent(), 'ATH:12');
     assert.equal(await page.locator('#tools-current-room').textContent(),'testroom','Library switches back to the live room');
-    await page.click('#btn-replay');
+    await clickControl(page,'#btn-replay');
     assert.equal(await page.locator('#tools-current-kind-replay').textContent(),'Replay Snapshot');
     await page.click('#playback-return');
     count = 4;

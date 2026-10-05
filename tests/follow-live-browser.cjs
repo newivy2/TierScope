@@ -1,3 +1,4 @@
+const {openAnalysis,clickControl}=require('./helpers/library.cjs');
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const {instrument,prepareSource}=require('./helpers/instrument.cjs');
 const engine=process.env.TIERSCOPE_BROWSER||'chromium';
@@ -28,7 +29,7 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
  await page.goto('https://tierscope.test/live_model/');await page.addScriptTag({content:instrument(source)});await page.evaluate(()=>ViewerTracker.__follow.setup());await page.waitForTimeout(250);
  const scan=async(n,ms=10000)=>{registered=n;await page.evaluate(ms=>{window.testNow+=ms;return ViewerTracker.__follow.scan();},ms);};
  const samples=()=>page.locator('#tools-summary-table tbody tr').first().locator('td').allTextContents();
- const nav=async tab=>{await page.locator('[data-tools-tab='+tab+']').click();};
+ const nav=async tab=>{await openAnalysis(page,tab);};
  await page.click('#btn-control-library');
  const priority=await page.evaluate(()=>{const keep=document.getElementById('tools-keep'),compare=document.getElementById('tools-compare-previous');return {quiet:keep.classList.contains('tools-quiet'),primary:compare.classList.contains('tools-primary'),keepBorder:getComputedStyle(keep).borderColor,top:keep.getBoundingClientRect().top<compare.getBoundingClientRect().top};});
  assert(priority.quiet&&priority.primary&&priority.top);assert.equal(priority.keepBorder,'rgba(0, 0, 0, 0)');
@@ -54,7 +55,7 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
  const savedBefore=await page.evaluate(()=>JSON.stringify(ViewerTracker.__follow.library().entries));await scan(600,61000);assert.deepEqual(await samples(),['10']);assert.match(await page.locator('#tools-follow-status').textContent(),/Library save pending/);
  assert.equal(await page.evaluate(()=>JSON.stringify(ViewerTracker.__follow.library().entries)),savedBefore);
  await page.evaluate(()=>{window.GM_setValue=window.originalSet;ViewerTracker.__follow.forceSave();});
- await nav('library');await page.click('#tools-compare-previous');assert(await page.locator('#tools-follow-live').isChecked());assert.equal((await samples()).length,6);
+ await nav('library');await clickControl(page,'#tools-compare-previous');assert(await page.locator('#tools-follow-live').isChecked());assert.equal((await samples()).length,6);
  await page.uncheck('#tools-shared-length');
  await page.uncheck('[data-analysis-series="1"]');await page.click('#tools-chart-zoom-in');await page.locator('#tools-analysis-chart').focus();await page.keyboard.press('End');
  const compareBefore=await samples(),compareZoom=(await page.locator('#tools-chart-range').textContent()).split(' · ')[0],compareCursor=await page.locator('#tools-chart-inspection caption').textContent();
@@ -66,7 +67,7 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
  await page.evaluate(()=>ViewerTracker.__follow.replay());const replayBefore=await page.evaluate(()=>ViewerTracker.__follow.state());await scan(800);const replayAfter=await page.evaluate(()=>ViewerTracker.__follow.state());assert.equal(replayAfter.mode,replayBefore.mode);assert.equal(replayAfter.position,replayBefore.position);assert.equal(Number((await samples())[0]),Number(compareAfter[0])+1);
  await nav('summary');await page.locator('#tools-recording-picker > summary').click();await page.selectOption('#tools-analysis-model','');await page.selectOption('#tools-source-a','current');assert(await page.locator('#tools-follow-live').isDisabled());const fileSamples=await samples();await scan(900);assert.deepEqual(await samples(),fileSamples,'file replay Summary is a fixed snapshot');
  await page.evaluate(()=>ViewerTracker.__follow.closeReplay());
- await nav('library');await page.click('#tools-room-history');assert(await page.locator('#tools-follow-live').isChecked());
+ await nav('library');await clickControl(page,'#tools-room-history');assert(await page.locator('#tools-follow-live').isChecked());
  const historyCurrent=await page.locator('#tools-history-recording').inputValue();const options=await page.locator('#tools-history-recording option').evaluateAll(es=>es.map(e=>e.value));
  await page.selectOption('#tools-history-recording',options.at(-1));const oldDetail=await page.locator('#tools-history-detail').textContent(),historyBefore=await page.locator('#tools-history-stats').textContent();
  await page.evaluate(()=>window.historySelect=document.getElementById('tools-history-recording'));await scan(1000);
@@ -80,7 +81,7 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
  const other=await context.newPage();await other.goto('https://tierscope.test/other_model/');await other.evaluate(()=>GM_setValue('tierscope:library-model:v1:live_model',JSON.stringify({schemaVersion:1,room:'live_model',favorite:false,autoKeep:false})));
  const beforeUnstar=await page.locator('#tools-history-detail').textContent();await scan(1200);assert.equal(await page.locator('#tools-history-detail').textContent(),beforeUnstar);assert(await page.locator('#tools-follow-live').isDisabled());await other.close();
  await page.evaluate(()=>GM_setValue('tierscope:library-model:v1:live_model',JSON.stringify({schemaVersion:1,room:'live_model',favorite:true,autoKeep:true})));await page.evaluate(()=>ViewerTracker.__follow.status());await page.check('#tools-follow-live');
- await nav('library');await page.click('#tools-compare-previous');const beforeReset=await samples();
+ await nav('library');await clickControl(page,'#tools-compare-previous');const beforeReset=await samples();
  page.once('dialog',d=>d.accept());await page.evaluate(()=>ViewerTracker.__follow.reset());assert(!(await page.locator('#tools-follow-live').isChecked()));await scan(30);assert.deepEqual(await samples(),beforeReset,'Reset cannot substitute a new session into an existing comparison');assert.match(await page.locator('#tools-follow-status').textContent(),/Session changed/);
  // Start with an empty Library/Summary, then receive the first accepted sample.
  page.once('dialog',d=>d.accept());await page.evaluate(()=>ViewerTracker.__follow.reset());await page.click('#tools-close');

@@ -6,7 +6,7 @@ export function renderLibraryBrowser(parent, entries, filters, selected, actions
     for (const id of selected) if (!present.has(id)) selected.delete(id);
     let shown = 50;
     const book = node(parent, 'details'); book.id = 'tools-sessions-book'; book.open = disclosures.book;
-    const bookSummary = node(book, 'summary', 'Sessions Book'); bookSummary.id = 'tools-sessions-book-toggle';
+    const bookSummary = node(book, 'summary', 'Recent sessions'); bookSummary.id = 'tools-sessions-book-toggle';
     const search = node(book, 'details'); search.id = 'tools-library-search-menu'; search.open = disclosures.search;
     const searchSummary = node(search, 'summary', 'Search & sort'); searchSummary.id = 'tools-library-search-toggle';
     const inputs = recordingFilters(search, entries, filters, 'tools-library', () => { shown = 50; actions.room(filters.room); rows(); }, true);
@@ -22,7 +22,7 @@ export function renderLibraryBrowser(parent, entries, filters, selected, actions
     const list = node(book, 'div'); list.id = 'tools-library-list';
     function favoriteButton(parent, room, compact = false) {
         const active = entries.some(entry => entry.archive.room.toLowerCase() === room && entry.modelFavorite);
-        const control = button(parent, (active ? '★' : '☆') + (compact ? '' : ' Favorite model'), () => actions.favoriteModel(room), 'tools-model-favorite-' + room);
+        const control = button(parent, (active ? '★' : '☆') + (compact ? '' : ' Favorite model'), () => actions.favoriteModel(room), (compact && filters.room === room ? 'tools-folder-favorite-' : 'tools-model-favorite-') + room);
         control.setAttribute('aria-pressed', String(active)); control.setAttribute('aria-label', (active ? 'Unfavorite ' : 'Favorite ') + room);
         control.title = (active ? 'Unfavorite model ' : 'Favorite model ') + room;
         if (active) control.className = 'tools-primary';
@@ -45,22 +45,24 @@ export function renderLibraryBrowser(parent, entries, filters, selected, actions
         for (const entry of matching) {
             const room = entry.archive.room.toLowerCase(); if (!folders.has(room)) folders.set(room, []); folders.get(room).push(entry);
         }
-        const browsingFolders = !filters.room && !filters.query;
-        const visible = browsingFolders ? [...folders.keys()] : matching;
+        const visible = matching;
         const heading = node(list, 'div', undefined, 'tools-actions');
-        if (!browsingFolders) button(heading, '‹ All models', () => {
-            const previous = filters.room; filters.room = ''; filters.query = ''; inputs.model.value = ''; inputs.search.value = ''; shown = 50;
-            actions.room(null); rows(); (document.getElementById('tools-folder-' + previous) || searchSummary).focus();
+        if (filters.room && filters.room !== '*') button(heading, '‹ All models', () => {
+            filters.room = ''; filters.query = ''; inputs.model.value = ''; inputs.search.value = ''; shown = 50;
+            actions.room(null); rows(); searchSummary.focus();
         }, 'tools-library-all-models');
         const room = filters.room && filters.room !== '*' ? filters.room : null;
-        node(heading, 'h3', room ? 'Folder: ' + room : browsingFolders ? 'Model folders' : 'Search results — all models');
+        if (room || filters.query || filters.from || filters.to || filters.favorites) node(heading, 'h3', room ? 'Sessions · ' + room : 'Matching sessions');
         if (room) {
             favoriteButton(heading, room);
             button(heading, 'History overview', () => actions.history(room), 'tools-model-history').className = 'tools-primary';
         }
-        if (!matching.length) node(list, 'p', entries.length ? 'No matching sessions.' : 'Your library is empty. Keep a session above or import a session file.', 'tools-muted');
-        if (browsingFolders) for (const room of visible.slice(0, shown)) {
-            const recordings = folders.get(room), row = node(list, 'div', undefined, 'tools-folder');
+        if (!matching.length) node(list, 'p', entries.length ? 'No matching sessions.' : 'No saved sessions yet. In Live, choose Keep in Library after the first scan. Confirm a model’s favorite star to save their sessions automatically, or import a session file below.', 'tools-muted');
+        const models = node(list, 'details'); models.id = 'tools-model-browser'; models.open = disclosures.models;
+        node(models, 'summary', 'Browse models · ' + folders.size);
+        models.ontoggle = () => { if (models.isConnected) { disclosures.models = models.open; actions.disclosure('libraryModels', models.open); } };
+        for (const room of [...folders.keys()].slice(0, shown)) {
+            const recordings = folders.get(room), row = node(models, 'div', undefined, 'tools-folder');
             const open = button(row, '', () => { filters.room = room; inputs.model.value = room; shown = 50; actions.room(room); rows(); document.getElementById('tools-library-all-models').focus(); }, 'tools-folder-' + room);
             open.className = 'tools-folder-open';
             open.setAttribute('aria-label', 'Open sessions for ' + room);
@@ -71,17 +73,21 @@ export function renderLibraryBrowser(parent, entries, filters, selected, actions
             const covered = node(open, 'span', 'Total covered time ' + actions.duration(summary.coveredMs), 'tools-folder-meta');
             covered.title = 'Sum of covered intervals in sessions matching the current filters. Gaps and time after the final sample are excluded; overlapping sessions are counted separately.';
             favoriteButton(row, room, true);
-        } else for (const entry of visible.slice(0, shown)) {
+        }
+        for (const entry of visible.slice(0, shown)) {
             const row = node(list, 'article', undefined, 'tools-row'); row.dataset.libraryId = entry.id;
             const title = node(row, 'label'), check = node(title, 'input'); check.type = 'checkbox'; check.checked = selected.has(entry.id);
             check.setAttribute('aria-label', 'Select ' + (entry.title || entry.archive.room));
             check.onchange = () => { if (check.checked) selected.add(entry.id); else selected.delete(entry.id); updateSelection(); };
-            node(title, 'strong', entry.title || entry.archive.room);
-            node(row, 'div', entry.archive.room + ' · ' + new Date(entry.archive.session.history.timestamps[0]).toLocaleString() + ' · ' + entry.archive.session.history.timestamps.length + ' samples', 'tools-muted');
+            node(title, 'strong', entry.archive.room);
+            if (entry.title && entry.title !== entry.archive.room) node(row, 'div', entry.title, 'tools-muted');
+            node(row, 'div', new Date(entry.archive.session.history.timestamps[0]).toLocaleString() + ' · Covered ' + actions.duration(actions.cardSummary([entry]).coveredMs), 'tools-muted');
             if (entry.notes) node(row, 'p', entry.notes, 'tools-recording-note');
             const controls = node(row, 'div', undefined, 'tools-actions');
-            button(controls, 'Replay', () => actions.replay(entry)).className = 'tools-primary';
-            button(controls, 'Summary', () => actions.summary(entry));
+            button(controls, 'Open session', () => actions.summary(entry)).className = 'tools-primary';
+            button(controls, 'Replay', () => actions.replay(entry));
+            const previous = button(controls, 'Compare with previous', () => actions.comparePrevious(entry));
+            previous.disabled = !actions.previousCount(entry); previous.title = previous.disabled ? 'No earlier saved sessions for this model yet.' : 'Compare with up to five earlier sessions for this model.';
             const more = node(controls, 'details', undefined, 'tools-more'); node(more, 'summary', 'More…');
             const extras = node(more, 'div', undefined, 'tools-more-actions');
             for (const [label, key] of [['Save file','save'],['TXT','txt'],['CSV','csv'],['GIF','gif'],['Add to all-time highs','highs'],['Rename','rename'],['Delete','delete']]) {
@@ -89,7 +95,7 @@ export function renderLibraryBrowser(parent, entries, filters, selected, actions
             }
             renderRecordingNotes(more, entry, actions);
         }
-        if (visible.length > 50) node(list, 'p', 'Showing ' + Math.min(shown, visible.length) + ' of ' + visible.length + (browsingFolders ? ' model folders.' : ' matching sessions.'), 'tools-muted');
+        if (visible.length > 50) node(list, 'p', 'Showing ' + Math.min(shown, visible.length) + ' of ' + visible.length + ' matching sessions.', 'tools-muted');
         if (shown < visible.length) button(list, 'Show ' + Math.min(50, visible.length - shown) + ' more', () => {
             shown += 50; rows(); (document.getElementById('tools-library-more') || bookSummary).focus();
         }, 'tools-library-more');

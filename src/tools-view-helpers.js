@@ -15,7 +15,7 @@ export function recordingFilters(parent, entries, state, prefix, changed, organi
     const modelRow = toolNode(controls, 'div', undefined, 'tools-model-filters');
     const label = toolNode(modelRow, 'label', 'Model ', 'tools-model-filter'), model = toolNode(label, 'select'); model.id = prefix + '-model';
     const rooms = [...new Set(entries.map(entry => entry.archive.room.toLowerCase()))].sort();
-    for (const [value, name] of [['', organization ? 'All models (folders)' : 'All models'], ...(organization ? [['*', 'All sessions']] : []), ...rooms.map(room => [room, room])]) {
+    for (const [value, name] of [['', organization ? 'All sessions' : 'All models'], ...(organization ? [['*', 'All sessions']] : []), ...rooms.map(room => [room, room])]) {
         const option = toolNode(model, 'option', name); option.value = value;
     }
     if (![...model.options].some(option => option.value === (state.room || ''))) state.room = '';

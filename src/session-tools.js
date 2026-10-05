@@ -1,3 +1,7 @@
+import { bindRememberedDisclosure, readDisclosure, rememberDisclosure } from './disclosure-preferences.js';
+import { journeyState, keepLiveJourneySession, noteJourneySave, openJourneyReference } from './library-journey.js';
+import { paintJourneyStatus } from './journey-panel-view.js';
+import { leavePlayback } from './replay.js';
 import { CLOCK_DAY_MS, clockSessionDuration, projectClockSeries } from './analysis-clock-data.js';
 import { createAnalysisFollower } from './analysis-follow.js';
 import { renderMetricStrip } from './analysis-metric-view.js';
@@ -52,6 +56,7 @@ let closeSessionTools = null;
 let refreshSessionTools = null;
 
 export function updateSessionToolsStatus(reload = false) {
+    paintJourneyStatus(journeyState().model, !!closeSessionTools);
     if (refreshSessionTools) refreshSessionTools(reload);
     const element = document.getElementById('session-save-info');
     if (!element) return;
@@ -68,10 +73,22 @@ export function bindSessionTools() {
         const button = document.getElementById(id);
         if (button) button.onclick = () => { if (closeSessionTools) closeSessionTools(); else openSessionTools(button); };
     }
+    const live = document.getElementById('btn-live');
+    if (live) live.onclick = () => { if (closeSessionTools) closeSessionTools(); leavePlayback(true); updateSessionToolsStatus(); };
+    const keep = document.getElementById('journey-keep');
+    if (keep) keep.onclick = () => { try { keepLiveJourneySession(); } catch (error) { /* The journey status explains the pending save. */ } updateSessionToolsStatus(true); };
+    const compare = document.getElementById('journey-compare');
+    if (compare) compare.onclick = () => openSessionTools(compare, 'previous');
+    const view = document.getElementById('journey-view');
+    if (view) view.onclick = () => {
+        try { const id = openJourneyReference(journeyState().saved); openSessionTools(view, 'summary', id); }
+        catch (error) { const detail = document.getElementById('journey-detail'); detail.hidden = false; detail.textContent = error.message; }
+    };
+    updateSessionToolsStatus();
     return () => { if (closeSessionTools) closeSessionTools(); };
 }
 
-export function openSessionTools(focusTarget) {
+export function openSessionTools(focusTarget, destination = 'library', sessionId = '') {
     if (closeSessionTools) closeSessionTools();
     const origin = location.href, generation = runtime.initGuard, focusBefore = focusTarget || document.getElementById('btn-control-library') || document.activeElement;
     const dialog = document.createElement('dialog');
@@ -88,12 +105,12 @@ export function openSessionTools(focusTarget) {
     const savedAnalysis = readAnalysisPreferences();
     let {metric, threshold, sharedLength} = savedAnalysis.preferences;
     let summaryThresholds = [], summaryThresholdSource = null, summaryAutomatic = true, thresholdDirty = false;
-    let selectedA = 'current', selectedB = '', selectedExtra = [], pendingBackup = null;
+    let selectedA = sessionId || 'current', selectedB = '', selectedExtra = [], pendingBackup = null;
     const libraryFilters = {room: '', query: '', from: '', to: '', sort: 'newest', favorites: false}, librarySelection = new Set();
-    const libraryDisclosures = {book: false, search: false};
+    const libraryDisclosures = {book: true, search: readDisclosure('librarySearch'), models: readDisclosure('libraryModels')};
     const analysisFilters = {room: '', query: '', from: '', to: ''};
     let filteredSources = null, chartDispose = null;
-    const pickerOpen = {summary: false, compare: true};
+    const pickerOpen = {summary: readDisclosure('summaryPicker'), compare: readDisclosure('comparePicker', true)};
     let analysisView = null, analysisOutput = null, analysisSources = null, analysisReports = null;
     const analysisStates = new Map();
     let libraryRoom = null, chartDraw = null, analysisPreferenceError = savedAnalysis.error;
@@ -385,6 +402,7 @@ export function openSessionTools(focusTarget) {
                 preference.error || (status.error ? 'Automatic keep pending: ' + status.error :
                 preference.autoKeep ? status.savedAt ? 'Automatically kept at ' + new Date(status.savedAt).toLocaleTimeString() + '. Updates as you record.' :
                     'Automatic keeping on · waiting for a recorded sample.' : preference.favorite ? 'Favorite · automatic keeping is off until you confirm.' : 'Favorite this model to automatically keep their live sessions.');
+            if (!replay) info.textContent = journeyState().model.text + (journeyState().model.detail ? ' · ' + journeyState().model.detail : '');
             info.style.color = !replay && status.error ? 'var(--panel-warning)' : 'var(--panel-muted)';
             const automatic = card.querySelector('#tools-auto-keep');
             if (automatic) {
@@ -431,9 +449,10 @@ export function openSessionTools(focusTarget) {
             const control = button(parent, text, () => fn(capture()), id + suffix); control.dataset.currentAction = 'true'; return control;
         }
         currentButton(actions, 'Keep in Library', archive => {
-            const result = keepSessionInLibrary(archive); libraryRoom = archive.room.toLowerCase();
+            const result = keepSessionInLibrary(archive); if (!replay) noteJourneySave(archive, result); libraryRoom = archive.room.toLowerCase();
             Object.assign(libraryFilters, {room: libraryRoom, query: '', from: '', to: '', favorites: false});
-            render('library', true); tell(result.added ? 'Session kept in the library.' : result.updated ? 'Library session updated; its name and notes were preserved.' : 'An equal or fuller session is already in the library.');
+            render('library', true); tell(result.added ? 'Saved · ' : result.updated ? 'Saved · Updated session; name and notes preserved.' : 'Saved · An equal or fuller session is already in the library.');
+            button(message, 'View session', () => { selectedA = result.id; render('summary'); }, 'tools-view-saved').className = 'tools-primary';
         }, 'tools-keep').className = replay ? 'tools-primary' : 'tools-quiet';
         if (replay) currentButton(actions, 'Save file', archive => downloadDataFile(archive, archiveName(archive)), 'tools-save-session');
         else {
@@ -482,7 +501,13 @@ export function openSessionTools(focusTarget) {
     }
     function renderLibrary() {
         const state = readLibrary();
-        currentCard(); currentCard(true); observedSignature = ''; refreshCurrent(); updateSessionToolsStatus();
+        const liveDetails = node(content, 'details'); liveDetails.id = 'tools-live-shortcuts';
+        node(liveDetails, 'summary', 'This room · Keep, Compare & history');
+        currentCard(); currentCard(true);
+        liveDetails.appendChild(dialog.querySelector('#tools-current-card'));
+        liveDetails.appendChild(dialog.querySelector('#tools-current-card-replay'));
+        if (isPlaybackCurrent(runtime.playback)) liveDetails.open = true;
+        observedSignature = ''; refreshCurrent(); updateSessionToolsStatus();
         let limits = null, capacityError = '';
         try { limits = readLibraryLimits(); } catch (error) { capacityError = error.message; }
         const checkpoint = automaticLibraryStatus(getModelName());
@@ -506,8 +531,11 @@ export function openSessionTools(focusTarget) {
                 favoriteAction(room);
             },
             enableAutomatic: room => favoriteAction(room, true),
-            replay: entry => { openSessionReplay(entry.archive); observedSignature = ''; refreshCurrent(); tell('Replaying ' + (entry.title || entry.archive.room) + '.'); },
-            summary: entry => { selectedA = entry.id; render('summary'); },
+            replay: entry => { openSessionReplay(entry.archive); const shortcuts = dialog.querySelector('#tools-live-shortcuts'); if (shortcuts) shortcuts.open = true; observedSignature = ''; refreshCurrent(); tell('Replaying ' + (entry.title || entry.archive.room) + '.'); },
+            summary: entry => { selectedA = entry.id; pickerOpen.summary = false; render('summary'); },
+            comparePrevious: entry => compareSavedWithPrevious(entry),
+            previousCount: entry => previousModelSessionIds(state.entries, entry.archive).length,
+            disclosure: (name, open) => rememberDisclosure(name, open),
             save: entry => downloadDataFile(entry.archive, archiveName(entry.archive)),
             txt: entry => downloadRecording(entry.archive, 'txt'), csv: entry => downloadRecording(entry.archive, 'csv'), gif: entry => generateGifFromHistory(entry.archive),
             highs: entry => addArchiveHighs(entry.archive),
@@ -516,6 +544,7 @@ export function openSessionTools(focusTarget) {
             delete: entry => { if (confirm('Delete this library session: ' + (entry.title || entry.archive.room) + '?\n\nLive tracking, ATH and downloaded files are unchanged.')) { removeLibrarySession(entry.id); render('library'); tell('Library session deleted.'); } }
         };
         renderLibraryBrowser(content, state.entries, libraryFilters, librarySelection, Object.fromEntries(Object.entries(callbacks).map(([key, fn]) => [key, action(fn)])), libraryDisclosures);
+        content.appendChild(liveDetails);
         if (state.damaged.length) {
             node(content, 'p', state.damaged.length + ' unreadable library record(s) were retained.', 'tools-muted');
             if (state.unavailable.length) node(content, 'p', 'Some records could not be read. The displayed storage size excludes them; saving new sessions waits until they can be read.', 'tools-muted');
@@ -529,6 +558,7 @@ export function openSessionTools(focusTarget) {
         const actions = node(content, 'div', undefined, 'tools-actions tools-library-management'); actions.id = 'tools-library-management';
         button(actions, 'Open saved file…', () => chooseFile(runtime.SESSION_FILE_MAX_BYTES, value => {
             openSessionReplay(validateSessionFile(value)); observedSignature = ''; refreshCurrent();
+            const shortcuts = dialog.querySelector('#tools-live-shortcuts'); if (shortcuts) shortcuts.open = true;
             tell('File opened in replay. Use Keep in library to store it here.');
         }), 'tools-open-session');
         button(actions, 'Import to library…', () => chooseFile(BACKUP_MAX_BYTES, values => {
@@ -617,7 +647,7 @@ export function openSessionTools(focusTarget) {
         const pickerTab = comparing ? 'compare' : 'summary';
         const picker = node(content, 'details'); picker.id = 'tools-recording-picker'; picker.open = pickerOpen[pickerTab];
         node(picker, 'summary', 'Choose sessions & filters');
-        picker.ontoggle = () => { if (picker.isConnected) pickerOpen[pickerTab] = picker.open; };
+        picker.ontoggle = () => { if (picker.isConnected) { pickerOpen[pickerTab] = picker.open; rememberDisclosure(pickerTab + 'Picker', picker.open); } };
         recordingFilters(picker, sourceOptions(), analysisFilters, 'tools-analysis', () => render(tab));
         try { filteredSources = filterLibraryEntries(sourceOptions(), analysisFilters); }
         catch (error) { filteredSources = []; tell(error.message, true); }
@@ -639,6 +669,7 @@ export function openSessionTools(focusTarget) {
             node(sourceControls, 'span', (2 + selectedExtra.length) + ' / 6 slots', 'tools-muted');
 
         }
+        const context = selectedSessionContext(comparing); content.insertBefore(context, picker);
         followControl(content);
         if (comparing) comparisonAxis(content);
         metricStrip(content, refreshAnalysis);
@@ -762,6 +793,48 @@ export function openSessionTools(focusTarget) {
         chartDraw = view.draw; chartDispose = view.dispose;
         if (window.ResizeObserver) { chartObserver = new window.ResizeObserver(view.draw); chartObserver.observe(view.canvas); }
     }
+    function compareSavedWithPrevious(entry) {
+        const ids = previousModelSessionIds(readLibrary().entries, entry.archive);
+        if (!ids.length) { tell('No earlier saved sessions for ' + entry.archive.room + '. Keep another session to compare later.'); return; }
+        selectedA = entry.id; selectedB = ids[0]; selectedExtra = ids.slice(1); pickerOpen.compare = false;
+        Object.assign(analysisFilters, {room: entry.archive.room.toLowerCase(), query: '', from: '', to: ''});
+        render('compare');
+    }
+    function selectedSessionContext(comparing) {
+        const section = node(content, 'section', undefined, 'tools-selected-sessions'); section.id = 'tools-selected-sessions'; section.dataset.comparing = String(comparing);
+        node(section, 'h3', comparing ? 'Comparing these sessions' : 'Session');
+        const ids = comparing ? [selectedA, selectedB, ...selectedExtra] : [selectedA];
+        for (const [index, id] of ids.entries()) {
+            const entry = sourceOptions().find(item => item.id === id);
+            const card = node(section, 'div', undefined, 'tools-selected-session'); card.dataset.selectedId = id;
+            if (!entry) { node(card, 'p', 'Selected session unavailable. Choose another session.'); continue; }
+            node(card, 'strong', (comparing ? String.fromCharCode(65 + index) + ' · ' : '') + entry.archive.room);
+            node(card, 'div', new Date(entry.archive.session.history.timestamps[0]).toLocaleString() +
+                ' · Covered ' + formatElapsedTime(modelCardReader.read([entry]).coveredMs), 'tools-muted');
+            const savedTitle = library?.entries.find(saved => saved.id === entry.id)?.title;
+            if (savedTitle && savedTitle !== entry.archive.room) node(card, 'div', savedTitle, 'tools-muted');
+            if (!comparing) {
+                const actions = node(card, 'div', undefined, 'tools-actions');
+                button(actions, 'Replay', () => { openSessionReplay(entry.archive); refreshCurrent(); tell('Replaying ' + entry.archive.room + '. Live tracking continues.'); }, 'tools-session-replay');
+                const previous = button(actions, 'Compare with previous', () => compareSavedWithPrevious(entry), 'tools-session-compare');
+                previous.className = 'tools-primary';
+                const ids = previousModelSessionIds(library?.entries || [], entry.archive);
+                previous.disabled = !ids.length;
+                if (!ids.length) node(card, 'div', 'No earlier saved session for this model yet.', 'tools-muted');
+                button(actions, 'History', () => openHistory(entry.archive.room.toLowerCase()), 'tools-session-history');
+                const exports = node(actions, 'details', undefined, 'tools-more'); node(exports, 'summary', 'Export & actions');
+                const formats = node(exports, 'div', undefined, 'tools-more-actions');
+                for (const format of ['Session file', 'TXT', 'CSV', 'GIF']) button(formats, format, () => {
+                    if (format === 'Session file') downloadDataFile(entry.archive, archiveName(entry.archive));
+                    else if (format === 'GIF') generateGifFromHistory(entry.archive);
+                    else downloadRecording(entry.archive, format.toLowerCase());
+                });
+                button(formats, 'Add to ATH', () => addArchiveHighs(entry.archive));
+                if (!['current', 'live'].includes(entry.id)) renderRecordingNotes(exports, entry, noteActions);
+            }
+        }
+        return section;
+    }
     function renderAnalysis(comparing) {
         const options = analysisControls(comparing); if (!options) return;
         if (comparing) comparisonRange();
@@ -865,7 +938,7 @@ export function openSessionTools(focusTarget) {
         refreshCapacity = null; historyView = null; followControls = null;
         const focusedId = dialog.contains(document.activeElement) ? document.activeElement.id : '';
         // Read synchronously before replacing nodes: native toggle events can be queued.
-        for (const [key, id] of [['book', 'tools-sessions-book'], ['search', 'tools-library-search-menu']]) {
+        for (const [key, id] of [['book', 'tools-sessions-book'], ['search', 'tools-library-search-menu'], ['models', 'tools-model-browser']]) {
             const details = dialog.querySelector('#' + id);
             if (details) libraryDisclosures[key] = details.open;
         }
@@ -882,6 +955,9 @@ export function openSessionTools(focusTarget) {
         dialog.querySelectorAll('[data-tools-tab]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.toolsTab === (tab === 'history' || tab === 'drafts' ? 'library' : tab))));
         try {
             if (tab === 'library') renderLibrary(); else if (tab === 'drafts') renderDrafts(); else if (tab === 'history') renderHistory(); else if (tab === 'backup') renderBackup(); else renderAnalysis(tab === 'compare');
+            paintJourneyStatus(journeyState().model, true);
+            bindRememberedDisclosure(dialog.querySelector('#tools-library-search-menu'), 'librarySearch', libraryDisclosures.search);
+            bindRememberedDisclosure(dialog.querySelector('#tools-model-browser'), 'libraryModels', libraryDisclosures.models);
             if ((tab === 'summary' || tab === 'compare' || tab === 'history') && analysisPreferenceError) tell(analysisPreferenceError, true);
         } catch (error) { tell(error.message, true); }
         if (focusedId) {
@@ -914,6 +990,7 @@ export function openSessionTools(focusTarget) {
             focus = document.getElementById(isPlaybackCurrent(runtime.playback) ? 'btn-playback-library' : 'btn-control-library');
         }
         if (focus) focus.focus();
+        paintJourneyStatus(journeyState().model, false);
     }
     function escape(event) {
         if (event.key === 'Escape' && !event.defaultPrevented) { event.preventDefault(); close(); }
@@ -926,6 +1003,7 @@ export function openSessionTools(focusTarget) {
         const button = document.getElementById(id); if (button) button.setAttribute('aria-expanded', 'true');
     }
     dialog.querySelector('#tools-close').onclick = close;
+    dialog.querySelector('#tools-live').onclick = () => { close(); leavePlayback(true); };
     dialog.querySelector('#tools-review-notes').onclick = () => render('drafts');
     updateDraftNotice();
     dialog.addEventListener('cancel', event => { event.preventDefault(); close(); });
@@ -933,5 +1011,6 @@ export function openSessionTools(focusTarget) {
     dialog.querySelectorAll('[data-tools-tab]').forEach(button => { button.onclick = () => render(button.dataset.toolsTab); });
     dialog.show();
     detachDock = attachLibraryDock(document.getElementById('tracker-container'), dialog, () => { if (chartDraw) chartDraw(); });
-    render('library'); dialog.querySelector('#tools-close').focus();
+    if (destination === 'previous') { render('library'); action(compareLiveWithPrevious)(); } else render(destination);
+    dialog.querySelector('#tools-close').focus();
 }

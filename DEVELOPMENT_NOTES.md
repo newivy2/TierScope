@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **3.23.0** ([24h comparison guide](docs/clock-comparison.md)). [Library chart controls guide](docs/library-chart-controls.md). [Follow live guide](docs/follow-live.md). [Audience trends and ratio guide](docs/audience-trends.md). [Sessions Book guide](docs/sessions-book.md). The simplified Current Live Session card provides Keep in Library, Auto, Compare with previous, and History. File controls are below the session list, and exports remain on stored-session menus and the separate replay card. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation instructions, see the [README](readme.md).
+Detailed reference for **3.24.0-beta.1**. Start with [Live and Saved sessions](docs/user-journey-beta.md). The analysis, exports, favorite consent, storage limits, retention and playback rules remain compatible with 3.23.0. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For the stable release, see the [README](readme.md).
 
 ## Contents
 
@@ -40,9 +40,9 @@ Keep only one enabled copy of TierScope. After an update, refresh existing room 
 | Header / drag area | Move the panel; save its position when you release it. |
 | Pink upper-left resize handle | Scale the panel; save its size when you release it. |
 | **100%** in the header | Restore standard scale while keeping row visibility and session data. |
-| **Full ▾ / 4h ▾ / 2h ▾ / 1h ▾ / 30m ▾ / 15m ▾** in the expanded header | Open chart-window and high-record options. |
+| **Charts ▾** in the expanded header | Open chart-window and high-record options. |
 | **−**, **+**, or **Expand** | Switch between expanded and compact views. |
-| **⏸ / ▶** in Controls or compact view | Pause or resume the current session. An already-running scan may finish. |
+| **Pause / Resume** in Live or compact view | Pause or resume the current session. An already-running scan may finish. |
 | **■ Stop** | Confirm closing the session, freeze elapsed time and history, and discard pending scan results. |
 | **Start** after Stop | Confirm starting a separate session with an empty chart and a fresh timer. |
 | Compact-view timer controls | Adjust the interval from 30 to 300 seconds; presets are 30s, 60s, 2m, and 5m. |
@@ -50,11 +50,16 @@ Keep only one enabled copy of TierScope. After an update, refresh existing room 
 | Boxed icon in the collapsed-row strip | Restore its row to its original position. |
 | Lamp slider | Adjust the main background and standard tier-row fills. |
 | Moon–sun switch at the bottom right of Controls | Moon / blue track for dark mode; sun / amber track for bright mode. Click or press Space when focused to switch. |
-| **Replay** | Open recorded history for the current room. |
-| **Library** | Open recordings, model folders, session files and exports, summaries, comparison and backups beside the chart. |
-| **Reset** | Confirm clearing this room’s history, counters, and elapsed time, then request one fresh scan. Keep the automatic-scan pause state and layout preferences. |
+| **Live** | Return to the current room; close the Library and leave Replay. |
+| **Keep in Library / View session** | Keep or update this live recording, then open that exact saved session. |
+| **Compare with previous** | Compare this live snapshot with up to five earlier sessions for the model. |
+| **Replay this session** in **Session actions** | Replay a snapshot of the current live recording. |
+| **Saved sessions** | Browse recent sessions immediately, narrow by model/date, or open a session’s chart and summary. |
+| **Reset** in **Session actions** | Confirm clearing this room’s history, counters, and elapsed time, then request one fresh scan. Keep the automatic-scan pause state and layout preferences. |
 
-The top control row shows **Controls**, elapsed time and the scan countdown/status. The bottom row contains **Library**, **Replay**, play/pause, **Stop**, **Reset** and the theme switch. Library and Replay match the other action buttons, and Library uses the same pink accent as its replay shortcut. Reserved timer space keeps these rows steady as status text changes.
+The header identifies the room, followed by **Live / Saved sessions**, a combined tracking/saving status, and the audience overview and its chart. Before the first sample, a short message explains what TierScope is waiting for. Keeping succeeds only after the Library write is verified. A manual save is a snapshot; later scans show that it needs updating. Confirmed favorites show automatic saving and the last successful save time. Failed saves leave live data available and show a pending message.
+
+The lower Live control row keeps elapsed time and countdown/status stable, with labeled Pause/Resume, Stop and the theme switch below. **Session actions** separates Reset and current-session Replay. **Trend settings** reveals comparison presets. Both disclosures remember their expanded state. The panel scrolls vertically when its scaled footprint would otherwise exceed the viewport.
 
 The default scan interval is **60 seconds**, counted after a scan finishes. A new, unpaused room session requests its first sample as soon as the panel is initialized, then starts the normal countdown when that attempt completes. Existing retry waits and access restrictions still apply. Restored sessions keep their existing startup behavior; paused sessions wait for Resume. Faster polling does not guarantee fresher data from the site.
 
@@ -115,7 +120,7 @@ Restoration, window resizing, and expansion from compact view adjust the positio
 
 ### Collapsible rows
 
-All **12 panel rows** can be collapsed independently. **Room Total (👥)** sits below Anons and includes registered and anonymous viewers, with its own chart and SH/ATH high. The header identifies the displayed model and has its favorite star, with left spacing clear of the resize handle; during file Replay it identifies the file’s model. The compact view keeps a separate room count below that header.
+All **12 panel rows** can be collapsed independently. **Room Total (👥)** sits below Anons and includes registered and anonymous viewers, with its own chart and SH/ATH high. The header identifies the displayed model and has its favorite star, with left spacing clear of the resize handle; during file Replay it identifies the file’s model. Both compact and expanded Live show the audience overview below that header.
 
 1. Click a row’s circle or icon to hide its full row.
 2. Its marker appears as a small bordered button in the strip below the header.
@@ -200,7 +205,7 @@ Request restrictions are shared through userscript storage across TierScope tabs
 Replay displays recorded audience samples. It does not record or play broadcast video or chat.
 
 1. Acquire at least one sample, or restore a saved session containing history.
-2. Click **Replay** in Controls. The header changes to `PLAYBACK`.
+2. Open a saved session and click **Replay**, or open **Session actions → Replay this session** in Live. The header changes to `PLAYBACK`.
 3. Use **Play / Pause**, the timeline slider, and **0.5× / 1× / 2×** to inspect the recording.
 4. Use the previous/next sample buttons beside the timeline to step through individual saved samples.
 5. Click **Return to Live** to return to the latest accepted sample, or the saved snapshot if no fresh scan has succeeded since restoration.
@@ -215,11 +220,11 @@ Replay freezes the available history when opened. New scans continue updating th
 
 ## Session files
 
-Click **Library** beside Replay, keep the live session with **Keep in Library**, then use that session’s **More… → Save file**. You can also use **Save file** on the separate replay card without keeping a Library copy. The download ends in `.tierscope.json` and contains the room name, capture time, full retained sample history, gap markers, session highs and their recorded times, session start information, active elapsed time, and paused/stopped state. It contains aggregate counts, without viewer username collections. A running session can be saved without pausing or stopping it. Save becomes available after the first recorded sample.
+In Live, choose **Keep in Library → View session**, then **Export & actions → Session file**. Stored sessions also keep **More… → Save file** in the recent list. You can also use **Save file** on the separate replay card without keeping a Library copy. The download ends in `.tierscope.json` and contains the room name, capture time, full retained sample history, gap markers, session highs and their recorded times, session start information, active elapsed time, and paused/stopped state. It contains aggregate counts, without viewer username collections. A running session can be saved without pausing or stopping it. Save becomes available after the first recorded sample.
 
 Click **Open saved file…** in Library to reopen a download. It opens paused in a separate **FILE REPLAY** view, with the same stepping, playback speed, row controls, chart windows, and GIF export as ordinary Replay. The file’s room name stays visible above the Replay controls, independently of the room currently open in the browser. Long names shorten with an ellipsis; hover over the name to read it in full. The options menu shows its room, capture time, sample count, and whole-session room high. The Replay time tooltip includes captured active time and session state. Replay SH values still use retained samples through the selected frame; the file also preserves whole-session highs that may predate those samples. ATH mode compares against the file room's saved all-time records. Opening the file does not add its highs; use the separate **Add to all-time highs** action in Library or in the chart-window menu.
 
-Both ordinary Replay and FILE REPLAY have a **Library** button beside the playback controls. The library stays open during playback; it displays a separate card for the replay snapshot alongside Current Live Session. **Save file** downloads the entire session without moving playback, and **Open saved file…** switches to another saved file. Open works without a live session; on directory pages, expand the panel to reach Library.
+Both ordinary Replay and FILE REPLAY have a **Library** button beside the playback controls. The library stays open during playback; **This room · Keep, Compare & history** reveals the live and replay cards. **Save file** downloads the entire session without moving playback, and **Open saved file…** switches to another saved file. Saved sessions is available in both compact and expanded views, including directory pages.
 
 Opening a file does not replace, merge, save over, or resume the current room session. Current live acquisition continues with its existing pause/Stop state. **Close Replay** returns to that room’s latest data. It is also possible to expand TierScope on a directory page and open a file there; opening the file itself makes no acquisition requests. Imported Replay is not automatically restored after refresh or navigation: reopen the file when needed.
 
@@ -255,7 +260,7 @@ Replay controls belong to the panel. The downloaded GIF does not contain pause, 
 
 ## Session tools
 
-Click **Library** beside Replay in Controls or beside Play in Replay. It opens a matching page to the left of the chart, with Sessions, Summary, Compare and Backup tabs. The chart remains usable. The page follows panel movement, scale and theme; small windows use a scrollable sheet. The main panel stays above Library wherever they overlap, including in sheet layout, and receives clicks in the overlapping area. The × button, Library button or Escape closes Library. Temporary space borrowed for docking is restored on close unless you moved the panel. Room navigation closes Library and discards pending file reads.
+Click **Saved sessions** in the primary navigation. It opens the Library to the left of Live, with recent sessions visible immediately. Live returns to the room; opening a recording leads to its chart and summary, with Replay, Compare and Export attached there. **Analysis & backup** keeps direct Summary, Compare and Backup access for experienced users. The chart remains usable. The page follows panel movement, scale, theme and transparency; small windows use a scrollable sheet. The main panel stays above Library wherever they overlap. The × button, Saved sessions button or Escape closes Library. Room navigation closes Library and discards pending file reads.
 
 ### Library
 
@@ -281,7 +286,7 @@ A failed settings save keeps the prior value when recovery succeeds and retains 
 
 ### Automatic keeping for favorites
 
-The Library is titled **Library**, with **Session Storage and Analysis** beneath it. Its tabs are **Sessions**, **Summary**, **Compare**, and **Backup**. Sessions starts with **Current Live Session**; a replayed session has its own separate card, so Save/Keep/exports always target the labeled model. Keep in Library and Auto share the first action row; Compare with previous and History share the next. **Sessions Book** follows the session/storage counter and Storage limits. It starts collapsed; expand it to browse model folders and sessions. A separate collapsed **Search & sort** section contains the existing model and sort selectors, Favorites only, date range and text search. An active-filter indicator remains visible when search is closed. Folding preserves filters, selections and note drafts; disclosure choices survive tab changes and Refresh while Library stays open. Closing and reopening Library starts both sections collapsed again. Keep/import and returning from model history open the book to reveal the relevant sessions. Open saved file, Import to library and Refresh remain at the bottom, outside the book.
+The Library destination is titled **Saved sessions**, with **Library · Session storage and analysis** beneath it. The session/storage counter and Storage limits precede the open **Recent sessions** list. Each entry shows its model, start date/time and covered duration. **Browse models** and **Search & sort** narrow the list; the latter contains model/sort selectors, Favorites only, date range and text search. Search and model disclosure choices persist between visits. Within the open Library, folding preserves filters, selections and note drafts. Keep/import reveals the relevant sessions. **This room · Keep, Compare & history** contains the live/replay cards and existing favorite/Auto controls. Open saved file, Import to library and Refresh stay below the list.
 
 **Auto** reflects the model’s confirmed favorite setting. Clicking it while off asks you to favorite the model and confirm automatic keeping. Cancelling leaves it off. When enabled it is checked and locked; remove the model’s star to stop automatic keeping without deleting stored sessions. Existing/imported favorites still need individual confirmation.
 
@@ -303,7 +308,7 @@ Expand **Select sessions for Compare or export**, then use the row checkboxes or
 
 ### Model history
 
-Open Library and use **History · count** beside Save file in the Current Live Session card to open the history for the model on the current page. This shortcut shows the saved-recording count and stays tied to the page when replaying a different model. It also works before the first recording is kept, showing the empty-history guidance; directory pages have no page-model shortcut. Alternatively, open a model folder and choose **History overview**. The recording selector and main actions sit above the chart. Each saved recording has a circle for its time-weighted average and a diamond for its peak within retained samples. Choose any audience/tier metric and show all recordings or the latest 10 or 30. Dates and spacing use the **first retained sample**, not the export date, an estimated session start, or evenly paced Replay time. Separate recordings on the same day remain separate; points are not joined across unrecorded time.
+Open Saved sessions, expand **This room · Keep, Compare & history**, and use **History · count** in the Current Live Session card to open the history for the model on the current page. This shortcut shows the saved-recording count and stays tied to the page when replaying a different model. It also works before the first recording is kept, showing the empty-history guidance; directory pages have no page-model shortcut. Alternatively, open a model folder and choose **History overview**. The recording selector and main actions sit above the chart. Each saved recording has a circle for its time-weighted average and a diamond for its peak within retained samples. Choose any audience/tier metric and show all recordings or the latest 10 or 30. Dates and spacing use the **first retained sample**, not the export date, an estimated session start, or evenly paced Replay time. Separate recordings on the same day remain separate; points are not joined across unrecorded time.
 
 The overview shows the recording count, average, peak, token-holder share of registered viewers, covered time and excluded gaps for the selected set. Averages weight the covered intervals across recordings; token share divides token-holder viewer-time by registered-viewer time. Time between separate recordings is not counted as a recording gap. Durations are summed across recordings; overlapping time ranges show an explicit notice because they can count a period more than once. Library deduplication still combines compatible copies of the same session, but conflicting recordings remain distinct.
 
@@ -346,7 +351,7 @@ Turning Follow live off freezes that view; turning it back on catches up. Summar
 
 An explicit file-replay source remains fixed even if it belongs to the current room. Reset expires the old binding: select or refresh the new recording and turn Follow live on to follow it. Room navigation closes Library. Removing the favorite or a favorite-setting read failure freezes the display. Existing owner checks continue to reject late acquisition results; Follow live only reads accepted data. Storage failures leave live analysis available and report pending saves.
 
-Current Live Session emphasizes **Compare with previous** with the primary pink border. **Keep in Library** uses a borderless style; neither action moved.
+Live keeps **Compare with previous** within reach. The optional Current Live Session card also retains that fast path with its primary pink border, beside History; Keep remains borderless there.
 
 ### Backup and restore
 

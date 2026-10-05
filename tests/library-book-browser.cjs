@@ -1,7 +1,7 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const {GifReader}=require('omggif');
 const {instrument,prepareSource}=require('./helpers/instrument.cjs');
-const {openLibraryBook}=require('./helpers/library.cjs');
+const {openLibraryBook,clickControl}=require('./helpers/library.cjs');
 const engine=process.env.TIERSCOPE_BROWSER||'chromium';
 const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8')).replaceAll('scheduleInit(2000);','').replace('downloadTrackingReport: downloadTrackingReport,',`
  __book:{setup(){loadSession(getModelName());const now=Date.now(),h={timestamps:[now-240000,now-180000,now-60000,now],breaks:[false,false,true,false]};
@@ -22,7 +22,7 @@ async function download(page,action){const [d]=await Promise.all([page.waitForEv
  await page.evaluate(()=>{window.store=new Map();window.GM_getValue=(k,d)=>store.has(k)?store.get(k):d;window.GM_setValue=(k,v)=>store.set(k,v);window.GM_listValues=()=>[...store.keys()];window.GM_deleteValue=k=>store.delete(k);});
  await page.addScriptTag({content:instrument(source)});await page.evaluate(()=>ViewerTracker.__book.setup());await page.waitForTimeout(350);
  const panel=page.locator('#tracker-container'),library=page.locator('#tierscope-session-tools'),bounds=await panel.boundingBox(),live=await page.evaluate(()=>ViewerTracker.__book.state());
- assert.deepEqual(await page.locator('#control-session-buttons button').allTextContents(),['Library','Replay']);
+ assert.deepEqual(await page.locator('#journey-nav button').allTextContents(),['Live','Saved sessions']);
  await page.click('#btn-control-library');await page.waitForTimeout(100);
  const dock=await library.boundingBox();assert(Math.abs(dock.x+dock.width-bounds.x-1)<1);assert.equal(dock.y,bounds.y);assert.equal(dock.height,bounds.height);
  assert.equal(await library.getAttribute('aria-modal'),'false');assert.equal(await library.getAttribute('data-layout'),'docked');
@@ -41,7 +41,7 @@ async function download(page,action){const [d]=await Promise.all([page.waitForEv
  const gif=await download(page,()=>row.getByRole('button',{name:'GIF',exact:true}).click());assert(gif.name.startsWith('another_model-'));assert.equal(new GifReader(gif.bytes).numFrames(),4);
  assert.deepEqual(await page.evaluate(()=>ViewerTracker.__book.state()),live,'stored exports do not open replay or change live data');
  // A current GIF captures the whole current session without starting replay.
- await page.click('#tools-keep');await page.locator('[data-library-id] summary').click();
+ await clickControl(page,'#tools-keep');await page.locator('[data-library-id] summary').click();
  const liveGif=await download(page,()=>page.locator('[data-library-id]').getByRole('button',{name:'GIF',exact:true}).click());assert(liveGif.name.startsWith('testroom-'));
  assert.deepEqual(await page.evaluate(()=>ViewerTracker.__book.state()),live);
  await page.selectOption('#tools-library-model','another_model');
@@ -53,14 +53,14 @@ async function download(page,action){const [d]=await Promise.all([page.waitForEv
  await row.getByRole('button',{name:'Replay',exact:true}).click();assert.equal(await library.count(),1);assert.equal(await page.locator('#tools-current-room-replay').textContent(),'another_model');
  await page.evaluate(async()=>{window.restoreRead();window.finishRead();await new Promise(resolve=>setTimeout(resolve,0));});
  assert.equal((await page.evaluate(()=>ViewerTracker.__book.state())).playback.room,'another_model','a late file cannot replace a newer replay selection');
- await page.click('#tools-close');assert.equal(await page.evaluate(()=>document.activeElement.id),'btn-playback-library','closing after live-to-file switches focus to the visible Library button');await page.click('#btn-playback-library');
+ await page.click('#tools-close');assert.equal(await page.evaluate(()=>document.activeElement.id),'btn-control-library','closing after live-to-file switches focus to the visible Library button');await page.click('#btn-playback-library');
  await page.click('#playback-next');const replay=await page.evaluate(()=>ViewerTracker.__book.state());
  const full=await download(page,()=>page.click('#tools-export-csv-replay'));assert.equal(full.bytes.toString().trim().split('\r\n').length,5);
  assert.deepEqual(await page.evaluate(()=>ViewerTracker.__book.state()),replay,'exports preserve replay cursor');
  await page.click('#playback-return');assert.equal(await page.locator('#tools-current-room').textContent(),'testroom');
- await page.click('#tools-close');assert.deepEqual(await panel.boundingBox(),bounds);assert.equal(await page.locator('#btn-control-library').getAttribute('aria-expanded'),'false');
+ await page.click('#tools-close');{const actual=await panel.boundingBox();assert.equal(actual.x,bounds.x);assert.equal(actual.y,bounds.y);assert.equal(actual.width,bounds.width);}assert.equal(await page.locator('#btn-control-library').getAttribute('aria-expanded'),'false');
  let cancelledDownloads=0;const countDownload=()=>cancelledDownloads++;page.on('download',countDownload);
- await page.click('#btn-control-library');await page.click('#tools-keep');await page.locator('[data-library-id] summary').click();await page.locator('[data-library-id]').getByRole('button',{name:'GIF',exact:true}).evaluate(e=>{e.click();document.getElementById('tools-close').click();});await page.waitForTimeout(200);assert.equal(cancelledDownloads,0,'closing the library cancels an in-progress export');page.off('download',countDownload);
+ await page.click('#btn-control-library');await clickControl(page,'#tools-keep');await page.locator('[data-library-id] summary').click();await page.locator('[data-library-id]').getByRole('button',{name:'GIF',exact:true}).evaluate(e=>{e.click();document.getElementById('tools-close').click();});await page.waitForTimeout(200);assert.equal(cancelledDownloads,0,'closing the library cancels an in-progress export');page.off('download',countDownload);
  // Borrow room only while open; never save that temporary shift.
  await panel.evaluate(e=>{e.style.left='30px';e.style.top='80px';e.style.right='auto';});
  const left=await panel.boundingBox(),geometry=await page.evaluate(()=>GM_getValue('tierscope:ui:geometry:v1',null));

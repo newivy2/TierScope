@@ -1,3 +1,4 @@
+const {clickControl}=require('./helpers/library.cjs');
 const {instrument, prepareSource} = require('./helpers/instrument.cjs');
 const fs=require('fs'),path=require('path'),assert=require('node:assert/strict');
 const engine=process.env.TIERSCOPE_BROWSER||'chromium';const browserType=require('playwright')[engine];
@@ -70,7 +71,7 @@ async function assertConnector(canvas,rgb){
  if(process.env.TIERSCOPE_SCREENSHOT)await page.locator('#tracker-container').screenshot({path:process.env.TIERSCOPE_SCREENSHOT+'.mini.png'});
  await page.click('#btn-expand');await page.waitForTimeout(350);
  assert.equal(await page.evaluate(()=>ViewerTracker.__charts.snapshot()),savedState,'drawing and inspecting gaps cannot change history or highs');
- await page.click('#btn-replay');await page.evaluate(()=>ViewerTracker.__charts.pause());await page.evaluate(()=>ViewerTracker.__charts.step(-1));
+ await clickControl(page,'#btn-replay');await page.evaluate(()=>ViewerTracker.__charts.pause());await page.evaluate(()=>ViewerTracker.__charts.step(-1));
  await canvas.focus();await page.keyboard.press('End');assert.match(await tooltip.textContent(),/Sample 1\/1/);assert.match(await tooltip.textContent(),/Range: 10–10/);
  await page.click('#playback-next');await canvas.focus();await page.keyboard.press('End');assert.match(await tooltip.textContent(),/Sample 2\/2/);assert.match(await tooltip.textContent(),/Range: 10–12/);
  assert.equal((await gapPixels(canvas)).orange,0,'Replay cannot draw a future gap');

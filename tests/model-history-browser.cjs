@@ -1,6 +1,6 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const {instrument,prepareSource}=require('./helpers/instrument.cjs');
-const {openLibraryBook}=require('./helpers/library.cjs');
+const {openLibraryBook,clickControl,revealControl}=require('./helpers/library.cjs');
 const engine=process.env.TIERSCOPE_BROWSER||'chromium';
 const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8')).replaceAll('scheduleInit(2000);','')
 .replace('downloadTrackingReport: downloadTrackingReport,',`__modelHistory:{checkUrlChange,
@@ -44,7 +44,7 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   assert.match(await page.locator('#tools-room-history').getAttribute('title'),/live_room/);
   assert.match(await page.locator('#tools-room-shortcuts').textContent(),/History · 0/);
   assert(await page.evaluate(()=>document.querySelector('.tools-current').contains(document.getElementById('tools-room-shortcuts'))));
-  await page.click('#tools-room-history');assert.match(await page.locator('#tools-content').textContent(),/No saved sessions for this model/);
+  await clickControl(page,'#tools-room-history');assert.match(await page.locator('#tools-content').textContent(),/No saved sessions for this model/);
   await page.click('#tools-history-back');assert.equal(await page.evaluate(()=>document.activeElement.id),'tools-sessions-book-toggle');await openLibraryBook(page,false);await page.click('#tools-folder-history_model');
   await page.locator('#tools-model-history').focus();await page.keyboard.press('Enter');
   assert.equal(await page.evaluate(()=>document.activeElement.id),'tools-history-back');
@@ -141,7 +141,7 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   await roomPage.addScriptTag({content:instrument(source)});await roomPage.evaluate(()=>ViewerTracker.__modelHistory.setup());await roomPage.click('#btn-control-library');
   assert.match(await roomPage.locator('#tools-room-shortcuts').textContent(),/History · 55/);
   await roomPage.screenshot({path:'/tmp/tierscope-model-history-shortcut-'+engine+'.png'});
-  await roomPage.locator('#tools-room-history').focus();await roomPage.keyboard.press('Enter');
+  await revealControl(roomPage,'#tools-room-history');await roomPage.locator('#tools-room-history').focus();await roomPage.keyboard.press('Enter');
   assert.equal(await roomPage.locator('#tools-history-recording').inputValue(),'history_54');await roomPage.click('#tools-history-compare');
   assert.deepEqual(await roomPage.locator('[id^=tools-source-]').evaluateAll(selects=>selects.map(s=>s.value)),['history_54','history_53','history_52','history_51','history_50','history_49']);
   await roomPage.evaluate(()=>{history.pushState({},'', '/tags/testroom/');ViewerTracker.__modelHistory.checkUrlChange();});

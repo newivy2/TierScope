@@ -1,3 +1,4 @@
+const {clickControl}=require('./helpers/library.cjs');
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const {instrument,prepareSource}=require('./helpers/instrument.cjs');
 const engine=process.env.TIERSCOPE_BROWSER||'chromium';
@@ -57,15 +58,15 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
  await page.evaluate(()=>ViewerTracker.__audience.scale(1));await page.setViewportSize({width:400,height:900});
  await page.evaluate(()=>ViewerTracker.__audience.scan());assert.equal(await ratio.textContent(),'0.8x');
  assert.match(await box('roomTotal').getAttribute('title'),/Room Total: 90\. Change -510 from 600/);
- await page.click('.trend-preset-btn[data-mode=start]');assert.match(await box('roomTotal').getAttribute('title'),/Change -105 from 195/);
- await page.click('.trend-preset-btn[data-mode=last]');
+ await clickControl(page,'.trend-preset-btn[data-mode=start]');assert.match(await box('roomTotal').getAttribute('title'),/Change -105 from 195/);
+ await clickControl(page,'.trend-preset-btn[data-mode=last]');
  await page.click('#btn-high-mode');assert.match(await page.locator('#high-anon').textContent(),/^ATH:/);assert.equal(await ratio.textContent(),'0.8x');
  await page.setViewportSize({width:1100,height:1000});
  for(const bright of [false,true]){
   await page.locator('#dark-mode-toggle').setChecked(!bright);
   await page.locator('#tracker-container').screenshot({path:'/tmp/tierscope-320-'+engine+'-'+(bright?'bright':'dark')+'.png'});
  }
- await page.click('#btn-replay');await page.evaluate(()=>ViewerTracker.__audience.pause());
+ await clickControl(page,'#btn-replay');await page.evaluate(()=>ViewerTracker.__audience.pause());
  while(await page.locator('#playback-previous').isEnabled())await page.click('#playback-previous');
  assert.equal(await ratio.textContent(),'1:1');await page.click('#playback-next');assert.equal(await ratio.textContent(),'1.8x');
  registered=10;anonymous=2000;await page.evaluate(()=>ViewerTracker.__audience.scan());assert.equal(await ratio.textContent(),'1.8x','background scan cannot replace replay ratio');

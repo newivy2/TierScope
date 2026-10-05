@@ -23,6 +23,18 @@ export function libraryShell() {
 #tierscope-session-tools nav{display:flex;gap:3px;padding:8px 10px 0;flex-shrink:0}
 #tierscope-session-tools nav button{flex:1;padding:5px 2px;font-size:.95em;background:transparent;border-color:transparent;border-bottom:2px solid transparent;border-radius:3px 3px 0 0}
 #tierscope-session-tools nav button[aria-pressed=true]{color:var(--panel-accent);background:#ff69b412;border-bottom-color:#ff69b4}
+#tierscope-session-tools #tools-analysis-navigation{margin:5px 12px 0;flex-shrink:0}
+#tierscope-session-tools #tools-analysis-navigation>summary{background:transparent;border:0;color:var(--panel-muted);padding:2px 0;font-size:.9em}
+#tierscope-session-tools .tools-selected-sessions{border:1px solid var(--panel-divider);border-radius:5px;padding:8px;margin:0 0 8px}
+#tierscope-session-tools .tools-selected-sessions h3{margin:0 0 6px;color:var(--panel-accent)}
+#tierscope-session-tools .tools-selected-sessions[data-comparing=true]{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px}
+#tierscope-session-tools .tools-selected-sessions[data-comparing=true]>h3{grid-column:1/-1}
+#tierscope-session-tools .tools-selected-sessions[data-comparing=true] .tools-selected-session{border:1px solid var(--panel-divider);border-radius:3px;padding:5px;overflow-wrap:anywhere}
+#tierscope-session-tools .tools-selected-session{padding:5px 0;border-top:1px solid var(--panel-divider)}
+#tierscope-session-tools .tools-selected-session:first-of-type{border-top:0}
+#tierscope-session-tools #tools-live-shortcuts{margin:12px 0}
+#tierscope-session-tools #tools-live-shortcuts>summary{background:transparent;color:var(--panel-muted)}
+#tierscope-session-tools #tools-live-shortcuts .tools-current{margin-top:7px}
 #tools-content{padding:10px 12px 14px;overflow:auto;min-height:0;flex:1;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#ff69b470 transparent}
 #tools-message:not(:empty){padding:7px 12px;border-bottom:1px solid var(--panel-divider);font-size:.95em;white-space:pre-line;overflow-wrap:anywhere;flex-shrink:0}
 #tierscope-session-tools .tools-actions{display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin:8px 0}
@@ -126,8 +138,9 @@ export function libraryShell() {
 #tools-review-notes[hidden]{display:none}
 #gif-export-controls{padding:8px 12px;gap:6px;align-items:center;flex-shrink:0;border-bottom:1px solid var(--panel-divider)}
 </style>
-<div class="tools-head"><div><h2 id="tools-title">Library</h2><div class="tools-subtitle">Session Storage and Analysis</div></div><button id="tools-close" type="button" aria-label="Close library" title="Close library (Escape)">×</button></div>
-<nav aria-label="Session tools"><button data-tools-tab="library">Sessions</button><button data-tools-tab="summary">Summary</button><button data-tools-tab="compare">Compare</button><button data-tools-tab="backup">Backup</button></nav>
+<div class="tools-head"><div><h2 id="tools-title">Saved sessions</h2><div class="tools-subtitle">Library · Session storage and analysis</div></div><button id="tools-close" type="button" aria-label="Close library" title="Close library (Escape)">×</button></div>
+<nav aria-label="TierScope destinations"><button id="tools-live">Live</button><button data-tools-tab="library">Saved sessions</button></nav>
+<details id="tools-analysis-navigation"><summary>Analysis &amp; backup</summary><nav aria-label="Analysis tools"><button data-tools-tab="summary">Summary</button><button data-tools-tab="compare">Compare</button><button data-tools-tab="backup">Backup</button></nav></details>
 <button id="tools-review-notes" type="button" hidden></button>
 <div id="tools-message" role="status" aria-live="polite"></div>
 <div id="gif-export-controls" style="display:none"><span id="gif-export-status" role="status"></span><button id="btn-cancel-gif" hidden type="button">Cancel</button></div>

@@ -1,3 +1,5 @@
+import { bindRememberedDisclosure } from './disclosure-preferences.js';
+import { journeyPanelHtml } from './journey-panel-view.js';
 import { selectScanInterval } from './acquisition-state.js';
 import { hideChartTooltip } from './chart-view.js';
 import { bindPanelOptions } from './files.js';
@@ -57,7 +59,7 @@ export function createPanel() {
                 '</div>' +
                 '<div style="display:flex;align-items:center;gap:3px;flex-shrink:0;">' +
                     '<button type="button" id="btn-high-mode" aria-pressed="false" aria-label="Session highs. Switch to all-time highs" style="display:none;min-width:29px;background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;">SH</button>' +
-                    '<button type="button" id="btn-panel-options" aria-label="Chart window and highs" aria-expanded="false" aria-controls="panel-options" style="display:none;background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;white-space:nowrap;">Full ▾</button>' +
+                    '<button type="button" id="btn-panel-options" aria-label="Chart settings and highs" aria-expanded="false" aria-controls="panel-options" style="display:none;background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;white-space:nowrap;">Full ▾</button>' +
                     '<button type="button" id="btn-standard-size" title="Restore standard panel size (100%)" aria-label="Restore standard panel size" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;">100%</button>' +
                     '<button id="btn-toggle" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:9px;padding:1px 4px;flex-shrink:0;">+</button>' +
                 '</div>' +
@@ -77,17 +79,20 @@ export function createPanel() {
                     '<div id="all-time-action-status" role="status" style="font-size:10px;line-height:1.4;overflow-wrap:anywhere;color:var(--panel-secondary);"></div>' +
                 '</div>' +
             '</div>' +
-            '<div id="minimized-view" style="display:block;position:relative;">' +
-                '<div style="display:flex;gap:4px;align-items:center;margin-bottom:3px;"><strong id="mini-room-count" style="color:var(--panel-accent);font-size:13px;">0</strong><span style="color:var(--panel-muted);font-size:8px;">in room</span><span id="mini-room-change" style="margin-left:auto;font-size:8px;"></span></div>' +
+            journeyPanelHtml() +
+            '<section id="journey-audience" aria-label="Current audience">' +
+                '<div style="display:flex;gap:4px;align-items:center;margin-bottom:3px;"><strong id="mini-room-count" style="color:var(--panel-accent);font-size:21px;">0</strong><span style="color:var(--panel-muted);font-size:8px;">in room</span><span id="mini-room-change" style="margin-left:auto;font-size:8px;"></span></div>' +
                 '<div style="display:flex;align-items:center;justify-content:space-between;gap:3px;">' +
                     '<button type="button" id="mini-metric" style="background:transparent;border:0;color:var(--panel-secondary);font:inherit;cursor:pointer;padding:2px 0;" aria-label="Cycle chart metric">Room total ▾</button>' +
                     '<button type="button" id="mini-high" style="background:transparent;border:0;padding:0;color:var(--panel-subtle);font-size:8px;cursor:pointer;"></button>' +
                 '</div>' +
-                '<canvas id="mini-chart" width="140" height="36" style="display:block;width:100%;height:36px;" role="img" aria-label="Recent audience history"></canvas>' +
+                '<canvas id="mini-chart" width="140" height="48" style="display:block;width:100%;height:48px;" role="img" aria-label="Recent audience history"></canvas>' +
                 '<div style="display:flex;justify-content:space-between;gap:4px;margin:3px 0;">' +
                     '<span title="With Tokens">💎 <span id="mini-withtokens" style="color:var(--panel-warning);">0</span> <span id="mini-withtokens-change"></span></span>' +
                     '<span title="Registered">📊 <span id="mini-total">0</span> <span id="mini-total-change"></span></span>' +
                 '</div>' +
+            '</section>' +
+            '<div id="minimized-view" style="display:block;position:relative;">' +
                 '<div style="display:flex;align-items:center;gap:3px;">' +
                     '<span id="mini-freshness" style="flex:1;min-width:0;font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">No sample</span>' +
                     '<button type="button" id="btn-auto" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;cursor:pointer;" title="Pause or resume scans">⏸</button>' +
@@ -184,7 +189,7 @@ export function createPanel() {
                 '<div id="live-trend">' +
                 '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;flex-wrap:wrap;gap:2px;">' +
                     '<span id="trend-header-label" style="font-size:9px;font-weight:bold;color:#4169E1;">📈 TREND</span>' +
-                    '<div style="display:flex;gap:2px;flex-wrap:wrap;">' +
+                    '<details id="trend-chart-settings" style="max-width:76%;"><summary style="cursor:pointer;font-size:9px;color:var(--panel-muted);">Trend settings</summary><div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:4px;">' +
                         '<button class="trend-preset-btn" data-mode="last" style="background:#4169E1;border:1px solid #4169E1;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Last</button>' +
                         '<button class="trend-preset-btn" data-mode="5min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">5m</button>' +
                         '<button class="trend-preset-btn" data-mode="15min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">15m</button>' +
@@ -192,7 +197,7 @@ export function createPanel() {
                         '<button class="trend-preset-btn" data-mode="1hour" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">1h</button>' +
                         '<button class="trend-preset-btn" data-mode="start" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Start</button>' +
                         '<button id="btn-trend-auto" style="background:#32CD32;border:1px solid #32CD32;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;" title="Auto-escalation ON - Click to disable">AUTO</button>' +
-                    '</div>' +
+                    '</div></details>' +
                 '</div>' +
                 '<div id="trend-container" style="min-height:30px;">' +
                     '<div style="font-size:8px;color:var(--panel-faint);text-align:center;padding:8px;">Waiting for scan...</div>' +
@@ -223,25 +228,14 @@ export function createPanel() {
 
             '<div id="control-field" style="margin-top:5px;padding:4px;background:rgba(65,105,225,0.15);border-radius:3px;border:1px solid #4169E1;">' +
                 '<div id="control-session-row" style="display:grid;grid-template-columns:max-content max-content minmax(0,1fr);align-items:center;gap:3px;margin-bottom:4px;white-space:nowrap;">' +
-                    '<span style="font-size:9px;font-weight:bold;color:#4169E1;">🎛️ CONTROLS</span>' +
+                    '<span style="font-size:9px;font-weight:bold;color:#4169E1;">LIVE</span>' +
                     '<span style="font-size:12px;color:var(--panel-warning);font-family:monospace;font-weight:bold;width:9ch;text-align:center;font-variant-numeric:tabular-nums;" id="control-tracking-timer">00:00:00</span>' +
                     '<span style="min-width:0;text-align:right;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums;font-size:11px;color:var(--panel-positive);font-weight:bold;" id="control-next-scan">Next: 60s</span>' +
                 '</div>' +
-                '<div id="control-action-row" style="display:grid;grid-template-columns:minmax(max-content,1fr) auto minmax(0,1fr);align-items:center;gap:3px;">' +
-                    '<div id="control-session-buttons" style="display:flex;gap:2px;align-items:center;">' +
-                    '<button type="button" id="btn-control-library" aria-expanded="false" aria-controls="tierscope-session-tools" aria-label="Open session library" title="Open model folders, session summaries, comparisons and backups" style="font-size:8px;line-height:10px;height:14px;min-width:38px;box-sizing:border-box;margin:0;padding:2px 3px;background:var(--panel-button);color:var(--panel-accent);border:none;border-radius:3px;cursor:pointer;">Library</button>' +
-                    '<button id="btn-replay" style="font-size:8px;line-height:10px;height:14px;min-width:38px;box-sizing:border-box;margin:0;padding:2px 3px;background:var(--panel-button);color:var(--panel-warning);border:none;border-radius:3px;cursor:pointer;" title="Replay recorded history">Replay</button>' +
-                    '</div>' +
+                '<div id="control-action-row" style="display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:3px;">' +
                     '<div id="control-action-buttons" style="display:flex;gap:2px;align-items:center;">' +
                         '<button id="btn-control-auto" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#32CD32;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 4px;min-width:24px;" title="Auto-Refresh ON">⏸</button>' +
                         '<button type="button" id="btn-control-stop" aria-label="Stop this session" title="Stop this session and freeze its history and elapsed time" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;white-space:nowrap;">■ Stop</button>' +
-                        '<button id="btn-main-reset" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Reset all tracking data">' +
-                            '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
-                                '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12"/>' +
-                                '<path d="M3 3v9h9"/>' +
-                            '</svg>' +
-                            'Reset' +
-                        '</button>' +
                     '</div>' +
                     '<style>' +
                         '#dark-mode-control #dark-mode-track{position:relative;display:block;flex:0 0 22px;width:22px;height:12px;box-sizing:border-box;border:1px solid #9b701d;border-radius:7px;background:#e8b444;transition:background-color .16s ease;}' +
@@ -263,6 +257,17 @@ export function createPanel() {
                     '</label>' +
                 '</div>' +
             '</div>' +
+
+            '<details id="live-session-actions" style="border-top:1px solid var(--panel-divider);margin-top:5px;padding-top:4px;"><summary style="cursor:pointer;color:var(--panel-muted);font-size:9px;">Session actions</summary><div style="display:flex;justify-content:space-between;gap:6px;margin:5px 0;">' +
+                    '<button id="btn-replay" style="font-size:8px;line-height:10px;height:14px;min-width:38px;box-sizing:border-box;margin:0;padding:2px 3px;background:var(--panel-button);color:var(--panel-warning);border:none;border-radius:3px;cursor:pointer;" title="Replay this live session snapshot">Replay this session</button>' +
+                        '<button id="btn-main-reset" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Reset all tracking data">' +
+                            '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
+                                '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12"/>' +
+                                '<path d="M3 3v9h9"/>' +
+                            '</svg>' +
+                            'Reset' +
+                        '</button>' +
+            '</div></details>' +
 
             '<div id="tracker-footer" style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:4px;margin-top:5px;min-height:18px;">' +
                 '<div id="acquisition-status" style="max-width:80px;font-size:7px;color:var(--panel-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="No accepted sample yet">No sample</div>' +
@@ -310,6 +315,8 @@ export function createPanel() {
         if (!confirm('Stop this session?\n\nHistory will remain available for Replay and downloads, but this session cannot be resumed. Starting again begins a new session.')) return;
         stopTracking('manual');
     };
+    bindRememberedDisclosure(document.getElementById('live-session-actions'), 'liveSettings');
+    bindRememberedDisclosure(document.getElementById('trend-chart-settings'), 'trendSettings');
     updateContainerOpacity(runtime.panelBackgroundPercent);
     if (opacitySlider) {
         opacitySlider.addEventListener('input', function() {

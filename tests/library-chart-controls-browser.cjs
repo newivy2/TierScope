@@ -1,3 +1,4 @@
+const {clickControl}=require('./helpers/library.cjs');
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
 const {instrument, prepareSource} = require('./helpers/instrument.cjs');
 const engine = process.env.TIERSCOPE_BROWSER || 'chromium';
@@ -32,7 +33,7 @@ const source = prepareSource(fs.readFileSync(path.join(__dirname, '../tierscope.
   await opacity(45);await background();assert.equal(await page.locator('#tools-title').evaluate(e=>getComputedStyle(e).color),textColor);
   assert.equal(await page.locator('#tierscope-session-tools').evaluate(e=>getComputedStyle(e).opacity),'1','only the background becomes transparent');
   await page.uncheck('#dark-mode-toggle');await background();assert.equal(await page.locator('#tierscope-session-tools').evaluate(e=>getComputedStyle(e).backgroundColor),'rgba(248, 249, 252, 0.45)');
-  await page.click('[data-tools-tab=summary]');
+  await clickControl(page,'[data-tools-tab=summary]');
   const choices=[['room','Room audience',82],['total','Registered viewers',32],['withTokens','Viewers with tokens',21],['red','Moderators',3],['green','Fan club',4],['purple','Dark purple',5],['pink','Light purple',6],['dark-blue','Dark blue',7],['light-blue','Light blue',8],['gray','Grey',9],['female-trans','Female / trans',10],['anonymous','Anonymous viewers',50]];
   const selected=async(id='tools-metric')=>page.locator('#'+id+' [aria-checked=true]').getAttribute('data-metric');
   assert.equal(await selected(),'room','new analysis defaults to Room audience');
@@ -56,7 +57,7 @@ const source = prepareSource(fs.readFileSync(path.join(__dirname, '../tierscope.
   await page.keyboard.press('Space');assert.equal(await selected(),'female-trans');
   assert.equal(await page.locator('#tools-metric-female-trans').evaluate(e=>getComputedStyle(e).outlineStyle),'solid');
   await page.click('#tools-metric-room');
-  await page.click('[data-tools-tab=compare]');
+  await clickControl(page,'[data-tools-tab=compare]');
   await page.selectOption('#tools-source-b',await page.locator('#tools-source-b option').evaluateAll(es=>es.find(e=>e.value!=='current').value));
   const below=await page.evaluate(()=>{const canvas=document.getElementById('tools-analysis-chart'),range=document.getElementById('tools-comparison-range'),output=document.getElementById('tools-analysis-output');return {after:range.getBoundingClientRect().top>=canvas.getBoundingClientRect().bottom,before:range.getBoundingClientRect().bottom<=output.getBoundingClientRect().top};});
   assert(below.after&&below.before,'Match shared length sits below the chart and above statistics');
@@ -64,7 +65,7 @@ const source = prepareSource(fs.readFileSync(path.join(__dirname, '../tierscope.
 
   await page.uncheck('#tools-shared-length');await page.click('#tools-metric-withTokens');assert(!(await page.locator('#tools-shared-length').isChecked()));
   assert.equal(await page.locator('#tools-chart-inspection tbody tr').count(),2);
-  await page.click('[data-tools-tab=library]');await page.click('#tools-room-history');
+  await page.click('[data-tools-tab=library]');await clickControl(page,'#tools-room-history');
   assert.equal(await selected('tools-history-metric'),'withTokens');
   await page.locator('#tools-history-metric-withTokens').focus();await page.keyboard.press('Home');assert.equal(await selected('tools-history-metric'),'room');
   assert.equal(await page.evaluate(()=>document.activeElement.id),'tools-history-metric-room','history redraw restores radio focus');
@@ -80,7 +81,7 @@ const source = prepareSource(fs.readFileSync(path.join(__dirname, '../tierscope.
    }
   }
   await page.setViewportSize({width:1200,height:1000});await page.evaluate(()=>ViewerTracker.__chartControls.scale(1));await opacity(95);await background();
-  await page.click('[data-tools-tab=summary]');await page.click('#tools-metric-room');
+  await clickControl(page,'[data-tools-tab=summary]');await page.click('#tools-metric-room');
   for(const bright of [false,true]){
    await page.locator('#dark-mode-toggle').setChecked(!bright);await background();await page.locator('#tools-content').evaluate(e=>e.scrollTop=0);
    await page.screenshot({path:'/tmp/tierscope-library-chart-controls-'+engine+'-'+(bright?'bright':'dark')+'.png'});

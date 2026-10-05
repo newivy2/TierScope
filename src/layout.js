@@ -137,6 +137,7 @@ export function applyScale(scale) {
     if (!container) return;
     container.style.transform = 'scale(' + scale + ')';
     container.style.transformOrigin = 'top left';
+    container.style.setProperty('--journey-scale', String(scale));
     container.dataset.scale = scale;
 }
 
