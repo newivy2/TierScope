@@ -6,6 +6,7 @@ export function attachLibraryDock(panel, library, onTheme) {
     const original = {left: panel.style.left, top: panel.style.top, right: panel.style.right};
     let lastPosition = {...original}, movedByUser = false, borrowed = false, frame = 0, closed = false;
     let previousTheme = '';
+    let previousBackground = '';
     const position = () => ({left: panel.style.left, top: panel.style.top, right: panel.style.right});
     function arrange() {
         frame = 0;
@@ -33,6 +34,13 @@ export function attachLibraryDock(panel, library, onTheme) {
         const mode = docked ? 'docked' : 'sheet';
         if (panel.dataset.libraryOpen !== mode) panel.dataset.libraryOpen = mode;
         if (library.dataset.layout !== mode) library.dataset.layout = mode;
+        // Copy the painted background, not element opacity: child controls and
+        // charts retain their own contrast. Style observation also handles a
+        // slider change while open; first arrange handles changes while closed.
+        const background = window.getComputedStyle(panel).backgroundColor;
+        if (background !== previousBackground) {
+            previousBackground = background; library.style.backgroundColor = background;
+        }
         const theme = panel.getAttribute('data-theme') || 'dark';
         if (theme !== previousTheme) {
             previousTheme = theme; library.dataset.theme = theme; setThemeVariables(library);

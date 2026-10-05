@@ -140,3 +140,9 @@ Transfer validation has independent limits of 10,000 sessions and 300 MiB, inclu
 ## Follow live analysis (3.21.0)
 
 `analysis-follow.js` owns per-view frozen/following snapshots and expiry without storage, DOM or runtime dependencies. `session-tools.js` binds eligible sources by room, session start and live reset epoch, validates their initial compatibility, and captures one frozen live archive per accepted revision. Existing presentation notifications drive updates; no polling, acquisition or persistence hooks are added. Only verified Library lineage carries selections through Auto replacements. Views receive derived values: the analysis chart updates in place, and model history preserves controls and table paging while replacing statistics. Dependency gates and the analysis type check include the new owner.
+
+## Library chart controls (3.22 beta)
+
+`analysis-metric-view.js` receives ordered metric descriptors and a change callback from the tools coordinator. The coordinator obtains icons and colors from the existing panel row definitions; the view owns radio selection/focus only and cannot read live data, preferences or storage. Dependency guards include this module. Summary/Compare keep their existing chart instance on metric changes; Model History restores radio focus through its existing redraw path. The chart view exposes a settings slot below its legend for the shared-length control.
+
+`library-dock.js` copies the panel's computed background color on opening and observed style/theme changes, without reading the preference owner or applying element opacity. Text and controls retain their own alpha and the existing Scope stacking rules. A Library size container lets the twelve-icon strip wrap to six columns at narrow widths relative to the chosen font scale.

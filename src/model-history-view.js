@@ -37,6 +37,7 @@ export function renderModelHistoryView(parent, overview, actions) {
     button(buttons, 'Replay', () => actions.replay(select.value), 'tools-history-replay');
     const comparisonHint = node(parent, 'p', '', 'tools-muted'); comparisonHint.id = 'tools-history-compare-hint';
     compare.setAttribute('aria-describedby', comparisonHint.id);
+    if (actions.metricControl) actions.metricControl(parent);
     const legend = node(parent, 'p', '● Average · ◆ Peak in recording', 'tools-history-legend'); legend.id = 'tools-history-legend';
     const canvas = node(parent, 'canvas'); canvas.id = 'tools-history-chart'; canvas.setAttribute('role', 'img');
     canvas.setAttribute('aria-label', actions.metricLabel + ' across saved recordings, positioned by the date of their first retained sample. Use the recording selector above or the table below for the values.');

@@ -1,4 +1,5 @@
 import { createAnalysisFollower } from './analysis-follow.js';
+import { renderMetricStrip } from './analysis-metric-view.js';
 import { automaticLibraryStatus, keepFavoriteSession } from './automatic-library.js';
 import { changeModelFavorite } from './favorite-controls.js';
 import { paintFavoriteButton } from './favorite-view.js';
@@ -535,6 +536,21 @@ export function openSessionTools(focusTarget) {
         }, true), 'tools-import-session').title = 'Import session files or Library bundles. Imported favorites need confirmation before automatic keeping.';
         button(actions, 'Refresh', () => render('library'), 'tools-refresh-library').title = 'Refresh list from this browser';
     }
+    function metricStrip(parent, changed, id = 'tools-metric') {
+        const rowKeys = {room: 'roomTotal', withTokens: 'withtokens', anonymous: 'anon'};
+        const choices = Object.entries(ANALYSIS_METRICS).map(([key, label]) => {
+            const row = runtime.PANEL_ROWS.find(row => row.key === (rowKeys[key] || key));
+            return {key, label, icon: row.icon || (key === 'female-trans' ? '♀⚧' : ''),
+                color: key === 'total' ? 'var(--panel-secondary)' : row.color};
+        });
+        return renderMetricStrip(parent, choices, metric, action(value => { rememberAnalysis({metric: value}); changed(); }), id);
+    }
+    function comparisonRange() {
+        const controls = node(content, 'div', undefined, 'tools-comparison-range'); controls.id = 'tools-comparison-range';
+        const label = node(controls, 'label'), check = node(label, 'input'); check.type = 'checkbox'; check.checked = sharedLength; check.id = 'tools-shared-length';
+        node(label, 'span', 'Match shared length'); check.onchange = () => { rememberAnalysis({sharedLength: check.checked}); updateFollowing(); refreshAnalysis(); };
+        return controls;
+    }
     function analysisControls(comparing) {
         if (!library) readLibrary();
         if (!sourceOptions().length) { node(content, 'p', 'Record a session or import one into the library to see analysis.'); return null; }
@@ -565,9 +581,6 @@ export function openSessionTools(focusTarget) {
         }
         followControl(content);
         const controls = node(content, 'div', undefined, 'tools-actions');
-        const label = node(controls, 'label', 'Metric '), metricSelect = node(label, 'select'); metricSelect.id = 'tools-metric';
-        for (const [key, name] of Object.entries(ANALYSIS_METRICS)) { const option = node(metricSelect, 'option', name); option.value = key; }
-        metricSelect.value = metric; metricSelect.onchange = () => { rememberAnalysis({metric: metricSelect.value}); refreshAnalysis(); };
         const thresholdLabel = node(controls, 'label', comparing ? 'Threshold ' : 'Thresholds '), input = node(thresholdLabel, 'input');
         input.id = 'tools-threshold'; input.style.width = comparing ? '105px' : '200px';
         if (comparing) {
@@ -590,10 +603,7 @@ export function openSessionTools(focusTarget) {
         input.onkeydown = event => { if (event.key === 'Enter') { event.preventDefault(); applyThreshold(); } };
         button(controls, comparing ? 'Apply threshold' : 'Apply thresholds', applyThreshold, 'tools-apply-threshold');
         if (!comparing) button(controls, 'Use average', () => { summaryThresholdSource = null; summaryAutomatic = true; thresholdDirty = false; refreshAnalysis(false); }, 'tools-average-thresholds').title = 'Recalculate from this session: average −25%, average, +25%';
-        if (comparing) {
-            const label = node(controls, 'label'), check = node(label, 'input'); check.type = 'checkbox'; check.checked = sharedLength; check.id = 'tools-shared-length';
-            node(label, 'span', 'Match shared length'); check.onchange = () => { rememberAnalysis({sharedLength: check.checked}); updateFollowing(); refreshAnalysis(); };
-        }
+        metricStrip(content, refreshAnalysis);
         return sourceOptions();
     }
     const number = value => value === null ? 'Not enough data' : value.toLocaleString(undefined, { maximumFractionDigits: 1 });
@@ -606,9 +616,6 @@ export function openSessionTools(focusTarget) {
         }, 'tools-history-back');
         node(heading, 'h3', 'Model history · ' + libraryRoom);
         const controls = node(content, 'div', undefined, 'tools-actions');
-        const metricLabel = node(controls, 'label', 'Metric '), metricSelect = node(metricLabel, 'select'); metricSelect.id = 'tools-history-metric';
-        for (const [key, name] of Object.entries(ANALYSIS_METRICS)) { const option = node(metricSelect, 'option', name); option.value = key; }
-        metricSelect.value = metric; metricSelect.onchange = () => { rememberAnalysis({metric: metricSelect.value}); render('history'); };
         const rangeLabel = node(controls, 'label', 'Show '), range = node(rangeLabel, 'select'); range.id = 'tools-history-range';
         for (const [value, label] of [['Infinity', 'All recordings'], ['30', 'Latest 30'], ['10', 'Latest 10']]) {
             const option = node(range, 'option', label); option.value = value;
@@ -625,6 +632,7 @@ export function openSessionTools(focusTarget) {
                 const entry = followedEntries().find(entry => entry.id === id);
                 openSessionReplay(entry.archive); observedSignature = ''; refreshCurrent(); tell('Replaying ' + (entry.title || entry.archive.room) + '.');
             }),
+            metricControl: parent => metricStrip(parent, () => render('history'), 'tools-history-metric'),
             compare: ids => {
                 [selectedA, selectedB] = ids; selectedExtra = ids.slice(2);
                 Object.assign(analysisFilters, {room: libraryRoom, query: '', from: '', to: ''});
@@ -705,6 +713,8 @@ export function openSessionTools(focusTarget) {
         const same = saved && saved.ids.length === ids.length && ids.every((id, index) => saved.archives[saved.ids.indexOf(id)] === archives[index]);
         const restored = same ? {...saved.state, hidden: saved.state.hidden.map(index => ids.indexOf(saved.ids[index]))} : null;
         const view = renderAnalysisChart(content, series, labels, endMs, ANALYSIS_METRICS[metric], restored);
+        const range = dialog.querySelector('#tools-comparison-range');
+        if (range) view.settings.appendChild(range);
         content.appendChild(analysisOutput);
         analysisView = view; analysisSources = {archives, ids};
         chartDraw = view.draw; chartDispose = view.dispose;
@@ -712,6 +722,7 @@ export function openSessionTools(focusTarget) {
     }
     function renderAnalysis(comparing) {
         const options = analysisControls(comparing); if (!options) return;
+        if (comparing) comparisonRange();
         analysisOutput = node(content, 'div'); analysisOutput.id = 'tools-analysis-output';
         refreshAnalysis();
     }

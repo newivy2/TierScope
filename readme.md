@@ -18,6 +18,8 @@ If you used the beta, install from the official link above to follow main releas
 
 **Current stable release: 3.21.0** · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.21.0) · [Follow live guide](docs/follow-live.md)
 
+**Beta for review: 3.22.0-beta.1** — [Library transparency and chart metric strip](docs/library-chart-controls-beta.md).
+
 ---
 
 Open the **Library** to unfold a left-hand page next to the charts. Follow your favorites, start storing sessions and use the Compare feature with up to 6 stored sessions. Session summaries are available too. [Build and source guide](BUILDING.md).
