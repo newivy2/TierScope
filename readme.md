@@ -40,35 +40,23 @@ Charts use periodic room-data samples. Session history is stored locally through
 
 ## Main features
 
-- **Live audience tracking** — Follow viewer tiers, registered and anonymous viewers, viewers with tokens in yellow, and the room’s total audience in a pink Room Total row below Anons. The Anons row also shows its ratio to registered viewers, with **1:1** when within 5% of equal.
+- **Live audience tracking** — See viewer tiers, token holders, registered and anonymous viewers, and the room’s total audience.
+- **Audience trends** — See which audience groups are growing or shrinking over time.
+- **Session and all-time highs** — Track each room’s audience records, with highlights when counts reach or break a high.
+- **Interactive charts** — Explore audience history, zoom in and inspect individual samples.
+- **Smooth replay** — Replay live or saved sessions with adjustable speed and timeline controls.
+- **Saved session files** — Save recordings to your device and reopen them later.
+- **Session library** — Keep recordings in model folders and update saved sessions as they grow.
+- **Favorite models** — Choose favorite models and enable automatic session saving while tracking them.
+- **Summaries and comparison** — Review audience statistics and compare up to six recordings on one chart.
+- **Model history** — Follow a model’s audience averages and peaks across saved sessions.
+- **Library organization** — Find recordings by model or date, add notes, and import or export sessions in bulk.
+- **Backups** — Back up and restore your library, all-time highs and preferences.
+- **Reports and exports** — Export session data as CSV, TXT reports or animated GIFs.
+- **Flexible layout** — Resize and move the panel, collapse tiers, switch views and choose a dark or bright theme.
+- **Session controls** — Pause, stop or reset tracking, with automatic pauses when the broadcaster is away.
 
-- **Audience trends** — Compare tier counts and four audience subtotals against the previous scan, session start or a selected time window. With Tokens has a yellow border and Room Total a pink border; larger bottom boxes and adaptive numbers keep the display readable. Hover for exact changes.
-
-- **Session and all-time highs** — Switch between **SH** and **ATH** to compare the current session with previous records for that room. Green highlights and gentle pulses mark counts reaching or breaking the selected high.
-
-- **Interactive charts** — View the full recorded history or focus on a recent time window. Inspect individual samples and see where recording gaps occurred.
-
-- **Smooth replay** — Replay recorded samples at an even pace, including across recording pauses. Play, pause, change speed, scrub through the timeline, or step through individual samples.
-
-- **Saved session files** — Save sessions and reopen them later. Use **Add to all-time highs** to include a saved file’s peaks in that room’s records.
-
-- **Session library** — Choose **Library → Keep in library** from live Controls or Replay. The Sessions tab starts with Keep in Library, **Auto**, **Compare with previous** and **History** for the current live session. Below the storage counter and limits, expand **Sessions Book** to browse model folders and stored sessions. Its separate **Search & sort** menu contains the model, date, favorites, sorting and text filters. Both start collapsed when Library opens; file/import/refresh controls remain at the bottom. Recordings are organized into model folders. Keeping a fuller version of the same session updates its entry and preserves your custom name. Search, rename, replay, download or delete recordings; the library defaults to 1,000 sessions / 50 MB. **Storage limits** below the usage counter lets you choose 1–10,000 sessions and 1–250 MB. A warning appears at 80% of either limit, and sessions are never automatically removed.
-
-- **Favorite models** — Star a model in the header or Library and confirm to keep their live sessions automatically. The **Auto** checkbox also opens this confirmation and becomes checked and locked when enabled. Existing favorites stay manual until confirmed. The same session updates as it grows; names and notes are preserved. Unstarring stops automatic keeping without deleting saved sessions.
-
-- **Summaries and comparison** — See audience averages and peaks together, token-holder proportions, coverage and gaps. Summary starts with its recording picker collapsed and thresholds at the displayed metric’s session average −25%, average, and +25%, rounded to whole viewers. Customize them or use **Use average** to recalculate. The table shows time at or above each count and its percentage of covered time. Statistics use real timestamps and exclude recording gaps. Compare up to six recordings from their first retained samples, optionally matching their shared duration, with line visibility controls, shared sample inspection and chart zoom. From Current Live Session, **Compare with previous** captures the live session and selects up to five earlier saved sessions from the same model. The latest recording is solid pink; older recordings use dashed lines.
-
-- **Model history** — Review one model’s saved recordings over time, with one point per recording for the selected metric’s average and peak. View all recordings or the latest 10 or 30. Library offers a direct history shortcut for the model on the page; **Compare with previous** selects that recording and up to five earlier recordings from the same model.
-
-- **Library organization** — Filter by model and inclusive local recording dates, search titles and notes, sort recordings, and star favorite model folders. Select recordings for comparison or export one library bundle with recording notes and favorite models; import multiple files in one explicit action.
-
-- **Backups** — Export ATH for every room and saved preferences, optionally including the library. 
-
-- **Reports and exports** — Download a session file, CSV data, TXT summary, or animated GIF from a stored session’s **More…** menu or the separate replay card in Library.
-
-- **Flexible layout** — Choose compact or expanded views, collapse individual rows, resize and reposition the panel, and adjust its transparency. New layouts start with Moderators, Anons and Room Total collapsed; all other tiers are expanded. Saved layouts are preserved. A moon–sun switch activate dark or bright theme.
-
-- **Session controls** —  Automatic absence detection reduces scanning when the broadcaster is away.
+For controls, settings and detailed behavior, see the [usage and development notes](DEVELOPMENT_NOTES.md).
 
 Session history and all-time records are stored locally through your userscript manager. All-time highs remain separate for each room and survive session resets.
 
