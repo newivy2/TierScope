@@ -32,7 +32,7 @@ async function downloaded(page,action){const [download]=await Promise.all([page.
  const panel=page.locator('#tracker-container'),bounds=await panel.boundingBox(),canvas=page.locator('#spark-red');
  const before=await page.evaluate(()=>ViewerTracker.__files.state());
  const options=page.getByRole('button',{name:'Chart window and highs'}),menu=page.locator('#panel-options');
- const save=page.locator('#tools-save-session'),open=page.locator('#tools-open-session');
+ const save=page.locator('[data-library-id]').getByRole('button',{name:'Save file',exact:true}),open=page.locator('#tools-open-session');
  const replaySave=page.locator('#tools-save-session-replay'),replayOpen=open,replayKeep=page.locator('#tools-keep-replay');
  const message=page.locator('#tools-message');
  const libraryBounds=await page.locator('#btn-control-library').boundingBox(),replayBounds=await page.locator('#btn-replay').boundingBox();
@@ -48,12 +48,12 @@ async function downloaded(page,action){const [download]=await Promise.all([page.
  assert.equal((await page.evaluate(()=>ViewerTracker.__files.state())).high,10000,'session high survives chart crop');
  if(process.env.TIERSCOPE_FILE_SHOTS)await panel.screenshot({path:process.env.TIERSCOPE_FILE_SHOTS+'-menu.png'});
  await page.keyboard.press('Escape');
- await page.click('#btn-control-library');assert(await save.isEnabled());assert(await open.isVisible());
+ await page.click('#btn-control-library');await page.click('#tools-keep');await page.locator('[data-library-id] summary').click();assert(await save.isEnabled());assert(await open.isVisible());
  const exported=await downloaded(page,()=>save.click());
  assert(exported.name.endsWith('.tierscope.json'));const archive=JSON.parse(exported.bytes);assert.equal(archive.session.history.timestamps.length,121);
  assert(!(await menu.isVisible()));assert.deepEqual(await panel.boundingBox(),bounds,'direct Save does not move or grow the panel');
  assert.deepEqual(await page.evaluate(()=>ViewerTracker.__files.state()),before);
- const csv=await downloaded(page,()=>page.click('#tools-export-csv'));assert.equal(csv.bytes.toString().trim().split('\r\n').length,122);
+ const csv=await downloaded(page,()=>page.locator('[data-library-id]').getByRole('button',{name:'CSV',exact:true}).click());assert.equal(csv.bytes.toString().trim().split('\r\n').length,122);
  await options.click();await page.keyboard.press('Escape');assert(!(await menu.isVisible()));assert.equal(await page.evaluate(()=>document.activeElement.id),'btn-panel-options');
  await options.click();await page.mouse.click(20,20);assert(!(await menu.isVisible()));
  await page.click('#tools-close');
@@ -72,8 +72,9 @@ async function downloaded(page,action){const [download]=await Promise.all([page.
  assert.deepEqual(replayArchive,{...archive,session:{...archive.session,timestamp:replayArchive.session.timestamp}},'ordinary Replay Save downloads the full frozen session');
  assert.deepEqual(await page.evaluate(()=>ViewerTracker.__files.state()),replayBeforeSave,'Replay Save preserves position and live session');
  assert(await replayKeep.isVisible());assert(await replayKeep.isEnabled());
- await replayKeep.focus();await page.keyboard.press('Enter');assert.match(await message.textContent(),/kept in the library/);
- assert.deepEqual(await page.evaluate(()=>ViewerTracker.__files.library().entries[0].archive),replayArchive,'Keep stores the whole frozen replay, not only frames through the playhead');
+ await replayKeep.focus();await page.keyboard.press('Enter');assert.match(await message.textContent(),/already in the library/);
+ const keptReplay=await page.evaluate(()=>ViewerTracker.__files.library().entries[0].archive);
+ assert.deepEqual({...keptReplay,session:{...keptReplay.session,timestamp:replayArchive.session.timestamp}},replayArchive,'Keep retains the whole snapshot and its highs; export time alone does not make a new recording');
  await replayKeep.click();assert.match(await message.textContent(),/already in the library/);assert.equal(await page.evaluate(()=>ViewerTracker.__files.library().count),1);
  assert.deepEqual(await page.evaluate(()=>ViewerTracker.__files.state()),replayBeforeSave,'Keep does not move the playhead or change live data');
  if(process.env.TIERSCOPE_FILE_SHOTS)await panel.screenshot({path:process.env.TIERSCOPE_FILE_SHOTS+'-ordinary-replay.png'});
@@ -95,7 +96,7 @@ async function downloaded(page,action){const [download]=await Promise.all([page.
  await page.waitForTimeout(100);assert.match(dialogs.at(-1),/Could not open session file/);assert.equal((await page.evaluate(()=>ViewerTracker.__files.state())).room,'archived_room');
  await page.evaluate(()=>ViewerTracker.__files.scan());assert.equal((await page.evaluate(()=>ViewerTracker.__files.state())).history.length,122);assert.equal((await page.evaluate(()=>ViewerTracker.__files.state())).room,'archived_room');
  assert.equal(await roomLabel.textContent(),'Room: archived_room','live scans preserve the file source label');
- assert(await replaySave.isVisible());assert(await save.isVisible());assert(await replayOpen.isVisible());assert(!(await menu.isVisible()));
+ assert(await replaySave.isVisible());assert(await page.locator('#tools-keep').isVisible());assert(await replayOpen.isVisible());assert(!(await menu.isVisible()));
  const fileBeforeSave=await page.evaluate(()=>ViewerTracker.__files.state());
  const reexported=await downloaded(page,()=>replaySave.click());
  assert.deepEqual(JSON.parse(reexported.bytes),archive,'file Replay downloads its original full session, not current room data');
@@ -133,7 +134,7 @@ async function downloaded(page,action){const [download]=await Promise.all([page.
  if(process.env.TIERSCOPE_FILE_SHOTS)await panel.screenshot({path:process.env.TIERSCOPE_FILE_SHOTS+'-long-name.png'});
  await page.click('#playback-return');assert.equal((await page.evaluate(()=>ViewerTracker.__files.state())).imported,false);
  assert(!(await roomLabel.isVisible()),'file source disappears on return to live');
- assert(await replaySave.isHidden());assert(await save.isVisible());assert(await replayOpen.isVisible());
+ assert(await replaySave.isHidden());assert(await page.locator('#tools-keep').isVisible());assert(await replayOpen.isVisible());
  assert.match(await page.locator('#tools-current-kind').textContent(),/Current Live Session/);assert.equal(await page.locator('#tools-current-room').textContent(),'testroom');
  assert.equal((await page.evaluate(()=>ViewerTracker.__files.state())).paused,true);assert.match(await page.locator('#header-text').getAttribute('title'),/^Live room:/);
  await page.click('#btn-replay');await page.evaluate(()=>ViewerTracker.__files.pause());assert(!(await roomLabel.isVisible()));assert.equal(await roomLabel.textContent(),'','ordinary Replay clears the file source');
@@ -149,11 +150,11 @@ async function downloaded(page,action){const [download]=await Promise.all([page.
  assert.equal(await page.locator('#btn-panel-options').textContent(),'15m ▾');assert.equal((await page.evaluate(()=>ViewerTracker.__files.state())).imported,false,'reload restores only the room session');
  const priorRequests=requests;
  await page.goto('https://tierscope.test/followed-cams/');await page.addScriptTag({content:instrument(source)});await page.evaluate(()=>ViewerTracker.__files.init());
- await page.click('#btn-expand');await page.click('#btn-control-library');assert(await save.isDisabled(),'empty directory view has nothing to save');assert(await open.isEnabled());
+ await page.click('#btn-expand');await page.click('#btn-control-library');assert(await page.locator('#tools-keep').isDisabled(),'empty directory view has nothing to keep');assert(await open.isEnabled());
  const directoryPicker=page.waitForEvent('filechooser');await open.click();await(await directoryPicker).setFiles(file);await page.waitForFunction(()=>ViewerTracker.__files.state().imported);
  assert(await roomLabel.isVisible());assert.equal(await roomLabel.textContent(),'Room: archived_room');
  await page.click('#playback-next');await page.click('#playback-return');assert.equal(requests,priorRequests,'opening a file on a directory page causes no acquisition');
  assert.deepEqual(errors,[]);
- console.log('PASS Library live and Replay Save/Open controls; Keep in library with keyboard, full snapshots, deduplication, failure/retry and room/ATH isolation; full replay exports, empty-session availability, file replacement, long-name and action layout, source clearing on exit, chart windows, frozen Replay position and unchanged panel geometry');
+ console.log('PASS Library kept-session and Replay Save/Open controls; Keep in library with keyboard, full snapshots, deduplication, failure/retry and room/ATH isolation; full replay exports, empty-session availability, file replacement, long-name and action layout, source clearing on exit, chart windows, frozen Replay position and unchanged panel geometry');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1});

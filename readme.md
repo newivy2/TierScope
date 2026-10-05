@@ -16,8 +16,7 @@ If you used the beta, install from the official link above to follow main releas
 
 ---
 
-**Current stable release: 3.16.1** · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.16.1)
-
+**Current stable release: 3.17.0** · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.17.0)
 
 ---
 
@@ -25,9 +24,9 @@ Open the **Library** to unfold a matching left-hand page next to the chart. Save
 
 The **Session-High / All-Time-High** switch sits on the main header. Session highs (SH) and all-time highs (ATH) are tracked separately for each room. ATH survive session Reset and expiry; hover a high to see the exact value and its recorded time. Opening a saved file does not change these records: but you can use **Add to all-time highs** in Library to add that file's highs to its own room.
 
-![Library unfolding to the left of the TierScope panel](docs/previews/model-library-beta-dark.png)
+![Library unfolding to the left of the TierScope panel](docs/previews/library-live-controls-dark.png)
 
-[Bright-theme preview](docs/previews/model-library-beta-bright.png)
+[Bright-theme preview](docs/previews/library-live-controls-bright.png)
 
 ![TierScope in expanded, totals-focused, collapsed, and compact views](tierscope-hero.png)
 
@@ -51,11 +50,11 @@ Charts use periodic room-data samples. Session history is stored locally through
 
 - **Saved session files** — Save sessions and reopen them later. Use **Add to all-time highs** to include a saved file’s peaks in that room’s records.
 
-- **Session library** — Choose **Library → Keep in library** from live Controls or Replay. The Sessions tab starts with the current live session and a History shortcut. Recordings are organized into model folders. Keeping a fuller version of the same session updates its entry and preserves your custom name. Search, rename, replay, download or delete recordings; the library holds up to 500 recordings / 25 MB.
+- **Session library** — Choose **Library → Keep in library** from live Controls or Replay. The Sessions tab starts with Keep in Library, **Auto**, **Compare with previous** and **History** for the current live session. Model filters and the session list follow the storage counter; file/import/refresh controls are at the bottom. Recordings are organized into model folders. Keeping a fuller version of the same session updates its entry and preserves your custom name. Search, rename, replay, download or delete recordings; the library holds up to 500 recordings / 25 MB.
 
-- **Favorite models** — Star a model in the header or Library and confirm to keep their live sessions automatically. Existing favorites stay manual until confirmed. The same session updates as it grows; names and notes are preserved. Unstarring stops automatic keeping without deleting saved sessions.
+- **Favorite models** — Star a model in the header or Library and confirm to keep their live sessions automatically. The **Auto** checkbox also opens this confirmation and becomes checked and locked when enabled. Existing favorites stay manual until confirmed. The same session updates as it grows; names and notes are preserved. Unstarring stops automatic keeping without deleting saved sessions.
 
-- **Summaries and comparison** — See audience averages and peaks together, token-holder proportions, coverage and gaps. Choose several thresholds to see time at or above each count and its percentage of covered time. Statistics use real timestamps and exclude recording gaps. Compare up to six recordings from their first retained samples, optionally matching their shared duration, with line visibility controls, shared sample inspection and chart zoom. The latest recording is solid pink; older recordings use dashed lines.
+- **Summaries and comparison** — See audience averages and peaks together, token-holder proportions, coverage and gaps. Choose several thresholds to see time at or above each count and its percentage of covered time. Statistics use real timestamps and exclude recording gaps. Compare up to six recordings from their first retained samples, optionally matching their shared duration, with line visibility controls, shared sample inspection and chart zoom. From Current Live Session, **Compare with previous** captures the live session and selects up to five earlier saved sessions from the same model. The latest recording is solid pink; older recordings use dashed lines.
 
 - **Model history** — Review one model’s saved recordings over time, with one point per recording for the selected metric’s average and peak. View all recordings or the latest 10 or 30. Library offers a direct history shortcut for the model on the page; **Compare with previous** selects that recording and up to five earlier recordings from the same model.
 
@@ -63,7 +62,7 @@ Charts use periodic room-data samples. Session history is stored locally through
 
 - **Backups** — Export ATH for every room and saved preferences, optionally including the library. 
 
-- **Reports and exports** — Download a session file, CSV data, TXT summary, or animated GIF from Library. 
+- **Reports and exports** — Download a session file, CSV data, TXT summary, or animated GIF from a stored session’s **More…** menu or the separate replay card in Library.
 
 - **Flexible layout** — Choose compact or expanded views, collapse individual rows, resize and reposition the panel, and adjust its transparency. A moon–sun switch activate dark or bright theme.
 

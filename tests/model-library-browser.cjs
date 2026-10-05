@@ -8,7 +8,8 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
  restoreSessionState(normalizeStoredSession({timestamp:now,history:h,isPaused:true,pausedElapsedTime:180000}));isAutoRefreshOn=false;isMinimized=true;createPanel();toggleView();repaintLivePresentation();
  const archive=captureSessionFile();for(let i=0;i<3;i++)keepSessionInLibrary({...archive,room:'saved_model_'+i});
  },library:readSessionLibrary,favorite:readModelFavorite,automatic:automaticLibraryStatus,
- live:captureLiveSessionFile, keep:keepFavoriteSession,save:()=>saveSession(getModelName(),true),
+ live:captureLiveSessionFile, state:()=>({history:JSON.stringify(history),mode:presentationMode,room:playback&&playback.archive.room,position:playback&&playback.positionMs}),
+ older(){const a=captureLiveSessionFile(),ids=[];for(let i=1;i<=7;i++){const old=JSON.parse(JSON.stringify(a)),d=i*86400000,s=old.session;s.timestamp-=d;s.sessionStartedAt=(s.sessionStartedAt??s.history.timestamps[0])-d;s.history.timestamps=s.history.timestamps.map(t=>t-d);if(s.roomTotalHighTime!==null)s.roomTotalHighTime-=d;Object.values(s.sessionHighs).forEach(h=>{if(h.time!=null)h.time-=d;});ids.push(keepSessionInLibrary(old).id);}return ids;}, keep:keepFavoriteSession,save:()=>saveSession(getModelName(),true),
  replay(){openSessionReplay({...captureLiveSessionFile(),room:'replay_model'});},
  sample(){users=new Map([['viewer',{tier:'red',gender:'male'}]]);saveToHistory();saveSession(getModelName(),true);updateDisplay();}},downloadTrackingReport: downloadTrackingReport,`);
 (async()=>{
@@ -33,14 +34,17 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
  assert.equal(await page.locator('#tools-title').textContent(),'Library');assert.equal(await page.locator('.tools-subtitle').textContent(),'Session Storage and Analysis');
  assert.deepEqual(await page.locator('[data-tools-tab]').allTextContents(),['Sessions','Summary','Compare','Backup']);
  assert.equal(await page.locator('#tools-content > :first-child #tools-current-kind').textContent(),'Current Live Session');
- const save=await page.locator('#tools-save-session').boundingBox(),history=await page.locator('#tools-room-history').boundingBox();
- assert(history.x>save.x&&Math.abs(history.y-save.y)<2,'History sits to the right of Save file');
- assert(await page.locator('#tools-enable-automatic').isVisible());assert.equal(await page.locator('#tools-current-favorite').textContent(),'★');
- page.once('dialog',async d=>{assert.match(d.message(),/automatically keep their live sessions\?/);await d.dismiss();});await page.click('#tools-enable-automatic');
+ const compare=await page.locator('#tools-compare-previous').boundingBox(),history=await page.locator('#tools-room-history').boundingBox();
+ assert(history.x>compare.x&&Math.abs(history.y-compare.y)<2,'History follows Compare with previous');
+ assert.equal(await page.locator('#tools-current-card').getByRole('button').allTextContents().then(names=>names.filter(n=>['Save file','TXT','CSV','GIF','Add to ATH'].includes(n))).then(names=>names.length),0);
+ assert(await page.locator('#tools-auto-keep').isEnabled());assert(!(await page.locator('#tools-auto-keep').isChecked()));
+ assert(await page.locator('#tools-compare-previous').isDisabled());assert.equal(await page.locator('#tools-current-favorite').textContent(),'★');
+ page.once('dialog',async d=>{assert.match(d.message(),/automatically keep their live sessions\?/);await d.dismiss();});await page.click('#tools-auto-keep');
  assert.equal(await page.evaluate(()=>ViewerTracker.__models.favorite('live_model').autoKeep),false);
- page.once('dialog',d=>d.accept());await page.click('#tools-enable-automatic');
+ page.once('dialog',d=>d.accept());await page.click('#tools-auto-keep');
  assert.equal(await page.evaluate(()=>ViewerTracker.__models.favorite('live_model').autoKeep),true);
- assert.equal(await page.locator('#tools-room-history').textContent(),'History · 1');assert(await page.locator('#tools-enable-automatic').isHidden());
+ assert.equal(await page.locator('#tools-room-history').textContent(),'History · 1');assert(await page.locator('#tools-auto-keep').isChecked());assert(await page.locator('#tools-auto-keep').isDisabled());
+ assert(await page.locator('#tools-compare-previous').isDisabled(),'the saved copy of the current session is not previous');
  await page.locator('#tools-library-search').scrollIntoViewIfNeeded();
  const controls=await page.evaluate(()=>{
   const box=id=>{const r=document.getElementById(id).getBoundingClientRect();return {x:r.x,y:r.y,right:r.right};};
@@ -48,8 +52,8 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
  });
  assert.equal(controls.model.y,controls.sort.y);assert.equal(controls.from.y,controls.to.y);assert(!controls.overflow);
  assert.match(await page.locator('#tools-library-favorites').locator('..').textContent(),/^Favorites only$/);
- await page.locator('#tools-content').evaluate(e=>e.scrollTop=0);await page.screenshot({path:'/tmp/tierscope-316-'+engine+'-dark.png'});
- await page.uncheck('#dark-mode-toggle');await page.waitForTimeout(100);await page.screenshot({path:'/tmp/tierscope-316-'+engine+'-bright.png'});await page.check('#dark-mode-toggle');
+ await page.locator('#tools-content').evaluate(e=>e.scrollTop=0);await page.screenshot({path:'/tmp/tierscope-317-'+engine+'-dark.png'});
+ await page.uncheck('#dark-mode-toggle');await page.waitForTimeout(100);await page.screenshot({path:'/tmp/tierscope-317-'+engine+'-bright.png'});await page.check('#dark-mode-toggle');
  // Header consent on a new model; cancel must leave its state and the Library intact.
  await page.evaluate(()=>ViewerTracker.__models.replay());
  assert.equal(await page.locator('#header-text').textContent(),'replay_model');
@@ -58,7 +62,8 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
  page.once('dialog',d=>d.accept());await page.click('#btn-model-favorite');assert.equal(await page.locator('#btn-model-favorite').textContent(),'★');
  assert.equal(await page.evaluate(()=>ViewerTracker.__models.library().entries.filter(e=>e.archive.room==='replay_model').length),0,'starring replay model never imports its snapshot');
  const download=page.waitForEvent('download');await page.click('#tools-save-session-replay');assert.equal(JSON.parse(fs.readFileSync(await(await download).path(),'utf8')).room,'replay_model');
- const liveDownload=page.waitForEvent('download');await page.click('#tools-save-session');assert.equal(JSON.parse(fs.readFileSync(await(await liveDownload).path(),'utf8')).room,'live_model');
+ await page.click('#tools-keep');await page.locator('[data-library-id] summary').click();
+ const liveDownload=page.waitForEvent('download');await page.locator('[data-library-id]').getByRole('button',{name:'Save file',exact:true}).click();assert.equal(JSON.parse(fs.readFileSync(await(await liveDownload).path(),'utf8')).room,'live_model');
  await page.click('#playback-return');
  await page.evaluate(()=>{window.originalSet=GM_setValue;window.GM_setValue=(k,v)=>{if(k.startsWith('tierscope:library:v1:'))throw Error('Storage blocked');return originalSet(k,v);};ViewerTracker.__models.sample();});
  assert.match(await page.locator('[data-card-auto]').first().textContent(),/pending.*Storage blocked/);
@@ -68,18 +73,37 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
  const kept=await page.evaluate(()=>JSON.stringify(ViewerTracker.__models.library().entries.find(e=>e.archive.room==='live_model').archive));
  await page.evaluate(()=>ViewerTracker.__models.sample());assert.equal(await page.evaluate(()=>JSON.stringify(ViewerTracker.__models.library().entries.find(e=>e.archive.room==='live_model').archive)),kept);await other.close();
  await page.click('#tools-refresh-library');assert.equal(await page.locator('#tools-current-favorite').textContent(),'☆');
+ assert(await page.locator('#tools-auto-keep').isEnabled());assert(!(await page.locator('#tools-auto-keep').isChecked()));
+ page.once('dialog',async d=>{assert.match(d.message(),/Favorite live_model/);await d.dismiss();});await page.locator('#tools-auto-keep').focus();await page.keyboard.press('Space');
+ assert.equal(await page.evaluate(()=>ViewerTracker.__models.favorite('live_model').favorite),false);assert(!(await page.locator('#tools-auto-keep').isChecked()));
  // A draft in a growing session follows the verified replacement, even if its card remains open.
- page.once('dialog',d=>d.accept());await page.click('#tools-current-favorite');
+ page.once('dialog',d=>d.accept());await page.locator('#tools-auto-keep').focus();await page.keyboard.press('Space');
  await page.selectOption('#tools-library-model','live_model');const session=page.locator('[data-library-id]');
  await session.locator('summary').click();await session.locator('textarea').fill('Draft while this session grows');
  await page.evaluate(()=>ViewerTracker.__models.sample());
  await session.getByRole('button',{name:'Save notes',exact:true}).click();
  assert.equal(await page.evaluate(()=>ViewerTracker.__models.library().entries.find(e=>e.archive.room==='live_model').notes),'Draft while this session grows');
  assert(await page.locator('#tools-review-notes').isHidden());
+ const priorIds=await page.evaluate(()=>ViewerTracker.__models.older());
+ await page.evaluate(()=>ViewerTracker.__models.replay());await page.click('#tools-refresh-library');
+ const beforeCompare=await page.evaluate(()=>ViewerTracker.__models.state()),storedBefore=await page.evaluate(()=>JSON.stringify(ViewerTracker.__models.library().entries));
+ await page.locator('#tools-compare-previous').focus();await page.keyboard.press('Enter');
+ assert.equal(await page.locator('[data-tools-tab=compare]').getAttribute('aria-pressed'),'true');
+ assert.equal(await page.locator('#tools-recording-picker').getAttribute('open'),null);
+ assert.deepEqual(await page.locator('[id^=tools-source-]').evaluateAll(els=>els.map(e=>e.value)),['live',...priorIds.slice(0,5)]);
+ assert.equal(await page.locator('#tools-analysis-chart').count(),1);
+ assert.deepEqual(await page.evaluate(()=>ViewerTracker.__models.state()),beforeCompare);
+ assert.equal(await page.evaluate(()=>JSON.stringify(ViewerTracker.__models.library().entries)),storedBefore);
+ const tableBefore=await page.locator('#tools-summary-table').textContent();
+ await page.evaluate(()=>ViewerTracker.__models.sample());assert.equal(await page.locator('#tools-summary-table').textContent(),tableBefore,'live comparison keeps its snapshot when another sample arrives');
+ await page.click('#playback-return');assert.equal(await page.locator('#tools-summary-table').textContent(),tableBefore,'closing replay cannot replace the live comparison');
+ await page.click('[data-tools-tab=library]');
+ const layout=await page.evaluate(()=>{const c=document.getElementById('tools-content');const ids=Array.from(c.children).map(e=>e.id||e.className);return {storage:ids.indexOf('tools-library-storage'),filters:ids.indexOf('tools-filters'),list:ids.indexOf('tools-library-list'),actions:ids.indexOf('tools-library-management'),last:c.lastElementChild.id};});
+ assert.equal(layout.filters,layout.storage+1);assert(layout.actions>layout.list);assert.equal(layout.last,'tools-library-management');
  await page.setViewportSize({width:640,height:700});await page.waitForTimeout(200);
  assert(await page.evaluate(()=>{const r=document.getElementById('tracker-container').getBoundingClientRect();return document.getElementById('tracker-container').contains(document.elementFromPoint(r.x+10,r.y+10));}));
  assert.equal(await page.locator('#tools-content').evaluate(e=>e.scrollWidth<=e.clientWidth),true);
- await page.screenshot({path:'/tmp/tierscope-316-'+engine+'-narrow.png'});
- assert.deepEqual(errors,[]);console.log('PASS model Library, opt-in consent, automatic updates/retry, live/replay isolation, new Room Total row, themes and filter layout');
+ await page.screenshot({path:'/tmp/tierscope-317-'+engine+'-narrow.png'});
+ assert.deepEqual(errors,[]);console.log('PASS simplified live card, locked favorite consent checkbox, frozen six-session live comparison, footer file controls, automatic updates/retry, drafts, themes and isolation');
  } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

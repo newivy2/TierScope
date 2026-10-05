@@ -40,8 +40,10 @@ async function download(page,action){const [d]=await Promise.all([page.waitForEv
  const gif=await download(page,()=>row.getByRole('button',{name:'GIF',exact:true}).click());assert(gif.name.startsWith('another_model-'));assert.equal(new GifReader(gif.bytes).numFrames(),4);
  assert.deepEqual(await page.evaluate(()=>ViewerTracker.__book.state()),live,'stored exports do not open replay or change live data');
  // A current GIF captures the whole current session without starting replay.
- const liveGif=await download(page,()=>page.click('#btn-export-gif'));assert(liveGif.name.startsWith('testroom-'));
+ await page.click('#tools-keep');await page.locator('[data-library-id] summary').click();
+ const liveGif=await download(page,()=>page.locator('[data-library-id]').getByRole('button',{name:'GIF',exact:true}).click());assert(liveGif.name.startsWith('testroom-'));
  assert.deepEqual(await page.evaluate(()=>ViewerTracker.__book.state()),live);
+ await page.selectOption('#tools-library-model','another_model');
  // A slow file read must not replace a recording selected afterward.
  await page.evaluate(()=>{const read=File.prototype.text;window.restoreRead=()=>{File.prototype.text=read;};File.prototype.text=function(){return read.call(this).then(text=>new Promise(resolve=>{window.finishRead=()=>resolve(text);}));};});
  const picker=page.waitForEvent('filechooser');await page.click('#tools-open-session');
@@ -57,7 +59,7 @@ async function download(page,action){const [d]=await Promise.all([page.waitForEv
  await page.click('#playback-return');assert.equal(await page.locator('#tools-current-room').textContent(),'testroom');
  await page.click('#tools-close');assert.deepEqual(await panel.boundingBox(),bounds);assert.equal(await page.locator('#btn-control-library').getAttribute('aria-expanded'),'false');
  let cancelledDownloads=0;const countDownload=()=>cancelledDownloads++;page.on('download',countDownload);
- await page.click('#btn-control-library');await page.evaluate(()=>{document.getElementById('btn-export-gif').click();document.getElementById('tools-close').click();});await page.waitForTimeout(200);assert.equal(cancelledDownloads,0,'closing the library cancels an in-progress export');page.off('download',countDownload);
+ await page.click('#btn-control-library');await page.click('#tools-keep');await page.locator('[data-library-id] summary').click();await page.locator('[data-library-id]').getByRole('button',{name:'GIF',exact:true}).evaluate(e=>{e.click();document.getElementById('tools-close').click();});await page.waitForTimeout(200);assert.equal(cancelledDownloads,0,'closing the library cancels an in-progress export');page.off('download',countDownload);
  // Borrow room only while open; never save that temporary shift.
  await panel.evaluate(e=>{e.style.left='30px';e.style.top='80px';e.style.right='auto';});
  const left=await panel.boundingBox(),geometry=await page.evaluate(()=>GM_getValue('tierscope:ui:geometry:v1',null));

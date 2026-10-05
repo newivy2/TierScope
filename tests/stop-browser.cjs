@@ -54,9 +54,10 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   await page.evaluate(()=>ViewerTracker.__stop.tick());await page.evaluate(()=>ViewerTracker.__stop.scan());await page.evaluate(()=>ViewerTracker.__stop.draw());
   assert.equal(requests,n);assert.deepEqual(await page.evaluate(()=>ViewerTracker.__stop.state()),stopped);
   assert.equal(await page.locator('#spark-light-blue').evaluate(c=>c.toDataURL()),frozen,'stopped chart keeps exactly the same pixels');
-  await page.click('#btn-replay');await page.evaluate(()=>ViewerTracker.__stop.pauseReplay());await page.click('#btn-playback-library');assert(await page.locator('#btn-export-gif').isVisible());await page.click('#playback-return');
+  await page.click('#btn-replay');await page.evaluate(()=>ViewerTracker.__stop.pauseReplay());await page.click('#btn-playback-library');assert(await page.locator('#btn-export-gif-replay').isVisible());await page.click('#playback-return');
   assert.match(await page.locator('#header-text').getAttribute('title'),/^Stopped session:/);
-  const downloadPromise=page.waitForEvent('download');await page.click('#tools-export-csv');const download=await downloadPromise;assert(download.suggestedFilename().endsWith('.csv'));
+  await page.click('#tools-keep');await page.locator('[data-library-id] summary').click();
+  const downloadPromise=page.waitForEvent('download');await page.locator('[data-library-id]').first().getByRole('button',{name:'CSV',exact:true}).click();const download=await downloadPromise;assert(download.suggestedFilename().endsWith('.csv'));
   await page.reload();await page.addScriptTag({content:instrument(source)});await page.evaluate(()=>ViewerTracker.__stop.init());
   assert.equal(requests,n);assert((await page.evaluate(()=>ViewerTracker.__stop.state())).stopped);
   await page.getByRole('button',{name:'Start a new session'}).click();
@@ -79,7 +80,7 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   assert.deepEqual(await panel.boundingBox(),beforeAbsencePause,'automatic pause adds no panel height');
   if(process.env.TIERSCOPE_STOP_SHOT)await panel.screenshot({path:process.env.TIERSCOPE_STOP_SHOT});
   // Return checks must continue behind FILE REPLAY without changing its frame.
-  await page.click('#btn-control-library');const exported=page.waitForEvent('download');await page.click('#tools-save-session');
+  await page.click('#btn-control-library');await page.click('#tools-keep');await page.locator('[data-library-id]').first().locator('summary').click();const exported=page.waitForEvent('download');await page.locator('[data-library-id]').first().getByRole('button',{name:'Save file',exact:true}).click();
   const archive=JSON.parse(fs.readFileSync(await(await exported).path(),'utf8'));archive.room='different_archive';
   await page.locator('#session-file-input').setInputFiles({name:'absence.tierscope.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(archive))});
   await page.waitForFunction(()=>document.getElementById('playback-room').textContent==='Room: different_archive');
