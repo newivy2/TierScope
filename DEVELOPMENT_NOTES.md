@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **3.17.0**. The simplified Current Live Session card provides Keep in Library, Auto, Compare with previous, and History. File controls are below the session list, and exports remain on stored-session menus and the separate replay card. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation instructions, see the [README](readme.md).
+Detailed reference for **3.18.0**. The simplified Current Live Session card provides Keep in Library, Auto, Compare with previous, and History. File controls are below the session list, and exports remain on stored-session menus and the separate replay card. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation instructions, see the [README](readme.md).
 
 ## Contents
 
@@ -269,7 +269,7 @@ The library opens with **model folders** ordered by their first matching recordi
 
 While Library is open, unchanged recordings are validated once and reused across its tabs. **Refresh**, switching tabs and reopening still check stored values, so additions, changes and deletions from another tab are visible. An unreadable record never falls back to its cached copy. Closing Library discards the cache; reopening performs a fresh read. This does not change library capacity, automatic retention, or file contents.
 
-### Storage limits — 3.18.0 beta
+### Storage limits — 3.18.0
 
 In **Library → Sessions**, open **Storage limits** below the usage counter. Set a whole-number session limit (1–10,000) and storage allowance (1–250 MB), then **Save limits**. **Use defaults** fills 1,000 sessions / 50 MB; Save applies those defaults. Values use 1 MB = 1,048,576 bytes, as the existing counter does. Limits are shared by all models in this browser, read fresh before writes, and verified after saving. Existing installations receive the higher defaults without rewriting recordings. Actual browser/userscript storage can still reject a write earlier.
 
@@ -512,7 +512,7 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
-| **3.18.0-beta.1** | Default to 1,000 sessions / 50 MB, add local configurable storage limits and capacity notices, preserve prior recordings on failed updates, and support backups/imports through 300 MB / 10,000 sessions with capacity preflight. |
+| **3.18.0** | Default to 1,000 sessions / 50 MB, add local configurable storage limits and capacity notices, preserve prior recordings on failed updates, and support backups/imports through 300 MB / 10,000 sessions with capacity preflight. |
 | **3.17.0** | Simplify Current Live Session to Keep in Library, Auto, Compare with previous and History. Keep exports on individual sessions, move file/import/refresh controls below the list, and compare a fixed live snapshot with up to five earlier sessions without including saved copies of the current start. Auto reflects confirmed favorites and locks when enabled. |
 | **3.16.1** | Use yellow for With Tokens and pink for Room Total, including charts, counts and collapsed-row borders. Match the compact chart colors and use theme-adjusted shades in bright mode. |
 | **3.16.0** | Release the model-focused Library, confirmed automatic keeping for favorites, separate live/replay cards, and streamlined Sessions controls. Add the yellow Room Total row below Anons; default Female/Trans to collapsed while preserving saved layouts. Enlarge the model header and adjacent star and the footer version. Preserve compatible session updates, notes, storage failure recovery and explicit replay imports. |

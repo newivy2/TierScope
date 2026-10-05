@@ -134,7 +134,7 @@ The comparison benchmark additionally measures hiding/showing a line and applyin
 `model-history.test.cjs` covers selection of up to five earlier sessions by session start, same-session exclusion after history rollover, room isolation, legacy start fallback and stable date ties. `model-library-browser.cjs` checks checkbox consent/cancellation with mouse and keyboard, locked confirmed favorites, cross-tab changes, pending saves, six-session comparison while a different model is replayed, fixed live snapshots through acquisition and replay closure, storage/list/footer order and both themes. Existing browser download fixtures now use the kept session’s More… actions or the replay card.
 
 
-## Configurable capacity — 3.18.0-beta.1
+## Configurable capacity — 3.18.0
 
 `library-capacity.test.cjs` covers existing-install defaults, local settings, cross-tab rereads, validation, corrupt/inaccessible preferences, failed/dropped/after-write/foreign settings writes, lowered allowances without eviction, automatic retry, old-copy byte headroom, capacity changes during writes, exports above local limits, restore/import preflight and the 80% warning boundaries. Existing Library tests now exercise 1,000-session capacity, competing additions, full-count updates and backup round trips. Cache bounds remain separately tested at 500 records / 25 MiB.
 

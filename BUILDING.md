@@ -129,7 +129,7 @@ An internal `lineage` ID is generated for a Library record and retained only thr
 The live card’s Auto checkbox reflects `readModelFavorite` and uses the same confirmation operation as the star; it does not introduce an independent setting. Active automatic keeping locks the checkbox, while unstarring remains the operation that stops keeping. Comparison stores a separate captured live archive within the open Library, so playback changes and new scans cannot replace its source. `previousModelSessionIds` is a pure, typed model-history selector using session starts (or the first retained timestamp for legacy records), excluding copies of the current start and selecting at most five earlier recordings. Explicit Refresh live snapshot replaces only that temporary analysis source. The normal current/replayed source remains available independently. File/import/refresh controls follow the paginated list; exports remain in stored-record and replay actions.
 
 
-## Configurable Library capacity — 3.18.0-beta.1
+## Configurable Library capacity — 3.18.0
 
 `library-capacity-data.js` owns validated defaults/ranges, transfer bounds and capacity notices; it is type checked. `library-capacity.js` owns the single `tierscope:library-limits:v1` preference. `library-capacity-view.js` receives usage/limits as data and invokes a save callback; it never reads storage or live state. Dependency guards include all three modules.
 

@@ -16,9 +16,7 @@ If you used the beta, install from the official link above to follow main releas
 
 ---
 
-**Current stable release: 3.17.0** · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.17.0)
-
-**Beta preview: 3.18.0-beta.1** — 1,000 sessions / 50 MB by default, with configurable Library storage limits. [Install the beta](https://raw.githubusercontent.com/newivy2/TierScope/beta/library-capacity/tierscope.user.js) · [Details and screenshots](docs/library-capacity-beta.md). Main remains 3.17.0.
+**Current stable release: 3.18.0** · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.18.0)
 
 ---
 
@@ -52,7 +50,7 @@ Charts use periodic room-data samples. Session history is stored locally through
 
 - **Saved session files** — Save sessions and reopen them later. Use **Add to all-time highs** to include a saved file’s peaks in that room’s records.
 
-- **Session library** — Choose **Library → Keep in library** from live Controls or Replay. The Sessions tab starts with Keep in Library, **Auto**, **Compare with previous** and **History** for the current live session. Model filters and the session list follow the storage counter; file/import/refresh controls are at the bottom. Recordings are organized into model folders. Keeping a fuller version of the same session updates its entry and preserves your custom name. Search, rename, replay, download or delete recordings; the beta defaults to 1,000 sessions / 50 MB. **Storage limits** below the usage counter lets you choose 1–10,000 sessions and 1–250 MB. A warning appears at 80% of either limit, and sessions are never automatically removed.
+- **Session library** — Choose **Library → Keep in library** from live Controls or Replay. The Sessions tab starts with Keep in Library, **Auto**, **Compare with previous** and **History** for the current live session. Model filters and the session list follow the storage counter; file/import/refresh controls are at the bottom. Recordings are organized into model folders. Keeping a fuller version of the same session updates its entry and preserves your custom name. Search, rename, replay, download or delete recordings; the library defaults to 1,000 sessions / 50 MB. **Storage limits** below the usage counter lets you choose 1–10,000 sessions and 1–250 MB. A warning appears at 80% of either limit, and sessions are never automatically removed.
 
 - **Favorite models** — Star a model in the header or Library and confirm to keep their live sessions automatically. The **Auto** checkbox also opens this confirmation and becomes checked and locked when enabled. Existing favorites stay manual until confirmed. The same session updates as it grows; names and notes are preserved. Unstarring stops automatic keeping without deleting saved sessions.
 

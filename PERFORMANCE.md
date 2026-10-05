@@ -176,6 +176,8 @@ Reproduce with `TIERSCOPE_BENCH_AUTOMATIC=1 TIERSCOPE_BENCH_ROUNDS=3 npm run tes
 
 ## Configurable capacity — 3.18.0-beta.1
 
+Stable 3.18.0 preserves the measured beta implementation; the displayed version and release documentation change.
+
 The capacity fixture uses **1,000 sessions × 750 samples**, about **39.8 MiB** of stored JSON, across 100 models. This reaches the new default session-count limit and exceeds the former 25-MiB Library and 32-MiB transfer bounds. Three fresh-page Chromium runs per CPU setting used the final beta script with no other browser/test jobs running. Values are median milliseconds. [Raw results and userscript hash](docs/benchmarks/library-capacity-3.18.0-beta.1.json).
 
 | Action | Normal CPU | 4× CPU slowdown |

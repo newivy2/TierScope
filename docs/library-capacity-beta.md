@@ -1,6 +1,6 @@
-# Configurable Library storage — 3.18.0-beta.1
+# Configurable Library storage — 3.18.0
 
-[Install the beta](https://raw.githubusercontent.com/newivy2/TierScope/beta/library-capacity/tierscope.user.js). Keep one enabled copy of TierScope and refresh room tabs after updating. Main remains 3.17.0.
+[Install 3.18.0](https://raw.githubusercontent.com/newivy2/TierScope/main/tierscope.user.js) · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.18.0). Keep one enabled copy of TierScope and refresh room tabs after updating.
 
 The Library now defaults to **1,000 sessions / 50 MB**. Existing recordings stay where they are.
 
@@ -18,4 +18,4 @@ Larger libraries can take longer to open and back up. [Performance measurements]
 
 [Bright-theme preview](previews/library-capacity-bright.png)
 
-To review: change both limits, close and reopen Library, and check that they persist. Try Use defaults followed by Save limits. Lower the session count below your stored count: recordings should remain accessible and new saves should report that the Library is full. Raise it again and use Retry keeping if Auto has a pending save.
+To check your settings, change both limits, close and reopen Library, and check that they persist. Try Use defaults followed by Save limits. Lower the session count below your stored count: recordings should remain accessible and new saves should report that the Library is full. Raise it again and use Retry keeping if Auto has a pending save.
