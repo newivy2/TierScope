@@ -28,7 +28,7 @@ import { getStorageKey } from './record-validation.js';
 import { downloadRecording } from './recording-exports.js';
 import { downloadTrackingReport } from './reports.js';
 import { runtime } from './runtime.js';
-import { ANALYSIS_METRICS, analysisSeries, compareRecordingSet, parseAnalysisThresholds, summarizeAudience, summarizeSession, summarizeThresholds } from './session-analysis.js';
+import { ANALYSIS_METRICS, analysisSeries, averageAnalysisThresholds, compareRecordingSet, parseAnalysisThresholds, summarizeAudience, summarizeSession, summarizeThresholds } from './session-analysis.js';
 import { captureSessionFile, captureLiveSessionFile } from './session-capture.js';
 import { validateSessionFile } from './session-file-format.js';
 import { getSessionSaveState } from './session-health.js';
@@ -81,11 +81,14 @@ export function openSessionTools(focusTarget) {
     let historyLimit = Infinity, historySelected = '';
     let optionsLibrary = null, optionsArchive = null, optionsLiveArchive = null, options = [];
     const savedAnalysis = readAnalysisPreferences();
-    let {metric, threshold, sharedLength, summaryThresholds} = savedAnalysis.preferences;
+    let {metric, threshold, sharedLength} = savedAnalysis.preferences;
+    let summaryThresholds = [], summaryThresholdSource = null;
     let selectedA = 'current', selectedB = '', selectedExtra = [], pendingBackup = null;
     const libraryFilters = {room: '', query: '', from: '', to: '', sort: 'newest', favorites: false}, librarySelection = new Set();
+    const libraryDisclosures = {book: false, search: false};
     const analysisFilters = {room: '', query: '', from: '', to: ''};
-    let filteredSources = null, chartDispose = null, pickerOpen = true;
+    let filteredSources = null, chartDispose = null;
+    const pickerOpen = {summary: false, compare: true};
     let analysisView = null, analysisOutput = null, analysisSources = null;
     const analysisStates = new Map();
     let libraryRoom = null, chartDraw = null, analysisPreferenceError = savedAnalysis.error;
@@ -98,7 +101,7 @@ export function openSessionTools(focusTarget) {
     function tell(text, error = false) { message.textContent = text; message.style.color = error ? 'var(--panel-negative)' : 'var(--panel-positive)'; }
     function rememberAnalysis(patch) {
         const result = rememberAnalysisPreferences(patch);
-        ({metric, threshold, sharedLength, summaryThresholds} = result.preferences);
+        ({metric, threshold, sharedLength} = result.preferences);
         analysisPreferenceError = result.error;
     }
     function downloadUnreadableRecords() {
@@ -326,7 +329,7 @@ export function openSessionTools(focusTarget) {
         currentButton(actions, 'Keep in Library', archive => {
             const result = keepSessionInLibrary(archive); libraryRoom = archive.room.toLowerCase();
             Object.assign(libraryFilters, {room: libraryRoom, query: '', from: '', to: '', favorites: false});
-            render('library'); tell(result.added ? 'Session kept in the library.' : result.updated ? 'Library session updated; its name and notes were preserved.' : 'An equal or fuller session is already in the library.');
+            render('library', true); tell(result.added ? 'Session kept in the library.' : result.updated ? 'Library session updated; its name and notes were preserved.' : 'An equal or fuller session is already in the library.');
         }, 'tools-keep').className = 'tools-primary';
         if (replay) currentButton(actions, 'Save file', archive => downloadDataFile(archive, archiveName(archive)), 'tools-save-session');
         else {
@@ -366,7 +369,7 @@ export function openSessionTools(focusTarget) {
         liveComparisonArchive = snapshot;
         selectedA = 'live'; selectedB = ids[0]; selectedExtra = ids.slice(1);
         Object.assign(analysisFilters, {room: snapshot.room.toLowerCase(), query: '', from: '', to: ''});
-        pickerOpen = false; render('compare');
+        pickerOpen.compare = false; render('compare');
         (dialog.querySelector('#tools-analysis-chart') || dialog.querySelector('#tools-recording-picker > summary'))?.focus();
     }
     function openHistory(room) {
@@ -406,7 +409,7 @@ export function openSessionTools(focusTarget) {
             rename: entry => { const title = window.prompt('Recording title (up to 80 characters):', entry.title); if (title !== null) { renameLibrarySession(entry.id, title); render('library'); } },
             delete: entry => { if (confirm('Delete this library recording: ' + (entry.title || entry.archive.room) + '?\n\nLive tracking, ATH and downloaded files are unchanged.')) { removeLibrarySession(entry.id); render('library'); tell('Library recording deleted.'); } }
         };
-        renderLibraryBrowser(content, state.entries, libraryFilters, librarySelection, Object.fromEntries(Object.entries(callbacks).map(([key, fn]) => [key, action(fn)])));
+        renderLibraryBrowser(content, state.entries, libraryFilters, librarySelection, Object.fromEntries(Object.entries(callbacks).map(([key, fn]) => [key, action(fn)])), libraryDisclosures);
         if (state.damaged.length) {
             node(content, 'p', state.damaged.length + ' unreadable library record(s) were retained.', 'tools-muted');
             if (state.unavailable.length) node(content, 'p', 'Some records could not be read. The displayed storage size excludes them; saving new recordings waits until they can be read.', 'tools-muted');
@@ -427,16 +430,17 @@ export function openSessionTools(focusTarget) {
             const rooms = new Set(bundle.library.map(entry => entry.archive.room.toLowerCase()));
             libraryRoom = rooms.size === 1 ? [...rooms][0] : '*';
             Object.assign(libraryFilters, {room: libraryRoom, query: '', from: '', to: '', favorites: false});
-            render('library'); tell('Imported: ' + result.recordings + ' new, ' + result.updatedRecordings + ' updated, ' + result.favoriteModels + ' favorite models added; existing recordings and model choices were preserved.');
+            render('library', true); tell('Imported: ' + result.recordings + ' new, ' + result.updatedRecordings + ' updated, ' + result.favoriteModels + ' favorite models added; existing recordings and model choices were preserved.');
         }, true), 'tools-import-session').title = 'Import session files or Library bundles. Imported favorites need confirmation before automatic keeping.';
         button(actions, 'Refresh', () => render('library'), 'tools-refresh-library').title = 'Refresh list from this browser';
     }
     function analysisControls(comparing) {
         if (!library) readLibrary();
         if (!sourceOptions().length) { node(content, 'p', 'Record a session or import one into the library to see analysis.'); return null; }
-        const picker = node(content, 'details'); picker.id = 'tools-recording-picker'; picker.open = pickerOpen;
+        const pickerTab = comparing ? 'compare' : 'summary';
+        const picker = node(content, 'details'); picker.id = 'tools-recording-picker'; picker.open = pickerOpen[pickerTab];
         node(picker, 'summary', 'Choose recordings & filters');
-        picker.ontoggle = () => { if (picker.isConnected) pickerOpen = picker.open; };
+        picker.ontoggle = () => { if (picker.isConnected) pickerOpen[pickerTab] = picker.open; };
         recordingFilters(picker, sourceOptions(), analysisFilters, 'tools-analysis', () => render(tab));
         try { filteredSources = filterLibraryEntries(sourceOptions(), analysisFilters); }
         catch (error) { filteredSources = []; tell(error.message, true); }
@@ -467,8 +471,8 @@ export function openSessionTools(focusTarget) {
         if (comparing) {
             input.type = 'number'; input.min = '0'; input.max = '9007199254740991'; input.step = '1'; input.value = threshold;
         } else {
-            input.type = 'text'; input.maxLength = 160; input.value = summaryThresholds.join(', '); input.placeholder = '25, 50, 100';
-            input.title = 'Up to 8 counts separated by commas. Applies to the selected metric.';
+            input.type = 'text'; input.maxLength = 160; input.value = summaryThresholds.join(', '); input.placeholder = 'Not enough covered time';
+            input.title = 'Defaults: session average −25%, average, +25%, rounded to whole viewers. Or enter up to 8 counts separated by commas for this session and metric.';
         }
         input.oninput = () => input.setCustomValidity('');
         function applyThreshold() {
@@ -476,13 +480,14 @@ export function openSessionTools(focusTarget) {
                 if (comparing) {
                     if (!Number.isSafeInteger(input.valueAsNumber) || input.valueAsNumber < 0) throw new Error('Enter a non-negative whole number.');
                     rememberAnalysis({threshold: input.valueAsNumber});
-                } else rememberAnalysis({summaryThresholds: parseAnalysisThresholds(input.value)});
+                } else summaryThresholds = parseAnalysisThresholds(input.value);
             } catch (error) { input.setCustomValidity(error.message); input.reportValidity(); return; }
             input.setCustomValidity('');
             refreshAnalysis(false);
         }
         input.onkeydown = event => { if (event.key === 'Enter') { event.preventDefault(); applyThreshold(); } };
         button(controls, comparing ? 'Apply threshold' : 'Apply thresholds', applyThreshold, 'tools-apply-threshold');
+        if (!comparing) button(controls, 'Use average', () => { summaryThresholdSource = null; refreshAnalysis(false); }, 'tools-average-thresholds').title = 'Recalculate from this session: average −25%, average, +25%';
         if (comparing) {
             const label = node(controls, 'label'), check = node(label, 'input'); check.type = 'checkbox'; check.checked = sharedLength; check.id = 'tools-shared-length';
             node(label, 'span', 'Match shared length'); check.onchange = () => { rememberAnalysis({sharedLength: check.checked}); refreshAnalysis(); };
@@ -495,7 +500,7 @@ export function openSessionTools(focusTarget) {
         if (!library) readLibrary();
         const heading = node(content, 'div', undefined, 'tools-actions');
         button(heading, '‹ Sessions', () => {
-            render('library'); (dialog.querySelector('#tools-model-history') || dialog.querySelector('#tools-library-search')).focus();
+            render('library', true); (dialog.querySelector('#tools-model-history') || dialog.querySelector('#tools-sessions-book-toggle')).focus();
         }, 'tools-history-back');
         node(heading, 'h3', 'Model history · ' + libraryRoom);
         const controls = node(content, 'div', undefined, 'tools-actions');
@@ -520,7 +525,7 @@ export function openSessionTools(focusTarget) {
             compare: ids => {
                 [selectedA, selectedB] = ids; selectedExtra = ids.slice(2);
                 Object.assign(analysisFilters, {room: libraryRoom, query: '', from: '', to: ''});
-                pickerOpen = false; render('compare');
+                pickerOpen.compare = false; render('compare');
                 (dialog.querySelector('#tools-analysis-chart') || dialog.querySelector('#tools-recording-picker > summary'))?.focus();
             }
         });
@@ -556,6 +561,9 @@ export function openSessionTools(focusTarget) {
         node(shares, 'p', 'Shares use viewer-time over covered intervals. A crowded interval contributes more than a quiet interval of the same length; gaps contribute nothing.', 'tools-muted');
     }
     function thresholdTable(archive) {
+        if (!summaryThresholds.length) {
+            node(analysisOutput, 'p', 'Not enough covered recording time to calculate average-based thresholds.', 'tools-muted'); return;
+        }
         const scroll = node(analysisOutput, 'div', undefined, 'tools-scroll'), table = node(scroll, 'table'); table.id = 'tools-threshold-table';
         node(table, 'caption', ANALYSIS_METRICS[metric] + ' — time at or above selected thresholds');
         const head = node(node(table, 'thead'), 'tr');
@@ -619,6 +627,15 @@ export function openSessionTools(focusTarget) {
             summaryTable(result.summaries, recordings.map((item, index) => String.fromCharCode(65 + index)));
         } else {
             const summary = summarizeSession(a.archive, metric, threshold);
+            // A custom choice belongs to this displayed snapshot and metric only.
+            // Never reuse another recording's thresholds or a global saved default.
+            if (!summaryThresholdSource || summaryThresholdSource.archive !== a.archive || summaryThresholdSource.id !== a.id || summaryThresholdSource.metric !== metric) {
+                summaryThresholdSource = {archive: a.archive, id: a.id, metric};
+                summaryThresholds = averageAnalysisThresholds(summary.mean);
+                const input = dialog.querySelector('#tools-threshold');
+                input.value = summaryThresholds.join(', '); input.setCustomValidity('');
+            }
+            dialog.querySelector('#tools-average-thresholds').disabled = summary.mean === null;
             if (redrawChart) chart([a.archive], [a.title], summary.spanMs, [a.id]);
             audienceOverview(a.archive); thresholdTable(a.archive);
             node(analysisOutput, 'h3', ANALYSIS_METRICS[metric] + ' — details');
@@ -674,11 +691,17 @@ export function openSessionTools(focusTarget) {
             }, 'tools-backup-restore');
         }
     }
-    function render(next) {
+    function render(next, revealSessions = false) {
         refreshCapacity = null;
         const focusedId = dialog.contains(document.activeElement) ? document.activeElement.id : '';
+        // Read synchronously before replacing nodes: native toggle events can be queued.
+        for (const [key, id] of [['book', 'tools-sessions-book'], ['search', 'tools-library-search-menu']]) {
+            const details = dialog.querySelector('#' + id);
+            if (details) libraryDisclosures[key] = details.open;
+        }
+        if (revealSessions) libraryDisclosures.book = true;
         const existingPicker = dialog.querySelector('#tools-recording-picker');
-        if (existingPicker) pickerOpen = existingPicker.open;
+        if (existingPicker) pickerOpen[tab] = existingPicker.open;
         if (analysisView) analysisStates.set(tab, {...analysisSources, state: analysisView.capture()});
         analysisView = null; analysisSources = null; analysisOutput = null;
         if (next !== tab) library = null;
@@ -693,8 +716,13 @@ export function openSessionTools(focusTarget) {
         } catch (error) { tell(error.message, true); }
         if (focusedId) {
             const target = document.getElementById(focusedId);
-            if (target && dialog.contains(target)) { const details = target.closest('details'); if (details) details.open = true; target.focus(); }
-            else if (focusedId.startsWith('tools-model-favorite-')) dialog.querySelector('#tools-library-model')?.focus();
+            if (target && dialog.contains(target)) {
+                // Reveal controls through every enclosing disclosure, but preserve
+                // a summary's own open/closed choice when restoring its focus.
+                let ancestor = target.tagName === 'SUMMARY' ? target.parentElement.parentElement : target;
+                for (let details = ancestor.closest('details'); details; details = details.parentElement.closest('details')) details.open = true;
+                target.focus();
+            } else if (focusedId.startsWith('tools-model-favorite-')) dialog.querySelector('#tools-sessions-book-toggle')?.focus();
         }
     }
     function close() {

@@ -1,5 +1,6 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const {instrument,prepareSource}=require('./helpers/instrument.cjs');
+const {openLibraryBook}=require('./helpers/library.cjs');
 const engine=process.env.TIERSCOPE_BROWSER||'chromium';
 const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8')).replaceAll('scheduleInit(2000);','')
 .replace('downloadTrackingReport: downloadTrackingReport,',`__organized:{checkUrlChange,
@@ -35,7 +36,7 @@ const file=(name,value)=>({name,mimeType:'application/json',buffer:Buffer.from(J
   });
   await page.goto('https://tierscope.test/live_room/');await page.addScriptTag({content:instrument(source)});await page.evaluate(()=>ViewerTracker.__organized.setup());await page.waitForTimeout(200);
   const before=await page.evaluate(()=>ViewerTracker.__organized.state()),bounds=await page.locator('#tracker-container').boundingBox();
-  await page.click('#btn-control-library');await page.click('#tools-folder-alpha_model');assert.equal(await page.locator('.tools-row').count(),6);
+  await page.click('#btn-control-library');await openLibraryBook(page);await page.click('#tools-folder-alpha_model');assert.equal(await page.locator('.tools-row').count(),6);
   // Drafts survive list actions, filters, tabs and closing the Library. None of
   // these actions writes notes; explicit Save/Discard controls their lifetime.
   const draftRow=page.locator('[data-library-id=organized_0]');
@@ -63,7 +64,7 @@ const file=(name,value)=>({name,mimeType:'application/json',buffer:Buffer.from(J
   assert.equal(await page.evaluate(()=>JSON.parse(GM_getValue('tierscope:library:v1:organized_0')).notes),'Changed in another tab');
   page.once('dialog',dialog=>dialog.accept());await page.click('#tools-notes-save-organized_0');assert(await page.locator('#tools-review-notes').isHidden());
   await draftOther.close();
-  await page.click('[data-tools-tab=library]');await page.click('#tools-folder-alpha_model');await draftRow.locator('summary').click();
+  await page.click('[data-tools-tab=library]');await openLibraryBook(page);await page.click('#tools-folder-alpha_model');await draftRow.locator('summary').click();
   await draftRow.locator('textarea').fill('Opening day');await page.click('#tools-notes-save-organized_0');
   if (!(await draftRow.locator('details').evaluate(e=>e.open))) await draftRow.locator('summary').click();
   await draftRow.locator('textarea').fill('Recover after removal');
@@ -210,7 +211,7 @@ const file=(name,value)=>({name,mimeType:'application/json',buffer:Buffer.from(J
   assert.deepEqual(await page.evaluate(()=>ViewerTracker.__organized.state()),before);
   const finalBounds=await page.locator('#tracker-container').boundingBox();assert.equal(finalBounds.width,bounds.width);assert.equal(finalBounds.height,bounds.height);
   // Closing/reopening keeps metadata while clearing transient selections.
-  await page.keyboard.press('Escape');await page.click('#btn-control-library');await page.selectOption('#tools-library-model','alpha_model');await page.check('#tools-library-favorites');
+  await page.keyboard.press('Escape');await page.click('#btn-control-library');await openLibraryBook(page);await page.selectOption('#tools-library-model','alpha_model');await page.check('#tools-library-favorites');
   assert.equal(await page.locator('.tools-row').count(),6);assert.match(await page.locator('.tools-recording-note').textContent(),/Remember this/);assert.match(await page.locator('#tools-library-selected').textContent(),/^0 selected/);
   await page.evaluate(()=>{history.pushState({},'', '/next_room/');ViewerTracker.__organized.checkUrlChange();});assert.equal(await page.locator('#tierscope-session-tools').count(),0);
   assert.deepEqual(errors,[]);console.log(engine+': filtered library, metadata, bulk transfer, six-way comparison, cursor/gaps, zoom/pan, themes and isolation passed');

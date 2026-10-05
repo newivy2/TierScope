@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.18.0
+// @version      3.19.0
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -4534,7 +4534,7 @@ underlying system, so should run in the browser, Node, or Plask.
     } catch (error) {
       log("Could not restore row preferences: " + error.message);
     }
-    return /* @__PURE__ */ new Set(["red", "green", "female-trans"]);
+    return /* @__PURE__ */ new Set(["red", "anon", "roomTotal"]);
   }
   function setRowCollapsed(key, collapsed) {
     cancelHighPulse(key);
@@ -4927,6 +4927,11 @@ underlying system, so should run in the browser, Node, or Plask.
     };
   }
   var ANALYSIS_MAX_THRESHOLDS = 8;
+  function averageAnalysisThresholds(mean) {
+    if (mean === null) return [];
+    if (!Number.isFinite(mean) || mean < 0) throw new Error("Invalid session average.");
+    return [...new Set([0.75, 1, 1.25].map((factor) => Math.min(Number.MAX_SAFE_INTEGER, Math.round(mean * factor))))];
+  }
   function parseAnalysisThresholds(text) {
     const parts = text.split(",").map((part) => part.trim());
     if (!parts.length || parts.length > ANALYSIS_MAX_THRESHOLDS || parts.some((part) => !/^\d+$/.test(part) || !Number.isSafeInteger(Number(part)))) {
@@ -5533,6 +5538,11 @@ underlying system, so should run in the browser, Node, or Plask.
 #tierscope-session-tools .tools-capacity-warning{color:var(--panel-warning);font-size:.95em}
 #tools-library-selected{flex-basis:100%}
 #tools-library-selection{margin-top:8px}
+#tierscope-session-tools #tools-sessions-book{margin-top:10px}
+#tierscope-session-tools #tools-sessions-book>summary{padding:7px 9px;color:var(--panel-accent);font-weight:bold;background:#ff69b412;border-color:#ff69b470}
+#tools-library-search-menu{margin-top:8px}
+#tierscope-session-tools #tools-library-search-menu>summary{background:transparent;color:var(--panel-muted)}
+#tierscope-session-tools #tools-library-search-menu .tools-filters{margin-top:0;border-top:0}
 #tierscope-session-tools .tools-auto-keep{display:inline-flex;align-items:center;gap:5px;margin:0 0 0 5px;font-size:.92em}
 #tierscope-session-tools .tools-auto-keep[data-locked=true]{color:var(--panel-accent)}
 #tierscope-session-tools .tools-auto-keep input:disabled{opacity:1}
@@ -5644,16 +5654,26 @@ underlying system, so should run in the browser, Node, or Plask.
   }
 
   // src/library-browser-view.js
-  function renderLibraryBrowser(parent, entries, filters, selected, actions) {
+  function renderLibraryBrowser(parent, entries, filters, selected, actions, disclosures) {
     const present = new Set(entries.map((entry) => entry.id));
     for (const id of selected) if (!present.has(id)) selected.delete(id);
     let shown = 50;
-    const inputs = recordingFilters(parent, entries, filters, "tools-library", () => {
+    const book = toolNode(parent, "details");
+    book.id = "tools-sessions-book";
+    book.open = disclosures.book;
+    const bookSummary = toolNode(book, "summary", "Sessions Book");
+    bookSummary.id = "tools-sessions-book-toggle";
+    const search = toolNode(book, "details");
+    search.id = "tools-library-search-menu";
+    search.open = disclosures.search;
+    const searchSummary = toolNode(search, "summary", "Search & sort");
+    searchSummary.id = "tools-library-search-toggle";
+    const inputs = recordingFilters(search, entries, filters, "tools-library", () => {
       shown = 50;
       actions.room(filters.room);
       rows();
     }, true);
-    const selectionTools = toolNode(parent, "details");
+    const selectionTools = toolNode(book, "details");
     selectionTools.id = "tools-library-selection";
     selectionTools.open = selected.size > 0;
     toolNode(selectionTools, "summary", "Select sessions for Compare or export");
@@ -5671,7 +5691,7 @@ underlying system, so should run in the browser, Node, or Plask.
     const compare = toolButton(bulk, "Compare", () => actions.compare([...selected]), "tools-compare-selected");
     const download = toolButton(bulk, "Export", () => actions.export([...selected]), "tools-export-selected");
     download.title = "Download one library bundle, including titles, notes and favorite models";
-    const list = toolNode(parent, "div");
+    const list = toolNode(book, "div");
     list.id = "tools-library-list";
     function favoriteButton(parent2, room, compact = false) {
       const active = entries.some((entry) => entry.archive.room.toLowerCase() === room && entry.modelFavorite);
@@ -5700,6 +5720,7 @@ underlying system, so should run in the browser, Node, or Plask.
       } catch (error) {
         toolNode(list, "p", error.message);
       }
+      searchSummary.textContent = "Search & sort" + (filters.query || filters.from || filters.to || filters.favorites ? " · Filters active" : "");
       updateSelection();
       const folders = /* @__PURE__ */ new Map();
       for (const entry of matching) {
@@ -5719,7 +5740,7 @@ underlying system, so should run in the browser, Node, or Plask.
         shown = 50;
         actions.room(null);
         rows();
-        (document.getElementById("tools-folder-" + previous) || inputs.search).focus();
+        (document.getElementById("tools-folder-" + previous) || searchSummary).focus();
       }, "tools-library-all-models");
       const room = filters.room && filters.room !== "*" ? filters.room : null;
       toolNode(heading, "h3", room ? "Folder: " + room : browsingFolders ? "Model folders" : "Search results — all models");
@@ -5776,7 +5797,7 @@ underlying system, so should run in the browser, Node, or Plask.
       if (shown < visible.length) toolButton(list, "Show " + Math.min(50, visible.length - shown) + " more", () => {
         shown += 50;
         rows();
-        (document.getElementById("tools-library-more") || inputs.search).focus();
+        (document.getElementById("tools-library-more") || bookSummary).focus();
       }, "tools-library-more");
     }
     rows();
@@ -6884,11 +6905,14 @@ underlying system, so should run in the browser, Node, or Plask.
     let historyLimit = Infinity, historySelected = "";
     let optionsLibrary = null, optionsArchive = null, optionsLiveArchive = null, options = [];
     const savedAnalysis = readAnalysisPreferences();
-    let { metric, threshold, sharedLength, summaryThresholds } = savedAnalysis.preferences;
+    let { metric, threshold, sharedLength } = savedAnalysis.preferences;
+    let summaryThresholds = [], summaryThresholdSource = null;
     let selectedA = "current", selectedB = "", selectedExtra = [], pendingBackup = null;
     const libraryFilters = { room: "", query: "", from: "", to: "", sort: "newest", favorites: false }, librarySelection = /* @__PURE__ */ new Set();
+    const libraryDisclosures = { book: false, search: false };
     const analysisFilters = { room: "", query: "", from: "", to: "" };
-    let filteredSources = null, chartDispose = null, pickerOpen = true;
+    let filteredSources = null, chartDispose = null;
+    const pickerOpen = { summary: false, compare: true };
     let analysisView = null, analysisOutput = null, analysisSources = null;
     const analysisStates = /* @__PURE__ */ new Map();
     let libraryRoom = null, chartDraw = null, analysisPreferenceError = savedAnalysis.error;
@@ -6907,7 +6931,7 @@ underlying system, so should run in the browser, Node, or Plask.
     }
     function rememberAnalysis(patch) {
       const result = rememberAnalysisPreferences(patch);
-      ({ metric, threshold, sharedLength, summaryThresholds } = result.preferences);
+      ({ metric, threshold, sharedLength } = result.preferences);
       analysisPreferenceError = result.error;
     }
     function downloadUnreadableRecords() {
@@ -7227,7 +7251,7 @@ underlying system, so should run in the browser, Node, or Plask.
         const result = keepSessionInLibrary(archive);
         libraryRoom = archive.room.toLowerCase();
         Object.assign(libraryFilters, { room: libraryRoom, query: "", from: "", to: "", favorites: false });
-        render("library");
+        render("library", true);
         tell(result.added ? "Session kept in the library." : result.updated ? "Library session updated; its name and notes were preserved." : "An equal or fuller session is already in the library.");
       }, "tools-keep").className = "tools-primary";
       if (replay) currentButton(actions, "Save file", (archive) => downloadDataFile(archive, archiveName(archive)), "tools-save-session");
@@ -7291,7 +7315,7 @@ underlying system, so should run in the browser, Node, or Plask.
       selectedB = ids[0];
       selectedExtra = ids.slice(1);
       Object.assign(analysisFilters, { room: snapshot.room.toLowerCase(), query: "", from: "", to: "" });
-      pickerOpen = false;
+      pickerOpen.compare = false;
       render("compare");
       (_a = dialog.querySelector("#tools-analysis-chart") || dialog.querySelector("#tools-recording-picker > summary")) == null ? void 0 : _a.focus();
     }
@@ -7377,7 +7401,7 @@ underlying system, so should run in the browser, Node, or Plask.
           }
         }
       });
-      renderLibraryBrowser(content, state.entries, libraryFilters, librarySelection, Object.fromEntries(Object.entries(callbacks).map(([key, fn]) => [key, action(fn)])));
+      renderLibraryBrowser(content, state.entries, libraryFilters, librarySelection, Object.fromEntries(Object.entries(callbacks).map(([key, fn]) => [key, action(fn)])), libraryDisclosures);
       if (state.damaged.length) {
         node(content, "p", state.damaged.length + " unreadable library record(s) were retained.", "tools-muted");
         if (state.unavailable.length) node(content, "p", "Some records could not be read. The displayed storage size excludes them; saving new recordings waits until they can be read.", "tools-muted");
@@ -7401,7 +7425,7 @@ underlying system, so should run in the browser, Node, or Plask.
         const rooms = new Set(bundle.library.map((entry) => entry.archive.room.toLowerCase()));
         libraryRoom = rooms.size === 1 ? [...rooms][0] : "*";
         Object.assign(libraryFilters, { room: libraryRoom, query: "", from: "", to: "", favorites: false });
-        render("library");
+        render("library", true);
         tell("Imported: " + result.recordings + " new, " + result.updatedRecordings + " updated, " + result.favoriteModels + " favorite models added; existing recordings and model choices were preserved.");
       }, true), "tools-import-session").title = "Import session files or Library bundles. Imported favorites need confirmation before automatic keeping.";
       button(actions, "Refresh", () => render("library"), "tools-refresh-library").title = "Refresh list from this browser";
@@ -7412,12 +7436,13 @@ underlying system, so should run in the browser, Node, or Plask.
         node(content, "p", "Record a session or import one into the library to see analysis.");
         return null;
       }
+      const pickerTab = comparing ? "compare" : "summary";
       const picker = node(content, "details");
       picker.id = "tools-recording-picker";
-      picker.open = pickerOpen;
+      picker.open = pickerOpen[pickerTab];
       node(picker, "summary", "Choose recordings & filters");
       picker.ontoggle = () => {
-        if (picker.isConnected) pickerOpen = picker.open;
+        if (picker.isConnected) pickerOpen[pickerTab] = picker.open;
       };
       recordingFilters(picker, sourceOptions(), analysisFilters, "tools-analysis", () => render(tab));
       try {
@@ -7491,8 +7516,8 @@ underlying system, so should run in the browser, Node, or Plask.
         input.type = "text";
         input.maxLength = 160;
         input.value = summaryThresholds.join(", ");
-        input.placeholder = "25, 50, 100";
-        input.title = "Up to 8 counts separated by commas. Applies to the selected metric.";
+        input.placeholder = "Not enough covered time";
+        input.title = "Defaults: session average −25%, average, +25%, rounded to whole viewers. Or enter up to 8 counts separated by commas for this session and metric.";
       }
       input.oninput = () => input.setCustomValidity("");
       function applyThreshold() {
@@ -7500,7 +7525,7 @@ underlying system, so should run in the browser, Node, or Plask.
           if (comparing) {
             if (!Number.isSafeInteger(input.valueAsNumber) || input.valueAsNumber < 0) throw new Error("Enter a non-negative whole number.");
             rememberAnalysis({ threshold: input.valueAsNumber });
-          } else rememberAnalysis({ summaryThresholds: parseAnalysisThresholds(input.value) });
+          } else summaryThresholds = parseAnalysisThresholds(input.value);
         } catch (error) {
           input.setCustomValidity(error.message);
           input.reportValidity();
@@ -7516,6 +7541,10 @@ underlying system, so should run in the browser, Node, or Plask.
         }
       };
       button(controls, comparing ? "Apply threshold" : "Apply thresholds", applyThreshold, "tools-apply-threshold");
+      if (!comparing) button(controls, "Use average", () => {
+        summaryThresholdSource = null;
+        refreshAnalysis(false);
+      }, "tools-average-thresholds").title = "Recalculate from this session: average −25%, average, +25%";
       if (comparing) {
         const label2 = node(controls, "label"), check = node(label2, "input");
         check.type = "checkbox";
@@ -7535,8 +7564,8 @@ underlying system, so should run in the browser, Node, or Plask.
       if (!library) readLibrary();
       const heading = node(content, "div", void 0, "tools-actions");
       button(heading, "‹ Sessions", () => {
-        render("library");
-        (dialog.querySelector("#tools-model-history") || dialog.querySelector("#tools-library-search")).focus();
+        render("library", true);
+        (dialog.querySelector("#tools-model-history") || dialog.querySelector("#tools-sessions-book-toggle")).focus();
       }, "tools-history-back");
       node(heading, "h3", "Model history · " + libraryRoom);
       const controls = node(content, "div", void 0, "tools-actions");
@@ -7590,7 +7619,7 @@ underlying system, so should run in the browser, Node, or Plask.
           [selectedA, selectedB] = ids;
           selectedExtra = ids.slice(2);
           Object.assign(analysisFilters, { room: libraryRoom, query: "", from: "", to: "" });
-          pickerOpen = false;
+          pickerOpen.compare = false;
           render("compare");
           (_a = dialog.querySelector("#tools-analysis-chart") || dialog.querySelector("#tools-recording-picker > summary")) == null ? void 0 : _a.focus();
         }
@@ -7634,6 +7663,10 @@ underlying system, so should run in the browser, Node, or Plask.
       node(shares, "p", "Shares use viewer-time over covered intervals. A crowded interval contributes more than a quiet interval of the same length; gaps contribute nothing.", "tools-muted");
     }
     function thresholdTable(archive) {
+      if (!summaryThresholds.length) {
+        node(analysisOutput, "p", "Not enough covered recording time to calculate average-based thresholds.", "tools-muted");
+        return;
+      }
       const scroll = node(analysisOutput, "div", void 0, "tools-scroll"), table = node(scroll, "table");
       table.id = "tools-threshold-table";
       node(table, "caption", ANALYSIS_METRICS[metric] + " — time at or above selected thresholds");
@@ -7726,6 +7759,14 @@ underlying system, so should run in the browser, Node, or Plask.
         summaryTable(result.summaries, recordings.map((item, index) => String.fromCharCode(65 + index)));
       } else {
         const summary = summarizeSession(a.archive, metric, threshold);
+        if (!summaryThresholdSource || summaryThresholdSource.archive !== a.archive || summaryThresholdSource.id !== a.id || summaryThresholdSource.metric !== metric) {
+          summaryThresholdSource = { archive: a.archive, id: a.id, metric };
+          summaryThresholds = averageAnalysisThresholds(summary.mean);
+          const input = dialog.querySelector("#tools-threshold");
+          input.value = summaryThresholds.join(", ");
+          input.setCustomValidity("");
+        }
+        dialog.querySelector("#tools-average-thresholds").disabled = summary.mean === null;
         if (redrawChart) chart([a.archive], [a.title], summary.spanMs, [a.id]);
         audienceOverview(a.archive);
         thresholdTable(a.archive);
@@ -7788,12 +7829,17 @@ underlying system, so should run in the browser, Node, or Plask.
         }, "tools-backup-restore");
       }
     }
-    function render(next) {
+    function render(next, revealSessions = false) {
       var _a;
       refreshCapacity = null;
       const focusedId = dialog.contains(document.activeElement) ? document.activeElement.id : "";
+      for (const [key, id] of [["book", "tools-sessions-book"], ["search", "tools-library-search-menu"]]) {
+        const details = dialog.querySelector("#" + id);
+        if (details) libraryDisclosures[key] = details.open;
+      }
+      if (revealSessions) libraryDisclosures.book = true;
       const existingPicker = dialog.querySelector("#tools-recording-picker");
-      if (existingPicker) pickerOpen = existingPicker.open;
+      if (existingPicker) pickerOpen[tab] = existingPicker.open;
       if (analysisView) analysisStates.set(tab, __spreadProps(__spreadValues({}, analysisSources), { state: analysisView.capture() }));
       analysisView = null;
       analysisSources = null;
@@ -7826,10 +7872,10 @@ underlying system, so should run in the browser, Node, or Plask.
       if (focusedId) {
         const target = document.getElementById(focusedId);
         if (target && dialog.contains(target)) {
-          const details = target.closest("details");
-          if (details) details.open = true;
+          let ancestor = target.tagName === "SUMMARY" ? target.parentElement.parentElement : target;
+          for (let details = ancestor.closest("details"); details; details = details.parentElement.closest("details")) details.open = true;
           target.focus();
-        } else if (focusedId.startsWith("tools-model-favorite-")) (_a = dialog.querySelector("#tools-library-model")) == null ? void 0 : _a.focus();
+        } else if (focusedId.startsWith("tools-model-favorite-")) (_a = dialog.querySelector("#tools-sessions-book-toggle")) == null ? void 0 : _a.focus();
       }
     }
     function close() {
@@ -9114,7 +9160,7 @@ underlying system, so should run in the browser, Node, or Plask.
     if (existing) existing.remove();
     var div = document.createElement("div");
     div.id = "cb-tier-tracker";
-    var html = '<div id="tracker-container" style="position:fixed;top:80px;right:20px;background:rgba(20,20,30,0.95);color:var(--panel-text);padding:5px;border-radius:6px;font-family:Arial,sans-serif;font-size:9px;z-index:999999;width:' + runtime.BASE_WIDTH_MINI + 'px;border:1px solid #ff69b4;transition:width 0.3s ease;cursor:default;user-select:none;"><div id="drag-handle" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;border-bottom:1px solid #ff69b4;padding-bottom:3px;cursor:move;"><div id="header-model" style="display:flex;flex:1;min-width:0;align-items:center;gap:3px;margin-right:4px;"><span id="header-text" style="flex:0 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:bold;color:var(--panel-accent);font-size:13px;line-height:18px;">TierScope</span><button type="button" id="btn-model-favorite" aria-label="Favorite model" style="flex:0 0 18px;padding:0;border:0;background:transparent;color:var(--panel-muted);font-size:14px;line-height:18px;cursor:pointer;">☆</button></div><div style="display:flex;align-items:center;gap:3px;flex-shrink:0;"><button type="button" id="btn-high-mode" aria-pressed="false" aria-label="Session highs. Switch to all-time highs" style="display:none;min-width:29px;background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;">SH</button><button type="button" id="btn-panel-options" aria-label="Chart window and highs" aria-expanded="false" aria-controls="panel-options" style="display:none;background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;white-space:nowrap;">Full ▾</button><button type="button" id="btn-standard-size" title="Restore standard panel size (100%)" aria-label="Restore standard panel size" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;">100%</button><button id="btn-toggle" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:9px;padding:1px 4px;flex-shrink:0;">+</button></div></div><div id="panel-options" role="group" aria-label="Chart and high options" style="display:none;position:absolute;right:5px;top:29px;width:190px;max-width:calc(100% - 10px);box-sizing:border-box;z-index:5;padding:8px;background:var(--panel-solid);color:var(--panel-text);border:1px solid #ff69b4;border-radius:4px;font-size:11px;box-shadow:0 3px 12px #0008;"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;"><strong>Charts &amp; highs</strong><button type="button" id="panel-options-close" aria-label="Close chart and high options" style="background:var(--panel-button);color:var(--panel-text);border:0;border-radius:3px;cursor:pointer;">×</button></div><label for="chart-window-select">Chart window</label><select id="chart-window-select" style="display:block;width:100%;margin:4px 0 6px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);font-size:11px;"><option value="full">Full history</option><option value="fourHours">Last 4 hours</option><option value="twoHours">Last 2 hours</option><option value="hour">Last hour</option><option value="halfHour">Last 30 minutes</option><option value="quarter">Last 15 minutes</option></select><div style="font-size:10px;color:var(--panel-muted);line-height:1.4;margin-bottom:8px;">Charts only. Downloads keep the full retained history.</div><input type="file" id="session-file-input" accept=".json,application/json" style="display:none;"><div id="session-file-info" style="display:none;margin-top:7px;font-size:10px;line-height:1.4;white-space:pre-line;overflow-wrap:anywhere;color:var(--panel-secondary);"></div><div style="border-top:1px solid var(--panel-divider);margin-top:8px;padding-top:6px;"><strong>All-time highs</strong><div id="all-time-info" style="font-size:10px;line-height:1.4;margin:4px 0;color:var(--panel-secondary);"></div><button type="button" id="btn-add-all-time" style="display:none;width:100%;margin:4px 0;padding:4px;background:#4169E1;color:#fff;border:0;border-radius:3px;cursor:pointer;">Add to all-time highs</button><button type="button" id="btn-clear-all-time" style="display:block;width:100%;margin:4px 0;padding:4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:3px;cursor:pointer;">Clear all-time highs…</button><div id="all-time-action-status" role="status" style="font-size:10px;line-height:1.4;overflow-wrap:anywhere;color:var(--panel-secondary);"></div></div></div><div id="minimized-view" style="display:block;position:relative;"><div style="display:flex;gap:4px;align-items:center;margin-bottom:3px;"><strong id="mini-room-count" style="color:var(--panel-accent);font-size:13px;">0</strong><span style="color:var(--panel-muted);font-size:8px;">in room</span><span id="mini-room-change" style="margin-left:auto;font-size:8px;"></span></div><div style="display:flex;align-items:center;justify-content:space-between;gap:3px;"><button type="button" id="mini-metric" style="background:transparent;border:0;color:var(--panel-secondary);font:inherit;cursor:pointer;padding:2px 0;" aria-label="Cycle chart metric">Room total ▾</button><button type="button" id="mini-high" style="background:transparent;border:0;padding:0;color:var(--panel-subtle);font-size:8px;cursor:pointer;"></button></div><canvas id="mini-chart" width="140" height="36" style="display:block;width:100%;height:36px;" role="img" aria-label="Recent audience history"></canvas><div style="display:flex;justify-content:space-between;gap:4px;margin:3px 0;"><span title="With Tokens">💎 <span id="mini-withtokens" style="color:var(--panel-warning);">0</span> <span id="mini-withtokens-change"></span></span><span title="Registered">📊 <span id="mini-total">0</span> <span id="mini-total-change"></span></span></div><div style="display:flex;align-items:center;gap:3px;"><span id="mini-freshness" style="flex:1;min-width:0;font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">No sample</span><button type="button" id="btn-auto" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;cursor:pointer;" title="Pause or resume scans">⏸</button><button type="button" id="mini-settings-toggle" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;cursor:pointer;" aria-label="Scan interval settings" title="Scan interval settings — adjust how often TierScope scans" aria-expanded="false" aria-controls="mini-settings">◷</button><button type="button" id="btn-expand" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;font-size:9px;cursor:pointer;" title="Expand panel" aria-label="Expand panel">↗</button></div><div id="mini-settings" style="display:none;position:absolute;left:0;right:0;top:17px;background:var(--panel-settings);border:1px solid #ff69b4;border-radius:4px;padding:5px;z-index:2;" role="group" aria-label="Scan interval"><div style="display:flex;justify-content:space-between;align-items:center;font-size:9px;color:var(--panel-secondary);">Scan interval <button type="button" id="mini-settings-close" aria-label="Close scan interval settings" title="Close (Escape)" style="background:var(--panel-button);color:var(--panel-text);border:0;border-radius:3px;cursor:pointer;padding:1px 5px;font-size:13px;">×</button></div><div style="display:flex;align-items:center;justify-content:center;gap:3px;margin:3px 0;padding:2px;background:rgba(var(--panel-row-rgb),0.05);border-radius:3px;"><button id="btn-timer-down" style="background:var(--panel-button-strong);border:none;color:var(--panel-text);border-radius:2px;cursor:pointer;font-size:9px;padding:1px 4px;font-weight:bold;">−</button><span id="timer-display" style="font-size:11px;color:var(--panel-warning);font-weight:bold;min-width:28px;">60s</span><button id="btn-timer-up" style="background:var(--panel-button-strong);border:none;color:var(--panel-text);border-radius:2px;cursor:pointer;font-size:9px;padding:1px 4px;font-weight:bold;">+</button></div><div style="display:flex;gap:2px;justify-content:center;margin-top:3px;"><button class="timer-preset" data-time="30" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">30s</button><button class="timer-preset" data-time="60" style="background:#ff69b4;border:1px solid #ff69b4;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">60s</button><button class="timer-preset" data-time="120" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">2m</button><button class="timer-preset" data-time="300" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">5m</button></div><div id="auto-status" style="margin-top:3px;font-size:8px;color:var(--panel-muted);">Starting...</div></div></div><div id="full-view" style="display:none;"><div id="tier-chart-region" style="display:flow-root;">' + collapsedTrayHtml();
+    var html = '<div id="tracker-container" style="position:fixed;top:80px;right:20px;background:rgba(20,20,30,0.95);color:var(--panel-text);padding:5px;border-radius:6px;font-family:Arial,sans-serif;font-size:9px;z-index:999999;width:' + runtime.BASE_WIDTH_MINI + 'px;border:1px solid #ff69b4;transition:width 0.3s ease;cursor:default;user-select:none;"><div id="drag-handle" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;border-bottom:1px solid #ff69b4;padding-bottom:3px;cursor:move;"><div id="header-model" style="display:flex;flex:1;min-width:0;align-items:center;gap:3px;margin-left:14px;margin-right:4px;"><span id="header-text" style="flex:0 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:bold;color:var(--panel-accent);font-size:13px;line-height:18px;">TierScope</span><button type="button" id="btn-model-favorite" aria-label="Favorite model" style="flex:0 0 18px;padding:0;border:0;background:transparent;color:var(--panel-muted);font-size:14px;line-height:18px;cursor:pointer;">☆</button></div><div style="display:flex;align-items:center;gap:3px;flex-shrink:0;"><button type="button" id="btn-high-mode" aria-pressed="false" aria-label="Session highs. Switch to all-time highs" style="display:none;min-width:29px;background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;">SH</button><button type="button" id="btn-panel-options" aria-label="Chart window and highs" aria-expanded="false" aria-controls="panel-options" style="display:none;background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;white-space:nowrap;">Full ▾</button><button type="button" id="btn-standard-size" title="Restore standard panel size (100%)" aria-label="Restore standard panel size" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;">100%</button><button id="btn-toggle" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:9px;padding:1px 4px;flex-shrink:0;">+</button></div></div><div id="panel-options" role="group" aria-label="Chart and high options" style="display:none;position:absolute;right:5px;top:29px;width:190px;max-width:calc(100% - 10px);box-sizing:border-box;z-index:5;padding:8px;background:var(--panel-solid);color:var(--panel-text);border:1px solid #ff69b4;border-radius:4px;font-size:11px;box-shadow:0 3px 12px #0008;"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;"><strong>Charts &amp; highs</strong><button type="button" id="panel-options-close" aria-label="Close chart and high options" style="background:var(--panel-button);color:var(--panel-text);border:0;border-radius:3px;cursor:pointer;">×</button></div><label for="chart-window-select">Chart window</label><select id="chart-window-select" style="display:block;width:100%;margin:4px 0 6px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);font-size:11px;"><option value="full">Full history</option><option value="fourHours">Last 4 hours</option><option value="twoHours">Last 2 hours</option><option value="hour">Last hour</option><option value="halfHour">Last 30 minutes</option><option value="quarter">Last 15 minutes</option></select><div style="font-size:10px;color:var(--panel-muted);line-height:1.4;margin-bottom:8px;">Charts only. Downloads keep the full retained history.</div><input type="file" id="session-file-input" accept=".json,application/json" style="display:none;"><div id="session-file-info" style="display:none;margin-top:7px;font-size:10px;line-height:1.4;white-space:pre-line;overflow-wrap:anywhere;color:var(--panel-secondary);"></div><div style="border-top:1px solid var(--panel-divider);margin-top:8px;padding-top:6px;"><strong>All-time highs</strong><div id="all-time-info" style="font-size:10px;line-height:1.4;margin:4px 0;color:var(--panel-secondary);"></div><button type="button" id="btn-add-all-time" style="display:none;width:100%;margin:4px 0;padding:4px;background:#4169E1;color:#fff;border:0;border-radius:3px;cursor:pointer;">Add to all-time highs</button><button type="button" id="btn-clear-all-time" style="display:block;width:100%;margin:4px 0;padding:4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:3px;cursor:pointer;">Clear all-time highs…</button><div id="all-time-action-status" role="status" style="font-size:10px;line-height:1.4;overflow-wrap:anywhere;color:var(--panel-secondary);"></div></div></div><div id="minimized-view" style="display:block;position:relative;"><div style="display:flex;gap:4px;align-items:center;margin-bottom:3px;"><strong id="mini-room-count" style="color:var(--panel-accent);font-size:13px;">0</strong><span style="color:var(--panel-muted);font-size:8px;">in room</span><span id="mini-room-change" style="margin-left:auto;font-size:8px;"></span></div><div style="display:flex;align-items:center;justify-content:space-between;gap:3px;"><button type="button" id="mini-metric" style="background:transparent;border:0;color:var(--panel-secondary);font:inherit;cursor:pointer;padding:2px 0;" aria-label="Cycle chart metric">Room total ▾</button><button type="button" id="mini-high" style="background:transparent;border:0;padding:0;color:var(--panel-subtle);font-size:8px;cursor:pointer;"></button></div><canvas id="mini-chart" width="140" height="36" style="display:block;width:100%;height:36px;" role="img" aria-label="Recent audience history"></canvas><div style="display:flex;justify-content:space-between;gap:4px;margin:3px 0;"><span title="With Tokens">💎 <span id="mini-withtokens" style="color:var(--panel-warning);">0</span> <span id="mini-withtokens-change"></span></span><span title="Registered">📊 <span id="mini-total">0</span> <span id="mini-total-change"></span></span></div><div style="display:flex;align-items:center;gap:3px;"><span id="mini-freshness" style="flex:1;min-width:0;font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">No sample</span><button type="button" id="btn-auto" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;cursor:pointer;" title="Pause or resume scans">⏸</button><button type="button" id="mini-settings-toggle" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;cursor:pointer;" aria-label="Scan interval settings" title="Scan interval settings — adjust how often TierScope scans" aria-expanded="false" aria-controls="mini-settings">◷</button><button type="button" id="btn-expand" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;font-size:9px;cursor:pointer;" title="Expand panel" aria-label="Expand panel">↗</button></div><div id="mini-settings" style="display:none;position:absolute;left:0;right:0;top:17px;background:var(--panel-settings);border:1px solid #ff69b4;border-radius:4px;padding:5px;z-index:2;" role="group" aria-label="Scan interval"><div style="display:flex;justify-content:space-between;align-items:center;font-size:9px;color:var(--panel-secondary);">Scan interval <button type="button" id="mini-settings-close" aria-label="Close scan interval settings" title="Close (Escape)" style="background:var(--panel-button);color:var(--panel-text);border:0;border-radius:3px;cursor:pointer;padding:1px 5px;font-size:13px;">×</button></div><div style="display:flex;align-items:center;justify-content:center;gap:3px;margin:3px 0;padding:2px;background:rgba(var(--panel-row-rgb),0.05);border-radius:3px;"><button id="btn-timer-down" style="background:var(--panel-button-strong);border:none;color:var(--panel-text);border-radius:2px;cursor:pointer;font-size:9px;padding:1px 4px;font-weight:bold;">−</button><span id="timer-display" style="font-size:11px;color:var(--panel-warning);font-weight:bold;min-width:28px;">60s</span><button id="btn-timer-up" style="background:var(--panel-button-strong);border:none;color:var(--panel-text);border-radius:2px;cursor:pointer;font-size:9px;padding:1px 4px;font-weight:bold;">+</button></div><div style="display:flex;gap:2px;justify-content:center;margin-top:3px;"><button class="timer-preset" data-time="30" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">30s</button><button class="timer-preset" data-time="60" style="background:#ff69b4;border:1px solid #ff69b4;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">60s</button><button class="timer-preset" data-time="120" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">2m</button><button class="timer-preset" data-time="300" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">5m</button></div><div id="auto-status" style="margin-top:3px;font-size:8px;color:var(--panel-muted);">Starting...</div></div></div><div id="full-view" style="display:none;"><div id="tier-chart-region" style="display:flow-root;">' + collapsedTrayHtml();
     Object.keys(runtime.TIERS).forEach(function(key) {
       var t = runtime.TIERS[key];
       html += '<div id="tier-row-' + key + '" data-tier="' + key + '" style="display:flex;align-items:center;padding:1px 3px;margin:1px 0;background:rgba(var(--panel-row-rgb),calc(0.05 * var(--tier-background-scale, 1)));border-radius:3px;border-left:3px solid ' + t.color + ';"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml(key) + '</div><canvas id="spark-' + key + '" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-' + key + '" style="font-weight:bold;color:' + t.color + ';font-size:14px;">0</span><div id="high-' + key + '" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div>';
@@ -9453,7 +9499,7 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/bootstrap.js
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.18.0";
+    runtime.TIERSCOPE_VERSION = "3.19.0";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;

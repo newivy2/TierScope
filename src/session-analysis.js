@@ -56,6 +56,14 @@ export function summarizeAudience(archive) {
 
 export const ANALYSIS_MAX_THRESHOLDS = 8;
 
+// Counts use whole viewers. Merge rounded duplicates for zero/small audiences.
+/** @param {number|null} mean */
+export function averageAnalysisThresholds(mean) {
+    if (mean === null) return [];
+    if (!Number.isFinite(mean) || mean < 0) throw new Error('Invalid session average.');
+    return [...new Set([0.75, 1, 1.25].map(factor => Math.min(Number.MAX_SAFE_INTEGER, Math.round(mean * factor))))];
+}
+
 /** @param {string} text */
 export function parseAnalysisThresholds(text) {
     const parts = text.split(',').map(part => part.trim());

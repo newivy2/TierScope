@@ -51,7 +51,7 @@ export function createPanel() {
                 'display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;' +
                 'border-bottom:1px solid #ff69b4;padding-bottom:3px;cursor:move;' +
             '">' +
-                '<div id="header-model" style="display:flex;flex:1;min-width:0;align-items:center;gap:3px;margin-right:4px;">' +
+                '<div id="header-model" style="display:flex;flex:1;min-width:0;align-items:center;gap:3px;margin-left:14px;margin-right:4px;">' +
                     '<span id="header-text" style="flex:0 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:bold;color:var(--panel-accent);font-size:13px;line-height:18px;">TierScope</span>' +
                     '<button type="button" id="btn-model-favorite" aria-label="Favorite model" style="flex:0 0 18px;padding:0;border:0;background:transparent;color:var(--panel-muted);font-size:14px;line-height:18px;cursor:pointer;">☆</button>' +
                 '</div>' +
