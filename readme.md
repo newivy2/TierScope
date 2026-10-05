@@ -1,6 +1,6 @@
 # TierScope
 
-**Review beta: 3.24.0-beta.1** — [Install the journey redesign](https://raw.githubusercontent.com/newivy2/TierScope/beta/user-journey/tierscope.user.js) · [Review guide and screenshots](docs/user-journey-beta.md). Main remains 3.23.0. Keep one enabled copy of TierScope.
+**Review beta: 3.24.0-beta.2** — [Install the journey redesign](https://raw.githubusercontent.com/newivy2/TierScope/beta/user-journey/tierscope.user.js) · [Review guide and screenshots](docs/user-journey-beta.md). Main remains 3.23.0. Keep one enabled copy of TierScope.
 
 TierScope is a free, open-source userscript that charts how a Chaturbate room’s audience changes over time.
 

@@ -118,6 +118,16 @@ export function createPanel() {
                 '</div>' +
             '</div>' +
 
+            '<div id="session-reset-control" style="display:flex;justify-content:flex-end;border-top:1px solid var(--panel-divider);margin:5px 0;padding-top:5px;">' +
+                '<button id="btn-main-reset" style="height:20px;box-sizing:border-box;line-height:10px;margin:0;background:var(--panel-button);border:1px solid #ff4444;color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:9px;padding:3px 5px;display:flex;align-items:center;gap:2px;" type="button" title="Reset this room’s live session after confirmation; Library sessions and all-time highs are kept">' +
+                    '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
+                        '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12"/>' +
+                        '<path d="M3 3v9h9"/>' +
+                    '</svg>' +
+                    'Reset session' +
+                '</button>' +
+            '</div>' +
+
             '<div id="full-view" style="display:none;">' +
             '<div id="tier-chart-region" style="display:flow-root;">' + collapsedTrayHtml();
 
@@ -260,13 +270,6 @@ export function createPanel() {
 
             '<details id="live-session-actions" style="border-top:1px solid var(--panel-divider);margin-top:5px;padding-top:4px;"><summary style="cursor:pointer;color:var(--panel-muted);font-size:9px;">Session actions</summary><div style="display:flex;justify-content:space-between;gap:6px;margin:5px 0;">' +
                     '<button id="btn-replay" style="font-size:8px;line-height:10px;height:14px;min-width:38px;box-sizing:border-box;margin:0;padding:2px 3px;background:var(--panel-button);color:var(--panel-warning);border:none;border-radius:3px;cursor:pointer;" title="Replay this live session snapshot">Replay this session</button>' +
-                        '<button id="btn-main-reset" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Reset all tracking data">' +
-                            '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
-                                '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12"/>' +
-                                '<path d="M3 3v9h9"/>' +
-                            '</svg>' +
-                            'Reset' +
-                        '</button>' +
             '</div></details>' +
 
             '<div id="tracker-footer" style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:4px;margin-top:5px;min-height:18px;">' +

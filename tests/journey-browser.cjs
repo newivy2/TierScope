@@ -21,6 +21,9 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
  assert.match(await page.locator('#journey-status').textContent(),/Tracking live · Not saved/);
  assert.match(await page.locator('#journey-detail').textContent(),/Waiting for the first audience scan/);
  assert(await page.locator('#journey-keep').isDisabled());
+ await page.click('#btn-toggle');assert(await page.locator('#minimized-view').isVisible());
+ assert(await page.locator('#btn-main-reset').isVisible(),'Reset is visible in compact view without opening settings');
+ await page.click('#btn-toggle');assert(await page.locator('#full-view').isVisible());
  await page.click('#btn-control-library');assert(await page.locator('#tools-library-list').isVisible());
  assert.match(await page.locator('#tools-library-list').textContent(),/No saved sessions yet.*Keep in Library/);
  assert(await page.locator('#tools-current-card').isHidden());assert(await page.locator('[data-tools-tab=compare]').isHidden());
@@ -53,7 +56,12 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
  // Pause/resume and settings do not change Library contents.
  await page.click('#btn-control-auto');assert.match(await page.locator('#journey-status').textContent(),/Tracking paused/);
  await page.click('#btn-control-auto');assert.match(await page.locator('#journey-status').textContent(),/Tracking live/);
- await page.locator('#live-session-actions > summary').click();assert(await page.locator('#btn-main-reset').isVisible());
+ assert(await page.locator('#live-session-actions').evaluate(e=>!e.open));
+ assert(await page.locator('#btn-main-reset').isVisible(),'Reset is visible in expanded view with Session actions collapsed');
+ const beforeResetCancel=await page.evaluate(()=>ViewerTracker.__journey.state());
+ page.once('dialog',d=>d.dismiss());await page.click('#btn-main-reset');
+ assert.deepEqual(await page.evaluate(()=>ViewerTracker.__journey.state()),beforeResetCancel,'canceling visible Reset keeps the session intact');
+ await page.locator('#live-session-actions > summary').click();
  await page.reload();await page.addScriptTag({content:instrument(source)});await page.evaluate(()=>ViewerTracker.__journey.setup());await page.waitForTimeout(350);
  assert(await page.locator('#live-session-actions').evaluate(e=>e.open),'session action choice is remembered');
  // Save failure never claims a confirmed save, and the exact-session link refuses

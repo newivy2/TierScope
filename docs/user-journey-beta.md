@@ -1,4 +1,4 @@
-# TierScope journey redesign — 3.24.0-beta.1
+# TierScope journey redesign — 3.24.0-beta.2
 
 [Install the beta](https://raw.githubusercontent.com/newivy2/TierScope/beta/user-journey/tierscope.user.js). Keep one enabled copy. Main remains **3.23.0**; this branch is for review.
 
@@ -8,7 +8,7 @@ The room name, tracking status, saving status, audience and recent chart appear 
 
 Manual keeping captures a snapshot. New scans indicate that the saved snapshot needs updating. A confirmed favorite shows **Automatically saved**, the last successful checkpoint and any pending save. Automatic keeping retains its existing one-minute cadence and pause/Stop/navigation checkpoints. Favorite consent and storage limits are unchanged.
 
-Pause/Resume and Stop remain nearby. Reset is separate under **Session actions**. Current-session Replay remains there as a fast path, while **Compare with previous** remains one click away in Live. Trend presets move into remembered **Trend settings**.
+Pause/Resume and Stop remain nearby. **Reset session** is always visible in compact and expanded views, on a separate row from everyday controls. It still asks for confirmation and preserves Library sessions and all-time highs. Current-session Replay stays under **Session actions** as a fast path, while **Compare with previous** remains one click away in Live. Trend presets move into remembered **Trend settings**.
 
 ![Live overview](images/journey-live.png)
 

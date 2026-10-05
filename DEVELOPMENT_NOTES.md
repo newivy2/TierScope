@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **3.24.0-beta.1**. Start with [Live and Saved sessions](docs/user-journey-beta.md). The analysis, exports, favorite consent, storage limits, retention and playback rules remain compatible with 3.23.0. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For the stable release, see the [README](readme.md).
+Detailed reference for **3.24.0-beta.2**. Start with [Live and Saved sessions](docs/user-journey-beta.md). The analysis, exports, favorite consent, storage limits, retention and playback rules remain compatible with 3.23.0. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For the stable release, see the [README](readme.md).
 
 ## Contents
 
@@ -55,11 +55,11 @@ Keep only one enabled copy of TierScope. After an update, refresh existing room 
 | **Compare with previous** | Compare this live snapshot with up to five earlier sessions for the model. |
 | **Replay this session** in **Session actions** | Replay a snapshot of the current live recording. |
 | **Saved sessions** | Browse recent sessions immediately, narrow by model/date, or open a session’s chart and summary. |
-| **Reset** in **Session actions** | Confirm clearing this room’s history, counters, and elapsed time, then request one fresh scan. Keep the automatic-scan pause state and layout preferences. |
+| **Reset session** on its separate, always-visible row | Confirm clearing this room’s history, counters, and elapsed time, then request one fresh scan. Keep the automatic-scan pause state and layout preferences. |
 
 The header identifies the room, followed by **Live / Saved sessions**, a combined tracking/saving status, and the audience overview and its chart. Before the first sample, a short message explains what TierScope is waiting for. Keeping succeeds only after the Library write is verified. A manual save is a snapshot; later scans show that it needs updating. Confirmed favorites show automatic saving and the last successful save time. Failed saves leave live data available and show a pending message.
 
-The lower Live control row keeps elapsed time and countdown/status stable, with labeled Pause/Resume, Stop and the theme switch below. **Session actions** separates Reset and current-session Replay. **Trend settings** reveals comparison presets. Both disclosures remember their expanded state. The panel scrolls vertically when its scaled footprint would otherwise exceed the viewport.
+The lower Live control row keeps elapsed time and countdown/status stable, with labeled Pause/Resume, Stop and the theme switch below. **Reset session** stays visible in compact and expanded views on a separate row. **Session actions** contains current-session Replay. **Trend settings** reveals comparison presets. Both disclosures remember their expanded state. The panel scrolls vertically when its scaled footprint would otherwise exceed the viewport.
 
 The default scan interval is **60 seconds**, counted after a scan finishes. A new, unpaused room session requests its first sample as soon as the panel is initialized, then starts the normal countdown when that attempt completes. Existing retry waits and access restrictions still apply. Restored sessions keep their existing startup behavior; paused sessions wait for Resume. Faster polling does not guarantee fresher data from the site.
 
