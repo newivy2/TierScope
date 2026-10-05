@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.20.0
+// @version      3.21.0
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -4842,6 +4842,74 @@ underlying system, so should run in the browser, Node, or Plask.
     }
   }
 
+  // src/analysis-follow.js
+  function createAnalysisFollower() {
+    let enabled = true, identity = null, signature = "", expired = false;
+    const snapshots = /* @__PURE__ */ new Map();
+    return {
+      get enabled() {
+        return enabled;
+      },
+      get expired() {
+        return expired;
+      },
+      get identity() {
+        return identity;
+      },
+      get(id) {
+        return snapshots.get(id);
+      },
+      forget(id) {
+        snapshots.delete(id);
+      },
+      toggle(value) {
+        enabled = value;
+        signature = "";
+      },
+      reset() {
+        identity = null;
+        signature = "";
+        expired = false;
+        snapshots.clear();
+      },
+      check(nextIdentity) {
+        if (identity !== null && identity !== nextIdentity) {
+          enabled = false;
+          expired = true;
+        }
+        return !expired;
+      },
+      update(nextIdentity, nextSignature, entries, archive) {
+        if (!enabled || !this.check(nextIdentity) || !entries.length) return false;
+        if (signature === nextSignature && entries.every((entry) => {
+          var _a;
+          return ((_a = snapshots.get(entry.id)) == null ? void 0 : _a.archive) === archive;
+        })) return false;
+        identity = nextIdentity;
+        signature = nextSignature;
+        for (const entry of entries) snapshots.set(entry.id, __spreadProps(__spreadValues({}, entry), { archive }));
+        return true;
+      },
+      project(entries) {
+        return entries.map((entry) => snapshots.has(entry.id) ? __spreadProps(__spreadValues({}, entry), { archive: snapshots.get(entry.id).archive }) : entry);
+      },
+      // Only storage-proven lineage may carry a selection through an Auto
+      // replacement. Deleted/reimported and conflicting recordings don't match.
+      reconcile(entries) {
+        const aliases = /* @__PURE__ */ new Map();
+        for (const [id, snapshot] of snapshots) {
+          if (!snapshot.lineage) continue;
+          const next = entries.find((entry) => entry.lineage === snapshot.lineage);
+          if (!next || next.id === id) continue;
+          snapshots.delete(id);
+          snapshots.set(next.id, __spreadProps(__spreadValues({}, next), { archive: snapshot.archive }));
+          aliases.set(id, next.id);
+        }
+        return aliases;
+      }
+    };
+  }
+
   // src/favorite-controls.js
   function changeModelFavorite(room, enableOnly = false) {
     const previous = readModelFavorite(room);
@@ -5472,6 +5540,9 @@ underlying system, so should run in the browser, Node, or Plask.
 #tierscope-session-tools button:disabled{opacity:.45;cursor:default}
 #tierscope-session-tools :is(button,select,input,textarea,summary):focus-visible{outline:2px solid #ff69b4;outline-offset:2px}
 #tierscope-session-tools .tools-primary{background:#ff69b420;border-color:#ff69b4;color:var(--panel-accent);font-weight:bold}
+#tierscope-session-tools .tools-quiet,#tierscope-session-tools .tools-quiet:hover{border-color:transparent;background:transparent}
+#tierscope-session-tools .tools-follow{padding:5px 0;border-bottom:1px solid var(--panel-divider)}
+#tierscope-session-tools .tools-follow>label{color:var(--panel-accent);font-weight:bold}
 #tierscope-session-tools .tools-danger{color:var(--panel-negative)}
 #tierscope-session-tools .tools-head{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid #ff69b4;background:rgba(255,105,180,.06);flex-shrink:0}
 #tierscope-session-tools h2{font-size:1.15em;letter-spacing:.04em;margin:0;color:var(--panel-accent)}
@@ -6317,7 +6388,7 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/model-history-view.js
   function renderModelHistoryView(parent, overview, actions) {
-    const { recordings } = overview;
+    let { recordings } = overview;
     const number = (value) => value === null ? "Not enough data" : value.toLocaleString(void 0, { maximumFractionDigits: 1 });
     const percent = (value) => value === null ? "Not enough data" : number(value) + "%";
     const date = (time) => new Date(time).toLocaleString();
@@ -6371,23 +6442,26 @@ underlying system, so should run in the browser, Node, or Plask.
     node(parent, "h3", "Across these recordings");
     const cards = node(parent, "dl", void 0, "tools-history-stats");
     cards.id = "tools-history-stats";
-    for (const [label2, value] of [
-      ["Recordings", recordings.length + " / " + overview.totalCount],
-      ["Time-weighted average", number(overview.mean)],
-      ["Peak in recordings", number(overview.peak)],
-      ["Token holders / registered", percent(overview.tokenShare)],
-      ["Covered time (sum)", actions.duration(overview.coveredMs)],
-      ["Excluded gaps (sum)", actions.duration(overview.gapMs)]
-    ]) {
-      const card = node(cards, "div");
-      node(card, "dt", label2);
-      node(card, "dd", value);
+    function updateCards() {
+      cards.replaceChildren();
+      for (const [label2, value] of [
+        ["Recordings", recordings.length + " / " + overview.totalCount],
+        ["Time-weighted average", number(overview.mean)],
+        ["Peak in recordings", number(overview.peak)],
+        ["Token holders / registered", percent(overview.tokenShare)],
+        ["Covered time (sum)", actions.duration(overview.coveredMs)],
+        ["Excluded gaps (sum)", actions.duration(overview.gapMs)]
+      ]) {
+        const card = node(cards, "div");
+        node(card, "dt", label2);
+        node(card, "dd", value);
+      }
     }
-    node(parent, "p", "Based only on saved recordings shown here. Token share uses registered-viewer time. These peaks are not ATH. Full-session highs may predate retained samples.", "tools-muted");
-    if (overview.overlaps) {
-      const warning = node(parent, "p", "Some recording time ranges overlap. Totals sum recordings and may count the same period more than once.", "tools-muted");
-      warning.id = "tools-history-overlap";
-    }
+    updateCards();
+    node(parent, "p", "Based on the recordings shown here, including new scans while Follow live is on. Token share uses registered-viewer time. These peaks are not ATH. Full-session highs may predate retained samples.", "tools-muted");
+    const warning = node(parent, "p", "Some recording time ranges overlap. Totals sum recordings and may count the same period more than once.", "tools-muted");
+    warning.id = "tools-history-overlap";
+    warning.hidden = !overview.overlaps;
     const detail = node(parent, "section", void 0, "tools-current");
     detail.id = "tools-history-detail";
     detail.setAttribute("aria-label", "Selected recording");
@@ -6503,9 +6577,25 @@ underlying system, so should run in the browser, Node, or Plask.
       if (more.hidden) select.focus();
     }, "tools-history-more");
     function rows() {
-      body.replaceChildren();
-      for (const record of [...recordings].reverse().slice(0, shown)) {
-        const row = node(body, "tr"), cell = node(row, "th");
+      const previous = new Map([...body.children].map((row) => [row.querySelector("button").dataset.historyId, row]));
+      const retained = /* @__PURE__ */ new Set();
+      for (const [index, record] of [...recordings].reverse().slice(0, shown).entries()) {
+        retained.add(record.id);
+        let row = previous.get(record.id);
+        if (row) {
+          row.querySelector("button").textContent = record.title;
+          row.querySelector("th div").textContent = date(record.time);
+          const cells = row.querySelectorAll("td");
+          cells[0].textContent = number(record.mean);
+          cells[1].textContent = number(record.peak);
+          cells[1].title = "First recorded at " + date(record.peakTime);
+          cells[2].textContent = percent(record.tokenShare);
+          cells[3].textContent = actions.duration(record.coveredMs);
+          continue;
+        }
+        row = node(body, "tr");
+        if (body.children[index] !== row) body.insertBefore(row, body.children[index]);
+        const cell = node(row, "th");
         cell.scope = "row";
         const choose = button(cell, record.title, () => {
           select.value = record.id;
@@ -6519,13 +6609,35 @@ underlying system, so should run in the browser, Node, or Plask.
         node(row, "td", percent(record.tokenShare));
         node(row, "td", actions.duration(record.coveredMs));
       }
+      for (const [id, row] of previous) if (!retained.has(id)) row.remove();
       more.hidden = shown >= recordings.length;
       more.textContent = "Show " + Math.min(50, recordings.length - shown) + " more (" + Math.min(shown, recordings.length) + " / " + recordings.length + ")";
     }
     node(parent, "p", "¹ Token holders as a proportion of registered viewers. Recordings with no covered interval have no average; recorded peaks remain available. Overlapping dates can be selected individually in the list.", "tools-muted");
     rows();
     updateSelection();
-    return { canvas, draw };
+    return { canvas, draw, update(next, selectedId = select.value) {
+      overview = next;
+      recordings = next.recordings;
+      const currentOptions = [...select.options];
+      const nextRecords = [...recordings].reverse();
+      if (currentOptions.length !== nextRecords.length || currentOptions.some((option, i) => option.value !== nextRecords[i].id)) {
+        select.replaceChildren();
+        for (const record of nextRecords) {
+          const option = node(select, "option", date(record.time) + " · " + record.title);
+          option.value = record.id;
+        }
+      }
+      [...select.options].forEach((option, i) => {
+        const record = nextRecords[i];
+        option.textContent = date(record.time) + " · " + record.title;
+      });
+      if (recordings.some((record) => record.id === selectedId)) select.value = selectedId;
+      updateCards();
+      warning.hidden = !overview.overlaps;
+      rows();
+      updateSelection();
+    } };
   }
 
   // src/recording-export-data.js
@@ -6914,7 +7026,7 @@ underlying system, so should run in the browser, Node, or Plask.
     let optionsLibrary = null, optionsArchive = null, optionsLiveArchive = null, options = [];
     const savedAnalysis = readAnalysisPreferences();
     let { metric, threshold, sharedLength } = savedAnalysis.preferences;
-    let summaryThresholds = [], summaryThresholdSource = null;
+    let summaryThresholds = [], summaryThresholdSource = null, summaryAutomatic = true, thresholdDirty = false;
     let selectedA = "current", selectedB = "", selectedExtra = [], pendingBackup = null;
     const libraryFilters = { room: "", query: "", from: "", to: "", sort: "newest", favorites: false }, librarySelection = /* @__PURE__ */ new Set();
     const libraryDisclosures = { book: false, search: false };
@@ -6926,7 +7038,9 @@ underlying system, so should run in the browser, Node, or Plask.
     let libraryRoom = null, chartDraw = null, analysisPreferenceError = savedAnalysis.error;
     let observedSource = null, observedSignature = "";
     let refreshCapacity = null, capacityCheckpoint = "";
-    let detachDock = null;
+    let detachDock = null, historyView = null, followControls = null, liveCapture = null, historyDiscovery = "";
+    let currentArchiveIsReplay = isPlaybackCurrent(runtime.playback);
+    const followers = { summary: createAnalysisFollower(), compare: createAnalysisFollower(), history: createAnalysisFollower() };
     try {
       currentArchive = captureSessionFile();
     } catch (error) {
@@ -7034,6 +7148,15 @@ underlying system, so should run in the browser, Node, or Plask.
         var _a;
         return __spreadProps(__spreadValues({}, entry), { modelFavorite: library.favoriteModels.has(entry.archive.room.toLowerCase()), autoKeep: ((_a = library.automaticModels) == null ? void 0 : _a.has(entry.archive.room.toLowerCase())) || false });
       });
+      for (const follower of Object.values(followers)) {
+        const aliases = follower.reconcile(library.entries), remap = (id) => aliases.get(id) || id;
+        selectedA = remap(selectedA);
+        selectedB = remap(selectedB);
+        selectedExtra = selectedExtra.map(remap);
+        historySelected = remap(historySelected);
+        if (summaryThresholdSource) summaryThresholdSource.id = remap(summaryThresholdSource.id);
+        for (const saved of analysisStates.values()) saved.ids = saved.ids.map(remap);
+      }
       noteDrafts.reconcile(library.entries);
       updateDraftNotice();
       return library;
@@ -7089,7 +7212,7 @@ underlying system, so should run in the browser, Node, or Plask.
       }
     }
     function sourceOptions() {
-      if (optionsLibrary === library && optionsArchive === currentArchive && optionsLiveArchive === liveComparisonArchive) return options;
+      if (optionsLibrary === library && optionsArchive === currentArchive && optionsLiveArchive === liveComparisonArchive) return followers[tab] ? followers[tab].project(options) : options;
       const items = [];
       if (liveComparisonArchive) items.push({ id: "live", title: "Live snapshot — " + liveComparisonArchive.room, archive: liveComparisonArchive });
       if (currentArchive) items.push({ id: "current", title: "Current / replayed snapshot — " + currentArchive.room, archive: currentArchive });
@@ -7101,7 +7224,7 @@ underlying system, so should run in the browser, Node, or Plask.
       optionsArchive = currentArchive;
       optionsLiveArchive = liveComparisonArchive;
       options = items;
-      return options;
+      return followers[tab] ? followers[tab].project(options) : options;
     }
     function selectSource(parent, label, id, selected, changed) {
       const wrapper = node(parent, "label", label), select = node(wrapper, "select");
@@ -7129,7 +7252,89 @@ underlying system, so should run in the browser, Node, or Plask.
       repaintHighMode();
       tell(result.saved ? (result.changed ? "All-time highs updated for " : "No higher records for ") + archive.room + "." : result.state.error || "Records changed in another tab. Try again.", !result.saved);
     }
+    function followContext() {
+      const room = getModelName(), history = runtime.history;
+      const identity = room + ":" + runtime.sessionStartedAt + ":" + runtime.activeRoomEpoch;
+      if (!current() || room === "unknown" || location.href !== runtime.lastUrl || runtime.activeSessionStorageKey !== getStorageKey(room) || !history.timestamps.length) {
+        return { identity, reason: "Waiting for a live session in this room." };
+      }
+      try {
+        if (!readModelFavorite(room).autoKeep) return { identity, reason: "Confirm this model as a favorite to follow their live session." };
+      } catch (error) {
+        return { identity, reason: "Favorite setting unavailable; this view is frozen." };
+      }
+      return { identity, room, signature: [identity, history.timestamps[0], history.timestamps.at(-1), history.timestamps.length, runtime.isPaused, runtime.isStopped, runtime.stoppedAt].join(":") };
+    }
+    function followedEntries() {
+      return followers.history.project(library.entries);
+    }
+    function updateFollowing() {
+      const follower = followers[tab];
+      if (!follower) return false;
+      const context = followContext();
+      let reason = context.reason || "", changed = false, candidates = [];
+      if (!follower.check(context.identity)) reason = "Session changed. Choose or refresh a recording to follow the new session.";
+      if (reason && follower.identity) follower.toggle(false);
+      if (!reason) {
+        if (tab === "history" && follower.enabled && !follower.identity) {
+          const saved = automaticLibraryStatus(context.room).savedAt;
+          if (saved && historyDiscovery !== String(saved)) {
+            historyDiscovery = String(saved);
+            readLibrary();
+          }
+        }
+        const items = tab === "history" ? followedEntries() : sourceOptions().filter((item) => (tab === "summary" ? [selectedA] : [selectedA, selectedB, ...selectedExtra]).includes(item.id));
+        candidates = items.filter((item) => !(item.id === "current" && currentArchiveIsReplay) && item.archive.room.toLowerCase() === context.room.toLowerCase() && item.archive.session.sessionStartedAt === runtime.sessionStartedAt && (tab !== "history" || libraryRoom === context.room.toLowerCase()));
+        if (!candidates.length) reason = "Choose this favorite model’s current live session to follow new scans.";
+        if (candidates.length && follower.enabled) {
+          if (!liveCapture || liveCapture.signature !== context.signature || liveCapture.source !== runtime.history) {
+            liveCapture = { signature: context.signature, source: runtime.history, archive: freezeRecordingData(captureLiveSessionFile()) };
+          }
+          candidates = candidates.filter((item) => {
+            var _a;
+            if (item.archive === liveCapture.archive || follower.identity === context.identity && ((_a = follower.get(item.id)) == null ? void 0 : _a.archive) === item.archive) return true;
+            const order = compareLibrarySessions(item.archive, liveCapture.archive);
+            return order === 0 || order === 1;
+          });
+          if (!candidates.length) reason = "This recording differs from the live session. Its snapshot is kept.";
+          else changed = follower.update(context.identity, context.signature, candidates, liveCapture.archive);
+        }
+      }
+      if (followControls) {
+        const { check, status } = followControls;
+        check.disabled = !!reason;
+        check.checked = follower.enabled && !reason;
+        status.textContent = reason || (!follower.enabled ? "Frozen for inspection. Turn on to catch up." : (runtime.isStopped ? "Stopped" : runtime.isPaused ? "Paused" : "Following live") + " · latest sample " + new Date(runtime.history.timestamps.at(-1)).toLocaleTimeString() + (automaticLibraryStatus(context.room).error ? " · Library save pending; showing live data." : "") + (tab === "compare" && sharedLength ? " · Match shared length limits the chart to the shortest recording." : ""));
+      }
+      return changed;
+    }
+    function followControl(parent) {
+      const row = node(parent, "div", void 0, "tools-actions tools-follow");
+      const check = checkbox(row, "tools-follow-live", "Follow live");
+      const status = node(row, "span", "", "tools-muted");
+      status.id = "tools-follow-status";
+      check.setAttribute("aria-describedby", status.id);
+      followControls = { check, status };
+      check.onchange = action(() => {
+        followers[tab].toggle(check.checked);
+        const changed = updateFollowing();
+        if (changed) refreshFollowedView();
+      });
+      updateFollowing();
+    }
+    function refreshFollowedView() {
+      const scrollTop = content.scrollTop;
+      if (tab === "history" && historyView) historyView.update(modelHistoryReader.read(followedEntries(), libraryRoom, metric, historyLimit), historySelected);
+      else if (tab === "history") render("history");
+      else if ((tab === "summary" || tab === "compare") && analysisView) refreshAnalysis(true, true);
+      content.scrollTop = scrollTop;
+    }
+    function selectNewFollowSource() {
+      if (followers[tab]) followers[tab].reset();
+    }
     function refreshCurrent() {
+      var _a;
+      if (followers[tab] && updateFollowing()) refreshFollowedView();
       const checkpoint2 = automaticLibraryStatus(getModelName());
       const checkpointSignature = [checkpoint2.identity, checkpoint2.signature, checkpoint2.savedAt, checkpoint2.error].join(":");
       if (refreshCapacity && capacityCheckpoint !== checkpointSignature) {
@@ -7150,18 +7355,23 @@ underlying system, so should run in the browser, Node, or Plask.
         refreshCards();
         return;
       }
-      const replaced = source !== observedSource;
+      const replaced = source !== observedSource, firstCapture = !currentArchive && available;
       observedSource = source;
       observedSignature = signature;
       if (replaced || !currentArchive) {
-        try {
-          currentArchive = captureSessionFile();
-        } catch (error) {
-          currentArchive = null;
+        const replayChanged = !!playback !== currentArchiveIsReplay;
+        if (!((_a = followers[tab]) == null ? void 0 : _a.identity) || replayChanged || playback) {
+          currentArchiveIsReplay = !!playback;
+          try {
+            currentArchive = captureSessionFile();
+          } catch (error) {
+            currentArchive = null;
+          }
+          if (replayChanged || playback) for (const follower of Object.values(followers)) follower.forget("current");
         }
       }
       refreshCards();
-      if (replaced && (tab === "summary" && selectedA === "current" || tab === "compare" && [selectedA, selectedB, ...selectedExtra].includes("current"))) render(tab);
+      if ((replaced || firstCapture) && (tab === "summary" && selectedA === "current" || tab === "compare" && [selectedA, selectedB, ...selectedExtra].includes("current"))) render(tab);
     }
     function favoriteAction(room, enableOnly = false) {
       if (!changeModelFavorite(room, enableOnly)) return;
@@ -7261,7 +7471,7 @@ underlying system, so should run in the browser, Node, or Plask.
         Object.assign(libraryFilters, { room: libraryRoom, query: "", from: "", to: "", favorites: false });
         render("library", true);
         tell(result.added ? "Session kept in the library." : result.updated ? "Library session updated; its name and notes were preserved." : "An equal or fuller session is already in the library.");
-      }, "tools-keep").className = "tools-primary";
+      }, "tools-keep").className = replay ? "tools-primary" : "tools-quiet";
       if (replay) currentButton(actions, "Save file", (archive) => downloadDataFile(archive, archiveName(archive)), "tools-save-session");
       else {
         const label = node(actions, "label", void 0, "tools-auto-keep"), check = node(label, "input");
@@ -7283,7 +7493,7 @@ underlying system, so should run in the browser, Node, or Plask.
       }
       const shortcuts = node(replay ? actions : card, replay ? "span" : "div", void 0, replay ? "tools-history-shortcut" : "tools-actions tools-history-shortcut");
       shortcuts.id = "tools-room-shortcuts" + suffix;
-      if (!replay) button(shortcuts, "Compare with previous", compareLiveWithPrevious, "tools-compare-previous");
+      if (!replay) button(shortcuts, "Compare with previous", compareLiveWithPrevious, "tools-compare-previous").className = "tools-primary";
       const history = button(shortcuts, "History · 0", () => openHistory(star.dataset.favoriteRoom.toLowerCase()), "tools-room-history" + suffix);
       history.dataset.cardHistory = "";
       if (replay) {
@@ -7319,6 +7529,7 @@ underlying system, so should run in the browser, Node, or Plask.
         return;
       }
       liveComparisonArchive = snapshot;
+      followers.compare.reset();
       selectedA = "live";
       selectedB = ids[0];
       selectedExtra = ids.slice(1);
@@ -7463,25 +7674,31 @@ underlying system, so should run in the browser, Node, or Plask.
       const sourceControls = node(picker, "div", void 0, "tools-actions");
       if (liveComparisonArchive) button(sourceControls, "Refresh live snapshot", () => {
         liveComparisonArchive = captureLiveSessionFile();
+        selectNewFollowSource();
         render(tab);
       }, "tools-refresh-live-snapshot");
       if (currentArchive) button(sourceControls, "Refresh current / replayed snapshot", () => {
         currentArchive = captureSessionFile();
+        currentArchiveIsReplay = isPlaybackCurrent(runtime.playback);
+        selectNewFollowSource();
         render(tab);
       }, "tools-refresh-snapshot");
       selectedA = selectSource(sourceControls, comparing ? "A " : "Recording ", "tools-source-a", selectedA, (value) => {
         selectedA = value;
+        selectNewFollowSource();
         render(tab);
       });
       if (comparing) {
         if (!selectedB) selectedB = (sourceOptions().find((item) => item.id !== selectedA) || sourceOptions()[0]).id;
         selectedB = selectSource(sourceControls, "B ", "tools-source-b", selectedB, (value) => {
           selectedB = value;
+          selectNewFollowSource();
           render(tab);
         });
         selectedExtra.forEach((id, index) => {
           selectedExtra[index] = selectSource(sourceControls, String.fromCharCode(67 + index) + " ", "tools-source-" + String.fromCharCode(99 + index), id, (value) => {
             selectedExtra[index] = value;
+            selectNewFollowSource();
             render(tab);
           });
           button(sourceControls, "Remove " + String.fromCharCode(67 + index), () => {
@@ -7499,6 +7716,7 @@ underlying system, so should run in the browser, Node, or Plask.
         }, "tools-compare-add").disabled = selectedExtra.length >= 4 || !next;
         node(sourceControls, "span", 2 + selectedExtra.length + " / 6 slots", "tools-muted");
       }
+      followControl(content);
       const controls = node(content, "div", void 0, "tools-actions");
       const label = node(controls, "label", "Metric "), metricSelect = node(label, "select");
       metricSelect.id = "tools-metric";
@@ -7527,19 +7745,26 @@ underlying system, so should run in the browser, Node, or Plask.
         input.placeholder = "Not enough covered time";
         input.title = "Defaults: session average −25%, average, +25%, rounded to whole viewers. Or enter up to 8 counts separated by commas for this session and metric.";
       }
-      input.oninput = () => input.setCustomValidity("");
+      input.oninput = () => {
+        thresholdDirty = true;
+        input.setCustomValidity("");
+      };
       function applyThreshold() {
         try {
           if (comparing) {
             if (!Number.isSafeInteger(input.valueAsNumber) || input.valueAsNumber < 0) throw new Error("Enter a non-negative whole number.");
             rememberAnalysis({ threshold: input.valueAsNumber });
-          } else summaryThresholds = parseAnalysisThresholds(input.value);
+          } else {
+            summaryThresholds = parseAnalysisThresholds(input.value);
+            summaryAutomatic = false;
+          }
         } catch (error) {
           input.setCustomValidity(error.message);
           input.reportValidity();
           return;
         }
         input.setCustomValidity("");
+        thresholdDirty = false;
         refreshAnalysis(false);
       }
       input.onkeydown = (event) => {
@@ -7551,6 +7776,8 @@ underlying system, so should run in the browser, Node, or Plask.
       button(controls, comparing ? "Apply threshold" : "Apply thresholds", applyThreshold, "tools-apply-threshold");
       if (!comparing) button(controls, "Use average", () => {
         summaryThresholdSource = null;
+        summaryAutomatic = true;
+        thresholdDirty = false;
         refreshAnalysis(false);
       }, "tools-average-thresholds").title = "Recalculate from this session: average −25%, average, +25%";
       if (comparing) {
@@ -7561,6 +7788,7 @@ underlying system, so should run in the browser, Node, or Plask.
         node(label2, "span", "Match shared length");
         check.onchange = () => {
           rememberAnalysis({ sharedLength: check.checked });
+          updateFollowing();
           refreshAnalysis();
         };
       }
@@ -7601,9 +7829,11 @@ underlying system, so should run in the browser, Node, or Plask.
       };
       button(controls, "Refresh", () => {
         readLibrary();
+        followers.history.reset();
         render("history");
       }, "tools-history-refresh").title = "Read the latest saved recordings from this browser";
-      const overview = modelHistoryReader.read(library.entries, libraryRoom, metric, historyLimit);
+      followControl(content);
+      const overview = modelHistoryReader.read(followedEntries(), libraryRoom, metric, historyLimit);
       const view = renderModelHistoryView(content, overview, {
         metricLabel: ANALYSIS_METRICS[metric],
         duration: formatElapsedTime,
@@ -7616,7 +7846,7 @@ underlying system, so should run in the browser, Node, or Plask.
           render("summary");
         }),
         replay: action((id) => {
-          const entry = library.entries.find((entry2) => entry2.id === id);
+          const entry = followedEntries().find((entry2) => entry2.id === id);
           openSessionReplay(entry.archive);
           observedSignature = "";
           refreshCurrent();
@@ -7632,6 +7862,7 @@ underlying system, so should run in the browser, Node, or Plask.
           (_a = dialog.querySelector("#tools-analysis-chart") || dialog.querySelector("#tools-recording-picker > summary")) == null ? void 0 : _a.focus();
         }
       });
+      historyView = view;
       if (view) {
         chartDraw = view.draw;
         if (window.ResizeObserver) {
@@ -7722,6 +7953,7 @@ underlying system, so should run in the browser, Node, or Plask.
     function chart(archives, labels, endMs, ids) {
       const series = archives.map((archive) => __spreadProps(__spreadValues({}, analysisSeries(archive, metric)), { timestamps: archive.session.history.timestamps }));
       if (analysisView) {
+        analysisSources = { archives, ids };
         analysisView.update(series, endMs, ANALYSIS_METRICS[metric]);
         return;
       }
@@ -7746,7 +7978,7 @@ underlying system, so should run in the browser, Node, or Plask.
       analysisOutput.id = "tools-analysis-output";
       refreshAnalysis();
     }
-    function refreshAnalysis(redrawChart = true) {
+    function refreshAnalysis(redrawChart = true, liveUpdate = false) {
       const comparing = tab === "compare", options2 = sourceOptions();
       if (!analysisOutput) return;
       analysisOutput.replaceChildren();
@@ -7767,12 +7999,19 @@ underlying system, so should run in the browser, Node, or Plask.
         summaryTable(result.summaries, recordings.map((item, index) => String.fromCharCode(65 + index)));
       } else {
         const summary = summarizeSession(a.archive, metric, threshold);
+        const continuing = liveUpdate && (summaryThresholdSource == null ? void 0 : summaryThresholdSource.id) === a.id && summaryThresholdSource.metric === metric;
         if (!summaryThresholdSource || summaryThresholdSource.archive !== a.archive || summaryThresholdSource.id !== a.id || summaryThresholdSource.metric !== metric) {
+          if (!continuing) {
+            summaryAutomatic = true;
+            thresholdDirty = false;
+          }
           summaryThresholdSource = { archive: a.archive, id: a.id, metric };
-          summaryThresholds = averageAnalysisThresholds(summary.mean);
+          if (summaryAutomatic) summaryThresholds = averageAnalysisThresholds(summary.mean);
           const input = dialog.querySelector("#tools-threshold");
-          input.value = summaryThresholds.join(", ");
-          input.setCustomValidity("");
+          if (!thresholdDirty) {
+            input.value = summaryThresholds.join(", ");
+            input.setCustomValidity("");
+          }
         }
         dialog.querySelector("#tools-average-thresholds").disabled = summary.mean === null;
         if (redrawChart) chart([a.archive], [a.title], summary.spanMs, [a.id]);
@@ -7840,6 +8079,8 @@ underlying system, so should run in the browser, Node, or Plask.
     function render(next, revealSessions = false) {
       var _a;
       refreshCapacity = null;
+      historyView = null;
+      followControls = null;
       const focusedId = dialog.contains(document.activeElement) ? document.activeElement.id : "";
       for (const [key, id] of [["book", "tools-sessions-book"], ["search", "tools-library-search-menu"]]) {
         const details = dialog.querySelector("#" + id);
@@ -7891,6 +8132,9 @@ underlying system, so should run in the browser, Node, or Plask.
       refreshSessionTools = null;
       refreshCapacity = null;
       chartDraw = null;
+      historyView = null;
+      followControls = null;
+      liveCapture = null;
       if (chartDispose) {
         chartDispose();
         chartDispose = null;
@@ -9507,7 +9751,7 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/bootstrap.js
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.20.0";
+    runtime.TIERSCOPE_VERSION = "3.21.0";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;

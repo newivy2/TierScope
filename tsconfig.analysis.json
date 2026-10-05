@@ -9,6 +9,7 @@
   },
   "include": [
     "src/session-analysis.js",
+    "src/analysis-follow.js",
     "src/library-capacity-data.js",
     "src/library-query.js",
     "src/library-drafts.js",

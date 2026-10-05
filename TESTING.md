@@ -145,3 +145,7 @@ The comparison benchmark additionally measures hiding/showing a line and applyin
 ## Audience display (3.20.0)
 
 `audience-display.test.cjs` checks ratio rounding, the inclusive 5% equality band and zero/invalid denominators. Presentation boundary tests check supplied-frame and replay ratios against later live updates. `audience-browser.cjs` checks four subtotal trend boxes, registered-plus-anonymous deltas across Last/Start baselines, theme-matched yellow/pink borders, larger bottom boxes, adaptive numbers without clipping at 50–150% scale, the ratio’s count/high placement and zero denominator, SH/ATH independence, restored/live/ordinary/file-replay isolation, and narrow layout. The browser suites now include 16 fixtures per engine.
+
+## Follow live (3.21.0)
+
+`analysis-follow.test.cjs` covers snapshot isolation, freeze/catch-up, identity expiry and verified lineage. `follow-live-browser.cjs` covers Summary, six-way Compare and Model History updates from accepted scans; preserved zoom, pinned cursor, hidden lines, selectors, focus, custom thresholds and unfinished edits; frozen views through tab switches and Auto replacements; save failures, replay isolation, favorite revocation from another tab, Reset/navigation, first samples, timestamp gaps, both themes, narrow layouts and Current Live Session button priority. Repeated status refreshes without new samples do not capture more archives. All 17 browser fixtures run in Chromium and Firefox.

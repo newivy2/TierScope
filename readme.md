@@ -16,7 +16,7 @@ If you used the beta, install from the official link above to follow main releas
 
 ---
 
-**Current stable release: 3.20.0** · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.20.0) · [Audience trends and ratio guide](docs/audience-trends.md)
+**Current stable release: 3.21.0** · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.21.0) · [Follow live guide](docs/follow-live.md)
 
 ---
 
@@ -48,7 +48,7 @@ Charts use periodic room-data samples. Session history is stored locally through
 - **Saved session files** — Save sessioins to your device and reopen them later.
 - **Session library** — Keep sessions in model folders and update saved sessions as they grow.
 - **Favorite models** — Choose favorite models and enable automatic session saving while tracking them.
-- **Summaries and comparison** — Review audience statistics and compare up to six sessions on one chart.
+- **Summaries and comparison** — Review audience statistics and compare up to six sessions, with live updates for favorites.
 - **Model history** — Follow a model’s audience averages and peaks across saved sessions.
 - **Library organization** — Find sessions by model or date, add notes, and import or export in bulk.
 - **Backups** — Back up and restore your library, all-time highs and preferences.

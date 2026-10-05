@@ -1,3 +1,4 @@
+import { createAnalysisFollower } from './analysis-follow.js';
 import { automaticLibraryStatus, keepFavoriteSession } from './automatic-library.js';
 import { changeModelFavorite } from './favorite-controls.js';
 import { paintFavoriteButton } from './favorite-view.js';
@@ -22,6 +23,7 @@ import { exportLibrarySelection, importLibraryBundle, libraryImportBundle } from
 import { renderAnalysisChart } from './analysis-chart-view.js';
 import { createModelHistoryReader, previousModelSessionIds } from './model-history.js';
 import { renderModelHistoryView } from './model-history-view.js';
+import { freezeRecordingData } from './immutable-data.js';
 import { isPlaybackCurrent } from './playback-data.js';
 import { setPlaybackAllTimeState } from './playback-state.js';
 import { getStorageKey } from './record-validation.js';
@@ -32,7 +34,7 @@ import { ANALYSIS_METRICS, analysisSeries, averageAnalysisThresholds, compareRec
 import { captureSessionFile, captureLiveSessionFile } from './session-capture.js';
 import { validateSessionFile } from './session-file-format.js';
 import { getSessionSaveState } from './session-health.js';
-import { LIBRARY_PREFIX, createLibraryReader, keepSessionInLibrary, removeLibrarySession, renameLibrarySession, updateLibraryMetadata } from './session-library.js';
+import { LIBRARY_PREFIX, compareLibrarySessions, createLibraryReader, keepSessionInLibrary, removeLibrarySession, renameLibrarySession, updateLibraryMetadata } from './session-library.js';
 import { openSessionReplay } from './session-replay.js';
 import { formatElapsedTime, getModelName } from './utils.js';
 
@@ -82,7 +84,7 @@ export function openSessionTools(focusTarget) {
     let optionsLibrary = null, optionsArchive = null, optionsLiveArchive = null, options = [];
     const savedAnalysis = readAnalysisPreferences();
     let {metric, threshold, sharedLength} = savedAnalysis.preferences;
-    let summaryThresholds = [], summaryThresholdSource = null;
+    let summaryThresholds = [], summaryThresholdSource = null, summaryAutomatic = true, thresholdDirty = false;
     let selectedA = 'current', selectedB = '', selectedExtra = [], pendingBackup = null;
     const libraryFilters = {room: '', query: '', from: '', to: '', sort: 'newest', favorites: false}, librarySelection = new Set();
     const libraryDisclosures = {book: false, search: false};
@@ -94,7 +96,9 @@ export function openSessionTools(focusTarget) {
     let libraryRoom = null, chartDraw = null, analysisPreferenceError = savedAnalysis.error;
     let observedSource = null, observedSignature = '';
     let refreshCapacity = null, capacityCheckpoint = '';
-    let detachDock = null;
+    let detachDock = null, historyView = null, followControls = null, liveCapture = null, historyDiscovery = '';
+    let currentArchiveIsReplay = isPlaybackCurrent(runtime.playback);
+    const followers = {summary: createAnalysisFollower(), compare: createAnalysisFollower(), history: createAnalysisFollower()};
     try { currentArchive = captureSessionFile(); } catch (error) { /* Tools also work on directory pages. */ }
     const content = dialog.querySelector('#tools-content'), message = dialog.querySelector('#tools-message');
     const current = () => dialog.isConnected && dialog.open && origin === location.href && generation === runtime.initGuard;
@@ -148,6 +152,12 @@ export function openSessionTools(focusTarget) {
             library.favoriteError = migrationError || (models.errors.length ? 'Some model favorites could not be read. Refresh to retry; recordings remain available.' : '');
         } catch (error) { library.favoriteModels = new Set(); library.favoriteError = 'Model favorites could not be read. Refresh to retry; recordings remain available.'; }
         library.entries = library.entries.map(entry => ({...entry, modelFavorite: library.favoriteModels.has(entry.archive.room.toLowerCase()), autoKeep: library.automaticModels?.has(entry.archive.room.toLowerCase()) || false}));
+        for (const follower of Object.values(followers)) {
+            const aliases = follower.reconcile(library.entries), remap = id => aliases.get(id) || id;
+            selectedA = remap(selectedA); selectedB = remap(selectedB); selectedExtra = selectedExtra.map(remap); historySelected = remap(historySelected);
+            if (summaryThresholdSource) summaryThresholdSource.id = remap(summaryThresholdSource.id);
+            for (const saved of analysisStates.values()) saved.ids = saved.ids.map(remap);
+        }
         noteDrafts.reconcile(library.entries); updateDraftNotice();
         return library;
     }
@@ -188,7 +198,7 @@ export function openSessionTools(focusTarget) {
         }
     }
     function sourceOptions() {
-        if (optionsLibrary === library && optionsArchive === currentArchive && optionsLiveArchive === liveComparisonArchive) return options;
+        if (optionsLibrary === library && optionsArchive === currentArchive && optionsLiveArchive === liveComparisonArchive) return followers[tab] ? followers[tab].project(options) : options;
         const items = [];
         if (liveComparisonArchive) items.push({id: 'live', title: 'Live snapshot — ' + liveComparisonArchive.room, archive: liveComparisonArchive});
         if (currentArchive) items.push({ id: 'current', title: 'Current / replayed snapshot — ' + currentArchive.room, archive: currentArchive });
@@ -197,7 +207,7 @@ export function openSessionTools(focusTarget) {
             items.push({...entry, title: entry.archive.room + title + ' — ' + new Date(entry.archive.session.history.timestamps[0]).toLocaleString()});
         }
         optionsLibrary = library; optionsArchive = currentArchive; optionsLiveArchive = liveComparisonArchive; options = items;
-        return options;
+        return followers[tab] ? followers[tab].project(options) : options;
     }
     function selectSource(parent, label, id, selected, changed) {
         const wrapper = node(parent, 'label', label), select = node(wrapper, 'select'); select.id = id;
@@ -221,7 +231,89 @@ export function openSessionTools(focusTarget) {
         tell(result.saved ? (result.changed ? 'All-time highs updated for ' : 'No higher records for ') + archive.room + '.' :
             result.state.error || 'Records changed in another tab. Try again.', !result.saved);
     }
+    function followContext() {
+        const room = getModelName(), history = runtime.history;
+        const identity = room + ':' + runtime.sessionStartedAt + ':' + runtime.activeRoomEpoch;
+        if (!current() || room === 'unknown' || location.href !== runtime.lastUrl || runtime.activeSessionStorageKey !== getStorageKey(room) || !history.timestamps.length) {
+            return {identity, reason: 'Waiting for a live session in this room.'};
+        }
+        try {
+            if (!readModelFavorite(room).autoKeep) return {identity, reason: 'Confirm this model as a favorite to follow their live session.'};
+        } catch (error) { return {identity, reason: 'Favorite setting unavailable; this view is frozen.'}; }
+        return {identity, room, signature: [identity, history.timestamps[0], history.timestamps.at(-1), history.timestamps.length, runtime.isPaused, runtime.isStopped, runtime.stoppedAt].join(':')};
+    }
+    function followedEntries() {
+        return followers.history.project(library.entries);
+    }
+    function updateFollowing() {
+        const follower = followers[tab];
+        if (!follower) return false;
+        const context = followContext();
+        let reason = context.reason || '', changed = false, candidates = [];
+        if (!follower.check(context.identity)) reason = 'Session changed. Choose or refresh a recording to follow the new session.';
+        if (reason && follower.identity) follower.toggle(false);
+        if (!reason) {
+            if (tab === 'history' && follower.enabled && !follower.identity) {
+                const saved = automaticLibraryStatus(context.room).savedAt;
+                if (saved && historyDiscovery !== String(saved)) { historyDiscovery = String(saved); readLibrary(); }
+            }
+            const items = tab === 'history' ? followedEntries() : sourceOptions().filter(item =>
+                (tab === 'summary' ? [selectedA] : [selectedA, selectedB, ...selectedExtra]).includes(item.id));
+            candidates = items.filter(item => !(item.id === 'current' && currentArchiveIsReplay) &&
+                item.archive.room.toLowerCase() === context.room.toLowerCase() &&
+                item.archive.session.sessionStartedAt === runtime.sessionStartedAt &&
+                (tab !== 'history' || libraryRoom === context.room.toLowerCase()));
+            if (!candidates.length) reason = 'Choose this favorite model’s current live session to follow new scans.';
+            if (candidates.length && follower.enabled) {
+                if (!liveCapture || liveCapture.signature !== context.signature || liveCapture.source !== runtime.history) {
+                    liveCapture = {signature: context.signature, source: runtime.history, archive: freezeRecordingData(captureLiveSessionFile())};
+                }
+                candidates = candidates.filter(item => {
+                    if (item.archive === liveCapture.archive || follower.identity === context.identity && follower.get(item.id)?.archive === item.archive) return true;
+                    const order = compareLibrarySessions(item.archive, liveCapture.archive);
+                    return order === 0 || order === 1;
+                });
+                if (!candidates.length) reason = 'This recording differs from the live session. Its snapshot is kept.';
+                else changed = follower.update(context.identity, context.signature, candidates, liveCapture.archive);
+            }
+        }
+        if (followControls) {
+            const {check, status} = followControls;
+            check.disabled = !!reason;
+            check.checked = follower.enabled && !reason;
+            status.textContent = reason || (!follower.enabled ? 'Frozen for inspection. Turn on to catch up.' :
+                (runtime.isStopped ? 'Stopped' : runtime.isPaused ? 'Paused' : 'Following live') +
+                ' · latest sample ' + new Date(runtime.history.timestamps.at(-1)).toLocaleTimeString() +
+                (automaticLibraryStatus(context.room).error ? ' · Library save pending; showing live data.' : '') +
+                (tab === 'compare' && sharedLength ? ' · Match shared length limits the chart to the shortest recording.' : ''));
+        }
+        return changed;
+    }
+    function followControl(parent) {
+        const row = node(parent, 'div', undefined, 'tools-actions tools-follow');
+        const check = checkbox(row, 'tools-follow-live', 'Follow live');
+        const status = node(row, 'span', '', 'tools-muted'); status.id = 'tools-follow-status';
+        check.setAttribute('aria-describedby', status.id);
+        followControls = {check, status};
+        check.onchange = action(() => {
+            followers[tab].toggle(check.checked);
+            const changed = updateFollowing();
+            if (changed) refreshFollowedView();
+        });
+        updateFollowing();
+    }
+    function refreshFollowedView() {
+        const scrollTop = content.scrollTop;
+        if (tab === 'history' && historyView) historyView.update(modelHistoryReader.read(followedEntries(), libraryRoom, metric, historyLimit), historySelected);
+        else if (tab === 'history') render('history');
+        else if ((tab === 'summary' || tab === 'compare') && analysisView) refreshAnalysis(true, true);
+        content.scrollTop = scrollTop;
+    }
+    function selectNewFollowSource() {
+        if (followers[tab]) followers[tab].reset();
+    }
     function refreshCurrent() {
+        if (followers[tab] && updateFollowing()) refreshFollowedView();
         const checkpoint = automaticLibraryStatus(getModelName());
         const checkpointSignature = [checkpoint.identity, checkpoint.signature, checkpoint.savedAt, checkpoint.error].join(':');
         if (refreshCapacity && capacityCheckpoint !== checkpointSignature) {
@@ -236,11 +328,20 @@ export function openSessionTools(focusTarget) {
         const available = history.timestamps.length > 0 && (playback || runtime.activeSessionStorageKey === getStorageKey(room) && runtime.lastUrl === location.href);
         const signature = [room, !!playback, history.timestamps.length, history.timestamps.at(-1), runtime.isPaused, runtime.isStopped].join(':');
         if (source === observedSource && signature === observedSignature) { refreshCards(); return; }
-        const replaced = source !== observedSource;
+        const replaced = source !== observedSource, firstCapture = !currentArchive && available;
         observedSource = source; observedSignature = signature;
-        if (replaced || !currentArchive) { try { currentArchive = captureSessionFile(); } catch (error) { currentArchive = null; } }
+        if (replaced || !currentArchive) {
+            const replayChanged = !!playback !== currentArchiveIsReplay;
+            // A live Reset freezes a followed analysis. Entering/leaving Replay
+            // still chooses that explicit source, which never follows live scans.
+            if (!followers[tab]?.identity || replayChanged || playback) {
+                currentArchiveIsReplay = !!playback;
+                try { currentArchive = captureSessionFile(); } catch (error) { currentArchive = null; }
+                if (replayChanged || playback) for (const follower of Object.values(followers)) follower.forget('current');
+            }
+        }
         refreshCards();
-        if (replaced && (tab === 'summary' && selectedA === 'current' || tab === 'compare' && [selectedA, selectedB, ...selectedExtra].includes('current'))) render(tab);
+        if ((replaced || firstCapture) && (tab === 'summary' && selectedA === 'current' || tab === 'compare' && [selectedA, selectedB, ...selectedExtra].includes('current'))) render(tab);
     }
     function favoriteAction(room, enableOnly = false) {
         if (!changeModelFavorite(room, enableOnly)) return;
@@ -330,7 +431,7 @@ export function openSessionTools(focusTarget) {
             const result = keepSessionInLibrary(archive); libraryRoom = archive.room.toLowerCase();
             Object.assign(libraryFilters, {room: libraryRoom, query: '', from: '', to: '', favorites: false});
             render('library', true); tell(result.added ? 'Session kept in the library.' : result.updated ? 'Library session updated; its name and notes were preserved.' : 'An equal or fuller session is already in the library.');
-        }, 'tools-keep').className = 'tools-primary';
+        }, 'tools-keep').className = replay ? 'tools-primary' : 'tools-quiet';
         if (replay) currentButton(actions, 'Save file', archive => downloadDataFile(archive, archiveName(archive)), 'tools-save-session');
         else {
             const label = node(actions, 'label', undefined, 'tools-auto-keep'), check = node(label, 'input');
@@ -345,7 +446,7 @@ export function openSessionTools(focusTarget) {
         }
         const shortcuts = node(replay ? actions : card, replay ? 'span' : 'div', undefined, replay ? 'tools-history-shortcut' : 'tools-actions tools-history-shortcut');
         shortcuts.id = 'tools-room-shortcuts' + suffix;
-        if (!replay) button(shortcuts, 'Compare with previous', compareLiveWithPrevious, 'tools-compare-previous');
+        if (!replay) button(shortcuts, 'Compare with previous', compareLiveWithPrevious, 'tools-compare-previous').className = 'tools-primary';
         const history = button(shortcuts, 'History · 0', () => openHistory(star.dataset.favoriteRoom.toLowerCase()), 'tools-room-history' + suffix);
         history.dataset.cardHistory = '';
         if (replay) {
@@ -366,7 +467,7 @@ export function openSessionTools(focusTarget) {
         const snapshot = captureLiveSessionFile();
         const state = readLibrary(), ids = previousModelSessionIds(state.entries, snapshot);
         if (!ids.length) { refreshCards(); tell('No earlier saved sessions for ' + snapshot.room + '. Keep a session in Library to compare with a later one.'); return; }
-        liveComparisonArchive = snapshot;
+        liveComparisonArchive = snapshot; followers.compare.reset();
         selectedA = 'live'; selectedB = ids[0]; selectedExtra = ids.slice(1);
         Object.assign(analysisFilters, {room: snapshot.room.toLowerCase(), query: '', from: '', to: ''});
         pickerOpen.compare = false; render('compare');
@@ -446,14 +547,14 @@ export function openSessionTools(focusTarget) {
         catch (error) { filteredSources = []; tell(error.message, true); }
         node(picker, 'p', filteredSources.length + ' matching recordings. Existing selections stay available when outside the filters.', 'tools-muted');
         const sourceControls = node(picker, 'div', undefined, 'tools-actions');
-        if (liveComparisonArchive) button(sourceControls, 'Refresh live snapshot', () => { liveComparisonArchive = captureLiveSessionFile(); render(tab); }, 'tools-refresh-live-snapshot');
-        if (currentArchive) button(sourceControls, 'Refresh current / replayed snapshot', () => { currentArchive = captureSessionFile(); render(tab); }, 'tools-refresh-snapshot');
-        selectedA = selectSource(sourceControls, comparing ? 'A ' : 'Recording ', 'tools-source-a', selectedA, value => { selectedA = value; render(tab); });
+        if (liveComparisonArchive) button(sourceControls, 'Refresh live snapshot', () => { liveComparisonArchive = captureLiveSessionFile(); selectNewFollowSource(); render(tab); }, 'tools-refresh-live-snapshot');
+        if (currentArchive) button(sourceControls, 'Refresh current / replayed snapshot', () => { currentArchive = captureSessionFile(); currentArchiveIsReplay = isPlaybackCurrent(runtime.playback); selectNewFollowSource(); render(tab); }, 'tools-refresh-snapshot');
+        selectedA = selectSource(sourceControls, comparing ? 'A ' : 'Recording ', 'tools-source-a', selectedA, value => { selectedA = value; selectNewFollowSource(); render(tab); });
         if (comparing) {
             if (!selectedB) selectedB = (sourceOptions().find(item => item.id !== selectedA) || sourceOptions()[0]).id;
-            selectedB = selectSource(sourceControls, 'B ', 'tools-source-b', selectedB, value => { selectedB = value; render(tab); });
+            selectedB = selectSource(sourceControls, 'B ', 'tools-source-b', selectedB, value => { selectedB = value; selectNewFollowSource(); render(tab); });
             selectedExtra.forEach((id, index) => {
-                selectedExtra[index] = selectSource(sourceControls, String.fromCharCode(67 + index) + ' ', 'tools-source-' + String.fromCharCode(99 + index), id, value => { selectedExtra[index] = value; render(tab); });
+                selectedExtra[index] = selectSource(sourceControls, String.fromCharCode(67 + index) + ' ', 'tools-source-' + String.fromCharCode(99 + index), id, value => { selectedExtra[index] = value; selectNewFollowSource(); render(tab); });
                 button(sourceControls, 'Remove ' + String.fromCharCode(67 + index), () => { selectedExtra.splice(index, 1); render(tab); });
             });
             const used = new Set([selectedA, selectedB, ...selectedExtra]);
@@ -462,6 +563,7 @@ export function openSessionTools(focusTarget) {
             node(sourceControls, 'span', (2 + selectedExtra.length) + ' / 6 slots', 'tools-muted');
 
         }
+        followControl(content);
         const controls = node(content, 'div', undefined, 'tools-actions');
         const label = node(controls, 'label', 'Metric '), metricSelect = node(label, 'select'); metricSelect.id = 'tools-metric';
         for (const [key, name] of Object.entries(ANALYSIS_METRICS)) { const option = node(metricSelect, 'option', name); option.value = key; }
@@ -474,23 +576,23 @@ export function openSessionTools(focusTarget) {
             input.type = 'text'; input.maxLength = 160; input.value = summaryThresholds.join(', '); input.placeholder = 'Not enough covered time';
             input.title = 'Defaults: session average −25%, average, +25%, rounded to whole viewers. Or enter up to 8 counts separated by commas for this session and metric.';
         }
-        input.oninput = () => input.setCustomValidity('');
+        input.oninput = () => { thresholdDirty = true; input.setCustomValidity(''); };
         function applyThreshold() {
             try {
                 if (comparing) {
                     if (!Number.isSafeInteger(input.valueAsNumber) || input.valueAsNumber < 0) throw new Error('Enter a non-negative whole number.');
                     rememberAnalysis({threshold: input.valueAsNumber});
-                } else summaryThresholds = parseAnalysisThresholds(input.value);
+                } else { summaryThresholds = parseAnalysisThresholds(input.value); summaryAutomatic = false; }
             } catch (error) { input.setCustomValidity(error.message); input.reportValidity(); return; }
-            input.setCustomValidity('');
+            input.setCustomValidity(''); thresholdDirty = false;
             refreshAnalysis(false);
         }
         input.onkeydown = event => { if (event.key === 'Enter') { event.preventDefault(); applyThreshold(); } };
         button(controls, comparing ? 'Apply threshold' : 'Apply thresholds', applyThreshold, 'tools-apply-threshold');
-        if (!comparing) button(controls, 'Use average', () => { summaryThresholdSource = null; refreshAnalysis(false); }, 'tools-average-thresholds').title = 'Recalculate from this session: average −25%, average, +25%';
+        if (!comparing) button(controls, 'Use average', () => { summaryThresholdSource = null; summaryAutomatic = true; thresholdDirty = false; refreshAnalysis(false); }, 'tools-average-thresholds').title = 'Recalculate from this session: average −25%, average, +25%';
         if (comparing) {
             const label = node(controls, 'label'), check = node(label, 'input'); check.type = 'checkbox'; check.checked = sharedLength; check.id = 'tools-shared-length';
-            node(label, 'span', 'Match shared length'); check.onchange = () => { rememberAnalysis({sharedLength: check.checked}); refreshAnalysis(); };
+            node(label, 'span', 'Match shared length'); check.onchange = () => { rememberAnalysis({sharedLength: check.checked}); updateFollowing(); refreshAnalysis(); };
         }
         return sourceOptions();
     }
@@ -512,14 +614,15 @@ export function openSessionTools(focusTarget) {
             const option = node(range, 'option', label); option.value = value;
         }
         range.value = String(historyLimit); range.onchange = () => { historyLimit = Number(range.value); render('history'); };
-        button(controls, 'Refresh', () => { readLibrary(); render('history'); }, 'tools-history-refresh').title = 'Read the latest saved recordings from this browser';
-        const overview = modelHistoryReader.read(library.entries, libraryRoom, metric, historyLimit);
+        button(controls, 'Refresh', () => { readLibrary(); followers.history.reset(); render('history'); }, 'tools-history-refresh').title = 'Read the latest saved recordings from this browser';
+        followControl(content);
+        const overview = modelHistoryReader.read(followedEntries(), libraryRoom, metric, historyLimit);
         const view = renderModelHistoryView(content, overview, {
             metricLabel: ANALYSIS_METRICS[metric], duration: formatElapsedTime,
             selected: historySelected, select: id => { historySelected = id; },
             summary: action(id => { selectedA = id; render('summary'); }),
             replay: action(id => {
-                const entry = library.entries.find(entry => entry.id === id);
+                const entry = followedEntries().find(entry => entry.id === id);
                 openSessionReplay(entry.archive); observedSignature = ''; refreshCurrent(); tell('Replaying ' + (entry.title || entry.archive.room) + '.');
             }),
             compare: ids => {
@@ -529,6 +632,7 @@ export function openSessionTools(focusTarget) {
                 (dialog.querySelector('#tools-analysis-chart') || dialog.querySelector('#tools-recording-picker > summary'))?.focus();
             }
         });
+        historyView = view;
         if (view) {
             chartDraw = view.draw;
             if (window.ResizeObserver) { chartObserver = new window.ResizeObserver(view.draw); chartObserver.observe(view.canvas); }
@@ -596,7 +700,7 @@ export function openSessionTools(focusTarget) {
     }
     function chart(archives, labels, endMs, ids) {
         const series = archives.map(archive => ({...analysisSeries(archive, metric), timestamps: archive.session.history.timestamps}));
-        if (analysisView) { analysisView.update(series, endMs, ANALYSIS_METRICS[metric]); return; }
+        if (analysisView) { analysisSources = {archives, ids}; analysisView.update(series, endMs, ANALYSIS_METRICS[metric]); return; }
         const saved = analysisStates.get(tab);
         const same = saved && saved.ids.length === ids.length && ids.every((id, index) => saved.archives[saved.ids.indexOf(id)] === archives[index]);
         const restored = same ? {...saved.state, hidden: saved.state.hidden.map(index => ids.indexOf(saved.ids[index]))} : null;
@@ -611,7 +715,7 @@ export function openSessionTools(focusTarget) {
         analysisOutput = node(content, 'div'); analysisOutput.id = 'tools-analysis-output';
         refreshAnalysis();
     }
-    function refreshAnalysis(redrawChart = true) {
+    function refreshAnalysis(redrawChart = true, liveUpdate = false) {
         const comparing = tab === 'compare', options = sourceOptions();
         if (!analysisOutput) return;
         analysisOutput.replaceChildren(); message.textContent = '';
@@ -629,11 +733,13 @@ export function openSessionTools(focusTarget) {
             const summary = summarizeSession(a.archive, metric, threshold);
             // A custom choice belongs to this displayed snapshot and metric only.
             // Never reuse another recording's thresholds or a global saved default.
+            const continuing = liveUpdate && summaryThresholdSource?.id === a.id && summaryThresholdSource.metric === metric;
             if (!summaryThresholdSource || summaryThresholdSource.archive !== a.archive || summaryThresholdSource.id !== a.id || summaryThresholdSource.metric !== metric) {
+                if (!continuing) { summaryAutomatic = true; thresholdDirty = false; }
                 summaryThresholdSource = {archive: a.archive, id: a.id, metric};
-                summaryThresholds = averageAnalysisThresholds(summary.mean);
+                if (summaryAutomatic) summaryThresholds = averageAnalysisThresholds(summary.mean);
                 const input = dialog.querySelector('#tools-threshold');
-                input.value = summaryThresholds.join(', '); input.setCustomValidity('');
+                if (!thresholdDirty) { input.value = summaryThresholds.join(', '); input.setCustomValidity(''); }
             }
             dialog.querySelector('#tools-average-thresholds').disabled = summary.mean === null;
             if (redrawChart) chart([a.archive], [a.title], summary.spanMs, [a.id]);
@@ -692,7 +798,7 @@ export function openSessionTools(focusTarget) {
         }
     }
     function render(next, revealSessions = false) {
-        refreshCapacity = null;
+        refreshCapacity = null; historyView = null; followControls = null;
         const focusedId = dialog.contains(document.activeElement) ? document.activeElement.id : '';
         // Read synchronously before replacing nodes: native toggle events can be queued.
         for (const [key, id] of [['book', 'tools-sessions-book'], ['search', 'tools-library-search-menu']]) {
@@ -726,7 +832,7 @@ export function openSessionTools(focusTarget) {
         }
     }
     function close() {
-        fileRequest++; refreshSessionTools = null; refreshCapacity = null; chartDraw = null;
+        fileRequest++; refreshSessionTools = null; refreshCapacity = null; chartDraw = null; historyView = null; followControls = null; liveCapture = null;
         if (chartDispose) { chartDispose(); chartDispose = null; }
         analysisStates.clear(); analysisView = null; analysisSources = null; analysisOutput = null;
         libraryReader.clear(); modelHistoryReader.clear(); options = []; optionsLibrary = null; optionsArchive = null; optionsLiveArchive = null; library = null; currentArchive = null; liveComparisonArchive = null;
