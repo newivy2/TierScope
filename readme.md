@@ -1,10 +1,6 @@
 # TierScope
 
-TierScope is a free, open-source userscript that charts how a Chaturbate room’s audience changes over time. 
-
-
----
-
+TierScope is a free, open-source userscript that charts how a Chaturbate room’s audience changes over time.
 
 ## Installation
 
@@ -12,54 +8,32 @@ Install [Tampermonkey](https://www.tampermonkey.net/), follow Tampermonkey’s [
 
 If you used the beta, install from the official link above to follow main releases. Keep only one enabled copy of TierScope.
 
-[Usage and development notes](DEVELOPMENT_NOTES.md) · [Report an issue](https://github.com/newivy2/TierScope/issues)
+**Current release: 3.22.0** · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.22.0)
 
----
+## Main features
 
-**Current stable release: 3.22.0** · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.22.0) · [Library chart controls guide](docs/library-chart-controls.md)
+- **Live tracking and replay** — Follow viewer tiers and totals, inspect and zoom charts, and replay live or saved sessions.
+- **Session library** — Organize sessions by model, choose favorites and automatically keep their sessions while tracking.
+- **Summaries and comparisons** — Review audience statistics, compare up to six sessions and explore a model’s history.
+- **Reports and exports** — Download CSV data, TXT reports, animated GIFs or session files you can reopen later.
+- **Session and all-time highs** — Track each room’s audience records, with highlights when counts reach or break a high.
+- **Backup and restore** — Back up your library, records and preferences, and choose your library’s storage limits.
 
----
+Data is stored locally through your userscript manager. For controls and detailed behavior, see the [usage and development notes](DEVELOPMENT_NOTES.md).
 
-Open the **Library** to unfold a left-hand page next to the charts. Follow your favorites, start storing sessions and use the Compare feature with up to 6 stored sessions. Session summaries are available too. [Build and source guide](BUILDING.md).
+## A flexible interface
 
-The **Session-High / All-Time-High** switch sits on the main header. Session highs (SH) and all-time highs (ATH) are tracked separately for each room. ATH survive session Reset and expiry; hover a high to see the exact value and its recorded time. Opening a saved file does not change these records: but you can use **Add to all-time highs** in Library to add that file's highs to its own room.
+Show all tiers, focus on totals or choose your own mix. Move and resize the panel, collapse rows, switch between dark and bright themes, and adjust background transparency. Open Library beside the panel to browse sessions and analyze charts.
 
-![Library unfolding to the left of the TierScope panel](docs/previews/sessions-book-expanded-dark.png)
+![TierScope overview: all tiers, totals-focused and custom layouts, plus session comparisons](tierscope-hero.png)
 
-[Bright-theme preview](docs/previews/sessions-book-expanded-bright.png)
-
-![TierScope in expanded, totals-focused, collapsed, and compact views](tierscope-hero.png)
-
-Charts use periodic room-data samples. Session history is stored locally through your userscript manager, so you can return to a saved session after a refresh. Replay lets you revisit that history while live tracking continues, or reopen a session file you kept for later.
+*Illustrative overview based on screenshots; model names anonymized.*
 
 ## Who it’s for
 
 - **Broadcasters:** follow audience changes during a broadcast and review the session afterward.
 - **Viewers:** follow a favorite room’s audience and learn what the tier colors represent.
-- **Moderators and studios:** use the charts and session summaries alongside your own observations when supporting broadcasters.
-
-## Main features
-
-- **Live audience tracking** — See viewer tiers, token holders, registered and anonymous viewers, and the room’s total audience.
-- **Audience trends** — See which audience groups are growing or shrinking over time.
-- **Session and all-time highs** — Track each room’s audience records, with highlights when counts reach or break a high.
-- **Interactive charts** — Explore audience history, zoom in and inspect individual samples.
-- **Smooth replay** — Replay live or saved sessions with adjustable speed and timeline controls.
-- **Saved session files** — Save sessioins to your device and reopen them later.
-- **Session library** — Keep sessions in model folders and update saved sessions as they grow.
-- **Favorite models** — Choose favorite models and enable automatic session saving while tracking them.
-- **Summaries and comparison** — Review audience statistics and compare up to six sessions, with live updates for favorites.
-- **Model history** — Follow a model’s audience averages and peaks across saved sessions.
-- **Library organization** — Find sessions by model or date, add notes, and import or export in bulk.
-- **Backups** — Back up and restore your library, all-time highs and preferences.
-- **Reports and exports** — Export session data as CSV, TXT reports or animated GIFs.
-- **Flexible layout** — Resize and move the panel, collapse tiers, switch views and choose a dark or bright theme.
-- **Session controls** — Pause, stop or reset tracking, with automatic pauses when the broadcaster is away.
-
-For controls, settings and detailed behavior, see the [usage and development notes](DEVELOPMENT_NOTES.md).
-
-Session history and all-time records are stored locally through your userscript manager. All-time highs remain separate for each room and survive session resets.
-
+- **Moderators and studios:** review audience trends and session comparisons alongside your own observations.
 
 ## Thanks
 
@@ -69,6 +43,8 @@ Session history and all-time records are stored locally through your userscript 
 
 ## License
 
-MIT. See [LICENSE](https://github.com/newivy2/TierScope/blob/main/LICENSE).
+MIT. See [LICENSE](LICENSE).
 
 For personal use. Not affiliated with Chaturbate.
+
+[Report an issue](https://github.com/newivy2/TierScope/issues) · [Build and source guide](BUILDING.md)
