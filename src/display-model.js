@@ -52,8 +52,9 @@ export function buildTrendDisplayModel() {
     const frame = buildLiveDisplayFrame(), comparison = getComparisonCounts();
     return freezeRecordingData({isPlayback: runtime.presentationMode === 'PLAYBACK', isRestored: !!runtime.restoredDisplayFrame,
         stopped: runtime.isStopped, hasTrendBaseline: runtime.hasTrendBaseline, counts: {...frame.counts},
-        total: frame.total, withTokens: frame.withTokens, anonymousCount: frame.anonymousCount,
+        total: frame.total, withTokens: frame.withTokens, anonymousCount: frame.anonymousCount, fullRoomTotal: frame.fullRoomTotal,
         historyLength: runtime.history.timestamps.length,
         comparison: {...comparison, counts: comparison.counts ? {...comparison.counts} : null},
+        tierLabels: Object.fromEntries(runtime.PANEL_ROWS.map(row => [row.key, row.label])),
         tierMarkers: Object.fromEntries(Object.keys(runtime.TIERS).map(key => [key, getTierMarker(key)]))});
 }

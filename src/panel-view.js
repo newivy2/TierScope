@@ -1,5 +1,5 @@
 import { updateCompactDashboard } from './compact-view.js';
-import { displayHigh, displayHighDescription, displayHighLabel } from './display-values.js';
+import { anonymousRegisteredRatio, displayHigh, displayHighDescription, displayHighLabel } from './display-values.js';
 import { paintFavoriteButton } from './favorite-view.js';
 
 export function paintPanelFrame(frame) {
@@ -99,6 +99,15 @@ export function paintPanelFrame(frame) {
             var digits = String(Math.abs(anonymousCount)).length;
             fullAnonText.textContent = anonLabel;
             fullAnonText.style.fontSize = digits >= 6 ? '9px' : digits === 5 ? '11px' : '13px';
+        }
+        var anonRatio = document.getElementById('anon-registered-ratio');
+        if (anonRatio) {
+            var ratioLabel = anonymousRegisteredRatio(anonymousCount, total);
+            anonRatio.textContent = ratioLabel;
+            anonRatio.style.fontSize = ratioLabel.length > 7 ? '8px' : '9px';
+            anonRatio.title = 'Anons / registered viewers: ' + ratioLabel + '. ' +
+                (total > 0 ? anonymousCount.toLocaleString() + ' / ' + total.toLocaleString() + '. 1:1 means within 5% of equal.' : 'No registered viewers; ratio unavailable.');
+            anonRatio.setAttribute('aria-label', anonRatio.title);
         }
         if (anonHighEl) { anonHighEl.textContent = displayHighLabel(anonResult, true); anonHighEl.title = displayHighDescription(anonResult); }
         if (anonRowEl) {

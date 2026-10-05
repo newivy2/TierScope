@@ -1,4 +1,4 @@
-
+import { compactNumber } from './format.js';
 export function renderTrendDisplay(model) {
     if (model.isPlayback) return;
     var trendContainer = document.getElementById('trend-container');
@@ -32,10 +32,9 @@ export function renderTrendDisplay(model) {
         var mins = actualMinutes % 60;
         return ' vs ' + hours + 'h' + (mins > 0 ? mins : '');
     };
-    // UPDATED: Removed arrows/dots, using color-coded backgrounds only
-    function buildTrendItem(name, current, prev, isSpecial, isLarge) {
+    function buildTrendItem(key, name, current, prev, isLarge = false, border = 'transparent') {
         var diff = current - prev;
-        var deltaText = diff !== 0 ? (diff > 0 ? '+' + diff : diff) : '';
+        var deltaText = diff !== 0 ? (diff > 0 ? '+' : '−') + compactNumber(Math.abs(diff)) : '';
         var deltaColor = diff > 0 ? 'var(--panel-positive)' : 'var(--panel-negative)';
         // Color-coded background based on delta direction
         var bgStyle;
@@ -46,39 +45,31 @@ export function renderTrendDisplay(model) {
         } else {
             bgStyle = 'background:rgba(255, 215, 0, 0.15);';   // Yellow for stable
         }
-        if (isSpecial) bgStyle += 'border:1px solid #ff69b4;';
-        var padding = isLarge ? '6px 12px' : '2px 6px';
+        bgStyle += 'border:1px solid ' + border + ';';
+        var padding = isLarge ? '6px 4px' : '2px 4px';
         var fontSize = isLarge ? '12px' : '10px';
-        var deltaFont = fontSize;
-        if (deltaText) {
-            var dlen = String(Math.abs(diff)).length;
-            if (dlen >= 4) deltaFont = '8px';
-            else if (dlen === 3) deltaFont = '10px';
-        }
-        // Removed the trendIcon span - only colors indicate direction now
-        return '<div style="display:flex;align-items:center;gap:4px;' + bgStyle + 'padding:' + padding + ';border-radius:4px;">' +
-            '<span style="font-size:' + fontSize + ';">' + name + '</span>' +
-            (deltaText ? '<span style="font-size:' + deltaFont + ';font-weight:bold;color:' + deltaColor + ';">' + deltaText + '</span>' : '') +
+        var deltaFont = Math.min(isLarge ? 12 : 10, Math.max(7, 14 - deltaText.length)) + 'px';
+        var label = ({withTokens: 'With Tokens', total: 'Registered viewers', anonymous: 'Anons', roomTotal: 'Room Total'})[key] || model.tierLabels[key];
+        var description = label + ': ' + current.toLocaleString() + '. Change ' + (diff > 0 ? '+' : '') + diff.toLocaleString() + ' from ' + prev.toLocaleString() + '.';
+        return '<div data-trend-key="' + key + '" role="img" aria-label="' + description + '" title="' + description + '" style="display:flex;justify-content:center;align-items:center;gap:3px;min-width:0;min-height:' + (isLarge ? 32 : 20) + 'px;box-sizing:border-box;white-space:nowrap;' + bgStyle + 'padding:' + padding + ';border-radius:4px;">' +
+            '<span aria-hidden="true" style="flex-shrink:0;font-size:' + fontSize + ';line-height:14px;">' + name + '</span>' +
+            (deltaText ? '<span data-trend-delta aria-hidden="true" style="min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:' + deltaFont + ';line-height:14px;font-weight:bold;color:' + deltaColor + ';">' + deltaText + '</span>' : '') +
             '</div>';
     }
     var headerLabel = '📈 TREND';
     var shortLabel = getShortLabel();
-    var html = '<div style="display:flex;justify-content:center;gap:6px;padding:4px 0;">';
-    html += buildTrendItem(model.tierMarkers['red'], counts['red'] || 0, comparisonCounts['red'] || 0, false, false);
-    html += buildTrendItem(model.tierMarkers['green'], counts['green'] || 0, comparisonCounts['green'] || 0, false, false);
-    html += buildTrendItem(model.tierMarkers['purple'], counts['purple'] || 0, comparisonCounts['purple'] || 0, false, false);
-    html += buildTrendItem(model.tierMarkers['pink'], counts['pink'] || 0, comparisonCounts['pink'] || 0, false, false);
-    html += '</div>';
-    html += '<div style="display:flex;justify-content:center;gap:6px;padding:4px 0;">';
-    html += buildTrendItem(model.tierMarkers['dark-blue'], counts['dark-blue'] || 0, comparisonCounts['dark-blue'] || 0, false, false);
-    html += buildTrendItem(model.tierMarkers['light-blue'], counts['light-blue'] || 0, comparisonCounts['light-blue'] || 0, false, false);
-    html += buildTrendItem(model.tierMarkers['gray'], counts['gray'] || 0, comparisonCounts['gray'] || 0, false, false);
-    html += buildTrendItem(model.tierMarkers['female-trans'], counts['female-trans'] || 0, comparisonCounts['female-trans'] || 0, false, false);
-    html += '</div>';
-    html += '<div style="display:flex;justify-content:center;gap:8px;padding:4px 0;">';
-    html += buildTrendItem('💎', withTokens || 0, comparisonCounts.withTokens || 0, true, true);
-    html += buildTrendItem('📊', total || 0, comparisonCounts.total || 0, false, true);
-    html += buildTrendItem('👻', anonymousCount || 0, comparisonCounts.anonymous || 0, false, true);
+    var rowStart = '<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;padding:4px 0;">';
+    var html = '';
+    for (var keys of [['red', 'green', 'purple', 'pink'], ['dark-blue', 'light-blue', 'gray', 'female-trans']]) {
+        html += rowStart;
+        for (var key of keys) html += buildTrendItem(key, model.tierMarkers[key], counts[key] || 0, comparisonCounts[key] || 0);
+        html += '</div>';
+    }
+    html += rowStart;
+    html += buildTrendItem('withTokens', '💎', withTokens || 0, comparisonCounts.withTokens || 0, true, 'var(--panel-warning)');
+    html += buildTrendItem('total', '📊', total || 0, comparisonCounts.total || 0, true);
+    html += buildTrendItem('anonymous', '👻', anonymousCount || 0, comparisonCounts.anonymous || 0, true);
+    html += buildTrendItem('roomTotal', '👥', model.fullRoomTotal || 0, (comparisonCounts.total || 0) + (comparisonCounts.anonymous || 0), true, 'var(--panel-accent)');
     html += '</div>';
     trendContainer.innerHTML = html;
     if (trendHeaderLabel) {
