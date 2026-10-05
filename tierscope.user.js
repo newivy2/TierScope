@@ -4993,7 +4993,8 @@ underlying system, so should run in the browser, Node, or Plask.
     }
     saved = saved ? verified : null;
     if (saved) manual = saved;
-    const newSamples = !!saved && runtime.history.timestamps.at(-1) > saved.archive.session.history.timestamps.at(-1);
+    const keptHistory = saved == null ? void 0 : saved.archive.session.history;
+    const newSamples = !!saved && (samples > keptHistory.timestamps.length || runtime.history.timestamps.at(-1) !== keptHistory.timestamps.at(-1) || runtime.STORAGE_HISTORY_SERIES.some((key) => runtime.history[key].at(-1) !== keptHistory[key].at(-1)));
     const state = {
       room,
       samples: available ? samples : 0,

@@ -76,3 +76,11 @@ test('a restored manual session discovers its existing kept recording without ad
  const h=fresh(),d=h.api.__journey;h.t.sample(5);d.keepLiveJourneySession();h.t.saveSession('testroom');
  const restored=harness(h.storage,extra);restored.t.initPanel();assert(restored.api.__journey.journeyState().model.canView);assert.equal(restored.api.__journey.readSessionLibrary().count,1);
 });
+
+test('repeated or backward scan timestamps still disclose newly recorded samples',()=>{
+ for(const delta of [0,-60000]){
+  const h=fresh(),d=h.api.__journey;h.t.sample(3);d.keepLiveJourneySession();h.advance(delta);h.t.sample(5);
+  const state=d.journeyState();assert.equal(state.newSamples,true);assert.equal(state.model.keepLabel,'Update saved session');
+  assert.match(state.model.detail,/New scans since this save/);
+ }
+});

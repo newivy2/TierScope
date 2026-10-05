@@ -63,7 +63,10 @@ export function journeyState() {
     }
     saved = saved ? verified : null;
     if (saved) manual = saved; // Revoking automatic consent keeps the confirmed Library link.
-    const newSamples = !!saved && (runtime.history.timestamps.at(-1) > saved.archive.session.history.timestamps.at(-1));
+    const keptHistory = saved?.archive.session.history;
+    const newSamples = !!saved && (samples > keptHistory.timestamps.length ||
+        runtime.history.timestamps.at(-1) !== keptHistory.timestamps.at(-1) ||
+        runtime.STORAGE_HISTORY_SERIES.some(key => runtime.history[key].at(-1) !== keptHistory[key].at(-1)));
     const state = {room, samples: available ? samples : 0, stopped: runtime.isStopped, paused: runtime.isPaused || !runtime.isAutoRefreshOn || runtime.absencePausedAt !== null,
         playback: runtime.presentationMode === 'PLAYBACK', automatic, saved, newSamples, error: error || checkpoint.error || preferenceError};
     return {...state, model: buildJourneyModel(state)};
