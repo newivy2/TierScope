@@ -45,12 +45,12 @@ Charts use periodic room-data samples. Session history is stored locally through
 - **Session and all-time highs** — Track each room’s audience records, with highlights when counts reach or break a high.
 - **Interactive charts** — Explore audience history, zoom in and inspect individual samples.
 - **Smooth replay** — Replay live or saved sessions with adjustable speed and timeline controls.
-- **Saved session files** — Save recordings to your device and reopen them later.
-- **Session library** — Keep recordings in model folders and update saved sessions as they grow.
+- **Saved session files** — Save sessioins to your device and reopen them later.
+- **Session library** — Keep sessions in model folders and update saved sessions as they grow.
 - **Favorite models** — Choose favorite models and enable automatic session saving while tracking them.
-- **Summaries and comparison** — Review audience statistics and compare up to six recordings on one chart.
+- **Summaries and comparison** — Review audience statistics and compare up to six sessions on one chart.
 - **Model history** — Follow a model’s audience averages and peaks across saved sessions.
-- **Library organization** — Find recordings by model or date, add notes, and import or export sessions in bulk.
+- **Library organization** — Find sessions by model or date, add notes, and import or export in bulk.
 - **Backups** — Back up and restore your library, all-time highs and preferences.
 - **Reports and exports** — Export session data as CSV, TXT reports or animated GIFs.
 - **Flexible layout** — Resize and move the panel, collapse tiers, switch views and choose a dark or bright theme.
