@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.22.0-beta.1
+// @version      3.22.0
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -5649,7 +5649,7 @@ underlying system, so should run in the browser, Node, or Plask.
 #tierscope-session-tools .tools-date-filters{grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 #tierscope-session-tools .tools-date-filters label{display:flex;flex-wrap:nowrap;gap:4px;font-size:.9em}
 #tierscope-session-tools .tools-date-filters input[type=date]{width:100%;min-width:0;flex:1;padding:4px 2px}
-#tierscope-session-tools .tools-current[hidden]{display:none}
+#tierscope-session-tools .tools-current[hidden],#tierscope-session-tools #tools-threshold-controls[hidden]{display:none}
 #tierscope-session-tools [data-card-enable][hidden],#tierscope-session-tools [data-card-retry][hidden]{display:none}
 #tierscope-session-tools .tools-model-name{display:flex;align-items:center;gap:5px;margin-bottom:4px}
 #tierscope-session-tools .tools-model-name strong{min-width:0}
@@ -7100,7 +7100,7 @@ underlying system, so should run in the browser, Node, or Plask.
     const analysisFilters = { room: "", query: "", from: "", to: "" };
     let filteredSources = null, chartDispose = null;
     const pickerOpen = { summary: false, compare: true };
-    let analysisView = null, analysisOutput = null, analysisSources = null;
+    let analysisView = null, analysisOutput = null, analysisSources = null, analysisReports = null;
     const analysisStates = /* @__PURE__ */ new Map();
     let libraryRoom = null, chartDraw = null, analysisPreferenceError = savedAnalysis.error;
     let observedSource = null, observedSignature = "";
@@ -7747,6 +7747,62 @@ underlying system, so should run in the browser, Node, or Plask.
       };
       return controls;
     }
+    function thresholdSelection(parent, comparing) {
+      const controls = node(parent, "div", void 0, "tools-actions");
+      controls.id = "tools-threshold-controls";
+      const thresholdLabel = node(controls, "label", comparing ? "Threshold " : "Thresholds "), input = node(thresholdLabel, "input");
+      input.id = "tools-threshold";
+      input.style.width = comparing ? "105px" : "200px";
+      if (comparing) {
+        input.type = "number";
+        input.min = "0";
+        input.max = "9007199254740991";
+        input.step = "1";
+        input.value = threshold;
+      } else {
+        input.type = "text";
+        input.maxLength = 160;
+        input.value = summaryThresholds.join(", ");
+        input.placeholder = "Not enough covered time";
+        input.title = "Defaults: session average −25%, average, +25%, rounded to whole viewers. Or enter up to 8 counts separated by commas for this session and metric.";
+      }
+      input.oninput = () => {
+        thresholdDirty = true;
+        input.setCustomValidity("");
+      };
+      function applyThreshold() {
+        try {
+          if (comparing) {
+            if (!Number.isSafeInteger(input.valueAsNumber) || input.valueAsNumber < 0) throw new Error("Enter a non-negative whole number.");
+            rememberAnalysis({ threshold: input.valueAsNumber });
+          } else {
+            summaryThresholds = parseAnalysisThresholds(input.value);
+            summaryAutomatic = false;
+          }
+        } catch (error) {
+          input.setCustomValidity(error.message);
+          input.reportValidity();
+          return;
+        }
+        input.setCustomValidity("");
+        thresholdDirty = false;
+        refreshAnalysis(false);
+      }
+      input.onkeydown = (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          applyThreshold();
+        }
+      };
+      button(controls, comparing ? "Apply threshold" : "Apply thresholds", applyThreshold, "tools-apply-threshold");
+      if (!comparing) button(controls, "Use average", () => {
+        summaryThresholdSource = null;
+        summaryAutomatic = true;
+        thresholdDirty = false;
+        refreshAnalysis(false);
+      }, "tools-average-thresholds").title = "Recalculate from this session: average −25%, average, +25%";
+      return controls;
+    }
     function analysisControls(comparing) {
       if (!library) readLibrary();
       if (!sourceOptions().length) {
@@ -7815,58 +7871,6 @@ underlying system, so should run in the browser, Node, or Plask.
         node(sourceControls, "span", 2 + selectedExtra.length + " / 6 slots", "tools-muted");
       }
       followControl(content);
-      const controls = node(content, "div", void 0, "tools-actions");
-      const thresholdLabel = node(controls, "label", comparing ? "Threshold " : "Thresholds "), input = node(thresholdLabel, "input");
-      input.id = "tools-threshold";
-      input.style.width = comparing ? "105px" : "200px";
-      if (comparing) {
-        input.type = "number";
-        input.min = "0";
-        input.max = "9007199254740991";
-        input.step = "1";
-        input.value = threshold;
-      } else {
-        input.type = "text";
-        input.maxLength = 160;
-        input.value = summaryThresholds.join(", ");
-        input.placeholder = "Not enough covered time";
-        input.title = "Defaults: session average −25%, average, +25%, rounded to whole viewers. Or enter up to 8 counts separated by commas for this session and metric.";
-      }
-      input.oninput = () => {
-        thresholdDirty = true;
-        input.setCustomValidity("");
-      };
-      function applyThreshold() {
-        try {
-          if (comparing) {
-            if (!Number.isSafeInteger(input.valueAsNumber) || input.valueAsNumber < 0) throw new Error("Enter a non-negative whole number.");
-            rememberAnalysis({ threshold: input.valueAsNumber });
-          } else {
-            summaryThresholds = parseAnalysisThresholds(input.value);
-            summaryAutomatic = false;
-          }
-        } catch (error) {
-          input.setCustomValidity(error.message);
-          input.reportValidity();
-          return;
-        }
-        input.setCustomValidity("");
-        thresholdDirty = false;
-        refreshAnalysis(false);
-      }
-      input.onkeydown = (event) => {
-        if (event.key === "Enter") {
-          event.preventDefault();
-          applyThreshold();
-        }
-      };
-      button(controls, comparing ? "Apply threshold" : "Apply thresholds", applyThreshold, "tools-apply-threshold");
-      if (!comparing) button(controls, "Use average", () => {
-        summaryThresholdSource = null;
-        summaryAutomatic = true;
-        thresholdDirty = false;
-        refreshAnalysis(false);
-      }, "tools-average-thresholds").title = "Recalculate from this session: average −25%, average, +25%";
       metricStrip(content, refreshAnalysis);
       return sourceOptions();
     }
@@ -7938,11 +7942,11 @@ underlying system, so should run in the browser, Node, or Plask.
       }
       if (library.damaged.length) node(content, "p", library.damaged.length + " unreadable library record(s) are excluded. Return to Recordings for recovery options.", "tools-muted");
     }
-    function audienceOverview(archive) {
+    function audienceOverview(archive, parent) {
       const overview = summarizeAudience(archive), coverage = overview.audience[0];
-      node(analysisOutput, "h3", "Audience overview");
-      node(analysisOutput, "p", archive.room + " · " + coverage.samples + " samples · Covered time " + formatElapsedTime(coverage.coveredMs) + " · Excluded gaps " + formatElapsedTime(coverage.gapMs) + " · Coverage " + percent(coverage.coverage), "tools-muted");
-      const scroll = node(analysisOutput, "div", void 0, "tools-scroll"), table = node(scroll, "table");
+      node(parent, "h3", "Audience overview");
+      node(parent, "p", archive.room + " · " + coverage.samples + " samples · Covered time " + formatElapsedTime(coverage.coveredMs) + " · Excluded gaps " + formatElapsedTime(coverage.gapMs) + " · Coverage " + percent(coverage.coverage), "tools-muted");
+      const scroll = node(parent, "div", void 0, "tools-scroll"), table = node(scroll, "table");
       table.id = "tools-audience-table";
       node(table, "caption", "Audience across the retained recording");
       const head = node(node(table, "thead"), "tr");
@@ -7958,8 +7962,8 @@ underlying system, so should run in the browser, Node, or Plask.
         if (summary.peakTime !== null) peak.title = "First recorded at " + new Date(summary.peakTime).toLocaleString();
         node(row, "td", number(summary.sessionPeak));
       }
-      node(analysisOutput, "p", "Room audience = registered + anonymous viewers. A full-session high may predate retained history. Hover a recording peak for its first recorded time.", "tools-muted");
-      const shares = node(analysisOutput, "div");
+      node(parent, "p", "Room audience = registered + anonymous viewers. A full-session high may predate retained history. Hover a recording peak for its first recorded time.", "tools-muted");
+      const shares = node(parent, "div");
       shares.id = "tools-audience-shares";
       node(shares, "h3", "Audience proportions");
       node(shares, "p", "Token holders / registered viewers: " + percent(overview.tokenShareRegistered));
@@ -7967,12 +7971,12 @@ underlying system, so should run in the browser, Node, or Plask.
       node(shares, "p", "Anonymous / whole room: " + percent(overview.anonymousShareRoom));
       node(shares, "p", "Shares use viewer-time over covered intervals. A crowded interval contributes more than a quiet interval of the same length; gaps contribute nothing.", "tools-muted");
     }
-    function thresholdTable(archive) {
+    function thresholdTable(archive, parent) {
       if (!summaryThresholds.length) {
-        node(analysisOutput, "p", "Not enough covered recording time to calculate average-based thresholds.", "tools-muted");
+        node(parent, "p", "Not enough covered recording time to calculate average-based thresholds.", "tools-muted");
         return;
       }
-      const scroll = node(analysisOutput, "div", void 0, "tools-scroll"), table = node(scroll, "table");
+      const scroll = node(parent, "div", void 0, "tools-scroll"), table = node(scroll, "table");
       table.id = "tools-threshold-table";
       node(table, "caption", ANALYSIS_METRICS[metric] + " — time at or above selected thresholds");
       const head = node(node(table, "thead"), "tr");
@@ -7986,10 +7990,10 @@ underlying system, so should run in the browser, Node, or Plask.
         node(row, "td", result.durationMs === null ? "Not enough data" : formatElapsedTime(result.durationMs));
         node(row, "td", percent(result.percent));
       }
-      node(analysisOutput, "p", "Includes samples equal to the threshold. Percentages use covered recording time; gaps and time after the final sample are excluded.", "tools-muted");
+      node(parent, "p", "Includes samples equal to the threshold. Percentages use covered recording time; gaps and time after the final sample are excluded.", "tools-muted");
     }
-    function summaryTable(summaries, labels, comparing = true) {
-      const scroll = node(analysisOutput, "div", void 0, "tools-scroll"), table = node(scroll, "table");
+    function summaryTable(summaries, labels, comparing, parent) {
+      const scroll = node(parent, "div", void 0, "tools-scroll"), table = node(scroll, "table");
       table.id = "tools-summary-table";
       node(table, "caption", ANALYSIS_METRICS[metric] + " — retained recording statistics");
       const head = node(table, "thead"), headRow = node(head, "tr");
@@ -8014,7 +8018,7 @@ underlying system, so should run in the browser, Node, or Plask.
         cell.scope = "row";
         summaries.forEach((summary) => node(row, "td", value(summary)));
       }
-      node(analysisOutput, "p", "The full-session high can predate retained history and is not limited by “Match shared length.” Token-holder share is weighted by recorded registered-viewer time.", "tools-muted");
+      node(parent, "p", "The full-session high can predate retained history and is not limited by “Match shared length.” Token-holder share is weighted by recorded registered-viewer time.", "tools-muted");
     }
     function chart(archives, labels, endMs, ids) {
       const series = archives.map((archive) => __spreadProps(__spreadValues({}, analysisSeries(archive, metric)), { timestamps: archive.session.history.timestamps }));
@@ -8045,27 +8049,33 @@ underlying system, so should run in the browser, Node, or Plask.
       if (comparing) comparisonRange();
       analysisOutput = node(content, "div");
       analysisOutput.id = "tools-analysis-output";
+      analysisReports = { overview: node(analysisOutput, "div"), controls: thresholdSelection(analysisOutput, comparing), results: node(analysisOutput, "div") };
       refreshAnalysis();
     }
     function refreshAnalysis(redrawChart = true, liveUpdate = false) {
       const comparing = tab === "compare", options2 = sourceOptions();
       if (!analysisOutput) return;
-      analysisOutput.replaceChildren();
+      const { overview, controls, results } = analysisReports;
+      overview.replaceChildren();
+      results.replaceChildren();
+      controls.hidden = false;
       message.textContent = "";
       const a = options2.find((item) => item.id === selectedA), b = options2.find((item) => item.id === selectedB);
       if (!a || comparing && (!b || selectedExtra.some((id) => !options2.some((item) => item.id === id)))) {
-        node(analysisOutput, "p", "Choose available recordings in each slot. A previous selection may have changed or been removed; clear filters to find another recording.");
+        controls.hidden = true;
+        node(overview, "p", "Choose available recordings in each slot. A previous selection may have changed or been removed; clear filters to find another recording.");
         return;
       }
       if (comparing) {
         if ((/* @__PURE__ */ new Set([selectedA, selectedB, ...selectedExtra])).size !== 2 + selectedExtra.length) {
-          node(analysisOutput, "p", "Choose a different recording in each comparison slot.");
+          controls.hidden = true;
+          node(overview, "p", "Choose a different recording in each comparison slot.");
           return;
         }
         const ids = [.../* @__PURE__ */ new Set([selectedA, selectedB, ...selectedExtra])], recordings = ids.map((id) => options2.find((item) => item.id === id)).filter((item) => !!item);
         const result = compareRecordingSet(recordings.map((item) => item.archive), metric, threshold, sharedLength);
         if (redrawChart) chart(recordings.map((item) => item.archive), recordings.map((item) => item.title), result.axisMs, ids);
-        summaryTable(result.summaries, recordings.map((item, index) => String.fromCharCode(65 + index)));
+        summaryTable(result.summaries, recordings.map((item, index) => String.fromCharCode(65 + index)), true, results);
       } else {
         const summary = summarizeSession(a.archive, metric, threshold);
         const continuing = liveUpdate && (summaryThresholdSource == null ? void 0 : summaryThresholdSource.id) === a.id && summaryThresholdSource.metric === metric;
@@ -8084,10 +8094,10 @@ underlying system, so should run in the browser, Node, or Plask.
         }
         dialog.querySelector("#tools-average-thresholds").disabled = summary.mean === null;
         if (redrawChart) chart([a.archive], [a.title], summary.spanMs, [a.id]);
-        audienceOverview(a.archive);
-        thresholdTable(a.archive);
-        node(analysisOutput, "h3", ANALYSIS_METRICS[metric] + " — details");
-        summaryTable([summary], [a.archive.room], false);
+        audienceOverview(a.archive, overview);
+        thresholdTable(a.archive, results);
+        node(results, "h3", ANALYSIS_METRICS[metric] + " — details");
+        summaryTable([summary], [a.archive.room], false, results);
       }
       if (analysisPreferenceError) tell(analysisPreferenceError, true);
     }
@@ -8162,6 +8172,7 @@ underlying system, so should run in the browser, Node, or Plask.
       analysisView = null;
       analysisSources = null;
       analysisOutput = null;
+      analysisReports = null;
       if (next !== tab) library = null;
       tab = next;
       fileRequest++;
@@ -8212,6 +8223,7 @@ underlying system, so should run in the browser, Node, or Plask.
       analysisView = null;
       analysisSources = null;
       analysisOutput = null;
+      analysisReports = null;
       libraryReader.clear();
       modelHistoryReader.clear();
       options = [];
@@ -9820,7 +9832,7 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/bootstrap.js
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.22.0-beta.1";
+    runtime.TIERSCOPE_VERSION = "3.22.0";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;

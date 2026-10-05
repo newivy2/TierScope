@@ -1,6 +1,6 @@
-# Library chart controls — 3.22.0-beta.1
+# Library chart controls — 3.22.0
 
-[Install the beta](https://raw.githubusercontent.com/newivy2/TierScope/beta/library-chart-controls/tierscope.user.js). Keep one enabled copy and refresh room tabs after updating. Main remains on 3.21.0 during review.
+[Install TierScope](https://raw.githubusercontent.com/newivy2/TierScope/main/tierscope.user.js). Keep one enabled copy and refresh room tabs after updating. [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.22.0).
 
 The background transparency slider now affects Library as well as the Scope. Text, charts and controls stay fully visible. Both themes follow the slider, including when you reopen Library.
 
@@ -9,11 +9,12 @@ Summary, Compare and Model History use an icon strip above the chart to select o
 - Hover an icon for its name. The active icon has a pink outline and its name below the strip.
 - Tab enters at the selected icon. Arrow keys switch metrics; Home/End select the first/last.
 - Narrow Library views wrap the strip into two rows without changing the order.
-- **Match shared length** now sits below the Compare chart and legend, before inspection and statistics.
+- **Match shared length** sits below the Compare chart and legend, before inspection and statistics.
+- **Thresholds** sit beside their report results: after the audience overview in Summary, and above the statistics table in Compare.
 
 Metric changes retain Summary/Compare chart zoom, cursor and hidden lines. Follow live, real timestamps, recording gaps and stored recordings keep their existing behavior.
 
-To review, try each analysis view, toggle a few metrics, adjust transparency in both themes, and resize the browser or panel. Check the comparison range with Match shared length on and off.
+To try the controls, use each analysis view, change thresholds beside their results, adjust transparency in both themes, and resize the browser or panel. Check the comparison range with Match shared length on and off.
 
 ![Library metric strip beside the Scope, dark theme](previews/library-chart-controls-dark.png)
 

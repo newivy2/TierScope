@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **3.22.0-beta.1** ([Library chart controls beta guide](docs/library-chart-controls-beta.md)); stable remains **3.21.0**. [Follow live guide](docs/follow-live.md). [Audience trends and ratio guide](docs/audience-trends.md). [Sessions Book guide](docs/sessions-book.md). The simplified Current Live Session card provides Keep in Library, Auto, Compare with previous, and History. File controls are below the session list, and exports remain on stored-session menus and the separate replay card. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation instructions, see the [README](readme.md).
+Detailed reference for **3.22.0** ([Library chart controls guide](docs/library-chart-controls.md)). [Follow live guide](docs/follow-live.md). [Audience trends and ratio guide](docs/audience-trends.md). [Sessions Book guide](docs/sessions-book.md). The simplified Current Live Session card provides Keep in Library, Auto, Compare with previous, and History. File controls are below the session list, and exports remain on stored-session menus and the separate replay card. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation instructions, see the [README](readme.md).
 
 ## Contents
 
@@ -313,7 +313,7 @@ The list shows 50 recordings at a time with **Show more**; the chart and totals 
 
 ### Summary and comparison
 
-Use the icon strip above the chart to choose one metric at a time, in Summary, Compare or Model History. The order is Room audience, Registered viewers, Viewers with tokens, Moderators, Fan club, Dark purple, Light purple, Dark blue, Light blue, Grey, Female / trans and Anonymous viewers. Hover for a label; the active metric has a pink outline and its name below the strip. Room audience is the default; your explicit metric choice remains remembered. Tab enters at the selected icon; arrow keys switch metrics, and Home/End choose the first/last. The strip wraps into two rows when Library is narrow. **Match shared length** sits below the Compare chart and legend.
+Use the icon strip above the chart to choose one metric at a time, in Summary, Compare or Model History. The order is Room audience, Registered viewers, Viewers with tokens, Moderators, Fan club, Dark purple, Light purple, Dark blue, Light blue, Grey, Female / trans and Anonymous viewers. Hover for a label; the active metric has a pink outline and its name below the strip. Room audience is the default; your explicit metric choice remains remembered. Tab enters at the selected icon; arrow keys switch metrics, and Home/End choose the first/last. The strip wraps into two rows when Library is narrow. **Match shared length** sits below the Compare chart and legend. Threshold controls sit immediately before their results: after Audience proportions in Summary, and above the statistics table in Compare. They remain attached while live results update, preserving unfinished input and keyboard focus.
 
 **Compare with previous** on Current Live Session captures the live recording and selects up to five earlier sessions for that model, six total. Saved copies with the same session start are excluded, including after retained-history rollover. This temporary snapshot does not save a Library record. With Follow live on, the matching current session grows with new accepted samples; earlier recordings stay fixed. File replay does not replace the explicitly live comparison. **Refresh live snapshot** in the recording picker captures newer live data explicitly. The button is disabled with an explanation when no earlier sessions are available.
 
@@ -528,7 +528,7 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
-| **3.22.0-beta.1** | Make Library follow background transparency; replace analysis metric dropdowns with a single-selection icon strip, and place Match shared length below the comparison chart. |
+| **3.22.0** | Make Library follow background transparency; add single-selection metric icons above analysis charts, move Match shared length below Compare, and place threshold controls beside their report results. |
 | **3.21.0** | Add Follow live to Summary, Compare and Model History for the active session of confirmed favorites; preserve chart controls, frozen views, session identity and independent save feedback. Promote Compare with previous in Current Live Session. |
 | **3.20.0** | Match the With Tokens trend border to yellow, add a pink Room Total trend box to the larger four-column bottom row, adjust delta fonts, and show an Anons/registered ratio from the displayed sample with a 5% equality band. |
 | **3.19.0** | Add a collapsed Sessions Book with nested Search & sort. Default Moderators/Anons/Room Total to collapsed, preserve saved layouts, and give the model header room beside the resize handle. Start Summary with its picker collapsed and derive thresholds from the displayed session’s time-weighted metric average. |

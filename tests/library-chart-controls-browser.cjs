@@ -36,6 +36,8 @@ const source = prepareSource(fs.readFileSync(path.join(__dirname, '../tierscope.
   const choices=[['room','Room audience',82],['total','Registered viewers',32],['withTokens','Viewers with tokens',21],['red','Moderators',3],['green','Fan club',4],['purple','Dark purple',5],['pink','Light purple',6],['dark-blue','Dark blue',7],['light-blue','Light blue',8],['gray','Grey',9],['female-trans','Female / trans',10],['anonymous','Anonymous viewers',50]];
   const selected=async(id='tools-metric')=>page.locator('#'+id+' [aria-checked=true]').getAttribute('data-metric');
   assert.equal(await selected(),'room','new analysis defaults to Room audience');
+  assert(await page.evaluate(()=>{const controls=document.getElementById('tools-threshold-controls'),shares=document.getElementById('tools-audience-shares'),table=document.getElementById('tools-threshold-table');return controls.previousElementSibling.contains(shares)&&controls.nextElementSibling.contains(table);}), 'Summary threshold controls sit between audience overview and threshold results');
+
   assert.deepEqual(await page.locator('#tools-metric [role=radio]').evaluateAll(es=>es.map(e=>[e.dataset.metric,e.getAttribute('aria-label')])),choices.map(([key,label])=>[key,label]));
   assert.equal(await page.locator('select#tools-metric').count(),0);
   await page.evaluate(()=>window.metricCanvas=document.getElementById('tools-analysis-chart'));
@@ -58,6 +60,8 @@ const source = prepareSource(fs.readFileSync(path.join(__dirname, '../tierscope.
   await page.selectOption('#tools-source-b',await page.locator('#tools-source-b option').evaluateAll(es=>es.find(e=>e.value!=='current').value));
   const below=await page.evaluate(()=>{const canvas=document.getElementById('tools-analysis-chart'),range=document.getElementById('tools-comparison-range'),output=document.getElementById('tools-analysis-output');return {after:range.getBoundingClientRect().top>=canvas.getBoundingClientRect().bottom,before:range.getBoundingClientRect().bottom<=output.getBoundingClientRect().top};});
   assert(below.after&&below.before,'Match shared length sits below the chart and above statistics');
+  assert(await page.evaluate(()=>{const controls=document.getElementById('tools-threshold-controls'),table=document.getElementById('tools-summary-table');return controls.closest('#tools-analysis-output')&&controls.nextElementSibling.contains(table);}), 'Compare threshold control is beside its report table');
+
   await page.uncheck('#tools-shared-length');await page.click('#tools-metric-withTokens');assert(!(await page.locator('#tools-shared-length').isChecked()));
   assert.equal(await page.locator('#tools-chart-inspection tbody tr').count(),2);
   await page.click('[data-tools-tab=library]');await page.click('#tools-room-history');
@@ -84,6 +88,6 @@ const source = prepareSource(fs.readFileSync(path.join(__dirname, '../tierscope.
   assert.deepEqual(await page.evaluate(()=>ViewerTracker.__chartControls.state()),state,'presentation changes preserve live session and replay');
   await page.click('#tools-close');await opacity(30);await page.click('#btn-control-library');await background();
   assert.equal(await page.locator('#tierscope-session-tools').evaluate(e=>getComputedStyle(e).backgroundColor),'rgba(248, 249, 252, 0.3)','reopened Library inherits the latest setting');
-  assert.deepEqual(errors,[]);console.log('PASS Library background transparency, single metric icon selection/order/counts, keyboard/focus, shared-length placement, history, themes/scales/narrow layout and live-state preservation');
+  assert.deepEqual(errors,[]);console.log('PASS Library background transparency, single metric icon selection/order/counts, keyboard/focus, shared-length/threshold placement, history, themes/scales/narrow layout and live-state preservation');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

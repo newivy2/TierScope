@@ -92,7 +92,7 @@ export function openSessionTools(focusTarget) {
     const analysisFilters = {room: '', query: '', from: '', to: ''};
     let filteredSources = null, chartDispose = null;
     const pickerOpen = {summary: false, compare: true};
-    let analysisView = null, analysisOutput = null, analysisSources = null;
+    let analysisView = null, analysisOutput = null, analysisSources = null, analysisReports = null;
     const analysisStates = new Map();
     let libraryRoom = null, chartDraw = null, analysisPreferenceError = savedAnalysis.error;
     let observedSource = null, observedSignature = '';
@@ -551,6 +551,32 @@ export function openSessionTools(focusTarget) {
         node(label, 'span', 'Match shared length'); check.onchange = () => { rememberAnalysis({sharedLength: check.checked}); updateFollowing(); refreshAnalysis(); };
         return controls;
     }
+    function thresholdSelection(parent, comparing) {
+        const controls = node(parent, 'div', undefined, 'tools-actions'); controls.id = 'tools-threshold-controls';
+        const thresholdLabel = node(controls, 'label', comparing ? 'Threshold ' : 'Thresholds '), input = node(thresholdLabel, 'input');
+        input.id = 'tools-threshold'; input.style.width = comparing ? '105px' : '200px';
+        if (comparing) {
+            input.type = 'number'; input.min = '0'; input.max = '9007199254740991'; input.step = '1'; input.value = threshold;
+        } else {
+            input.type = 'text'; input.maxLength = 160; input.value = summaryThresholds.join(', '); input.placeholder = 'Not enough covered time';
+            input.title = 'Defaults: session average −25%, average, +25%, rounded to whole viewers. Or enter up to 8 counts separated by commas for this session and metric.';
+        }
+        input.oninput = () => { thresholdDirty = true; input.setCustomValidity(''); };
+        function applyThreshold() {
+            try {
+                if (comparing) {
+                    if (!Number.isSafeInteger(input.valueAsNumber) || input.valueAsNumber < 0) throw new Error('Enter a non-negative whole number.');
+                    rememberAnalysis({threshold: input.valueAsNumber});
+                } else { summaryThresholds = parseAnalysisThresholds(input.value); summaryAutomatic = false; }
+            } catch (error) { input.setCustomValidity(error.message); input.reportValidity(); return; }
+            input.setCustomValidity(''); thresholdDirty = false;
+            refreshAnalysis(false);
+        }
+        input.onkeydown = event => { if (event.key === 'Enter') { event.preventDefault(); applyThreshold(); } };
+        button(controls, comparing ? 'Apply threshold' : 'Apply thresholds', applyThreshold, 'tools-apply-threshold');
+        if (!comparing) button(controls, 'Use average', () => { summaryThresholdSource = null; summaryAutomatic = true; thresholdDirty = false; refreshAnalysis(false); }, 'tools-average-thresholds').title = 'Recalculate from this session: average −25%, average, +25%';
+        return controls;
+    }
     function analysisControls(comparing) {
         if (!library) readLibrary();
         if (!sourceOptions().length) { node(content, 'p', 'Record a session or import one into the library to see analysis.'); return null; }
@@ -580,29 +606,6 @@ export function openSessionTools(focusTarget) {
 
         }
         followControl(content);
-        const controls = node(content, 'div', undefined, 'tools-actions');
-        const thresholdLabel = node(controls, 'label', comparing ? 'Threshold ' : 'Thresholds '), input = node(thresholdLabel, 'input');
-        input.id = 'tools-threshold'; input.style.width = comparing ? '105px' : '200px';
-        if (comparing) {
-            input.type = 'number'; input.min = '0'; input.max = '9007199254740991'; input.step = '1'; input.value = threshold;
-        } else {
-            input.type = 'text'; input.maxLength = 160; input.value = summaryThresholds.join(', '); input.placeholder = 'Not enough covered time';
-            input.title = 'Defaults: session average −25%, average, +25%, rounded to whole viewers. Or enter up to 8 counts separated by commas for this session and metric.';
-        }
-        input.oninput = () => { thresholdDirty = true; input.setCustomValidity(''); };
-        function applyThreshold() {
-            try {
-                if (comparing) {
-                    if (!Number.isSafeInteger(input.valueAsNumber) || input.valueAsNumber < 0) throw new Error('Enter a non-negative whole number.');
-                    rememberAnalysis({threshold: input.valueAsNumber});
-                } else { summaryThresholds = parseAnalysisThresholds(input.value); summaryAutomatic = false; }
-            } catch (error) { input.setCustomValidity(error.message); input.reportValidity(); return; }
-            input.setCustomValidity(''); thresholdDirty = false;
-            refreshAnalysis(false);
-        }
-        input.onkeydown = event => { if (event.key === 'Enter') { event.preventDefault(); applyThreshold(); } };
-        button(controls, comparing ? 'Apply threshold' : 'Apply thresholds', applyThreshold, 'tools-apply-threshold');
-        if (!comparing) button(controls, 'Use average', () => { summaryThresholdSource = null; summaryAutomatic = true; thresholdDirty = false; refreshAnalysis(false); }, 'tools-average-thresholds').title = 'Recalculate from this session: average −25%, average, +25%';
         metricStrip(content, refreshAnalysis);
         return sourceOptions();
     }
@@ -647,12 +650,12 @@ export function openSessionTools(focusTarget) {
         }
         if (library.damaged.length) node(content, 'p', library.damaged.length + ' unreadable library record(s) are excluded. Return to Recordings for recovery options.', 'tools-muted');
     }
-    function audienceOverview(archive) {
+    function audienceOverview(archive, parent) {
         const overview = summarizeAudience(archive), coverage = overview.audience[0];
-        node(analysisOutput, 'h3', 'Audience overview');
-        node(analysisOutput, 'p', archive.room + ' · ' + coverage.samples + ' samples · Covered time ' + formatElapsedTime(coverage.coveredMs) +
+        node(parent, 'h3', 'Audience overview');
+        node(parent, 'p', archive.room + ' · ' + coverage.samples + ' samples · Covered time ' + formatElapsedTime(coverage.coveredMs) +
             ' · Excluded gaps ' + formatElapsedTime(coverage.gapMs) + ' · Coverage ' + percent(coverage.coverage), 'tools-muted');
-        const scroll = node(analysisOutput, 'div', undefined, 'tools-scroll'), table = node(scroll, 'table'); table.id = 'tools-audience-table';
+        const scroll = node(parent, 'div', undefined, 'tools-scroll'), table = node(scroll, 'table'); table.id = 'tools-audience-table';
         node(table, 'caption', 'Audience across the retained recording');
         const head = node(node(table, 'thead'), 'tr');
         ['Audience', 'Time-weighted average', 'Peak in recording', 'Full-session high'].forEach(label => { node(head, 'th', label).scope = 'col'; });
@@ -664,19 +667,19 @@ export function openSessionTools(focusTarget) {
             if (summary.peakTime !== null) peak.title = 'First recorded at ' + new Date(summary.peakTime).toLocaleString();
             node(row, 'td', number(summary.sessionPeak));
         }
-        node(analysisOutput, 'p', 'Room audience = registered + anonymous viewers. A full-session high may predate retained history. Hover a recording peak for its first recorded time.', 'tools-muted');
-        const shares = node(analysisOutput, 'div'); shares.id = 'tools-audience-shares';
+        node(parent, 'p', 'Room audience = registered + anonymous viewers. A full-session high may predate retained history. Hover a recording peak for its first recorded time.', 'tools-muted');
+        const shares = node(parent, 'div'); shares.id = 'tools-audience-shares';
         node(shares, 'h3', 'Audience proportions');
         node(shares, 'p', 'Token holders / registered viewers: ' + percent(overview.tokenShareRegistered));
         node(shares, 'p', 'Token holders / whole room: ' + percent(overview.tokenShareRoom));
         node(shares, 'p', 'Anonymous / whole room: ' + percent(overview.anonymousShareRoom));
         node(shares, 'p', 'Shares use viewer-time over covered intervals. A crowded interval contributes more than a quiet interval of the same length; gaps contribute nothing.', 'tools-muted');
     }
-    function thresholdTable(archive) {
+    function thresholdTable(archive, parent) {
         if (!summaryThresholds.length) {
-            node(analysisOutput, 'p', 'Not enough covered recording time to calculate average-based thresholds.', 'tools-muted'); return;
+            node(parent, 'p', 'Not enough covered recording time to calculate average-based thresholds.', 'tools-muted'); return;
         }
-        const scroll = node(analysisOutput, 'div', undefined, 'tools-scroll'), table = node(scroll, 'table'); table.id = 'tools-threshold-table';
+        const scroll = node(parent, 'div', undefined, 'tools-scroll'), table = node(scroll, 'table'); table.id = 'tools-threshold-table';
         node(table, 'caption', ANALYSIS_METRICS[metric] + ' — time at or above selected thresholds');
         const head = node(node(table, 'thead'), 'tr');
         ['Threshold', 'Time at or above', '% of covered time'].forEach(label => { node(head, 'th', label).scope = 'col'; });
@@ -686,10 +689,10 @@ export function openSessionTools(focusTarget) {
             node(row, 'td', result.durationMs === null ? 'Not enough data' : formatElapsedTime(result.durationMs));
             node(row, 'td', percent(result.percent));
         }
-        node(analysisOutput, 'p', 'Includes samples equal to the threshold. Percentages use covered recording time; gaps and time after the final sample are excluded.', 'tools-muted');
+        node(parent, 'p', 'Includes samples equal to the threshold. Percentages use covered recording time; gaps and time after the final sample are excluded.', 'tools-muted');
     }
-    function summaryTable(summaries, labels, comparing = true) {
-        const scroll = node(analysisOutput, 'div', undefined, 'tools-scroll'), table = node(scroll, 'table'); table.id = 'tools-summary-table';
+    function summaryTable(summaries, labels, comparing, parent) {
+        const scroll = node(parent, 'div', undefined, 'tools-scroll'), table = node(scroll, 'table'); table.id = 'tools-summary-table';
         node(table, 'caption', ANALYSIS_METRICS[metric] + ' — retained recording statistics');
         const head = node(table, 'thead'), headRow = node(head, 'tr'); node(headRow, 'th', 'Measure');
         labels.forEach(label => node(headRow, 'th', label));
@@ -704,7 +707,7 @@ export function openSessionTools(focusTarget) {
             const row = node(body, 'tr'); const cell = node(row, 'th', label); cell.scope = 'row';
             summaries.forEach(summary => node(row, 'td', value(summary)));
         }
-        node(analysisOutput, 'p', 'The full-session high can predate retained history and is not limited by “Match shared length.” Token-holder share is weighted by recorded registered-viewer time.', 'tools-muted');
+        node(parent, 'p', 'The full-session high can predate retained history and is not limited by “Match shared length.” Token-holder share is weighted by recorded registered-viewer time.', 'tools-muted');
     }
     function chart(archives, labels, endMs, ids) {
         const series = archives.map(archive => ({...analysisSeries(archive, metric), timestamps: archive.session.history.timestamps}));
@@ -724,22 +727,26 @@ export function openSessionTools(focusTarget) {
         const options = analysisControls(comparing); if (!options) return;
         if (comparing) comparisonRange();
         analysisOutput = node(content, 'div'); analysisOutput.id = 'tools-analysis-output';
+        // Keep the controls attached while live reports change, so unfinished
+        // threshold edits, keyboard focus and selection survive incoming scans.
+        analysisReports = {overview: node(analysisOutput, 'div'), controls: thresholdSelection(analysisOutput, comparing), results: node(analysisOutput, 'div')};
         refreshAnalysis();
     }
     function refreshAnalysis(redrawChart = true, liveUpdate = false) {
         const comparing = tab === 'compare', options = sourceOptions();
         if (!analysisOutput) return;
-        analysisOutput.replaceChildren(); message.textContent = '';
+        const {overview, controls, results} = analysisReports;
+        overview.replaceChildren(); results.replaceChildren(); controls.hidden = false; message.textContent = '';
         const a = options.find(item => item.id === selectedA), b = options.find(item => item.id === selectedB);
         if (!a || comparing && (!b || selectedExtra.some(id => !options.some(item => item.id === id)))) {
-            node(analysisOutput, 'p', 'Choose available recordings in each slot. A previous selection may have changed or been removed; clear filters to find another recording.'); return;
+            controls.hidden = true; node(overview, 'p', 'Choose available recordings in each slot. A previous selection may have changed or been removed; clear filters to find another recording.'); return;
         }
         if (comparing) {
-            if (new Set([selectedA, selectedB, ...selectedExtra]).size !== 2 + selectedExtra.length) { node(analysisOutput, 'p', 'Choose a different recording in each comparison slot.'); return; }
+            if (new Set([selectedA, selectedB, ...selectedExtra]).size !== 2 + selectedExtra.length) { controls.hidden = true; node(overview, 'p', 'Choose a different recording in each comparison slot.'); return; }
             const ids = [...new Set([selectedA, selectedB, ...selectedExtra])], recordings = ids.map(id => options.find(item => item.id === id)).filter(item => !!item);
             const result = compareRecordingSet(recordings.map(item => item.archive), metric, threshold, sharedLength);
             if (redrawChart) chart(recordings.map(item => item.archive), recordings.map(item => item.title), result.axisMs, ids);
-            summaryTable(result.summaries, recordings.map((item, index) => String.fromCharCode(65 + index)));
+            summaryTable(result.summaries, recordings.map((item, index) => String.fromCharCode(65 + index)), true, results);
         } else {
             const summary = summarizeSession(a.archive, metric, threshold);
             // A custom choice belongs to this displayed snapshot and metric only.
@@ -754,9 +761,9 @@ export function openSessionTools(focusTarget) {
             }
             dialog.querySelector('#tools-average-thresholds').disabled = summary.mean === null;
             if (redrawChart) chart([a.archive], [a.title], summary.spanMs, [a.id]);
-            audienceOverview(a.archive); thresholdTable(a.archive);
-            node(analysisOutput, 'h3', ANALYSIS_METRICS[metric] + ' — details');
-            summaryTable([summary], [a.archive.room], false);
+            audienceOverview(a.archive, overview); thresholdTable(a.archive, results);
+            node(results, 'h3', ANALYSIS_METRICS[metric] + ' — details');
+            summaryTable([summary], [a.archive.room], false, results);
         }
         if (analysisPreferenceError) tell(analysisPreferenceError, true);
     }
@@ -820,7 +827,7 @@ export function openSessionTools(focusTarget) {
         const existingPicker = dialog.querySelector('#tools-recording-picker');
         if (existingPicker) pickerOpen[tab] = existingPicker.open;
         if (analysisView) analysisStates.set(tab, {...analysisSources, state: analysisView.capture()});
-        analysisView = null; analysisSources = null; analysisOutput = null;
+        analysisView = null; analysisSources = null; analysisOutput = null; analysisReports = null;
         if (next !== tab) library = null;
         tab = next; fileRequest++; chartDraw = null;
         if (chartDispose) { chartDispose(); chartDispose = null; }
@@ -845,7 +852,7 @@ export function openSessionTools(focusTarget) {
     function close() {
         fileRequest++; refreshSessionTools = null; refreshCapacity = null; chartDraw = null; historyView = null; followControls = null; liveCapture = null;
         if (chartDispose) { chartDispose(); chartDispose = null; }
-        analysisStates.clear(); analysisView = null; analysisSources = null; analysisOutput = null;
+        analysisStates.clear(); analysisView = null; analysisSources = null; analysisOutput = null; analysisReports = null;
         libraryReader.clear(); modelHistoryReader.clear(); options = []; optionsLibrary = null; optionsArchive = null; optionsLiveArchive = null; library = null; currentArchive = null; liveComparisonArchive = null;
         cancelGifExport();
         if (detachDock) detachDock();
