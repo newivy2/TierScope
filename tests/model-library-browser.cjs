@@ -52,8 +52,14 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
  });
  assert.equal(controls.model.y,controls.sort.y);assert.equal(controls.from.y,controls.to.y);assert(!controls.overflow);
  assert.match(await page.locator('#tools-library-favorites').locator('..').textContent(),/^Favorites only$/);
- await page.locator('#tools-content').evaluate(e=>e.scrollTop=0);await page.screenshot({path:'/tmp/tierscope-317-'+engine+'-dark.png'});
- await page.uncheck('#dark-mode-toggle');await page.waitForTimeout(100);await page.screenshot({path:'/tmp/tierscope-317-'+engine+'-bright.png'});await page.check('#dark-mode-toggle');
+ // Frame documentation previews around both attached panels, without viewport whitespace or a transient toast.
+ await page.click('#tools-close');await page.click('#btn-control-library');
+ await page.locator('#tools-content').evaluate(e=>e.scrollTop=0);await page.waitForTimeout(200);
+ const scopeBounds=await page.locator('#tracker-container').boundingBox(),libraryBounds=await page.locator('#tierscope-session-tools').boundingBox();
+ const padding=16,x=Math.floor(Math.min(scopeBounds.x,libraryBounds.x))-padding,y=Math.floor(Math.min(scopeBounds.y,libraryBounds.y))-padding;
+ const clip={x,y,width:Math.ceil(Math.max(scopeBounds.x+scopeBounds.width,libraryBounds.x+libraryBounds.width))-x+padding,height:Math.ceil(Math.max(scopeBounds.y+scopeBounds.height,libraryBounds.y+libraryBounds.height))-y+padding};
+ await page.screenshot({path:'/tmp/tierscope-317-'+engine+'-dark.png',clip});
+ await page.uncheck('#dark-mode-toggle');await page.waitForTimeout(100);await page.screenshot({path:'/tmp/tierscope-317-'+engine+'-bright.png',clip});await page.check('#dark-mode-toggle');
  // Header consent on a new model; cancel must leave its state and the Library intact.
  await page.evaluate(()=>ViewerTracker.__models.replay());
  assert.equal(await page.locator('#header-text').textContent(),'replay_model');
