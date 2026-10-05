@@ -77,6 +77,14 @@ export function libraryShell() {
 #tierscope-session-tools #session-save-info{font-size:.85em;margin-top:4px}
 #tierscope-session-tools .tools-library-bulk{gap:4px;font-size:.9em}
 #tierscope-session-tools .tools-library-bulk button{padding:3px 5px}
+#tierscope-session-tools #tools-library-storage{margin:7px 0;font-size:.95em}
+#tierscope-session-tools #tools-library-storage>p{margin:4px 0}
+#tierscope-session-tools #tools-storage-settings>summary{display:inline-block;padding:1px 0;color:var(--panel-accent);background:transparent;border:0;font-size:.95em}
+#tierscope-session-tools #tools-storage-settings[open]{border:1px solid var(--panel-divider);border-radius:4px;padding:7px;margin-top:5px}
+#tierscope-session-tools .tools-capacity-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+#tierscope-session-tools .tools-capacity-fields label{display:grid;gap:3px}
+#tierscope-session-tools .tools-capacity-fields input{width:100%}
+#tierscope-session-tools .tools-capacity-warning{color:var(--panel-warning);font-size:.95em}
 #tools-library-selected{flex-basis:100%}
 #tools-library-selection{margin-top:8px}
 #tierscope-session-tools .tools-auto-keep{display:inline-flex;align-items:center;gap:5px;margin:0 0 0 5px;font-size:.92em}

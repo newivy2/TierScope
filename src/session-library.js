@@ -1,10 +1,12 @@
+import { readLibraryLimits } from './library-capacity.js';
+import { LIBRARY_MEGABYTE } from './library-capacity-data.js';
 import { makeStorageId } from './record-validation.js';
 import { validateSessionFile } from './session-file-format.js';
 import { freezeRecordingData } from './immutable-data.js';
 
 export const LIBRARY_PREFIX = 'tierscope:library:v1:';
-export const LIBRARY_MAX_COUNT = 500;
-export const LIBRARY_MAX_BYTES = 25 * 1024 * 1024;
+export const LIBRARY_CACHE_MAX_COUNT = 500;
+export const LIBRARY_CACHE_MAX_BYTES = 25 * LIBRARY_MEGABYTE;
 
 export function libraryRecordKey(id) {
     if (typeof id !== 'string' || !/^[a-z0-9_-]{1,100}$/i.test(id)) throw new Error('Invalid library record.');
@@ -104,7 +106,7 @@ export function readSessionLibrary(cache = null) {
                 data = {title: libraryTitle(record.title), ...libraryMetadata(record), lineage, addedAt: record.addedAt, archive: validateSessionFile(record.archive)};
             }
             if (cache) {
-                if (typeof raw === 'string' && cachedCount < LIBRARY_MAX_COUNT && cachedBytes + recordBytes <= LIBRARY_MAX_BYTES) {
+                if (typeof raw === 'string' && cachedCount < LIBRARY_CACHE_MAX_COUNT && cachedBytes + recordBytes <= LIBRARY_CACHE_MAX_BYTES) {
                     if (!cached) {
                         // Validation copied these arrays and checked every item
                         // as a primitive. Freeze them without visiting every
@@ -132,6 +134,7 @@ export function readSessionLibrary(cache = null) {
 }
 
 export function planLibraryAdditions(incoming, library = readSessionLibrary()) {
+    const limits = readLibraryLimits();
     if (library.unavailable && library.unavailable.length) throw new Error('Some library records could not be read. Refresh the list before saving more recordings.');
     const entries = library.entries.slice(), writes = [];
     let bytes = library.bytes;
@@ -156,8 +159,8 @@ export function planLibraryAdditions(incoming, library = readSessionLibrary()) {
         const next = { id, title, ...metadata, lineage, addedAt, archive, records: [{ key, value: raw }] };
         if (previous) entries[index] = next; else entries.push(next);
     }
-    if (library.count - library.entries.length + entries.length > LIBRARY_MAX_COUNT || bytes > LIBRARY_MAX_BYTES) {
-        throw new Error('Library full (' + LIBRARY_MAX_COUNT + ' recordings / ' + LIBRARY_MAX_BYTES / 1024 / 1024 + ' MB). Export and remove recordings before adding more.');
+    if (library.count - library.entries.length + entries.length > limits.maxSessions || bytes > limits.maxMegabytes * LIBRARY_MEGABYTE) {
+        throw new Error('Library full (' + limits.maxSessions.toLocaleString() + ' sessions / ' + limits.maxMegabytes + ' MB). Raise Storage limits or export and remove sessions before saving more. Updates also need temporary space.');
     }
     return writes;
 }
@@ -195,9 +198,9 @@ export function keepSessionInLibrary(archive, title = '', reader = null) {
 }
 
 export function verifyLibraryCapacity(reader = null) {
-    const state = reader ? reader.read() : readSessionLibrary();
+    const limits = readLibraryLimits(), state = reader ? reader.read() : readSessionLibrary();
     if (state.unavailable.length) throw new Error('Library capacity could not be checked because some records could not be read.');
-    if (state.count > LIBRARY_MAX_COUNT || state.bytes > LIBRARY_MAX_BYTES) throw new Error('Library limit reached, possibly by another tab. Refresh the list and remove recordings before retrying.');
+    if (state.count > limits.maxSessions || state.bytes > limits.maxMegabytes * LIBRARY_MEGABYTE) throw new Error('Library limit reached, possibly by another tab. Refresh the list, raise Storage limits or remove sessions before retrying.');
 }
 
 export function removeLibrarySession(id) {
@@ -212,6 +215,7 @@ export function renameLibrarySession(id, title) {
 }
 
 export function updateLibraryMetadata(id, patch) {
+    const limits = readLibraryLimits();
     if (!patch || Object.keys(patch).some(key => !['title', 'notes'].includes(key))) throw new Error('Invalid recording metadata.');
     const key = libraryRecordKey(id), state = readSessionLibrary();
     if (state.unavailable.length) throw new Error('Some library records could not be read. Refresh the list before editing.');
@@ -220,7 +224,7 @@ export function updateLibraryMetadata(id, patch) {
     const clean = {...libraryMetadata({...entry, ...patch}), title: libraryTitle(patch.title === undefined ? entry.title : patch.title)};
     const writes = entry.records.map(record => ({ ...record, next: JSON.stringify({ ...JSON.parse(record.value), ...clean }) }));
     const bytes = state.bytes + writes.reduce((total, write) => total + new Blob([write.next]).size - new Blob([write.value]).size, 0);
-    if (bytes > LIBRARY_MAX_BYTES) throw new Error('Library full. Use shorter notes or a shorter title, or remove a recording.');
+    if (bytes > limits.maxMegabytes * LIBRARY_MEGABYTE) throw new Error('Library full. Raise Storage limits, use shorter notes or a shorter title, or remove a session.');
     const touched = [];
     try {
         for (const write of writes) {

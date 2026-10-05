@@ -9,6 +9,9 @@ import { displayedHighRoom } from './high-selectors.js';
 import { readAllTimeHighs, sessionAllTimeHighs, storeAllTimeHighs } from './highs-store.js';
 import { repaintHighMode } from './highs.js';
 import { attachLibraryDock } from './library-dock.js';
+import { LIBRARY_TRANSFER_MAX_COUNT } from './library-capacity-data.js';
+import { readLibraryLimits, saveLibraryLimits } from './library-capacity.js';
+import { renderLibraryCapacity } from './library-capacity-view.js';
 import { libraryShell } from './library-shell.js';
 import { migrateRecordingFavorites, readModelFavorites, readModelFavorite } from './library-models.js';
 import { createLibraryDrafts } from './library-drafts.js';
@@ -29,7 +32,7 @@ import { ANALYSIS_METRICS, analysisSeries, compareRecordingSet, parseAnalysisThr
 import { captureSessionFile, captureLiveSessionFile } from './session-capture.js';
 import { validateSessionFile } from './session-file-format.js';
 import { getSessionSaveState } from './session-health.js';
-import { LIBRARY_MAX_BYTES, LIBRARY_MAX_COUNT, LIBRARY_PREFIX, createLibraryReader, keepSessionInLibrary, removeLibrarySession, renameLibrarySession, updateLibraryMetadata } from './session-library.js';
+import { LIBRARY_PREFIX, createLibraryReader, keepSessionInLibrary, removeLibrarySession, renameLibrarySession, updateLibraryMetadata } from './session-library.js';
 import { openSessionReplay } from './session-replay.js';
 import { formatElapsedTime, getModelName } from './utils.js';
 
@@ -87,6 +90,7 @@ export function openSessionTools(focusTarget) {
     const analysisStates = new Map();
     let libraryRoom = null, chartDraw = null, analysisPreferenceError = savedAnalysis.error;
     let observedSource = null, observedSignature = '';
+    let refreshCapacity = null, capacityCheckpoint = '';
     let detachDock = null;
     try { currentArchive = captureSessionFile(); } catch (error) { /* Tools also work on directory pages. */ }
     const content = dialog.querySelector('#tools-content'), message = dialog.querySelector('#tools-message');
@@ -121,7 +125,7 @@ export function openSessionTools(focusTarget) {
         input.onchange = async () => {
             const files = Array.from(input.files || []); if (!files.length) { input.remove(); return; }
             try {
-                if (files.length > LIBRARY_MAX_COUNT || files.reduce((total, file) => total + file.size, 0) > maxBytes) throw new Error('Choose up to 500 files totaling at most ' + Math.round(maxBytes / 1024 / 1024) + ' MB.');
+                if (files.length > (multiple ? LIBRARY_TRANSFER_MAX_COUNT : 1) || files.reduce((total, file) => total + file.size, 0) > maxBytes) throw new Error('Choose ' + (multiple ? 'up to 10,000 files' : 'one file') + ' totaling at most ' + Math.round(maxBytes / 1024 / 1024) + ' MB.');
                 const values = [];
                 for (const file of files) { values.push(await readDataFile(file, maxBytes)); if (!stillSelected()) return; }
                 const value = multiple ? values : values[0];
@@ -215,6 +219,13 @@ export function openSessionTools(focusTarget) {
             result.state.error || 'Records changed in another tab. Try again.', !result.saved);
     }
     function refreshCurrent() {
+        const checkpoint = automaticLibraryStatus(getModelName());
+        const checkpointSignature = [checkpoint.identity, checkpoint.signature, checkpoint.savedAt, checkpoint.error].join(':');
+        if (refreshCapacity && capacityCheckpoint !== checkpointSignature) {
+            capacityCheckpoint = checkpointSignature;
+            try { refreshCapacity(libraryReader.read(), readLibraryLimits(), ''); }
+            catch (error) { refreshCapacity(library, null, error.message); }
+        }
         const playback = isPlaybackCurrent(runtime.playback) ? runtime.playback : null;
         const source = playback ? playback.archive : runtime.history;
         const history = playback ? source.session.history : runtime.history;
@@ -365,7 +376,14 @@ export function openSessionTools(focusTarget) {
     function renderLibrary() {
         const state = readLibrary();
         currentCard(); currentCard(true); observedSignature = ''; refreshCurrent(); updateSessionToolsStatus();
-        node(content, 'p', state.count + ' / ' + LIBRARY_MAX_COUNT + ' sessions · ' + (state.bytes / 1024 / 1024).toFixed(2) + ' / ' + LIBRARY_MAX_BYTES / 1024 / 1024 + ' MB · Kept until you delete them.', 'tools-muted').id = 'tools-library-storage';
+        let limits = null, capacityError = '';
+        try { limits = readLibraryLimits(); } catch (error) { capacityError = error.message; }
+        const checkpoint = automaticLibraryStatus(getModelName());
+        capacityCheckpoint = [checkpoint.identity, checkpoint.signature, checkpoint.savedAt, checkpoint.error].join(':');
+        refreshCapacity = renderLibraryCapacity(content, state, limits, capacityError, value => {
+            saveLibraryLimits(value); render('library'); tell('Storage limits saved for this browser. Existing sessions were kept.');
+            dialog.querySelector('#tools-storage-settings > summary').focus();
+        });
         if (state.favoriteError) node(content, 'p', state.favoriteError, 'tools-muted');
         libraryFilters.room = libraryRoom || '';
         if (libraryRoom && libraryRoom !== '*' && !state.entries.some(entry => entry.archive.room.toLowerCase() === libraryRoom)) libraryFilters.room = libraryRoom = '';
@@ -631,7 +649,7 @@ export function openSessionTools(focusTarget) {
                 'Backup download requested. Check your browser downloads.', !!omitted);
         }, 'tools-backup-download');
         node(content, 'h3', 'Restore a backup');
-        node(content, 'p', 'ATH is merged without lowering existing records. New library sessions are added; fuller versions of the same session update its entry and keep its name. Saved preferences take effect after refreshing your room tabs.', 'tools-muted');
+        node(content, 'p', 'ATH is merged without lowering existing records. New library sessions are added; fuller versions of the same session update its entry and keep its name. Saved preferences take effect after refreshing your room tabs. Storage limits stay local to this browser; raise them in Sessions → Storage limits if the recordings need more room. Backups up to 300 MB / 10,000 sessions can be opened.', 'tools-muted');
         button(content, 'Choose backup…', () => {
             pendingBackup = null; render('backup');
             chooseFile(BACKUP_MAX_BYTES, value => {
@@ -657,6 +675,7 @@ export function openSessionTools(focusTarget) {
         }
     }
     function render(next) {
+        refreshCapacity = null;
         const focusedId = dialog.contains(document.activeElement) ? document.activeElement.id : '';
         const existingPicker = dialog.querySelector('#tools-recording-picker');
         if (existingPicker) pickerOpen = existingPicker.open;
@@ -679,7 +698,7 @@ export function openSessionTools(focusTarget) {
         }
     }
     function close() {
-        fileRequest++; refreshSessionTools = null; chartDraw = null;
+        fileRequest++; refreshSessionTools = null; refreshCapacity = null; chartDraw = null;
         if (chartDispose) { chartDispose(); chartDispose = null; }
         analysisStates.clear(); analysisView = null; analysisSources = null; analysisOutput = null;
         libraryReader.clear(); modelHistoryReader.clear(); options = []; optionsLibrary = null; optionsArchive = null; optionsLiveArchive = null; library = null; currentArchive = null; liveComparisonArchive = null;

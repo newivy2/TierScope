@@ -3,10 +3,11 @@ import { makeStorageId } from './record-validation.js';
 import { runtime } from './runtime.js';
 import { ANALYSIS_PREFERENCE_KEY, validateAnalysisPreferences } from './analysis-preference-data.js';
 import { validateSessionFile } from './session-file-format.js';
-import { LIBRARY_MAX_COUNT, LIBRARY_PREFIX, finalizeLibraryWrites, libraryTitle, libraryMetadata, planLibraryAdditions, readSessionLibrary, verifyLibraryCapacity } from './session-library.js';
+import { LIBRARY_PREFIX, finalizeLibraryWrites, libraryTitle, libraryMetadata, planLibraryAdditions, readSessionLibrary, verifyLibraryCapacity } from './session-library.js';
 import { planModelFavoriteWrites, readModelFavorites, validateFavoriteModels } from './library-models.js';
+import { LIBRARY_TRANSFER_MAX_BYTES, LIBRARY_TRANSFER_MAX_COUNT } from './library-capacity-data.js';
 
-export const BACKUP_MAX_BYTES = 32 * 1024 * 1024;
+export const BACKUP_MAX_BYTES = LIBRARY_TRANSFER_MAX_BYTES;
 const preferenceKeys = Object.freeze({ theme: 'tierscope:ui:theme:v1', highMode: 'tierscope:ui:highMode:v1',
     miniMetric: 'tierscope:ui:miniMetric:v1', chartWindow: 'tierscope:ui:chartWindow:v1',
     collapsedRows: 'tierscope:ui:collapsedRows:v1', geometry: 'tierscope:ui:geometry:v1' });
@@ -37,7 +38,7 @@ export function validateBackupPreferences(preferences) {
 export function validateTierScopeBackup(input) {
     if (!input || input.format !== 'TierScopeBackup' || input.formatVersion !== 1 ||
         typeof input.producerVersion !== 'string' || input.producerVersion.length > 40 ||
-        !Array.isArray(input.rooms) || input.rooms.length > 1000 || !Array.isArray(input.library) || input.library.length > LIBRARY_MAX_COUNT) {
+        !Array.isArray(input.rooms) || input.rooms.length > LIBRARY_TRANSFER_MAX_COUNT || !Array.isArray(input.library) || input.library.length > LIBRARY_TRANSFER_MAX_COUNT) {
         throw new Error('This is not a supported TierScope backup.');
     }
     const seen = new Set();
@@ -62,7 +63,7 @@ export function validateTierScopeBackup(input) {
             new Set(keys).size !== keys.length) throw new Error('Invalid partial-backup recovery notice.');
         backup.recovery = {omittedLibraryKeys: keys.slice()};
     }
-    if (new Blob([JSON.stringify(backup)]).size > BACKUP_MAX_BYTES) throw new Error('Backup exceeds 32 MB.');
+    if (new Blob([JSON.stringify(backup)]).size > BACKUP_MAX_BYTES) throw new Error('Backup exceeds 300 MB.');
     return backup;
 }
 

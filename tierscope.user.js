@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.17.0
+// @version      3.18.0
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -2575,10 +2575,64 @@ underlying system, so should run in the browser, Node, or Plask.
     });
   }
 
+  // src/library-capacity-data.js
+  var LIBRARY_MEGABYTE = 1024 * 1024;
+  var DEFAULT_LIBRARY_LIMITS = Object.freeze({ maxSessions: 1e3, maxMegabytes: 50 });
+  var LIBRARY_LIMIT_RANGES = Object.freeze({ maxSessions: 1e4, maxMegabytes: 250 });
+  var LIBRARY_TRANSFER_MAX_COUNT = LIBRARY_LIMIT_RANGES.maxSessions;
+  var LIBRARY_TRANSFER_MAX_BYTES = 300 * LIBRARY_MEGABYTE;
+  function validateLibraryLimits(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value) || !("maxSessions" in value) || !("maxMegabytes" in value) || typeof value.maxSessions !== "number" || !Number.isSafeInteger(value.maxSessions) || value.maxSessions < 1 || value.maxSessions > LIBRARY_LIMIT_RANGES.maxSessions || typeof value.maxMegabytes !== "number" || !Number.isSafeInteger(value.maxMegabytes) || value.maxMegabytes < 1 || value.maxMegabytes > LIBRARY_LIMIT_RANGES.maxMegabytes) {
+      throw new Error("Use whole numbers: 1–10,000 sessions and 1–250 MB.");
+    }
+    return { maxSessions: value.maxSessions, maxMegabytes: value.maxMegabytes };
+  }
+  function libraryCapacityNotice(usage, limits) {
+    var _a;
+    if ((_a = usage.unavailable) == null ? void 0 : _a.length) return "Some recordings could not be read. Storage usage is incomplete; new saves wait until they can be read or removed.";
+    const ratio = Math.max(usage.count / limits.maxSessions, usage.bytes / (limits.maxMegabytes * LIBRARY_MEGABYTE));
+    if (ratio >= 1) return "Library limit reached. Existing sessions are kept. Raise the limits or export and remove sessions to make room.";
+    if (ratio >= 0.8) return "Library is nearing its limit. Raise the limits or export and remove sessions before it fills up.";
+    return "";
+  }
+
+  // src/library-capacity.js
+  var LIBRARY_LIMITS_KEY = "tierscope:library-limits:v1";
+  function readLibraryLimits() {
+    try {
+      const raw = GM_getValue(LIBRARY_LIMITS_KEY, void 0);
+      if (raw === void 0) return __spreadValues({}, DEFAULT_LIBRARY_LIMITS);
+      const record = JSON.parse(raw);
+      if (record.schemaVersion !== 1) throw new Error("Unsupported storage limits.");
+      return validateLibraryLimits(record);
+    } catch (error) {
+      throw new Error("Library storage limits could not be read. Open Storage limits to save them again, or refresh to retry.");
+    }
+  }
+  function saveLibraryLimits(value) {
+    const limits = validateLibraryLimits(value), before = GM_getValue(LIBRARY_LIMITS_KEY, void 0);
+    const raw = JSON.stringify(__spreadValues({ schemaVersion: 1 }, limits));
+    try {
+      GM_setValue(LIBRARY_LIMITS_KEY, raw);
+      if (GM_getValue(LIBRARY_LIMITS_KEY, void 0) !== raw) throw new Error("Storage limits could not be verified. Refresh and retry.");
+    } catch (error) {
+      try {
+        if (GM_getValue(LIBRARY_LIMITS_KEY, void 0) === raw) {
+          if (before === void 0) GM_deleteValue(LIBRARY_LIMITS_KEY);
+          else GM_setValue(LIBRARY_LIMITS_KEY, before);
+        }
+      } catch (rollbackError) {
+        throw new Error("Storage limits could not be saved or restored. Refresh to check the current limits.");
+      }
+      throw error;
+    }
+    return limits;
+  }
+
   // src/session-library.js
   var LIBRARY_PREFIX = "tierscope:library:v1:";
-  var LIBRARY_MAX_COUNT = 500;
-  var LIBRARY_MAX_BYTES = 25 * 1024 * 1024;
+  var LIBRARY_CACHE_MAX_COUNT = 500;
+  var LIBRARY_CACHE_MAX_BYTES = 25 * LIBRARY_MEGABYTE;
   function libraryRecordKey(id) {
     if (typeof id !== "string" || !/^[a-z0-9_-]{1,100}$/i.test(id)) throw new Error("Invalid library record.");
     return LIBRARY_PREFIX + id;
@@ -2683,7 +2737,7 @@ underlying system, so should run in the browser, Node, or Plask.
           data = __spreadProps(__spreadValues({ title: libraryTitle(record.title) }, libraryMetadata(record)), { lineage, addedAt: record.addedAt, archive: validateSessionFile(record.archive) });
         }
         if (cache) {
-          if (typeof raw === "string" && cachedCount < LIBRARY_MAX_COUNT && cachedBytes + recordBytes <= LIBRARY_MAX_BYTES) {
+          if (typeof raw === "string" && cachedCount < LIBRARY_CACHE_MAX_COUNT && cachedBytes + recordBytes <= LIBRARY_CACHE_MAX_BYTES) {
             if (!cached) {
               for (const values of Object.values(data.archive.session.history)) Object.freeze(values);
               cache.set(key, { raw, bytes: recordBytes, data: freezeRecordingData(data) });
@@ -2714,6 +2768,7 @@ underlying system, so should run in the browser, Node, or Plask.
     return { entries, damaged, unavailable, bytes, count: entries.length + damaged.length };
   }
   function planLibraryAdditions(incoming, library = readSessionLibrary()) {
+    const limits = readLibraryLimits();
     if (library.unavailable && library.unavailable.length) throw new Error("Some library records could not be read. Refresh the list before saving more recordings.");
     const entries = library.entries.slice(), writes = [];
     let bytes = library.bytes;
@@ -2734,8 +2789,8 @@ underlying system, so should run in the browser, Node, or Plask.
       if (previous) entries[index] = next;
       else entries.push(next);
     }
-    if (library.count - library.entries.length + entries.length > LIBRARY_MAX_COUNT || bytes > LIBRARY_MAX_BYTES) {
-      throw new Error("Library full (" + LIBRARY_MAX_COUNT + " recordings / " + LIBRARY_MAX_BYTES / 1024 / 1024 + " MB). Export and remove recordings before adding more.");
+    if (library.count - library.entries.length + entries.length > limits.maxSessions || bytes > limits.maxMegabytes * LIBRARY_MEGABYTE) {
+      throw new Error("Library full (" + limits.maxSessions.toLocaleString() + " sessions / " + limits.maxMegabytes + " MB). Raise Storage limits or export and remove sessions before saving more. Updates also need temporary space.");
     }
     return writes;
   }
@@ -2778,9 +2833,9 @@ underlying system, so should run in the browser, Node, or Plask.
     return { added: !writes[0].updated, updated: writes[0].updated, id: writes[0].id };
   }
   function verifyLibraryCapacity(reader2 = null) {
-    const state = reader2 ? reader2.read() : readSessionLibrary();
+    const limits = readLibraryLimits(), state = reader2 ? reader2.read() : readSessionLibrary();
     if (state.unavailable.length) throw new Error("Library capacity could not be checked because some records could not be read.");
-    if (state.count > LIBRARY_MAX_COUNT || state.bytes > LIBRARY_MAX_BYTES) throw new Error("Library limit reached, possibly by another tab. Refresh the list and remove recordings before retrying.");
+    if (state.count > limits.maxSessions || state.bytes > limits.maxMegabytes * LIBRARY_MEGABYTE) throw new Error("Library limit reached, possibly by another tab. Refresh the list, raise Storage limits or remove sessions before retrying.");
   }
   function removeLibrarySession(id) {
     const key = libraryRecordKey(id), state = readSessionLibrary();
@@ -2795,6 +2850,7 @@ underlying system, so should run in the browser, Node, or Plask.
     return updateLibraryMetadata(id, { title });
   }
   function updateLibraryMetadata(id, patch) {
+    const limits = readLibraryLimits();
     if (!patch || Object.keys(patch).some((key2) => !["title", "notes"].includes(key2))) throw new Error("Invalid recording metadata.");
     const key = libraryRecordKey(id), state = readSessionLibrary();
     if (state.unavailable.length) throw new Error("Some library records could not be read. Refresh the list before editing.");
@@ -2803,7 +2859,7 @@ underlying system, so should run in the browser, Node, or Plask.
     const clean = __spreadProps(__spreadValues({}, libraryMetadata(__spreadValues(__spreadValues({}, entry), patch))), { title: libraryTitle(patch.title === void 0 ? entry.title : patch.title) });
     const writes = entry.records.map((record) => __spreadProps(__spreadValues({}, record), { next: JSON.stringify(__spreadValues(__spreadValues({}, JSON.parse(record.value)), clean)) }));
     const bytes = state.bytes + writes.reduce((total, write) => total + new Blob([write.next]).size - new Blob([write.value]).size, 0);
-    if (bytes > LIBRARY_MAX_BYTES) throw new Error("Library full. Use shorter notes or a shorter title, or remove a recording.");
+    if (bytes > limits.maxMegabytes * LIBRARY_MEGABYTE) throw new Error("Library full. Raise Storage limits, use shorter notes or a shorter title, or remove a session.");
     const touched = [];
     try {
       for (const write of writes) {
@@ -4786,7 +4842,8 @@ underlying system, so should run in the browser, Node, or Plask.
       clearAutomaticLibraryStatus(room);
       return true;
     }
-    if (!confirm("Favorite " + room + " and automatically keep their live sessions?\n\nWhile TierScope is recording this model, sessions will be kept in this browser’s Library. The same session is updated as it grows, at most once per minute as samples arrive, and on pause, Stop or leaving the room. The current live session will be kept too. Replay files are never added automatically.\n\nLibrary limits still apply (500 sessions / 25 MB). Nothing is deleted automatically. Removing the star stops automatic keeping; sessions already kept remain.")) return false;
+    const limits = readLibraryLimits();
+    if (!confirm("Favorite " + room + " and automatically keep their live sessions?\n\nWhile TierScope is recording this model, sessions will be kept in this browser’s Library. The same session is updated as it grows, at most once per minute as samples arrive, and on pause, Stop or leaving the room. The current live session will be kept too. Replay files are never added automatically.\n\nLibrary limits still apply (" + limits.maxSessions.toLocaleString() + " sessions / " + limits.maxMegabytes + " MB). Nothing is deleted automatically. Removing the star stops automatic keeping; sessions already kept remain.")) return false;
     setModelFavorite(room, true, true);
     keepFavoriteSession(room, true);
     return true;
@@ -4941,7 +4998,7 @@ underlying system, so should run in the browser, Node, or Plask.
   }
 
   // src/backup.js
-  var BACKUP_MAX_BYTES = 32 * 1024 * 1024;
+  var BACKUP_MAX_BYTES = LIBRARY_TRANSFER_MAX_BYTES;
   var preferenceKeys = Object.freeze({
     theme: "tierscope:ui:theme:v1",
     highMode: "tierscope:ui:highMode:v1",
@@ -4975,7 +5032,7 @@ underlying system, so should run in the browser, Node, or Plask.
     return clean;
   }
   function validateTierScopeBackup(input) {
-    if (!input || input.format !== "TierScopeBackup" || input.formatVersion !== 1 || typeof input.producerVersion !== "string" || input.producerVersion.length > 40 || !Array.isArray(input.rooms) || input.rooms.length > 1e3 || !Array.isArray(input.library) || input.library.length > LIBRARY_MAX_COUNT) {
+    if (!input || input.format !== "TierScopeBackup" || input.formatVersion !== 1 || typeof input.producerVersion !== "string" || input.producerVersion.length > 40 || !Array.isArray(input.rooms) || input.rooms.length > LIBRARY_TRANSFER_MAX_COUNT || !Array.isArray(input.library) || input.library.length > LIBRARY_TRANSFER_MAX_COUNT) {
       throw new Error("This is not a supported TierScope backup.");
     }
     const seen = /* @__PURE__ */ new Set();
@@ -5004,7 +5061,7 @@ underlying system, so should run in the browser, Node, or Plask.
       if (!Array.isArray(keys) || !keys.length || keys.length > 1e4 || keys.some((key) => typeof key !== "string" || !key.startsWith(LIBRARY_PREFIX) || key.length > 256) || new Set(keys).size !== keys.length) throw new Error("Invalid partial-backup recovery notice.");
       backup.recovery = { omittedLibraryKeys: keys.slice() };
     }
-    if (new Blob([JSON.stringify(backup)]).size > BACKUP_MAX_BYTES) throw new Error("Backup exceeds 32 MB.");
+    if (new Blob([JSON.stringify(backup)]).size > BACKUP_MAX_BYTES) throw new Error("Backup exceeds 300 MB.");
     return backup;
   }
   function createTierScopeBackup(includeLibrary = true, allowPartialLibrary = false) {
@@ -5237,6 +5294,157 @@ underlying system, so should run in the browser, Node, or Plask.
     };
   }
 
+  // src/tools-view-helpers.js
+  function toolNode(parent, tag, text, className) {
+    const node = document.createElement(tag);
+    if (text !== void 0) node.textContent = text;
+    if (className) node.className = className;
+    parent.appendChild(node);
+    return node;
+  }
+  function toolButton(parent, text, action, id) {
+    const button = toolNode(parent, "button", text);
+    button.type = "button";
+    button.onclick = action;
+    if (id) button.id = id;
+    return button;
+  }
+  function recordingFilters(parent, entries, state, prefix, changed, organization = false) {
+    const controls = toolNode(parent, "div", void 0, "tools-filters");
+    const modelRow = toolNode(controls, "div", void 0, "tools-model-filters");
+    const label = toolNode(modelRow, "label", "Model ", "tools-model-filter"), model = toolNode(label, "select");
+    model.id = prefix + "-model";
+    const rooms = [...new Set(entries.map((entry) => entry.archive.room.toLowerCase()))].sort();
+    for (const [value, name] of [["", organization ? "All models (folders)" : "All models"], ...organization ? [["*", "All sessions"]] : [], ...rooms.map((room) => [room, room])]) {
+      const option = toolNode(model, "option", name);
+      option.value = value;
+    }
+    if (![...model.options].some((option) => option.value === (state.room || ""))) state.room = "";
+    model.value = state.room || "";
+    model.onchange = () => {
+      state.room = model.value;
+      changed();
+    };
+    if (organization) {
+      const label2 = toolNode(modelRow, "label", "Sort ", "tools-sort-filter"), sort = toolNode(label2, "select");
+      sort.id = prefix + "-sort";
+      for (const [value, name] of [["newest", "Newest first"], ["oldest", "Oldest first"], ["title", "Title"], ["model", "Model"], ["favorites", "Favorite models first"]]) {
+        const option = toolNode(sort, "option", name);
+        option.value = value;
+      }
+      sort.value = state.sort || "newest";
+      sort.onchange = () => {
+        state.sort = sort.value;
+        changed();
+      };
+      const favoriteLabel = toolNode(modelRow, "label", void 0, "tools-favorites-filter"), favorite = toolNode(favoriteLabel, "input");
+      favorite.type = "checkbox";
+      favorite.id = prefix + "-favorites";
+      favorite.checked = !!state.favorites;
+      toolNode(favoriteLabel, "span", "Favorites only");
+      favorite.onchange = () => {
+        state.favorites = favorite.checked;
+        changed();
+      };
+    }
+    const dates = toolNode(controls, "div", void 0, "tools-date-filters");
+    dates.title = "First retained sample, in your browser’s local timezone. Through includes the whole day.";
+    for (const [key, name] of [["from", "From"], ["to", "Through"]]) {
+      const label2 = toolNode(dates, "label", name + " "), input = toolNode(label2, "input");
+      input.type = "date";
+      input.id = prefix + "-" + key;
+      input.value = state[key] || "";
+      input.onchange = () => {
+        state[key] = input.value;
+        changed();
+      };
+    }
+    const searchLabel = toolNode(controls, "label", "Find ", "tools-search"), search = toolNode(searchLabel, "input");
+    search.type = "search";
+    search.id = prefix + "-search";
+    search.placeholder = "Title, model or notes";
+    search.value = state.query || "";
+    search.oninput = () => {
+      state.query = search.value;
+      changed();
+    };
+    toolButton(controls, "Clear filters", () => {
+      Object.assign(state, { room: "", from: "", to: "", query: "", favorites: false, sort: "newest" });
+      model.value = "";
+      search.value = "";
+      controls.querySelectorAll("input[type=date]").forEach((input) => {
+        input.value = "";
+      });
+      if (organization) {
+        controls.querySelector("input[type=checkbox]").checked = false;
+        controls.querySelector("#" + prefix + "-sort").value = "newest";
+      }
+      changed();
+    }, prefix + "-clear");
+    return { model, search };
+  }
+
+  // src/library-capacity-view.js
+  function renderLibraryCapacity(parent, usage, limits, error, save) {
+    const section = toolNode(parent, "section");
+    section.id = "tools-library-storage";
+    const counter = toolNode(section, "p", "", "tools-muted");
+    counter.id = "tools-library-usage";
+    const notice = toolNode(section, "p", "", "tools-capacity-warning");
+    notice.id = "tools-library-capacity-warning";
+    notice.setAttribute("role", "status");
+    function refresh(nextUsage, nextLimits, nextError) {
+      counter.textContent = nextUsage.count.toLocaleString() + " / " + (nextLimits ? nextLimits.maxSessions.toLocaleString() : "?") + " sessions · " + (nextUsage.bytes / LIBRARY_MEGABYTE).toFixed(2) + " / " + (nextLimits ? nextLimits.maxMegabytes : "?") + " MB";
+      notice.textContent = nextError || (nextLimits ? libraryCapacityNotice(nextUsage, nextLimits) : "");
+      notice.hidden = !notice.textContent;
+    }
+    refresh(usage, limits, error);
+    const settings = toolNode(section, "details");
+    settings.id = "tools-storage-settings";
+    toolNode(settings, "summary", "Storage limits");
+    const form = toolNode(settings, "form");
+    form.id = "tools-storage-form";
+    toolNode(form, "p", "For all models in this browser. Sessions are kept until you delete them.", "tools-muted");
+    const fields = toolNode(form, "div", void 0, "tools-capacity-fields");
+    const inputs = {};
+    for (const [key, label, id] of [["maxSessions", "Sessions", "tools-storage-sessions"], ["maxMegabytes", "Storage (MB)", "tools-storage-megabytes"]]) {
+      const wrapper = toolNode(fields, "label", label), input = toolNode(wrapper, "input");
+      input.type = "number";
+      input.id = id;
+      input.min = "1";
+      input.max = String(LIBRARY_LIMIT_RANGES[key]);
+      input.step = "1";
+      input.required = true;
+      input.value = String((limits || DEFAULT_LIBRARY_LIMITS)[key]);
+      inputs[key] = input;
+    }
+    toolNode(form, "p", "Defaults: 1,000 sessions / 50 MB. Choose up to 10,000 sessions / 250 MB. Larger libraries can take longer to open and back up.", "tools-muted");
+    toolNode(form, "p", "Lowering limits never deletes sessions. Saves wait if usage exceeds a limit. Updates need spare space; browser storage can fill before these limits.", "tools-muted");
+    const actions = toolNode(form, "div", void 0, "tools-actions");
+    const submit = toolButton(actions, "Save limits", null, "tools-storage-save");
+    submit.type = "submit";
+    submit.className = "tools-primary";
+    toolButton(actions, "Use defaults", () => {
+      for (const [key, input] of Object.entries(inputs)) input.value = String(DEFAULT_LIBRARY_LIMITS[key]);
+      inputs.maxSessions.focus();
+    }, "tools-storage-defaults");
+    const feedback = toolNode(form, "p", "", "tools-capacity-warning");
+    feedback.id = "tools-storage-error";
+    feedback.setAttribute("role", "alert");
+    feedback.hidden = true;
+    form.onsubmit = (event) => {
+      event.preventDefault();
+      if (!form.reportValidity()) return;
+      try {
+        save({ maxSessions: inputs.maxSessions.valueAsNumber, maxMegabytes: inputs.maxMegabytes.valueAsNumber });
+      } catch (failure) {
+        feedback.textContent = "Storage limit save failed. " + failure.message;
+        feedback.hidden = false;
+      }
+    };
+    return refresh;
+  }
+
   // src/library-shell.js
   function libraryShell() {
     return `<style>
@@ -5315,6 +5523,14 @@ underlying system, so should run in the browser, Node, or Plask.
 #tierscope-session-tools #session-save-info{font-size:.85em;margin-top:4px}
 #tierscope-session-tools .tools-library-bulk{gap:4px;font-size:.9em}
 #tierscope-session-tools .tools-library-bulk button{padding:3px 5px}
+#tierscope-session-tools #tools-library-storage{margin:7px 0;font-size:.95em}
+#tierscope-session-tools #tools-library-storage>p{margin:4px 0}
+#tierscope-session-tools #tools-storage-settings>summary{display:inline-block;padding:1px 0;color:var(--panel-accent);background:transparent;border:0;font-size:.95em}
+#tierscope-session-tools #tools-storage-settings[open]{border:1px solid var(--panel-divider);border-radius:4px;padding:7px;margin-top:5px}
+#tierscope-session-tools .tools-capacity-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+#tierscope-session-tools .tools-capacity-fields label{display:grid;gap:3px}
+#tierscope-session-tools .tools-capacity-fields input{width:100%}
+#tierscope-session-tools .tools-capacity-warning{color:var(--panel-warning);font-size:.95em}
 #tools-library-selected{flex-basis:100%}
 #tools-library-selection{margin-top:8px}
 #tierscope-session-tools .tools-auto-keep{display:inline-flex;align-items:center;gap:5px;margin:0 0 0 5px;font-size:.92em}
@@ -5425,96 +5641,6 @@ underlying system, so should run in the browser, Node, or Plask.
     });
     const byDate = (a, b) => b.archive.session.history.timestamps[0] - a.archive.session.history.timestamps[0] || a.id.localeCompare(b.id);
     return result.sort((a, b) => filters.sort === "oldest" ? -byDate(a, b) : filters.sort === "title" ? a.title.localeCompare(b.title) || byDate(a, b) : filters.sort === "model" ? a.archive.room.localeCompare(b.archive.room) || byDate(a, b) : filters.sort === "favorites" ? Number(!!b.modelFavorite) - Number(!!a.modelFavorite) || byDate(a, b) : byDate(a, b));
-  }
-
-  // src/tools-view-helpers.js
-  function toolNode(parent, tag, text, className) {
-    const node = document.createElement(tag);
-    if (text !== void 0) node.textContent = text;
-    if (className) node.className = className;
-    parent.appendChild(node);
-    return node;
-  }
-  function toolButton(parent, text, action, id) {
-    const button = toolNode(parent, "button", text);
-    button.type = "button";
-    button.onclick = action;
-    if (id) button.id = id;
-    return button;
-  }
-  function recordingFilters(parent, entries, state, prefix, changed, organization = false) {
-    const controls = toolNode(parent, "div", void 0, "tools-filters");
-    const modelRow = toolNode(controls, "div", void 0, "tools-model-filters");
-    const label = toolNode(modelRow, "label", "Model ", "tools-model-filter"), model = toolNode(label, "select");
-    model.id = prefix + "-model";
-    const rooms = [...new Set(entries.map((entry) => entry.archive.room.toLowerCase()))].sort();
-    for (const [value, name] of [["", organization ? "All models (folders)" : "All models"], ...organization ? [["*", "All sessions"]] : [], ...rooms.map((room) => [room, room])]) {
-      const option = toolNode(model, "option", name);
-      option.value = value;
-    }
-    if (![...model.options].some((option) => option.value === (state.room || ""))) state.room = "";
-    model.value = state.room || "";
-    model.onchange = () => {
-      state.room = model.value;
-      changed();
-    };
-    if (organization) {
-      const label2 = toolNode(modelRow, "label", "Sort ", "tools-sort-filter"), sort = toolNode(label2, "select");
-      sort.id = prefix + "-sort";
-      for (const [value, name] of [["newest", "Newest first"], ["oldest", "Oldest first"], ["title", "Title"], ["model", "Model"], ["favorites", "Favorite models first"]]) {
-        const option = toolNode(sort, "option", name);
-        option.value = value;
-      }
-      sort.value = state.sort || "newest";
-      sort.onchange = () => {
-        state.sort = sort.value;
-        changed();
-      };
-      const favoriteLabel = toolNode(modelRow, "label", void 0, "tools-favorites-filter"), favorite = toolNode(favoriteLabel, "input");
-      favorite.type = "checkbox";
-      favorite.id = prefix + "-favorites";
-      favorite.checked = !!state.favorites;
-      toolNode(favoriteLabel, "span", "Favorites only");
-      favorite.onchange = () => {
-        state.favorites = favorite.checked;
-        changed();
-      };
-    }
-    const dates = toolNode(controls, "div", void 0, "tools-date-filters");
-    dates.title = "First retained sample, in your browser’s local timezone. Through includes the whole day.";
-    for (const [key, name] of [["from", "From"], ["to", "Through"]]) {
-      const label2 = toolNode(dates, "label", name + " "), input = toolNode(label2, "input");
-      input.type = "date";
-      input.id = prefix + "-" + key;
-      input.value = state[key] || "";
-      input.onchange = () => {
-        state[key] = input.value;
-        changed();
-      };
-    }
-    const searchLabel = toolNode(controls, "label", "Find ", "tools-search"), search = toolNode(searchLabel, "input");
-    search.type = "search";
-    search.id = prefix + "-search";
-    search.placeholder = "Title, model or notes";
-    search.value = state.query || "";
-    search.oninput = () => {
-      state.query = search.value;
-      changed();
-    };
-    toolButton(controls, "Clear filters", () => {
-      Object.assign(state, { room: "", from: "", to: "", query: "", favorites: false, sort: "newest" });
-      model.value = "";
-      search.value = "";
-      controls.querySelectorAll("input[type=date]").forEach((input) => {
-        input.value = "";
-      });
-      if (organization) {
-        controls.querySelector("input[type=checkbox]").checked = false;
-        controls.querySelector("#" + prefix + "-sort").value = "newest";
-      }
-      changed();
-    }, prefix + "-clear");
-    return { model, search };
   }
 
   // src/library-browser-view.js
@@ -5680,8 +5806,8 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/library-transfer.js
   function libraryImportBundle(values, version) {
-    if (!Array.isArray(values) || !values.length || values.length > LIBRARY_MAX_COUNT) throw new Error("Choose 1–500 recording files or library bundles.");
-    if (new Blob([JSON.stringify(values)]).size > BACKUP_MAX_BYTES) throw new Error("Selected files exceed 32 MB.");
+    if (!Array.isArray(values) || !values.length || values.length > LIBRARY_TRANSFER_MAX_COUNT) throw new Error("Choose 1–10,000 recording files or library bundles.");
+    if (new Blob([JSON.stringify(values)]).size > BACKUP_MAX_BYTES) throw new Error("Selected files exceed 300 MB.");
     const library = [], favoriteModels = /* @__PURE__ */ new Set();
     for (const value of values) {
       if (value && value.format === "TierScopeBackup") {
@@ -5693,7 +5819,7 @@ underlying system, so should run in the browser, Node, or Plask.
         const archive = validateSessionFile(value);
         library.push({ title: archive.room, archive });
       }
-      if (library.length > LIBRARY_MAX_COUNT) throw new Error("Import up to 500 recordings at once.");
+      if (library.length > LIBRARY_TRANSFER_MAX_COUNT) throw new Error("Import up to 10,000 recordings at once.");
     }
     if (!library.length) throw new Error("These files contain no library recordings.");
     return validateTierScopeBackup({ format: "TierScopeBackup", formatVersion: 1, producerVersion: version, rooms: [], preferences: {}, library, favoriteModels: [...favoriteModels] });
@@ -6767,6 +6893,7 @@ underlying system, so should run in the browser, Node, or Plask.
     const analysisStates = /* @__PURE__ */ new Map();
     let libraryRoom = null, chartDraw = null, analysisPreferenceError = savedAnalysis.error;
     let observedSource = null, observedSignature = "";
+    let refreshCapacity = null, capacityCheckpoint = "";
     let detachDock = null;
     try {
       currentArchive = captureSessionFile();
@@ -6834,7 +6961,7 @@ underlying system, so should run in the browser, Node, or Plask.
           return;
         }
         try {
-          if (files.length > LIBRARY_MAX_COUNT || files.reduce((total, file) => total + file.size, 0) > maxBytes) throw new Error("Choose up to 500 files totaling at most " + Math.round(maxBytes / 1024 / 1024) + " MB.");
+          if (files.length > (multiple ? LIBRARY_TRANSFER_MAX_COUNT : 1) || files.reduce((total, file) => total + file.size, 0) > maxBytes) throw new Error("Choose " + (multiple ? "up to 10,000 files" : "one file") + " totaling at most " + Math.round(maxBytes / 1024 / 1024) + " MB.");
           const values = [];
           for (const file of files) {
             values.push(await readDataFile(file, maxBytes));
@@ -6971,6 +7098,16 @@ underlying system, so should run in the browser, Node, or Plask.
       tell(result.saved ? (result.changed ? "All-time highs updated for " : "No higher records for ") + archive.room + "." : result.state.error || "Records changed in another tab. Try again.", !result.saved);
     }
     function refreshCurrent() {
+      const checkpoint2 = automaticLibraryStatus(getModelName());
+      const checkpointSignature = [checkpoint2.identity, checkpoint2.signature, checkpoint2.savedAt, checkpoint2.error].join(":");
+      if (refreshCapacity && capacityCheckpoint !== checkpointSignature) {
+        capacityCheckpoint = checkpointSignature;
+        try {
+          refreshCapacity(libraryReader.read(), readLibraryLimits(), "");
+        } catch (error) {
+          refreshCapacity(library, null, error.message);
+        }
+      }
       const playback = isPlaybackCurrent(runtime.playback) ? runtime.playback : null;
       const source = playback ? playback.archive : runtime.history;
       const history = playback ? source.session.history : runtime.history;
@@ -7171,7 +7308,20 @@ underlying system, so should run in the browser, Node, or Plask.
       observedSignature = "";
       refreshCurrent();
       updateSessionToolsStatus();
-      node(content, "p", state.count + " / " + LIBRARY_MAX_COUNT + " sessions · " + (state.bytes / 1024 / 1024).toFixed(2) + " / " + LIBRARY_MAX_BYTES / 1024 / 1024 + " MB · Kept until you delete them.", "tools-muted").id = "tools-library-storage";
+      let limits = null, capacityError = "";
+      try {
+        limits = readLibraryLimits();
+      } catch (error) {
+        capacityError = error.message;
+      }
+      const checkpoint2 = automaticLibraryStatus(getModelName());
+      capacityCheckpoint = [checkpoint2.identity, checkpoint2.signature, checkpoint2.savedAt, checkpoint2.error].join(":");
+      refreshCapacity = renderLibraryCapacity(content, state, limits, capacityError, (value) => {
+        saveLibraryLimits(value);
+        render("library");
+        tell("Storage limits saved for this browser. Existing sessions were kept.");
+        dialog.querySelector("#tools-storage-settings > summary").focus();
+      });
       if (state.favoriteError) node(content, "p", state.favoriteError, "tools-muted");
       libraryFilters.room = libraryRoom || "";
       if (libraryRoom && libraryRoom !== "*" && !state.entries.some((entry) => entry.archive.room.toLowerCase() === libraryRoom)) libraryFilters.room = libraryRoom = "";
@@ -7611,7 +7761,7 @@ underlying system, so should run in the browser, Node, or Plask.
         tell(omitted ? "Partial backup download requested: " + backup.library.length + " healthy recordings included; " + omitted + " unreadable entries omitted and left untouched. Download unreadable records separately for recovery." : "Backup download requested. Check your browser downloads.", !!omitted);
       }, "tools-backup-download");
       node(content, "h3", "Restore a backup");
-      node(content, "p", "ATH is merged without lowering existing records. New library sessions are added; fuller versions of the same session update its entry and keep its name. Saved preferences take effect after refreshing your room tabs.", "tools-muted");
+      node(content, "p", "ATH is merged without lowering existing records. New library sessions are added; fuller versions of the same session update its entry and keep its name. Saved preferences take effect after refreshing your room tabs. Storage limits stay local to this browser; raise them in Sessions → Storage limits if the recordings need more room. Backups up to 300 MB / 10,000 sessions can be opened.", "tools-muted");
       button(content, "Choose backup…", () => {
         pendingBackup = null;
         render("backup");
@@ -7640,6 +7790,7 @@ underlying system, so should run in the browser, Node, or Plask.
     }
     function render(next) {
       var _a;
+      refreshCapacity = null;
       const focusedId = dialog.contains(document.activeElement) ? document.activeElement.id : "";
       const existingPicker = dialog.querySelector("#tools-recording-picker");
       if (existingPicker) pickerOpen = existingPicker.open;
@@ -7684,6 +7835,7 @@ underlying system, so should run in the browser, Node, or Plask.
     function close() {
       fileRequest++;
       refreshSessionTools = null;
+      refreshCapacity = null;
       chartDraw = null;
       if (chartDispose) {
         chartDispose();
@@ -9301,7 +9453,7 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/bootstrap.js
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.17.0";
+    runtime.TIERSCOPE_VERSION = "3.18.0";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;

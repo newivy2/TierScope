@@ -37,7 +37,7 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
   const rowValue=(label,column=0)=>page.locator('#tools-summary-table tbody tr').filter({has:page.getByRole('rowheader',{name:label,exact:true})}).locator('td').nth(column).textContent();
   const thresholdValues=count=>page.locator('#tools-threshold-table tbody tr').filter({has:page.getByRole('rowheader',{name:String(count),exact:true})}).locator('td').allTextContents();
   await openTools();assert.deepEqual(await page.locator('#tracker-container').boundingBox(),panelBounds);
-  assert.match(await page.locator('#tools-content').textContent(),/0 \/ 500 sessions/);
+  assert.match(await page.locator('#tools-content').textContent(),/0 \/ 1,000 sessions/);
   await page.click('#tools-keep');assert.match(await page.locator('#tools-message').textContent(),/kept/);
   await page.click('#tools-keep');assert.match(await page.locator('#tools-message').textContent(),/already/);
   const first=await page.evaluate(()=>ViewerTracker.__tools.library().entries[0]);
@@ -120,7 +120,7 @@ const file=(name,data)=>({name,mimeType:'application/json',buffer:Buffer.from(JS
    const later=JSON.parse(JSON.stringify(archive));later.session.history.timestamps=later.session.history.timestamps.map(t=>t+86400000);later.session.sessionStartedAt+=86400000;later.session.timestamp+=86400000;
    GM_setValue('tierscope:library:v1:nested',JSON.stringify({schemaVersion:1,addedAt:Date.now(),title:'Another session for the same model',archive:later}));});
   await page.locator('#tools-refresh-library').click();if(await page.locator('#tools-library-all-models').count())await page.click('#tools-library-all-models');assert.equal(await page.locator('.tools-folder').count(),50);
-  assert.match(await page.locator('#tools-content').textContent(),/57 \/ 500 sessions/);
+  assert.match(await page.locator('#tools-content').textContent(),/57 \/ 1,000 sessions/);
   await page.click('#tools-library-more');assert.equal(await page.locator('.tools-folder').count(),56);
   await page.click('#tools-folder-testroom');assert.equal(await page.locator('.tools-row').count(),2);
   assert.equal(await page.locator('.tools-row').first().getAttribute('data-library-id'),'nested','model folders show newest recordings first');

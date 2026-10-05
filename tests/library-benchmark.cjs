@@ -3,6 +3,7 @@ const root=path.join(__dirname,'..');
 const {instrument,prepareSource}=require(path.join(root,'tests/helpers/instrument.cjs'));
 const {chromium}=require(path.join(root,'node_modules/playwright'));
 const throttle=Number(process.env.TIERSCOPE_CPU_THROTTLE||1),rounds=Number(process.env.TIERSCOPE_BENCH_ROUNDS||3);
+const capacityMode=process.env.TIERSCOPE_BENCH_CAPACITY==='1';
 const automaticMode=process.env.TIERSCOPE_BENCH_AUTOMATIC==='1';
 const historyMode=process.env.TIERSCOPE_BENCH_HISTORY==='1';
 const compareMode=process.env.TIERSCOPE_BENCH_COMPARE==='1';
@@ -30,7 +31,7 @@ const source=prepareSource(fs.readFileSync(sourceFile,'utf8')).replaceAll('sched
   const raw=JSON.stringify({schemaVersion:1,addedAt:now-i,title:'Recording '+i,archive});
   GM_setValue('tierscope:library:v1:bench_'+i,raw);bytes+=new Blob([raw]).size;
  }
- if(bytes>LIBRARY_MAX_BYTES)throw new Error('Benchmark exceeds library size: '+bytes);
+ if(bytes>readLibraryLimits().maxMegabytes*1024*1024)throw new Error('Benchmark exceeds library size: '+bytes);
  return {version:TIERSCOPE_VERSION,recordings:count,samplesPerRecording:samples,bytes};
  },
  run(){
@@ -87,7 +88,15 @@ const source=prepareSource(fs.readFileSync(sourceFile,'utf8')).replaceAll('sched
  measure('compare',()=>tab('compare'));
  measure('metric',()=>{const select=document.getElementById('tools-metric');select.value='withTokens';select.dispatchEvent(new Event('change'));});
  measure('backupView',()=>tab('backup'));
- measure('backupBuild',()=>{const backup=createTierScopeBackup();results.backupRecordings=backup.library.length;});
+ let capacityBackup;
+ measure('backupBuild',()=>{const backup=createTierScopeBackup();results.backupRecordings=backup.library.length;if(${capacityMode})capacityBackup=backup;});
+ if(${capacityMode}){
+  const encoded=JSON.stringify(capacityBackup);results.backupBytes=new Blob([encoded]).size;
+  if(results.backupBytes<=32*1024*1024)throw Error('Capacity fixture must exercise a backup beyond the old 32 MB limit');
+  measure('backupRead',()=>{capacityBackup=validateTierScopeBackup(JSON.parse(encoded));if(capacityBackup.library.length!==1000)throw Error('Incomplete backup');});
+  measure('backupRestore',()=>{const restored=restoreTierScopeBackup(capacityBackup,{highs:false,preferences:false,library:true});if(restored.recordings||restored.updatedRecordings)throw Error('Duplicate backup changed the Library');});
+ }
+
  measure('returnToLibrary',()=>tab('library'));
  measure('refresh',()=>click('tools-refresh-library'));
  measure('reopen',()=>{click('btn-control-library');click('btn-control-library');});
@@ -97,8 +106,8 @@ const source=prepareSource(fs.readFileSync(sourceFile,'utf8')).replaceAll('sched
 (async()=>{
  const browser=await chromium.launch({headless:true,executablePath:process.env.TIERSCOPE_CHROMIUM_PATH,args:JSON.parse(process.env.TIERSCOPE_CHROMIUM_ARGS||'[]')});
  try{
-  const output={source:path.basename(sourceFile),historyMode,compareMode,automaticMode,cpuThrottle:throttle,rounds,cases:[]};
-  for(const [label,count,samples] of [['small',12,300],['many',500,500],['long',36,10000]]){
+  const output={source:path.basename(sourceFile),historyMode,compareMode,automaticMode,capacityMode,cpuThrottle:throttle,rounds,cases:[]};
+  for(const [label,count,samples] of (capacityMode ? [['defaultCapacity',1000,750]] : [['small',12,300],['many',500,500],['long',36,10000]])){
    const measurements=[];let size;
    for(let i=0;i<rounds;i++){
     const page=await browser.newPage({viewport:{width:1400,height:1100}}),errors=[];page.on('pageerror',error=>errors.push(error.message));

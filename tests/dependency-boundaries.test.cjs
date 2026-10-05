@@ -45,8 +45,8 @@ test('all application imports form an acyclic dependency graph', () => {
 });
 
 test('panel views have no dependency on owners, live selectors, controllers or storage', () => {
-  const views = ['favorite-view.js', 'panel-view.js', 'compact-view.js', 'trend-view.js', 'status-view.js', 'chart-view.js', 'library-dock.js', 'library-shell.js', 'model-history-view.js', 'library-browser-view.js', 'tools-view-helpers.js', 'analysis-chart-view.js', 'recording-export-data.js'];
-  const permitted = new Set([...views, 'library-query.js', 'analysis-chart-data.js', 'display-values.js', 'format.js', 'history-data.js', 'theme-values.js', 'runtime.js']);
+  const views = ['library-capacity-view.js', 'favorite-view.js', 'panel-view.js', 'compact-view.js', 'trend-view.js', 'status-view.js', 'chart-view.js', 'library-dock.js', 'library-shell.js', 'model-history-view.js', 'library-browser-view.js', 'tools-view-helpers.js', 'analysis-chart-view.js', 'recording-export-data.js'];
+  const permitted = new Set([...views, 'library-capacity-data.js', 'library-query.js', 'analysis-chart-data.js', 'display-values.js', 'format.js', 'history-data.js', 'theme-values.js', 'runtime.js']);
   for (const view of views) {
     assert.deepEqual([...dependencies(view)].filter(file => !permitted.has(file)), [], view);
   }
@@ -61,8 +61,8 @@ test('panel views have no dependency on owners, live selectors, controllers or s
 });
 
 test('record stores and validation cannot reach session/playback owners, panel code or coordinators', () => {
-  const stores = ['library-models.js', 'library-transfer.js', 'storage.js', 'highs-store.js', 'session-library.js', 'backup.js', 'session-file-format.js'];
-  const permitted = new Set([...stores, 'immutable-data.js', 'analysis-preference-data.js', 'session-analysis.js', 'record-validation.js', 'history-data.js', 'utils.js', 'diagnostics.js', 'room-context.js', 'runtime.js']);
+  const stores = ['library-capacity.js', 'library-models.js', 'library-transfer.js', 'storage.js', 'highs-store.js', 'session-library.js', 'backup.js', 'session-file-format.js'];
+  const permitted = new Set([...stores, 'library-capacity-data.js', 'immutable-data.js', 'analysis-preference-data.js', 'session-analysis.js', 'record-validation.js', 'history-data.js', 'utils.js', 'diagnostics.js', 'room-context.js', 'runtime.js']);
   const metadata = new Set(['activeRoomEpoch', 'activeSessionStorageKey', 'sessionRecordWarnings', 'sessionStorageNotice',
     'sessionStorageStatus', 'tabRecords', 'allTimeCache', 'chartTimeCache',
     // Backup captures preferences as data; applying them belongs to session tools.

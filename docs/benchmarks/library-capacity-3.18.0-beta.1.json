@@ -1,0 +1,419 @@
+{
+  "version": "3.18.0-beta.1",
+  "userscriptSha256": "987e4e3438bb278b65290a30dfc24ad505cb33b3d70a6c24c0665f2a3ca565ff",
+  "method": "Three fresh-page Chromium runs per CPU setting; final userscript; no parallel browser/test runs. In-memory GM storage. Timings include a forced layout and exclude dataset seeding; heap samples are GC-assisted, not peak memory.",
+  "runs": [
+    {
+      "source": "tierscope.user.js",
+      "historyMode": false,
+      "compareMode": false,
+      "automaticMode": false,
+      "capacityMode": true,
+      "cpuThrottle": 1,
+      "rounds": 3,
+      "cases": [
+        {
+          "label": "defaultCapacity",
+          "version": "3.18.0-beta.1",
+          "recordings": 1000,
+          "samplesPerRecording": 750,
+          "bytes": 41743890,
+          "measurements": [
+            {
+              "open": {
+                "ms": 362.6000000014901,
+                "storageReads": 1000
+              },
+              "folder": {
+                "ms": 3.600000001490116,
+                "storageReads": 0
+              },
+              "search": {
+                "ms": 1.2000000029802322,
+                "storageReads": 0
+              },
+              "summary": {
+                "ms": 215.39999999850988,
+                "storageReads": 1000
+              },
+              "compare": {
+                "ms": 217.79999999701977,
+                "storageReads": 1000
+              },
+              "metric": {
+                "ms": 4.800000004470348,
+                "storageReads": 0
+              },
+              "backupView": {
+                "ms": 155.5,
+                "storageReads": 1000
+              },
+              "backupRecordings": 1000,
+              "backupBuild": {
+                "ms": 924.5,
+                "storageReads": 1000
+              },
+              "backupBytes": 41714869,
+              "backupRead": {
+                "ms": 761.6000000014901,
+                "storageReads": 0
+              },
+              "backupRestore": {
+                "ms": 1590.2999999970198,
+                "storageReads": 1000
+              },
+              "returnToLibrary": {
+                "ms": 152.30000000447035,
+                "storageReads": 1000
+              },
+              "refresh": {
+                "ms": 148.60000000149012,
+                "storageReads": 1000
+              },
+              "reopen": {
+                "ms": 304.19999999552965,
+                "storageReads": 1000
+              },
+              "nodes": 463,
+              "heap": {
+                "before": 43923584,
+                "open": 49014800,
+                "closed": 2636156
+              }
+            },
+            {
+              "open": {
+                "ms": 349.6000000014901,
+                "storageReads": 1000
+              },
+              "folder": {
+                "ms": 3.7000000029802322,
+                "storageReads": 0
+              },
+              "search": {
+                "ms": 1.5,
+                "storageReads": 0
+              },
+              "summary": {
+                "ms": 191.39999999850988,
+                "storageReads": 1000
+              },
+              "compare": {
+                "ms": 206.69999999552965,
+                "storageReads": 1000
+              },
+              "metric": {
+                "ms": 4.800000004470348,
+                "storageReads": 0
+              },
+              "backupView": {
+                "ms": 142.39999999850988,
+                "storageReads": 1000
+              },
+              "backupRecordings": 1000,
+              "backupBuild": {
+                "ms": 989.3999999985099,
+                "storageReads": 1000
+              },
+              "backupBytes": 41714869,
+              "backupRead": {
+                "ms": 719.0999999940395,
+                "storageReads": 0
+              },
+              "backupRestore": {
+                "ms": 1661,
+                "storageReads": 1000
+              },
+              "returnToLibrary": {
+                "ms": 152,
+                "storageReads": 1000
+              },
+              "refresh": {
+                "ms": 155.90000000596046,
+                "storageReads": 1000
+              },
+              "reopen": {
+                "ms": 307.5,
+                "storageReads": 1000
+              },
+              "nodes": 463,
+              "heap": {
+                "before": 43923584,
+                "open": 49022896,
+                "closed": 2636168
+              }
+            },
+            {
+              "open": {
+                "ms": 373,
+                "storageReads": 1000
+              },
+              "folder": {
+                "ms": 3.5,
+                "storageReads": 0
+              },
+              "search": {
+                "ms": 1.2999999970197678,
+                "storageReads": 0
+              },
+              "summary": {
+                "ms": 207.70000000298023,
+                "storageReads": 1000
+              },
+              "compare": {
+                "ms": 219.39999999850988,
+                "storageReads": 1000
+              },
+              "metric": {
+                "ms": 5.899999998509884,
+                "storageReads": 0
+              },
+              "backupView": {
+                "ms": 156.39999999850988,
+                "storageReads": 1000
+              },
+              "backupRecordings": 1000,
+              "backupBuild": {
+                "ms": 1004.3999999985099,
+                "storageReads": 1000
+              },
+              "backupBytes": 41714869,
+              "backupRead": {
+                "ms": 745.7000000029802,
+                "storageReads": 0
+              },
+              "backupRestore": {
+                "ms": 1654.5,
+                "storageReads": 1000
+              },
+              "returnToLibrary": {
+                "ms": 146.60000000149012,
+                "storageReads": 1000
+              },
+              "refresh": {
+                "ms": 149.80000000447035,
+                "storageReads": 1000
+              },
+              "reopen": {
+                "ms": 304.3999999985099,
+                "storageReads": 1000
+              },
+              "nodes": 463,
+              "heap": {
+                "before": 43923584,
+                "open": 49022792,
+                "closed": 2636192
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "source": "tierscope.user.js",
+      "historyMode": false,
+      "compareMode": false,
+      "automaticMode": false,
+      "capacityMode": true,
+      "cpuThrottle": 4,
+      "rounds": 3,
+      "cases": [
+        {
+          "label": "defaultCapacity",
+          "version": "3.18.0-beta.1",
+          "recordings": 1000,
+          "samplesPerRecording": 750,
+          "bytes": 41743890,
+          "measurements": [
+            {
+              "open": {
+                "ms": 1647.1000000014901,
+                "storageReads": 1000
+              },
+              "folder": {
+                "ms": 21.899999998509884,
+                "storageReads": 0
+              },
+              "search": {
+                "ms": 7.699999995529652,
+                "storageReads": 0
+              },
+              "summary": {
+                "ms": 873,
+                "storageReads": 1000
+              },
+              "compare": {
+                "ms": 1048.7000000029802,
+                "storageReads": 1000
+              },
+              "metric": {
+                "ms": 27.600000001490116,
+                "storageReads": 0
+              },
+              "backupView": {
+                "ms": 683.6000000014901,
+                "storageReads": 1000
+              },
+              "backupRecordings": 1000,
+              "backupBuild": {
+                "ms": 4110.79999999702,
+                "storageReads": 1000
+              },
+              "backupBytes": 41714869,
+              "backupRead": {
+                "ms": 3428.1999999955297,
+                "storageReads": 0
+              },
+              "backupRestore": {
+                "ms": 7246.70000000298,
+                "storageReads": 1000
+              },
+              "returnToLibrary": {
+                "ms": 708.8999999985099,
+                "storageReads": 1000
+              },
+              "refresh": {
+                "ms": 686.1999999955297,
+                "storageReads": 1000
+              },
+              "reopen": {
+                "ms": 1393.8999999985099,
+                "storageReads": 1000
+              },
+              "nodes": 463,
+              "heap": {
+                "before": 43923584,
+                "open": 49022264,
+                "closed": 2635920
+              }
+            },
+            {
+              "open": {
+                "ms": 1693.9000000059605,
+                "storageReads": 1000
+              },
+              "folder": {
+                "ms": 25.5,
+                "storageReads": 0
+              },
+              "search": {
+                "ms": 12.399999998509884,
+                "storageReads": 0
+              },
+              "summary": {
+                "ms": 927.2000000029802,
+                "storageReads": 1000
+              },
+              "compare": {
+                "ms": 1053.5,
+                "storageReads": 1000
+              },
+              "metric": {
+                "ms": 24.69999999552965,
+                "storageReads": 0
+              },
+              "backupView": {
+                "ms": 638.4000000059605,
+                "storageReads": 1000
+              },
+              "backupRecordings": 1000,
+              "backupBuild": {
+                "ms": 4431,
+                "storageReads": 1000
+              },
+              "backupBytes": 41714869,
+              "backupRead": {
+                "ms": 3384,
+                "storageReads": 0
+              },
+              "backupRestore": {
+                "ms": 7534,
+                "storageReads": 1000
+              },
+              "returnToLibrary": {
+                "ms": 728.1999999955297,
+                "storageReads": 1000
+              },
+              "refresh": {
+                "ms": 724.2000000029802,
+                "storageReads": 1000
+              },
+              "reopen": {
+                "ms": 1398.8999999985099,
+                "storageReads": 1000
+              },
+              "nodes": 463,
+              "heap": {
+                "before": 43923584,
+                "open": 49020320,
+                "closed": 2636192
+              }
+            },
+            {
+              "open": {
+                "ms": 1817.1999999955297,
+                "storageReads": 1000
+              },
+              "folder": {
+                "ms": 19,
+                "storageReads": 0
+              },
+              "search": {
+                "ms": 7,
+                "storageReads": 0
+              },
+              "summary": {
+                "ms": 948.3999999985099,
+                "storageReads": 1000
+              },
+              "compare": {
+                "ms": 1065,
+                "storageReads": 1000
+              },
+              "metric": {
+                "ms": 26.600000001490116,
+                "storageReads": 0
+              },
+              "backupView": {
+                "ms": 683.6999999955297,
+                "storageReads": 1000
+              },
+              "backupRecordings": 1000,
+              "backupBuild": {
+                "ms": 4410,
+                "storageReads": 1000
+              },
+              "backupBytes": 41714869,
+              "backupRead": {
+                "ms": 3296.39999999851,
+                "storageReads": 0
+              },
+              "backupRestore": {
+                "ms": 7252.79999999702,
+                "storageReads": 1000
+              },
+              "returnToLibrary": {
+                "ms": 699.6000000014901,
+                "storageReads": 1000
+              },
+              "refresh": {
+                "ms": 669.6000000014901,
+                "storageReads": 1000
+              },
+              "reopen": {
+                "ms": 1364.2999999970198,
+                "storageReads": 1000
+              },
+              "nodes": 463,
+              "heap": {
+                "before": 43923584,
+                "open": 49022272,
+                "closed": 2636048
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 const test=require('node:test'),assert=require('node:assert/strict');
 const {harness,source}=require('./helpers/harness.cjs');
 const clean=value=>JSON.parse(JSON.stringify(value));
-const extra=source.replace('downloadTrackingReport: downloadTrackingReport,',`__libraryCache:{createLibraryReader,readSessionLibrary,captureSessionFile,keepSessionInLibrary,renameLibrarySession,removeLibrarySession,createTierScopeBackup,restoreTierScopeBackup,LIBRARY_MAX_BYTES,
+const extra=source.replace('downloadTrackingReport: downloadTrackingReport,',`__libraryCache:{createLibraryReader,readSessionLibrary,captureSessionFile,keepSessionInLibrary,renameLibrarySession,removeLibrarySession,createTierScopeBackup,restoreTierScopeBackup,LIBRARY_CACHE_MAX_BYTES,
  countValidations(){let calls=0;const validate=validateSessionFile;validateSessionFile=file=>{calls++;return validate(file);};return ()=>calls;}},downloadTrackingReport: downloadTrackingReport,`);
 function fresh(){const h=harness(new Map(),extra);h.d=h.api.__libraryCache;h.t.initPanel();h.t.sample(2);h.advance(60000);h.t.sample(4);return h;}
 function seed(h,id='one',room=id,title='Recording '+id){
@@ -70,7 +70,7 @@ test('the reader bounds cached records without hiding an over-capacity library',
 
 test('oversized raw records are readable but cannot consume the entire cache budget',()=>{
  const h=fresh(),entry=seed(h),reader=h.d.createLibraryReader();
- h.storage.set('tierscope:library:v1:oversized',JSON.stringify({...JSON.parse(entry.raw),padding:'x'.repeat(h.d.LIBRARY_MAX_BYTES),archive:{...entry.archive,room:'huge'}}));
+ h.storage.set('tierscope:library:v1:oversized',JSON.stringify({...JSON.parse(entry.raw),padding:'x'.repeat(h.d.LIBRARY_CACHE_MAX_BYTES),archive:{...entry.archive,room:'huge'}}));
  const calls=h.d.countValidations();assert.equal(reader.read().count,2);assert.equal(calls(),2);
  assert.equal(reader.read().count,2);assert.equal(calls(),3,'oversized record is not retained');
 });

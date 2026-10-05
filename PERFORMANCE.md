@@ -172,3 +172,29 @@ Three Chromium runs per case, without a Library view open; median milliseconds b
 The first save in a large Library remains synchronous and can briefly pause a slower device; long-recording updates also have a measurable cost. Routine growth is coalesced to one minute; lifecycle flushes and explicit retries are immediate. The automatic reader can retain validated recordings up to the existing 25-MB/500-entry cache budget while enabled; opening Library uses its own cache. These results use synthetic aggregate data and in-memory GM adapters, not real Tampermonkey storage, network traffic, or a live room. They exclude acquisition and chart painting and are not a timing gate.
 
 Reproduce with `TIERSCOPE_BENCH_AUTOMATIC=1 TIERSCOPE_BENCH_ROUNDS=3 npm run test:library-performance`; add `TIERSCOPE_CPU_THROTTLE=4` for the slowed run. [Raw measurements, heap observations and exact userscript hash](docs/benchmarks/model-library-3.16.0-beta.1.json).
+
+
+## Configurable capacity — 3.18.0-beta.1
+
+Stable 3.18.0 preserves the measured beta implementation; the displayed version and release documentation change.
+
+The capacity fixture uses **1,000 sessions × 750 samples**, about **39.8 MiB** of stored JSON, across 100 models. This reaches the new default session-count limit and exceeds the former 25-MiB Library and 32-MiB transfer bounds. Three fresh-page Chromium runs per CPU setting used the final beta script with no other browser/test jobs running. Values are median milliseconds. [Raw results and userscript hash](docs/benchmarks/library-capacity-3.18.0-beta.1.json).
+
+| Action | Normal CPU | 4× CPU slowdown |
+| --- | ---: | ---: |
+| Open Library | 362.6 | 1,693.9 |
+| Open model folder | 3.6 | 21.9 |
+| Open Summary | 207.7 | 927.2 |
+| Open Compare | 217.8 | 1,053.5 |
+| Refresh Library | 149.8 | 686.2 |
+| Build full backup | 989.4 | 4,410.0 |
+| Parse and validate backup | 745.7 | 3,384.0 |
+| Restore duplicate backup | 1,654.5 | 7,252.8 |
+
+The roughly 39.8-MiB backup was serialized, parsed/validated and restored as a duplicate, preserving all 1,000 recordings. A separate regression test restores 1,000 sessions into an empty Library, rejects an additional session at default limits without writes, then accepts it after raising the allowance. These are capacity checks, not a speed improvement claim against an older version.
+
+Larger libraries still require synchronous validation, grouping and serialization. Opening can take over a second under slowdown and full backup operations take several seconds. The 500-record / 25-MiB validation cache stays independently bounded; records beyond it are read/validated again on subsequent views. Raising the allowance does not expand the cache without limit. The maximum configurable 250-MiB/10,000-session Library was not benchmarked; the settings editor explains that larger libraries take longer.
+
+The fixture uses synthetic aggregate data and in-memory GM storage, excluding Tampermonkey's storage bridge, actual website activity, input scheduling and paint/compositing. CPU throttling is not a particular device. Heap observations are not peak process memory or a leak proof. Timing is informational, without machine-dependent CI gates.
+
+Reproduce with `TIERSCOPE_BENCH_CAPACITY=1 TIERSCOPE_BENCH_ROUNDS=3 npm run test:library-performance`; add `TIERSCOPE_CPU_THROTTLE=4` for the slowed run. Existing benchmark datasets and modes are unchanged.
