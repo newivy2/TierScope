@@ -23,7 +23,9 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
  assert(await page.locator('#journey-keep').isDisabled());
  await page.click('#btn-toggle');assert(await page.locator('#minimized-view').isVisible());
  assert(await page.locator('#btn-main-reset').isVisible(),'Reset is visible in compact view without opening settings');
+ assert(await page.locator('#mini-chart').isVisible(),'Audience overview chart belongs in compact view');
  await page.click('#btn-toggle');assert(await page.locator('#full-view').isVisible());
+ assert(await page.locator('#journey-audience').isHidden(),'Expanded view uses its tier charts without a duplicate overview');
  await page.click('#btn-control-library');assert(await page.locator('#tools-library-list').isVisible());
  assert.match(await page.locator('#tools-library-list').textContent(),/No saved sessions yet.*Keep in Library/);
  assert(await page.locator('#tools-current-card').isHidden());assert(await page.locator('[data-tools-tab=compare]').isHidden());

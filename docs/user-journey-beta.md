@@ -1,10 +1,10 @@
-# TierScope journey redesign — 3.24.0-beta.2
+# TierScope journey redesign — 3.24.0-beta.3
 
 [Install the beta](https://raw.githubusercontent.com/newivy2/TierScope/beta/user-journey/tierscope.user.js). Keep one enabled copy. Main remains **3.23.0**; this branch is for review.
 
 ## Start in Live
 
-The room name, tracking status, saving status, audience and recent chart appear together in compact and expanded views. Recording still starts automatically. The first sample enables **Keep in Library**. **View session** opens the exact kept recording; another Keep updates the same compatible session.
+The room name, tracking status and saving status appear in both panel sizes. The audience overview and recent chart stay in compact view; expanded view shows the existing tier charts. Recording still starts automatically. The first sample enables **Keep in Library**. **View session** opens the exact kept recording; another Keep updates the same compatible session.
 
 Manual keeping captures a snapshot. New scans indicate that the saved snapshot needs updating. A confirmed favorite shows **Automatically saved**, the last successful checkpoint and any pending save. Automatic keeping retains its existing one-minute cadence and pause/Stop/navigation checkpoints. Favorite consent and storage limits are unchanged.
 

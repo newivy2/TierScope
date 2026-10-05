@@ -80,6 +80,7 @@ export function createPanel() {
                 '</div>' +
             '</div>' +
             journeyPanelHtml() +
+            '<div id="minimized-view" style="display:block;position:relative;">' +
             '<section id="journey-audience" aria-label="Current audience">' +
                 '<div style="display:flex;gap:4px;align-items:center;margin-bottom:3px;"><strong id="mini-room-count" style="color:var(--panel-accent);font-size:21px;">0</strong><span style="color:var(--panel-muted);font-size:8px;">in room</span><span id="mini-room-change" style="margin-left:auto;font-size:8px;"></span></div>' +
                 '<div style="display:flex;align-items:center;justify-content:space-between;gap:3px;">' +
@@ -92,7 +93,7 @@ export function createPanel() {
                     '<span title="Registered">📊 <span id="mini-total">0</span> <span id="mini-total-change"></span></span>' +
                 '</div>' +
             '</section>' +
-            '<div id="minimized-view" style="display:block;position:relative;">' +
+            '<div style="position:relative;">' +
                 '<div style="display:flex;align-items:center;gap:3px;">' +
                     '<span id="mini-freshness" style="flex:1;min-width:0;font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">No sample</span>' +
                     '<button type="button" id="btn-auto" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;cursor:pointer;" title="Pause or resume scans">⏸</button>' +
@@ -116,6 +117,8 @@ export function createPanel() {
 
                     '<div id="auto-status" style="margin-top:3px;font-size:8px;color:var(--panel-muted);">Starting...</div>' +
                 '</div>' +
+            '</div>' +
+
             '</div>' +
 
             '<div id="session-reset-control" style="display:flex;justify-content:flex-end;border-top:1px solid var(--panel-divider);margin:5px 0;padding-top:5px;">' +
