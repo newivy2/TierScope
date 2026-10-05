@@ -35,6 +35,7 @@ test('panel models are immutable snapshots and painting supplied data cannot cha
   assert.equal(h.d.runtime.highMode, 'ath');
   h.d.paintPanelFrame(model); h.d.renderTrendDisplay(trend);
   assert.equal(h.e('count-red').textContent, '3', 'paint uses the supplied earlier sample');
+  assert.equal(h.e('anon-registered-ratio').textContent, '1:1', 'ratio uses the supplied sample, not later live viewers');
   assert.equal(h.e('high-red').textContent, 'SH:3', 'paint uses the supplied high mode');
   assert.deepEqual(clean(h.d.snapshot()), before);
   assert.deepEqual(clean(model.history.red), [3], 'later live samples cannot change a captured frame');
@@ -64,6 +65,7 @@ test('replay presentation stays on its captured recording while scans keep advan
   const before = clean(h.d.snapshot());
   h.d.paintPanelFrame(model);
   assert.equal(h.e('count-red').textContent, '4');
+  assert.equal(h.e('anon-registered-ratio').textContent, '0.8x', 'Replay ratio stays on its captured registered and anonymous counts');
   assert.equal(h.e('high-red').textContent, 'SH:4');
   assert.deepEqual(clean(h.d.snapshot()), before);
   h.t.leavePlayback();

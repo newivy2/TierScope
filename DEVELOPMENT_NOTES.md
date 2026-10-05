@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **3.19.0** ([Sessions Book guide](docs/sessions-book.md)). The simplified Current Live Session card provides Keep in Library, Auto, Compare with previous, and History. File controls are below the session list, and exports remain on stored-session menus and the separate replay card. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation instructions, see the [README](readme.md).
+Detailed reference for **3.20.0** ([audience trends and ratio guide](docs/audience-trends.md)). [Sessions Book guide](docs/sessions-book.md). The simplified Current Live Session card provides Keep in Library, Auto, Compare with previous, and History. File controls are below the session list, and exports remain on stored-session menus and the separate replay card. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation instructions, see the [README](readme.md).
 
 ## Contents
 
@@ -143,7 +143,7 @@ Dense charts preserve the first, last, minimum, and maximum samples in each pixe
 
 ### Trends and highlights
 
-The trend display uses green for increases, red for decreases, and yellow for unchanged counts. It shows the numeric change when nonzero.
+The trend display uses green for increases, red for decreases, and yellow for unchanged counts. It shows the numeric change when nonzero. Its larger bottom row contains With Tokens (yellow border), Registered, Anons, and Room Total (pink border). Room Total is registered plus anonymous viewers, compared at the same baseline as the other boxes. All rows use four columns; the bottom boxes remain taller. Delta fonts adjust to fit, large changes use k/m shorthand, and each box’s tooltip gives the exact current count, comparison count and change.
 
 Choose **Last**, **5m**, **15m**, **30m**, **1h**, or **Start**. A manual selection turns automatic escalation off. **AUTO** toggles escalation through Last → 5m → 15m → 30m → 1h as tracking time grows. If a requested window extends before available history, the earliest retained sample is used.
 
@@ -372,6 +372,10 @@ See Chaturbate’s [username-color documentation](https://support.chaturbate.com
 
 With API samples, owner records are excluded from the seven color tiers but remain in Registered. The displayed female/trans count can include a matching-gender owner. The female/trans row and its history remain aggregate sample counts; unique-viewer totals are no longer collected or reported.
 
+### Anons-to-registered ratio
+
+The expanded Anons row shows Anons divided by registered viewers between the count and SH/ATH: for example, **0.8x** or **1.2x**. The inclusive **0.95–1.05** range shows **1:1**. Zero registered viewers shows **—**, with an explanatory tooltip. Values use the currently displayed sample, including restored data and ordinary/file Replay, and are independent of the selected high mode.
+
 ## TXT and CSV exports
 
 ### TXT session summary
@@ -512,6 +516,7 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
+| **3.20.0** | Match the With Tokens trend border to yellow, add a pink Room Total trend box to the larger four-column bottom row, adjust delta fonts, and show an Anons/registered ratio from the displayed sample with a 5% equality band. |
 | **3.19.0** | Add a collapsed Sessions Book with nested Search & sort. Default Moderators/Anons/Room Total to collapsed, preserve saved layouts, and give the model header room beside the resize handle. Start Summary with its picker collapsed and derive thresholds from the displayed session’s time-weighted metric average. |
 | **3.18.0** | Default to 1,000 sessions / 50 MB, add local configurable storage limits and capacity notices, preserve prior recordings on failed updates, and support backups/imports through 300 MB / 10,000 sessions with capacity preflight. |
 | **3.17.0** | Simplify Current Live Session to Keep in Library, Auto, Compare with previous and History. Keep exports on individual sessions, move file/import/refresh controls below the list, and compare a fixed live snapshot with up to five earlier sessions without including saved copies of the current start. Auto reflects confirmed favorites and locks when enabled. |

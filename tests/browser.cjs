@@ -296,7 +296,7 @@ const injected=source.replaceAll('scheduleInit(2000);','/* test controls initial
      const a=getComputedStyle(rows[0].children[0]),b=getComputedStyle(rows[2].children[0]);
      return {tier:a.backgroundColor,diamond:b.backgroundColor,border:b.borderColor,tierPadding:a.paddingTop,totalPadding:b.paddingTop,rowPadding:getComputedStyle(rows[2]).paddingTop};
    });
-   assert.equal(styles.diamond,styles.tier);assert.equal(styles.border,'rgb(255, 105, 180)');
+   assert.equal(styles.diamond,styles.tier);assert.equal(styles.border,await page.locator('#tier-row-withtokens').evaluate(e=>getComputedStyle(e).borderColor));
    assert.equal(styles.tierPadding,'2px');assert.equal(styles.totalPadding,'6px');assert.equal(styles.rowPadding,'4px');
    if(diff===1)assert.equal(styles.diamond,'rgba(50, 205, 50, 0.22)');
  }
