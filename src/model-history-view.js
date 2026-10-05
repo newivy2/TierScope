@@ -1,7 +1,7 @@
 // Presentation receives compact analysis values and explicit user actions. It
 // cannot read library storage, live state, playback, or acquisition controllers.
 export function renderModelHistoryView(parent, overview, actions) {
-    const { recordings } = overview;
+    let { recordings } = overview;
     const number = value => value === null ? 'Not enough data' : value.toLocaleString(undefined, { maximumFractionDigits: 1 });
     const percent = value => value === null ? 'Not enough data' : number(value) + '%';
     const date = time => new Date(time).toLocaleString();
@@ -44,17 +44,19 @@ export function renderModelHistoryView(parent, overview, actions) {
     node(parent, 'p', 'One point per recording, using its first retained sample date. Averages use real covered time; gaps and time after the final sample are excluded. Select a point or use the recording selector above.', 'tools-muted');
     node(parent, 'h3', 'Across these recordings');
     const cards = node(parent, 'dl', undefined, 'tools-history-stats'); cards.id = 'tools-history-stats';
-    for (const [label, value] of [
-        ['Recordings', recordings.length + ' / ' + overview.totalCount],
-        ['Time-weighted average', number(overview.mean)], ['Peak in recordings', number(overview.peak)],
-        ['Token holders / registered', percent(overview.tokenShare)],
-        ['Covered time (sum)', actions.duration(overview.coveredMs)], ['Excluded gaps (sum)', actions.duration(overview.gapMs)]
-    ]) { const card = node(cards, 'div'); node(card, 'dt', label); node(card, 'dd', value); }
-    node(parent, 'p', 'Based only on saved recordings shown here. Token share uses registered-viewer time. These peaks are not ATH. Full-session highs may predate retained samples.', 'tools-muted');
-    if (overview.overlaps) {
-        const warning = node(parent, 'p', 'Some recording time ranges overlap. Totals sum recordings and may count the same period more than once.', 'tools-muted');
-        warning.id = 'tools-history-overlap';
+    function updateCards() {
+        cards.replaceChildren();
+        for (const [label, value] of [
+            ['Recordings', recordings.length + ' / ' + overview.totalCount],
+            ['Time-weighted average', number(overview.mean)], ['Peak in recordings', number(overview.peak)],
+            ['Token holders / registered', percent(overview.tokenShare)],
+            ['Covered time (sum)', actions.duration(overview.coveredMs)], ['Excluded gaps (sum)', actions.duration(overview.gapMs)]
+        ]) { const card = node(cards, 'div'); node(card, 'dt', label); node(card, 'dd', value); }
     }
+    updateCards();
+    node(parent, 'p', 'Based on the recordings shown here, including new scans while Follow live is on. Token share uses registered-viewer time. These peaks are not ATH. Full-session highs may predate retained samples.', 'tools-muted');
+    const warning = node(parent, 'p', 'Some recording time ranges overlap. Totals sum recordings and may count the same period more than once.', 'tools-muted');
+    warning.id = 'tools-history-overlap'; warning.hidden = !overview.overlaps;
     const detail = node(parent, 'section', undefined, 'tools-current'); detail.id = 'tools-history-detail';
     detail.setAttribute('aria-label', 'Selected recording');
     const heading = node(detail, 'strong'), meta = node(detail, 'p', undefined, 'tools-muted');
@@ -135,9 +137,20 @@ export function renderModelHistoryView(parent, overview, actions) {
         shown += 50; rows(); updateSelection(); if (more.hidden) select.focus();
     }, 'tools-history-more');
     function rows() {
-        body.replaceChildren();
-        for (const record of [...recordings].reverse().slice(0, shown)) {
-            const row = node(body, 'tr'), cell = node(row, 'th'); cell.scope = 'row';
+        const previous = new Map([...body.children].map(row => [row.querySelector('button').dataset.historyId, row]));
+        const retained = new Set();
+        for (const [index, record] of [...recordings].reverse().slice(0, shown).entries()) {
+            retained.add(record.id);
+            let row = previous.get(record.id);
+            if (row) {
+                row.querySelector('button').textContent = record.title; row.querySelector('th div').textContent = date(record.time);
+                const cells = row.querySelectorAll('td');
+                cells[0].textContent = number(record.mean); cells[1].textContent = number(record.peak);
+                cells[1].title = 'First recorded at ' + date(record.peakTime);
+                cells[2].textContent = percent(record.tokenShare); cells[3].textContent = actions.duration(record.coveredMs);
+                continue;
+            }
+            row = node(body, 'tr'); if (body.children[index] !== row) body.insertBefore(row, body.children[index]); const cell = node(row, 'th'); cell.scope = 'row';
             const choose = button(cell, record.title, () => { select.value = record.id; updateSelection(); select.focus(); });
             choose.dataset.historyId = record.id;
             node(cell, 'div', date(record.time), 'tools-muted');
@@ -145,10 +158,22 @@ export function renderModelHistoryView(parent, overview, actions) {
             node(row, 'td', number(record.peak)).title = 'First recorded at ' + date(record.peakTime);
             node(row, 'td', percent(record.tokenShare)); node(row, 'td', actions.duration(record.coveredMs));
         }
+        for (const [id, row] of previous) if (!retained.has(id)) row.remove();
         more.hidden = shown >= recordings.length;
         more.textContent = 'Show ' + Math.min(50, recordings.length - shown) + ' more (' + Math.min(shown, recordings.length) + ' / ' + recordings.length + ')';
     }
     node(parent, 'p', '¹ Token holders as a proportion of registered viewers. Recordings with no covered interval have no average; recorded peaks remain available. Overlapping dates can be selected individually in the list.', 'tools-muted');
     rows(); updateSelection();
-    return { canvas, draw };
+    return { canvas, draw, update(next, selectedId = select.value) {
+        overview = next; recordings = next.recordings;
+        const currentOptions = [...select.options];
+        const nextRecords = [...recordings].reverse();
+        if (currentOptions.length !== nextRecords.length || currentOptions.some((option, i) => option.value !== nextRecords[i].id)) {
+            select.replaceChildren();
+            for (const record of nextRecords) { const option = node(select, 'option', date(record.time) + ' · ' + record.title); option.value = record.id; }
+        }
+        [...select.options].forEach((option, i) => { const record = nextRecords[i]; option.textContent = date(record.time) + ' · ' + record.title; });
+        if (recordings.some(record => record.id === selectedId)) select.value = selectedId;
+        updateCards(); warning.hidden = !overview.overlaps; rows(); updateSelection();
+    }};
 }

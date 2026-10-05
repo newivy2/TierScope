@@ -140,8 +140,9 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
  assert.equal(await page.locator('#tools-analysis-chart').count(),1);
  assert.deepEqual(await page.evaluate(()=>ViewerTracker.__models.state()),beforeCompare);
  assert.equal(await page.evaluate(()=>JSON.stringify(ViewerTracker.__models.library().entries)),storedBefore);
+ await page.uncheck('#tools-follow-live');
  const tableBefore=await page.locator('#tools-summary-table').textContent();
- await page.evaluate(()=>ViewerTracker.__models.sample());assert.equal(await page.locator('#tools-summary-table').textContent(),tableBefore,'live comparison keeps its snapshot when another sample arrives');
+ await page.evaluate(()=>ViewerTracker.__models.sample());assert.equal(await page.locator('#tools-summary-table').textContent(),tableBefore,'Follow live off keeps the comparison snapshot when another sample arrives');
  await page.click('#playback-return');assert.equal(await page.locator('#tools-summary-table').textContent(),tableBefore,'closing replay cannot replace the live comparison');
  await page.click('[data-tools-tab=library]');
  const layout=await page.evaluate(()=>{const c=document.getElementById('tools-content');const ids=Array.from(c.children).map(e=>e.id||e.className);return {storage:ids.indexOf('tools-library-storage'),book:ids.indexOf('tools-sessions-book'),searchFirst:document.getElementById('tools-sessions-book').children[1].id,listInside:document.getElementById('tools-library-list').parentElement.id,actions:ids.indexOf('tools-library-management'),last:c.lastElementChild.id};});
