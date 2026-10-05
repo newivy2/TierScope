@@ -56,7 +56,7 @@ const source=prepareSource(fs.readFileSync(sourceFile,'utf8')).replaceAll('sched
   const choose=(id,value)=>{const input=document.getElementById(id);input.value=value;input.dispatchEvent(new Event('change'));};
   tab('compare');choose('tools-source-a','bench_0');choose('tools-source-b','bench_1');
   for(let i=2;i<6;i++){click('tools-compare-add');choose('tools-source-'+String.fromCharCode(97+i),'bench_'+i);}
-  measure('sixRecordingMetric',()=>choose('tools-metric','withTokens'));
+  measure('sixRecordingMetric',()=>click('tools-metric-withTokens'));
   measure('zoomIn',()=>click('tools-chart-zoom-in'));
   const canvas=document.getElementById('tools-analysis-chart'),bounds=canvas.getBoundingClientRect(),costs=[];
   for(let i=0;i<140;i++){
@@ -74,8 +74,8 @@ const source=prepareSource(fs.readFileSync(sourceFile,'utf8')).replaceAll('sched
  }
  if(${historyMode}){
   measure('history',()=>click('tools-model-history'));
-  measure('historyMetric',()=>{const select=document.getElementById('tools-history-metric');select.value='withTokens';select.dispatchEvent(new Event('change'));});
-  measure('historyMetricCached',()=>{const select=document.getElementById('tools-history-metric');select.value='room';select.dispatchEvent(new Event('change'));});
+  measure('historyMetric',()=>click('tools-history-metric-withTokens'));
+  measure('historyMetricCached',()=>click('tools-history-metric-room'));
   measure('historyLatest10',()=>{const select=document.getElementById('tools-history-range');select.value='10';select.dispatchEvent(new Event('change'));});
   measure('historyAll',()=>{const select=document.getElementById('tools-history-range');select.value='Infinity';select.dispatchEvent(new Event('change'));});
   measure('historyRefresh',()=>click('tools-history-refresh'));
@@ -88,7 +88,7 @@ const source=prepareSource(fs.readFileSync(sourceFile,'utf8')).replaceAll('sched
  measure('search',()=>{const input=document.getElementById('tools-library-search');input.value='Recording 1';input.dispatchEvent(new Event('input'));});
  measure('summary',()=>tab('summary'));
  measure('compare',()=>tab('compare'));
- measure('metric',()=>{const select=document.getElementById('tools-metric');select.value='withTokens';select.dispatchEvent(new Event('change'));});
+ measure('metric',()=>click('tools-metric-withTokens'));
  measure('backupView',()=>tab('backup'));
  let capacityBackup;
  measure('backupBuild',()=>{const backup=createTierScopeBackup();results.backupRecordings=backup.library.length;if(${capacityMode})capacityBackup=backup;});

@@ -123,7 +123,7 @@ const file=(name,value)=>({name,mimeType:'application/json',buffer:Buffer.from(J
   const keptRange=await page.locator('#tools-chart-range').textContent();
   const roomAtCursor=Number(await page.locator('#tools-chart-inspection tbody tr').first().locator('td').first().textContent());
   await page.evaluate(()=>{window.keptChart=document.getElementById('tools-analysis-chart');window.keptPicker=document.getElementById('tools-source-a');});
-  await page.selectOption('#tools-metric','total');
+  await page.click('#tools-metric-total');
   assert.equal(Number(await page.locator('#tools-chart-inspection tbody tr').first().locator('td').first().textContent()),roomAtCursor-5,'preserved cursor reads the new metric');
   assert.equal(await page.locator('#tools-chart-range').textContent(),keptRange);assert.equal(await page.locator('[data-analysis-series="1"]').isChecked(),false);
   assert.equal(await page.locator('#tools-chart-pin').getAttribute('aria-pressed'),'true');
@@ -136,7 +136,7 @@ const file=(name,value)=>({name,mimeType:'application/json',buffer:Buffer.from(J
   await page.click('[data-tools-tab=summary]');await page.click('[data-tools-tab=compare]');
   assert.equal(await page.locator('#tools-chart-range').textContent(),keptRange);assert.equal(await page.locator('[data-analysis-series="1"]').isChecked(),false);
   await page.locator('#tools-analysis-search').fill('');await page.locator('[data-analysis-series="1"]').check();await page.click('#tools-chart-reset');await page.click('#tools-chart-pin');
-  await page.selectOption('#tools-metric','room');await page.locator('#tools-threshold').fill('100');await page.click('#tools-apply-threshold');
+  await page.click('#tools-metric-room');await page.locator('#tools-threshold').fill('100');await page.click('#tools-apply-threshold');
   await page.selectOption('#tools-analysis-model','beta_model');
   assert.match(await page.locator('#tools-source-a option:checked').textContent(),/outside filters/);assert.equal(await page.locator('#tools-summary-table thead th').count(),7);
   await page.click('#tools-analysis-clear');await page.locator('#tools-analysis-from').fill('2026-10-03');await page.locator('#tools-analysis-to').fill('2026-10-03');

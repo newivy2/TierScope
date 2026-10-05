@@ -16,7 +16,7 @@ If you used the beta, install from the official link above to follow main releas
 
 ---
 
-**Current stable release: 3.21.0** · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.21.0) · [Follow live guide](docs/follow-live.md)
+**Current stable release: 3.22.0** · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.22.0) · [Library chart controls guide](docs/library-chart-controls.md)
 
 ---
 

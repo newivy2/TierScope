@@ -46,6 +46,7 @@ export function renderAnalysisChart(parent, series, labels, axisMs, metricLabel,
     canvas.setAttribute('aria-label', metricLabel + ' by real elapsed time. Arrow keys inspect samples; plus and minus zoom; Home and End jump to visible endpoints.');
     const range = node(parent, 'p', '', 'tools-muted'); range.id = 'tools-chart-range';
     parent.insertBefore(range, legend);
+    const settings = node(parent, 'div');
     node(parent, 'p', 'Aligned from each recording’s first retained sample, using real elapsed time. Move to inspect; click to pin, drag to zoom, or use the buttons and arrow keys. Gaps have no assumed samples. Hidden lines and zoom do not change summary totals or the shared comparison length.', 'tools-muted');
     const scroll = node(parent, 'div', undefined, 'tools-scroll'), table = node(scroll, 'table'); table.id = 'tools-chart-inspection';
     const caption = node(table, 'caption');
@@ -168,7 +169,7 @@ export function renderAnalysisChart(parent, series, labels, axisMs, metricLabel,
         cursor = Math.max(start, Math.min(end, cursor));
     }
     draw();
-    return {canvas, draw,
+    return {canvas, settings, draw,
         capture: () => ({start, end, cursor, pinned, axisMs, hidden: [...hidden]}),
         update(nextSeries, nextAxis, nextMetricLabel) {
             if (disposed) return;

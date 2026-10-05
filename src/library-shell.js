@@ -3,7 +3,7 @@ export function libraryShell() {
     // Scope stays in front of Library in both attached and narrow-window layouts.
     return `<style>
 #tracker-container[data-library-open=docked]{border-top-left-radius:0!important;border-bottom-left-radius:0!important}
-#tierscope-session-tools{position:fixed;inset:auto;margin:0;padding:0;box-sizing:border-box;max-width:none;max-height:none;min-width:0;border:1px solid #ff69b4;border-radius:7px 0 0 7px;background:var(--panel-solid);color:var(--panel-text);font:11px/1.45 Arial,sans-serif;z-index:999998;box-shadow:-8px 5px 24px #0004;overflow:hidden;display:flex;flex-direction:column}
+#tierscope-session-tools{position:fixed;inset:auto;margin:0;padding:0;box-sizing:border-box;max-width:none;max-height:none;min-width:0;border:1px solid #ff69b4;border-radius:7px 0 0 7px;background:var(--panel-solid);color:var(--panel-text);font:11px/1.45 Arial,sans-serif;z-index:999998;box-shadow:-8px 5px 24px #0004;overflow:hidden;display:flex;flex-direction:column;container:tierscope-library / inline-size}
 #tierscope-session-tools[data-layout=sheet]{border-radius:7px;box-shadow:0 8px 32px #0007}
 #tierscope-session-tools[data-layout=docked]::after{content:'';position:absolute;pointer-events:none;inset:0 0 0 auto;width:9px;background:linear-gradient(90deg,transparent,#0002);border-right:1px solid #ff69b450}
 #tierscope-session-tools *{box-sizing:border-box}
@@ -68,7 +68,7 @@ export function libraryShell() {
 #tierscope-session-tools .tools-date-filters{grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 #tierscope-session-tools .tools-date-filters label{display:flex;flex-wrap:nowrap;gap:4px;font-size:.9em}
 #tierscope-session-tools .tools-date-filters input[type=date]{width:100%;min-width:0;flex:1;padding:4px 2px}
-#tierscope-session-tools .tools-current[hidden]{display:none}
+#tierscope-session-tools .tools-current[hidden],#tierscope-session-tools #tools-threshold-controls[hidden]{display:none}
 #tierscope-session-tools [data-card-enable][hidden],#tierscope-session-tools [data-card-retry][hidden]{display:none}
 #tierscope-session-tools .tools-model-name{display:flex;align-items:center;gap:5px;margin-bottom:4px}
 #tierscope-session-tools .tools-model-name strong{min-width:0}
@@ -110,6 +110,16 @@ export function libraryShell() {
 #tierscope-session-tools .tools-chart-legend label{flex-wrap:nowrap;min-width:0}
 #tierscope-session-tools .tools-chart-legend span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #tierscope-session-tools .tools-chart-legend .tools-series-swatch{width:13px;flex-shrink:0;border-top:2px solid currentColor}
+#tierscope-session-tools .tools-metric-strip{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:3px;margin:9px 0 3px}
+#tierscope-session-tools .tools-metric-strip button{display:flex;align-items:center;justify-content:center;padding:2px 0;height:2.5em;background:transparent;border-color:transparent}
+#tierscope-session-tools .tools-metric-strip button:hover{border-color:var(--panel-muted);background:rgba(var(--panel-row-rgb),.06)}
+#tierscope-session-tools .tools-metric-strip button[aria-checked=true]{border-color:var(--panel-accent);background:#ff69b420;box-shadow:inset 0 -2px var(--panel-accent)}
+#tierscope-session-tools .tools-metric-strip button:focus-visible{outline:2px solid var(--panel-accent);outline-offset:1px}
+#tierscope-session-tools .tools-metric-icon{font-size:1.3em;line-height:1;color:var(--metric-color);white-space:nowrap}
+#tierscope-session-tools .tools-metric-circle{width:1.1em;height:1.1em;border-radius:50%;background:var(--metric-color);box-shadow:0 0 0 1px var(--panel-muted)}
+@container tierscope-library (max-width:30em){#tierscope-session-tools .tools-metric-strip{grid-template-columns:repeat(6,minmax(0,1fr))}}
+#tierscope-session-tools .tools-metric-caption{color:var(--panel-secondary);font-weight:bold;margin:0 0 7px}
+#tierscope-session-tools .tools-comparison-range{margin:8px 0}
 #tools-analysis-chart{touch-action:pan-y;cursor:crosshair}
 #tools-analysis-chart:focus-visible{outline:2px solid var(--panel-accent);outline-offset:2px}
 #tools-review-notes{margin:6px 12px 0;text-align:left;color:var(--panel-accent)!important;flex-shrink:0}
