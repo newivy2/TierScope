@@ -1,3 +1,4 @@
+import { CLOCK_DAY_MS, clockSessionDuration, projectClockSeries } from './analysis-clock-data.js';
 import { createAnalysisFollower } from './analysis-follow.js';
 import { renderMetricStrip } from './analysis-metric-view.js';
 import { automaticLibraryStatus, keepFavoriteSession } from './automatic-library.js';
@@ -18,7 +19,7 @@ import { libraryShell } from './library-shell.js';
 import { migrateRecordingFavorites, readModelFavorites, readModelFavorite } from './library-models.js';
 import { createLibraryDrafts } from './library-drafts.js';
 import { renderLibraryBrowser, renderRecordingNotes } from './library-browser-view.js';
-import { filterLibraryEntries } from './library-query.js';
+import { createModelCardReader, filterLibraryEntries } from './library-query.js';
 import { recordingFilters } from './tools-view-helpers.js';
 import { exportLibrarySelection, importLibraryBundle, libraryImportBundle } from './library-transfer.js';
 import { renderAnalysisChart } from './analysis-chart-view.js';
@@ -81,7 +82,8 @@ export function openSessionTools(focusTarget) {
     let currentArchive = null, liveComparisonArchive = null, library = null, tab = 'library', fileRequest = 0, chartObserver = null;
     const libraryReader = createLibraryReader();
     const modelHistoryReader = createModelHistoryReader();
-    let historyLimit = Infinity, historySelected = '';
+    const modelCardReader = createModelCardReader();
+    let historyLimit = Infinity, historySelected = '', compareAxis = 'elapsed';
     let optionsLibrary = null, optionsArchive = null, optionsLiveArchive = null, options = [];
     const savedAnalysis = readAnalysisPreferences();
     let {metric, threshold, sharedLength} = savedAnalysis.preferences;
@@ -150,8 +152,8 @@ export function openSessionTools(focusTarget) {
         try {
             const models = readModelFavorites(library.entries);
             library.favoriteModels = models.favorites; library.automaticModels = models.automatic;
-            library.favoriteError = migrationError || (models.errors.length ? 'Some model favorites could not be read. Refresh to retry; recordings remain available.' : '');
-        } catch (error) { library.favoriteModels = new Set(); library.favoriteError = 'Model favorites could not be read. Refresh to retry; recordings remain available.'; }
+            library.favoriteError = migrationError || (models.errors.length ? 'Some model favorites could not be read. Refresh to retry; sessions remain available.' : '');
+        } catch (error) { library.favoriteModels = new Set(); library.favoriteError = 'Model favorites could not be read. Refresh to retry; sessions remain available.'; }
         library.entries = library.entries.map(entry => ({...entry, modelFavorite: library.favoriteModels.has(entry.archive.room.toLowerCase()), autoKeep: library.automaticModels?.has(entry.archive.room.toLowerCase()) || false}));
         for (const follower of Object.values(followers)) {
             const aliases = follower.reconcile(library.entries), remap = id => aliases.get(id) || id;
@@ -177,11 +179,11 @@ export function openSessionTools(focusTarget) {
             if (!draft.dirty) return;
             const fresh = libraryReader.read();
             const latest = fresh.entries.find(item => item.id === draft.id || draft.lineage && item.lineage === draft.lineage || item.records.some(record => record.key === LIBRARY_PREFIX + draft.id));
-            if (!latest) throw new Error('This recording changed or is unavailable. Your draft is kept in Review unsaved notes.');
+            if (!latest) throw new Error('This session changed or is unavailable. Your draft is kept in Review unsaved notes.');
             if ((latest.notes || '') !== draft.base && latest.notes !== draft.value &&
-                !confirm('Saved notes for this recording changed in another tab. Replace them with your draft?')) return;
+                !confirm('Saved notes for this session changed in another tab. Replace them with your draft?')) return;
             updateLibraryMetadata(latest.id, {notes: draft.value});
-            noteDrafts.discard(draft.id); updateDraftNotice(); render(tab); tell('Recording notes saved.');
+            noteDrafts.discard(draft.id); updateDraftNotice(); render(tab); tell('Session notes saved.');
         })
     };
     function renderDrafts() {
@@ -215,7 +217,7 @@ export function openSessionTools(focusTarget) {
         const matches = filteredSources || sourceOptions(), choices = matches.slice();
         const retained = sourceOptions().find(item => item.id === selected);
         if (retained && !choices.some(item => item.id === selected)) choices.unshift({...retained, title: retained.title + ' (selected; outside filters)'});
-        if (selected && selected !== 'current' && selected !== 'live' && !retained) choices.unshift({id: selected, title: 'Recording changed or removed — choose another'});
+        if (selected && selected !== 'current' && selected !== 'live' && !retained) choices.unshift({id: selected, title: 'Session changed or removed — choose another'});
         for (const item of choices) { const option = node(select, 'option', item.title); option.value = item.id; }
         if (choices.some(item => item.id === selected)) select.value = selected;
         select.onchange = () => changed(select.value); return select.value;
@@ -251,7 +253,7 @@ export function openSessionTools(focusTarget) {
         if (!follower) return false;
         const context = followContext();
         let reason = context.reason || '', changed = false, candidates = [];
-        if (!follower.check(context.identity)) reason = 'Session changed. Choose or refresh a recording to follow the new session.';
+        if (!follower.check(context.identity)) reason = 'Session changed. Choose or refresh a session to follow the new session.';
         if (reason && follower.identity) follower.toggle(false);
         if (!reason) {
             if (tab === 'history' && follower.enabled && !follower.identity) {
@@ -274,7 +276,7 @@ export function openSessionTools(focusTarget) {
                     const order = compareLibrarySessions(item.archive, liveCapture.archive);
                     return order === 0 || order === 1;
                 });
-                if (!candidates.length) reason = 'This recording differs from the live session. Its snapshot is kept.';
+                if (!candidates.length) reason = 'This session differs from the live session. Its snapshot is kept.';
                 else changed = follower.update(context.identity, context.signature, candidates, liveCapture.archive);
             }
         }
@@ -286,7 +288,7 @@ export function openSessionTools(focusTarget) {
                 (runtime.isStopped ? 'Stopped' : runtime.isPaused ? 'Paused' : 'Following live') +
                 ' · latest sample ' + new Date(runtime.history.timestamps.at(-1)).toLocaleTimeString() +
                 (automaticLibraryStatus(context.room).error ? ' · Library save pending; showing live data.' : '') +
-                (tab === 'compare' && sharedLength ? ' · Match shared length limits the chart to the shortest recording.' : ''));
+                (tab === 'compare' && compareAxis === 'elapsed' && sharedLength ? ' · Match shared length limits the chart to the shortest session.' : ''));
         }
         return changed;
     }
@@ -307,7 +309,7 @@ export function openSessionTools(focusTarget) {
         const scrollTop = content.scrollTop;
         if (tab === 'history' && historyView) historyView.update(modelHistoryReader.read(followedEntries(), libraryRoom, metric, historyLimit), historySelected);
         else if (tab === 'history') render('history');
-        else if ((tab === 'summary' || tab === 'compare') && analysisView) refreshAnalysis(true, true);
+        else if ((tab === 'summary' || tab === 'compare') && analysisOutput) refreshAnalysis(true, true);
         content.scrollTop = scrollTop;
     }
     function selectNewFollowSource() {
@@ -472,7 +474,7 @@ export function openSessionTools(focusTarget) {
         selectedA = 'live'; selectedB = ids[0]; selectedExtra = ids.slice(1);
         Object.assign(analysisFilters, {room: snapshot.room.toLowerCase(), query: '', from: '', to: ''});
         pickerOpen.compare = false; render('compare');
-        (dialog.querySelector('#tools-analysis-chart') || dialog.querySelector('#tools-recording-picker > summary'))?.focus();
+        (dialog.querySelector('#tools-analysis-chart') || dialog.querySelector('#tools-session-picker > summary'))?.focus();
     }
     function openHistory(room) {
         readLibrary();
@@ -493,10 +495,12 @@ export function openSessionTools(focusTarget) {
         libraryFilters.room = libraryRoom || '';
         if (libraryRoom && libraryRoom !== '*' && !state.entries.some(entry => entry.archive.room.toLowerCase() === libraryRoom)) libraryFilters.room = libraryRoom = '';
         const callbacks = {
+            cardSummary: entries => modelCardReader.read(entries),
+            duration: formatElapsedTime,
             room: room => { libraryRoom = room; },
             history: openHistory,
             compare: ids => { selectedA = ids[0]; selectedB = ids[1]; selectedExtra = ids.slice(2); Object.assign(analysisFilters, {room: '', query: '', from: '', to: ''}); render('compare'); },
-            export: ids => { downloadDataFile(exportLibrarySelection(ids, runtime.TIERSCOPE_VERSION), 'TierScope-library-selection-' + new Date().toISOString().slice(0, 10) + '.json'); tell('Selected recordings exported, including titles, notes and favorite models.'); },
+            export: ids => { downloadDataFile(exportLibrarySelection(ids, runtime.TIERSCOPE_VERSION), 'TierScope-library-selection-' + new Date().toISOString().slice(0, 10) + '.json'); tell('Selected sessions exported, including titles, notes and favorite models.'); },
             favoriteModel: room => {
                 if (state.favoriteError) throw new Error('Model favorites are not fully available. Refresh before changing them.');
                 favoriteAction(room);
@@ -508,13 +512,13 @@ export function openSessionTools(focusTarget) {
             txt: entry => downloadRecording(entry.archive, 'txt'), csv: entry => downloadRecording(entry.archive, 'csv'), gif: entry => generateGifFromHistory(entry.archive),
             highs: entry => addArchiveHighs(entry.archive),
             ...noteActions,
-            rename: entry => { const title = window.prompt('Recording title (up to 80 characters):', entry.title); if (title !== null) { renameLibrarySession(entry.id, title); render('library'); } },
-            delete: entry => { if (confirm('Delete this library recording: ' + (entry.title || entry.archive.room) + '?\n\nLive tracking, ATH and downloaded files are unchanged.')) { removeLibrarySession(entry.id); render('library'); tell('Library recording deleted.'); } }
+            rename: entry => { const title = window.prompt('Session title (up to 80 characters):', entry.title); if (title !== null) { renameLibrarySession(entry.id, title); render('library'); } },
+            delete: entry => { if (confirm('Delete this library session: ' + (entry.title || entry.archive.room) + '?\n\nLive tracking, ATH and downloaded files are unchanged.')) { removeLibrarySession(entry.id); render('library'); tell('Library session deleted.'); } }
         };
         renderLibraryBrowser(content, state.entries, libraryFilters, librarySelection, Object.fromEntries(Object.entries(callbacks).map(([key, fn]) => [key, action(fn)])), libraryDisclosures);
         if (state.damaged.length) {
             node(content, 'p', state.damaged.length + ' unreadable library record(s) were retained.', 'tools-muted');
-            if (state.unavailable.length) node(content, 'p', 'Some records could not be read. The displayed storage size excludes them; saving new recordings waits until they can be read.', 'tools-muted');
+            if (state.unavailable.length) node(content, 'p', 'Some records could not be read. The displayed storage size excludes them; saving new sessions waits until they can be read.', 'tools-muted');
             button(content, 'Download unreadable records', downloadUnreadableRecords, 'tools-recovery-download');
             button(content, 'Remove unreadable library records…', () => {
                 if (!confirm('Delete the ' + state.damaged.length + ' unreadable library record(s)? This cannot be undone.')) return;
@@ -532,7 +536,7 @@ export function openSessionTools(focusTarget) {
             const rooms = new Set(bundle.library.map(entry => entry.archive.room.toLowerCase()));
             libraryRoom = rooms.size === 1 ? [...rooms][0] : '*';
             Object.assign(libraryFilters, {room: libraryRoom, query: '', from: '', to: '', favorites: false});
-            render('library', true); tell('Imported: ' + result.recordings + ' new, ' + result.updatedRecordings + ' updated, ' + result.favoriteModels + ' favorite models added; existing recordings and model choices were preserved.');
+            render('library', true); tell('Imported: ' + result.recordings + ' new, ' + result.updatedRecordings + ' updated, ' + result.favoriteModels + ' favorite models added; existing sessions and model choices were preserved.');
         }, true), 'tools-import-session').title = 'Import session files or Library bundles. Imported favorites need confirmation before automatic keeping.';
         button(actions, 'Refresh', () => render('library'), 'tools-refresh-library').title = 'Refresh list from this browser';
     }
@@ -544,6 +548,36 @@ export function openSessionTools(focusTarget) {
                 color: key === 'total' ? 'var(--panel-secondary)' : row.color};
         });
         return renderMetricStrip(parent, choices, metric, action(value => { rememberAnalysis({metric: value}); changed(); }), id);
+    }
+    function comparisonAxis(parent) {
+        const controls = node(parent, 'div', undefined, 'tools-actions');
+        const label = node(controls, 'label', 'X axis '), select = node(label, 'select'); select.id = 'tools-compare-axis';
+        for (const [value, text] of [['elapsed', 'Elapsed time'], ['clock', '24h time of day']]) {
+            const option = node(select, 'option', text); option.value = value;
+        }
+        select.value = compareAxis;
+        const hint = node(parent, 'p', '', 'tools-muted'); hint.id = 'tools-compare-axis-hint';
+        select.setAttribute('aria-describedby', hint.id);
+        select.onchange = () => { compareAxis = select.value; updateFollowing(); refreshAnalysis(); };
+    }
+    function syncComparisonAxis() {
+        if (tab !== 'compare') return;
+        const clock = compareAxis === 'clock', check = dialog.querySelector('#tools-shared-length');
+        check.disabled = clock; check.checked = sharedLength;
+        check.title = clock ? 'Match shared length applies to elapsed-time comparison.' : '';
+        dialog.querySelector('#tools-compare-axis-hint').textContent = clock ?
+            '24h uses your local time (' + Intl.DateTimeFormat().resolvedOptions().timeZone + '). Statistics use full sessions; Match shared length applies in elapsed mode.' : '';
+    }
+    function clearAnalysisChart() {
+        if (!analysisView) return;
+        const hadFocus = analysisView.element.contains(document.activeElement);
+        analysisStates.set(tab, {...analysisSources, state: analysisView.capture()});
+        const range = dialog.querySelector('#tools-comparison-range');
+        if (range) content.insertBefore(range, analysisOutput);
+        if (chartObserver) { chartObserver.disconnect(); chartObserver = null; }
+        if (chartDispose) chartDispose();
+        analysisView.element.remove(); analysisView = null; analysisSources = null; chartDraw = null; chartDispose = null;
+        if (hadFocus) dialog.querySelector('#tools-compare-axis').focus({preventScroll: true});
     }
     function comparisonRange() {
         const controls = node(content, 'div', undefined, 'tools-comparison-range'); controls.id = 'tools-comparison-range';
@@ -582,16 +616,16 @@ export function openSessionTools(focusTarget) {
         if (!sourceOptions().length) { node(content, 'p', 'Record a session or import one into the library to see analysis.'); return null; }
         const pickerTab = comparing ? 'compare' : 'summary';
         const picker = node(content, 'details'); picker.id = 'tools-recording-picker'; picker.open = pickerOpen[pickerTab];
-        node(picker, 'summary', 'Choose recordings & filters');
+        node(picker, 'summary', 'Choose sessions & filters');
         picker.ontoggle = () => { if (picker.isConnected) pickerOpen[pickerTab] = picker.open; };
         recordingFilters(picker, sourceOptions(), analysisFilters, 'tools-analysis', () => render(tab));
         try { filteredSources = filterLibraryEntries(sourceOptions(), analysisFilters); }
         catch (error) { filteredSources = []; tell(error.message, true); }
-        node(picker, 'p', filteredSources.length + ' matching recordings. Existing selections stay available when outside the filters.', 'tools-muted');
+        node(picker, 'p', filteredSources.length + ' matching sessions. Existing selections stay available when outside the filters.', 'tools-muted');
         const sourceControls = node(picker, 'div', undefined, 'tools-actions');
         if (liveComparisonArchive) button(sourceControls, 'Refresh live snapshot', () => { liveComparisonArchive = captureLiveSessionFile(); selectNewFollowSource(); render(tab); }, 'tools-refresh-live-snapshot');
         if (currentArchive) button(sourceControls, 'Refresh current / replayed snapshot', () => { currentArchive = captureSessionFile(); currentArchiveIsReplay = isPlaybackCurrent(runtime.playback); selectNewFollowSource(); render(tab); }, 'tools-refresh-snapshot');
-        selectedA = selectSource(sourceControls, comparing ? 'A ' : 'Recording ', 'tools-source-a', selectedA, value => { selectedA = value; selectNewFollowSource(); render(tab); });
+        selectedA = selectSource(sourceControls, comparing ? 'A ' : 'Session ', 'tools-source-a', selectedA, value => { selectedA = value; selectNewFollowSource(); render(tab); });
         if (comparing) {
             if (!selectedB) selectedB = (sourceOptions().find(item => item.id !== selectedA) || sourceOptions()[0]).id;
             selectedB = selectSource(sourceControls, 'B ', 'tools-source-b', selectedB, value => { selectedB = value; selectNewFollowSource(); render(tab); });
@@ -601,11 +635,12 @@ export function openSessionTools(focusTarget) {
             });
             const used = new Set([selectedA, selectedB, ...selectedExtra]);
             const next = filteredSources.find(item => !used.has(item.id));
-            button(sourceControls, 'Add recording', () => { if (next && selectedExtra.length < 4) { selectedExtra.push(next.id); render(tab); } }, 'tools-compare-add').disabled = selectedExtra.length >= 4 || !next;
+            button(sourceControls, 'Add session', () => { if (next && selectedExtra.length < 4) { selectedExtra.push(next.id); render(tab); } }, 'tools-compare-add').disabled = selectedExtra.length >= 4 || !next;
             node(sourceControls, 'span', (2 + selectedExtra.length) + ' / 6 slots', 'tools-muted');
 
         }
         followControl(content);
+        if (comparing) comparisonAxis(content);
         metricStrip(content, refreshAnalysis);
         return sourceOptions();
     }
@@ -620,11 +655,11 @@ export function openSessionTools(focusTarget) {
         node(heading, 'h3', 'Model history · ' + libraryRoom);
         const controls = node(content, 'div', undefined, 'tools-actions');
         const rangeLabel = node(controls, 'label', 'Show '), range = node(rangeLabel, 'select'); range.id = 'tools-history-range';
-        for (const [value, label] of [['Infinity', 'All recordings'], ['30', 'Latest 30'], ['10', 'Latest 10']]) {
+        for (const [value, label] of [['Infinity', 'All sessions'], ['30', 'Latest 30'], ['10', 'Latest 10']]) {
             const option = node(range, 'option', label); option.value = value;
         }
         range.value = String(historyLimit); range.onchange = () => { historyLimit = Number(range.value); render('history'); };
-        button(controls, 'Refresh', () => { readLibrary(); followers.history.reset(); render('history'); }, 'tools-history-refresh').title = 'Read the latest saved recordings from this browser';
+        button(controls, 'Refresh', () => { readLibrary(); followers.history.reset(); render('history'); }, 'tools-history-refresh').title = 'Read the latest saved sessions from this browser';
         followControl(content);
         const overview = modelHistoryReader.read(followedEntries(), libraryRoom, metric, historyLimit);
         const view = renderModelHistoryView(content, overview, {
@@ -640,7 +675,7 @@ export function openSessionTools(focusTarget) {
                 [selectedA, selectedB] = ids; selectedExtra = ids.slice(2);
                 Object.assign(analysisFilters, {room: libraryRoom, query: '', from: '', to: ''});
                 pickerOpen.compare = false; render('compare');
-                (dialog.querySelector('#tools-analysis-chart') || dialog.querySelector('#tools-recording-picker > summary'))?.focus();
+                (dialog.querySelector('#tools-analysis-chart') || dialog.querySelector('#tools-session-picker > summary'))?.focus();
             }
         });
         historyView = view;
@@ -648,7 +683,7 @@ export function openSessionTools(focusTarget) {
             chartDraw = view.draw;
             if (window.ResizeObserver) { chartObserver = new window.ResizeObserver(view.draw); chartObserver.observe(view.canvas); }
         }
-        if (library.damaged.length) node(content, 'p', library.damaged.length + ' unreadable library record(s) are excluded. Return to Recordings for recovery options.', 'tools-muted');
+        if (library.damaged.length) node(content, 'p', library.damaged.length + ' unreadable library record(s) are excluded. Return to Sessions for recovery options.', 'tools-muted');
     }
     function audienceOverview(archive, parent) {
         const overview = summarizeAudience(archive), coverage = overview.audience[0];
@@ -656,9 +691,9 @@ export function openSessionTools(focusTarget) {
         node(parent, 'p', archive.room + ' · ' + coverage.samples + ' samples · Covered time ' + formatElapsedTime(coverage.coveredMs) +
             ' · Excluded gaps ' + formatElapsedTime(coverage.gapMs) + ' · Coverage ' + percent(coverage.coverage), 'tools-muted');
         const scroll = node(parent, 'div', undefined, 'tools-scroll'), table = node(scroll, 'table'); table.id = 'tools-audience-table';
-        node(table, 'caption', 'Audience across the retained recording');
+        node(table, 'caption', 'Audience across the retained session');
         const head = node(node(table, 'thead'), 'tr');
-        ['Audience', 'Time-weighted average', 'Peak in recording', 'Full-session high'].forEach(label => { node(head, 'th', label).scope = 'col'; });
+        ['Audience', 'Time-weighted average', 'Peak in session', 'Full-session high'].forEach(label => { node(head, 'th', label).scope = 'col'; });
         const body = node(table, 'tbody');
         for (const summary of overview.audience) {
             const row = node(body, 'tr'); node(row, 'th', ANALYSIS_METRICS[summary.metric]).scope = 'row';
@@ -667,7 +702,7 @@ export function openSessionTools(focusTarget) {
             if (summary.peakTime !== null) peak.title = 'First recorded at ' + new Date(summary.peakTime).toLocaleString();
             node(row, 'td', number(summary.sessionPeak));
         }
-        node(parent, 'p', 'Room audience = registered + anonymous viewers. A full-session high may predate retained history. Hover a recording peak for its first recorded time.', 'tools-muted');
+        node(parent, 'p', 'Room audience = registered + anonymous viewers. A full-session high may predate retained history. Hover a session peak for its first recorded time.', 'tools-muted');
         const shares = node(parent, 'div'); shares.id = 'tools-audience-shares';
         node(shares, 'h3', 'Audience proportions');
         node(shares, 'p', 'Token holders / registered viewers: ' + percent(overview.tokenShareRegistered));
@@ -677,7 +712,7 @@ export function openSessionTools(focusTarget) {
     }
     function thresholdTable(archive, parent) {
         if (!summaryThresholds.length) {
-            node(parent, 'p', 'Not enough covered recording time to calculate average-based thresholds.', 'tools-muted'); return;
+            node(parent, 'p', 'Not enough covered session time to calculate average-based thresholds.', 'tools-muted'); return;
         }
         const scroll = node(parent, 'div', undefined, 'tools-scroll'), table = node(scroll, 'table'); table.id = 'tools-threshold-table';
         node(table, 'caption', ANALYSIS_METRICS[metric] + ' — time at or above selected thresholds');
@@ -689,16 +724,16 @@ export function openSessionTools(focusTarget) {
             node(row, 'td', result.durationMs === null ? 'Not enough data' : formatElapsedTime(result.durationMs));
             node(row, 'td', percent(result.percent));
         }
-        node(parent, 'p', 'Includes samples equal to the threshold. Percentages use covered recording time; gaps and time after the final sample are excluded.', 'tools-muted');
+        node(parent, 'p', 'Includes samples equal to the threshold. Percentages use covered session time; gaps and time after the final sample are excluded.', 'tools-muted');
     }
     function summaryTable(summaries, labels, comparing, parent) {
         const scroll = node(parent, 'div', undefined, 'tools-scroll'), table = node(scroll, 'table'); table.id = 'tools-summary-table';
-        node(table, 'caption', ANALYSIS_METRICS[metric] + ' — retained recording statistics');
+        node(table, 'caption', ANALYSIS_METRICS[metric] + ' — retained session statistics');
         const head = node(table, 'thead'), headRow = node(head, 'tr'); node(headRow, 'th', 'Measure');
         labels.forEach(label => node(headRow, 'th', label));
         const body = node(table, 'tbody');
         const rows = [ ['Samples in range', s => number(s.samples)], ['Elapsed span', s => formatElapsedTime(s.spanMs)],
-            ['Covered recording time', s => formatElapsedTime(s.coveredMs)], ['Excluded gaps', s => formatElapsedTime(s.gapMs)],
+            ['Covered session time', s => formatElapsedTime(s.coveredMs)], ['Excluded gaps', s => formatElapsedTime(s.gapMs)],
             ['Coverage', s => s.coverage === null ? 'Not enough data' : number(s.coverage) + '%'],
             ['Time-weighted average', s => number(s.mean)], ['Peak in range', s => number(s.peak)],
             ['Full-session high', s => number(s.sessionPeak)], ['Token-holder share of registered viewers', s => s.tokenShare === null ? 'Not enough data' : number(s.tokenShare) + '%'] ];
@@ -710,12 +745,16 @@ export function openSessionTools(focusTarget) {
         node(parent, 'p', 'The full-session high can predate retained history and is not limited by “Match shared length.” Token-holder share is weighted by recorded registered-viewer time.', 'tools-muted');
     }
     function chart(archives, labels, endMs, ids) {
-        const series = archives.map(archive => ({...analysisSeries(archive, metric), timestamps: archive.session.history.timestamps}));
-        if (analysisView) { analysisSources = {archives, ids}; analysisView.update(series, endMs, ANALYSIS_METRICS[metric]); return; }
+        const axisMode = tab === 'compare' ? compareAxis : 'elapsed';
+        const series = archives.map(archive => {
+            const source = {...analysisSeries(archive, metric), timestamps: archive.session.history.timestamps};
+            return axisMode === 'clock' ? {...source, clock: projectClockSeries(source)} : source;
+        });
+        if (analysisView) { analysisSources = {archives, ids}; analysisView.update(series, endMs, ANALYSIS_METRICS[metric], axisMode); return; }
         const saved = analysisStates.get(tab);
-        const same = saved && saved.ids.length === ids.length && ids.every((id, index) => saved.archives[saved.ids.indexOf(id)] === archives[index]);
+        const same = saved && (saved.state.axisMode || 'elapsed') === axisMode && saved.ids.length === ids.length && ids.every((id, index) => saved.archives[saved.ids.indexOf(id)] === archives[index]);
         const restored = same ? {...saved.state, hidden: saved.state.hidden.map(index => ids.indexOf(saved.ids[index]))} : null;
-        const view = renderAnalysisChart(content, series, labels, endMs, ANALYSIS_METRICS[metric], restored);
+        const view = renderAnalysisChart(content, series, labels, endMs, ANALYSIS_METRICS[metric], restored, axisMode);
         const range = dialog.querySelector('#tools-comparison-range');
         if (range) view.settings.appendChild(range);
         content.appendChild(analysisOutput);
@@ -736,16 +775,23 @@ export function openSessionTools(focusTarget) {
         const comparing = tab === 'compare', options = sourceOptions();
         if (!analysisOutput) return;
         const {overview, controls, results} = analysisReports;
+        syncComparisonAxis();
         overview.replaceChildren(); results.replaceChildren(); controls.hidden = false; message.textContent = '';
         const a = options.find(item => item.id === selectedA), b = options.find(item => item.id === selectedB);
         if (!a || comparing && (!b || selectedExtra.some(id => !options.some(item => item.id === id)))) {
-            controls.hidden = true; node(overview, 'p', 'Choose available recordings in each slot. A previous selection may have changed or been removed; clear filters to find another recording.'); return;
+            controls.hidden = true; node(overview, 'p', 'Choose available sessions in each slot. A previous selection may have changed or been removed; clear filters to find another session.'); return;
         }
         if (comparing) {
-            if (new Set([selectedA, selectedB, ...selectedExtra]).size !== 2 + selectedExtra.length) { controls.hidden = true; node(overview, 'p', 'Choose a different recording in each comparison slot.'); return; }
+            if (new Set([selectedA, selectedB, ...selectedExtra]).size !== 2 + selectedExtra.length) { controls.hidden = true; node(overview, 'p', 'Choose a different session in each comparison slot.'); return; }
             const ids = [...new Set([selectedA, selectedB, ...selectedExtra])], recordings = ids.map(id => options.find(item => item.id === id)).filter(item => !!item);
-            const result = compareRecordingSet(recordings.map(item => item.archive), metric, threshold, sharedLength);
-            if (redrawChart) chart(recordings.map(item => item.archive), recordings.map(item => item.title), result.axisMs, ids);
+            const archives = recordings.map(item => item.archive), clock = compareAxis === 'clock';
+            const result = compareRecordingSet(archives, metric, threshold, !clock && sharedLength);
+            const tooLong = clock ? archives.flatMap((archive, index) => clockSessionDuration(archive) > CLOCK_DAY_MS ? [String.fromCharCode(65 + index)] : []) : [];
+            if (tooLong.length) {
+                clearAnalysisChart();
+                node(overview, 'p', '24h chart unavailable: session' + (tooLong.length > 1 ? 's ' : ' ') + tooLong.join(', ') +
+                    ' exceed' + (tooLong.length === 1 ? 's' : '') + ' 24 hours. Choose Elapsed time or select shorter sessions.', 'tools-muted');
+            } else if (redrawChart) chart(archives, recordings.map(item => item.title), clock ? CLOCK_DAY_MS : result.axisMs, ids);
             summaryTable(result.summaries, recordings.map((item, index) => String.fromCharCode(65 + index)), true, results);
         } else {
             const summary = summarizeSession(a.archive, metric, threshold);
@@ -773,12 +819,12 @@ export function openSessionTools(focusTarget) {
     function renderBackup() {
         node(content, 'h3', 'Back up this browser');
         node(content, 'p', 'Download ATH for every room and your saved preferences: theme, panel size/position, collapsed rows, compact metric, chart window, SH/ATH mode and analysis choices. Keep this file somewhere safe. Session-only controls such as the scan interval are not saved preferences.', 'tools-muted');
-        const include = checkbox(content, 'tools-backup-library', 'Include library recordings and favorite models');
+        const include = checkbox(content, 'tools-backup-library', 'Include library sessions and favorite models');
         const state = readLibrary();
         let partial = null;
         if (state.damaged.length) {
-            node(content, 'p', state.damaged.length + ' unreadable library record(s) are retained. You can back up healthy recordings and download the unreadable values separately for recovery.', 'tools-muted');
-            partial = checkbox(content, 'tools-backup-partial', 'Back up healthy recordings; omit unreadable entries', false);
+            node(content, 'p', state.damaged.length + ' unreadable library record(s) are retained. You can back up healthy sessions and download the unreadable values separately for recovery.', 'tools-muted');
+            partial = checkbox(content, 'tools-backup-partial', 'Back up healthy sessions; omit unreadable entries', false);
             button(content, 'Download unreadable records', downloadUnreadableRecords, 'tools-backup-recovery');
         }
         const actions = node(content, 'div', undefined, 'tools-actions');
@@ -786,11 +832,11 @@ export function openSessionTools(focusTarget) {
             const backup = createTierScopeBackup(include.checked, !!(partial && partial.checked));
             const omitted = backup.recovery ? backup.recovery.omittedLibraryKeys.length : 0;
             downloadDataFile(backup, 'TierScope-' + (omitted ? 'partial-backup-' : 'backup-') + new Date().toISOString().slice(0, 10) + '.json');
-            tell(omitted ? 'Partial backup download requested: ' + backup.library.length + ' healthy recordings included; ' + omitted + ' unreadable entries omitted and left untouched. Download unreadable records separately for recovery.' :
+            tell(omitted ? 'Partial backup download requested: ' + backup.library.length + ' healthy sessions included; ' + omitted + ' unreadable entries omitted and left untouched. Download unreadable records separately for recovery.' :
                 'Backup download requested. Check your browser downloads.', !!omitted);
         }, 'tools-backup-download');
         node(content, 'h3', 'Restore a backup');
-        node(content, 'p', 'ATH is merged without lowering existing records. New library sessions are added; fuller versions of the same session update its entry and keep its name. Saved preferences take effect after refreshing your room tabs. Storage limits stay local to this browser; raise them in Sessions → Storage limits if the recordings need more room. Backups up to 300 MB / 10,000 sessions can be opened.', 'tools-muted');
+        node(content, 'p', 'ATH is merged without lowering existing records. New library sessions are added; fuller versions of the same session update its entry and keep its name. Saved preferences take effect after refreshing your room tabs. Storage limits stay local to this browser; raise them in Sessions → Storage limits if the sessions need more room. Backups up to 300 MB / 10,000 sessions can be opened.', 'tools-muted');
         button(content, 'Choose backup…', () => {
             pendingBackup = null; render('backup');
             chooseFile(BACKUP_MAX_BYTES, value => {
@@ -799,19 +845,19 @@ export function openSessionTools(focusTarget) {
         }, 'tools-backup-open');
         if (pendingBackup) {
             if (pendingBackup.recovery) node(content, 'p', 'This is a partial backup. ' + pendingBackup.recovery.omittedLibraryKeys.length + ' unreadable library entries were excluded when it was created; they cannot be restored from this file.', 'tools-muted');
-            node(content, 'p', pendingBackup.rooms.length + ' rooms · ' + (Object.keys(pendingBackup.preferences).length + (pendingBackup.analysisPreferences ? 1 : 0)) + ' saved preferences · ' + pendingBackup.library.length + ' recordings', 'tools-muted');
+            node(content, 'p', pendingBackup.rooms.length + ' rooms · ' + (Object.keys(pendingBackup.preferences).length + (pendingBackup.analysisPreferences ? 1 : 0)) + ' saved preferences · ' + pendingBackup.library.length + ' sessions', 'tools-muted');
             node(content, 'p', pendingBackup.favoriteModels.length + ' favorite models. Restoring Library adds these where no local model choice exists.', 'tools-muted');
             const choices = node(content, 'div', undefined, 'tools-actions');
-            const highs = checkbox(choices, 'tools-restore-highs', 'Merge ATH'), preferences = checkbox(choices, 'tools-restore-preferences', 'Restore preferences'), recordings = checkbox(choices, 'tools-restore-library', 'Add recordings and favorite models');
+            const highs = checkbox(choices, 'tools-restore-highs', 'Merge ATH'), preferences = checkbox(choices, 'tools-restore-preferences', 'Restore preferences'), recordings = checkbox(choices, 'tools-restore-library', 'Add sessions and favorite models');
             button(content, 'Restore selected data', () => {
                 if (!highs.checked && !preferences.checked && !recordings.checked) throw new Error('Choose at least one kind of data to restore.');
-                if (!confirm('Restore the selected backup data?\n\nATH will be merged, library recordings added or updated with fuller versions, and selected saved preferences replaced. Your live session is not replaced.' +
+                if (!confirm('Restore the selected backup data?\n\nATH will be merged, library sessions added or updated with fuller versions, and selected saved preferences replaced. Your live session is not replaced.' +
                     (pendingBackup.recovery ? '\n\nThis partial backup excludes ' + pendingBackup.recovery.omittedLibraryKeys.length + ' unreadable library entries.' : ''))) return;
                 const result = restoreTierScopeBackup(pendingBackup, { highs: highs.checked, preferences: preferences.checked, library: recordings.checked });
                 library = null;
                 if (runtime.playback) setPlaybackAllTimeState(runtime.playback, readAllTimeHighs(displayedHighRoom()));
                 repaintHighMode();
-                tell('Restored: ' + result.rooms + ' room ATH updates, ' + result.recordings + ' new recordings, ' + result.updatedRecordings + ' updated recordings, ' + result.favoriteModels + ' favorite models, ' + result.preferences + ' preferences.' + (result.preferences ? '\nRefresh your room tabs when convenient to apply preferences.' : ''));
+                tell('Restored: ' + result.rooms + ' room ATH updates, ' + result.recordings + ' new sessions, ' + result.updatedRecordings + ' updated sessions, ' + result.favoriteModels + ' favorite models, ' + result.preferences + ' preferences.' + (result.preferences ? '\nRefresh your room tabs when convenient to apply preferences.' : ''));
             }, 'tools-backup-restore');
         }
     }

@@ -1,3 +1,36 @@
+// One reader per Library opening. Only immutable histories reuse covered time;
+// model cards aggregate sessions matching the active filters, including overlaps.
+export function createModelCardReader() {
+    /** @type {WeakMap<{timestamps:number[],breaks?:boolean[]},number>} */
+    const cache = new WeakMap();
+    /** @param {{timestamps:number[],breaks?:boolean[]}} history */
+    function coverage(history) {
+        const immutable = Object.isFrozen(history) && Object.isFrozen(history.timestamps) &&
+            (!history.breaks || Object.isFrozen(history.breaks));
+        if (immutable && cache.has(history)) return cache.get(history);
+        let previous = 0, coveredMs = 0;
+        const origin = history.timestamps[0];
+        for (let i = 1; i < history.timestamps.length; i++) {
+            const next = Math.max(previous, history.timestamps[i] - origin, 0);
+            if (!history.breaks?.[i]) coveredMs += next - previous;
+            previous = next;
+        }
+        if (immutable) cache.set(history, coveredMs);
+        return coveredMs;
+    }
+    /** @param {{archive:{session:{history:{timestamps:number[],breaks?:boolean[]}}}}[]} entries */
+    function read(entries) {
+        let first = Infinity, latest = -Infinity, coveredMs = 0;
+        for (const entry of entries) {
+            const history = entry.archive.session.history, start = history.timestamps[0];
+            if (start === undefined) continue;
+            first = Math.min(first, start); latest = Math.max(latest, start); coveredMs += coverage(history);
+        }
+        return {first: first === Infinity ? null : first, latest: latest === -Infinity ? null : latest, coveredMs};
+    }
+    return {read};
+}
+
 // Dates are inclusive browser-local calendar days, based on the first retained
 // sample. No timezone conversion through Date.parse('YYYY-MM-DD').
 /** @param {string} text @param {boolean} after */

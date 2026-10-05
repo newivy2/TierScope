@@ -22,7 +22,7 @@ export function libraryMetadata(value) {
     // Keep beta 1's legacy flag readable for migration; new stars belong to models.
     const favorite = value.favorite === undefined ? false : value.favorite, notes = value.notes === undefined ? '' : value.notes;
     if (typeof favorite !== 'boolean' || typeof notes !== 'string' || notes.length > 2000 || /[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(notes)) {
-        throw new Error('Recording notes must be plain text of up to 2,000 characters; favorite must be true or false.');
+        throw new Error('Session notes must be plain text of up to 2,000 characters; favorite must be true or false.');
     }
     return {...(value.favorite === undefined ? {} : {favorite}), notes};
 }
@@ -135,7 +135,7 @@ export function readSessionLibrary(cache = null) {
 
 export function planLibraryAdditions(incoming, library = readSessionLibrary()) {
     const limits = readLibraryLimits();
-    if (library.unavailable && library.unavailable.length) throw new Error('Some library records could not be read. Refresh the list before saving more recordings.');
+    if (library.unavailable && library.unavailable.length) throw new Error('Some library records could not be read. Refresh the list before saving more sessions.');
     const entries = library.entries.slice(), writes = [];
     let bytes = library.bytes;
     for (const entry of incoming) {
@@ -216,11 +216,11 @@ export function renameLibrarySession(id, title) {
 
 export function updateLibraryMetadata(id, patch) {
     const limits = readLibraryLimits();
-    if (!patch || Object.keys(patch).some(key => !['title', 'notes'].includes(key))) throw new Error('Invalid recording metadata.');
+    if (!patch || Object.keys(patch).some(key => !['title', 'notes'].includes(key))) throw new Error('Invalid session metadata.');
     const key = libraryRecordKey(id), state = readSessionLibrary();
     if (state.unavailable.length) throw new Error('Some library records could not be read. Refresh the list before editing.');
     const entry = state.entries.find(entry => entry.records.some(record => record.key === key));
-    if (!entry) throw new Error('This recording changed in another tab. Refresh the list.');
+    if (!entry) throw new Error('This session changed in another tab. Refresh the list.');
     const clean = {...libraryMetadata({...entry, ...patch}), title: libraryTitle(patch.title === undefined ? entry.title : patch.title)};
     const writes = entry.records.map(record => ({ ...record, next: JSON.stringify({ ...JSON.parse(record.value), ...clean }) }));
     const bytes = state.bytes + writes.reduce((total, write) => total + new Blob([write.next]).size - new Blob([write.value]).size, 0);
@@ -228,7 +228,7 @@ export function updateLibraryMetadata(id, patch) {
     const touched = [];
     try {
         for (const write of writes) {
-            if (GM_getValue(write.key, null) !== write.value) throw new Error('This recording changed in another tab. Refresh the list.');
+            if (GM_getValue(write.key, null) !== write.value) throw new Error('This session changed in another tab. Refresh the list.');
             touched.push(write); GM_setValue(write.key, write.next);
         }
         verifyLibraryCapacity();
@@ -238,7 +238,7 @@ export function updateLibraryMetadata(id, patch) {
             try { if (GM_getValue(write.key, null) === write.next) GM_setValue(write.key, write.value); }
             catch (rollbackError) { failed = true; }
         }
-        if (failed) throw new Error('Some recording edits could not be undone. Refresh the library before retrying.');
+        if (failed) throw new Error('Some session edits could not be undone. Refresh the library before retrying.');
         throw error;
     }
 }

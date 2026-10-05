@@ -153,3 +153,11 @@ The comparison benchmark additionally measures hiding/showing a line and applyin
 ## Library chart controls (3.22.0)
 
 `library-chart-controls-browser.cjs` checks background alpha before opening, while open and after reopening; both themes and unchanged text/element opacity; all twelve metrics in order with actual sample-inspection counts; one active radio, arrow wrapping, Home/End, Space and focus; preserved chart nodes; Model History changes; shared-length placement below the chart and above statistics; threshold controls beside Summary/Compare results; scales/narrow widths and unchanged live state. It runs with the existing fixtures in both Chromium and Firefox. The analysis and benchmark fixtures use the visible radios instead of the removed dropdowns.
+
+## Clock comparison and model cards (3.23.0)
+
+`analysis-clock.test.cjs` verifies local-time alignment, midnight holds, separate paths, wrapped gaps, exact-midnight and duplicate/backward timestamps, clipped drawing, peak/gap retention, immutable inputs, empty/single samples and recording-duration guards. A separate Node process in America/New_York checks spring-forward blank hours and fall-back multiple dated values without changing the runner's timezone.
+
+`clock-comparison-browser.cjs` verifies local 00:00–24:00 labels, six-way comparison, original sample inspection, midnight gaps, exactly-24-hour and overlong recordings, retained starts, full statistics, disabled/restored shared length, axis and metric state, filters/tabs, live growth past the limit, chart recovery, themes/scales/narrow layout and unchanged session/storage data. All 19 browser fixtures run in Chromium and Firefox.
+
+`library-analysis.test.cjs` checks model-card coverage against analysis results with gaps, duplicate/backward times and overlapping sessions, plus empty/single-sample sessions, date bounds, immutable reads and mutable updates. The model-library browser fixture checks First/Latest, gap-excluding Total covered time and session labels on folder cards.

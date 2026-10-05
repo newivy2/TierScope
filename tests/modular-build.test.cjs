@@ -74,7 +74,7 @@ const reviewedChanges = new Set([
 ]);
 // Configurable capacity is covered by library-capacity unit/browser fixtures.
 // Follow-live snapshot ownership: analysis-follow.test.cjs and follow-live-browser.cjs.
-const featureModules = new Set(['analysis-metric-view.js', 'analysis-follow.js', 'library-capacity-data.js', 'library-capacity.js', 'library-capacity-view.js', 'automatic-library.js', 'favorite-controls.js', 'favorite-view.js', 'room-total-series.js', 'library-drafts.js', 'library-models.js', 'library-query.js', 'library-transfer.js', 'library-browser-view.js', 'tools-view-helpers.js', 'analysis-chart-data.js', 'analysis-chart-view.js', 'model-history.js', 'model-history-view.js', 'presentation-health.js', 'sample-presentation.js', 'analysis-preference-data.js', 'analysis-preferences.js', 'acquisition-state.js', 'panel-preferences.js', 'library-dock.js', 'library-shell.js', 'recording-export-data.js', 'recording-exports.js', 'display-model.js', 'display-values.js', 'immutable-data.js', 'presentation-data.js', 'status-model.js', 'status-view.js', 'trend-view.js', 'playback-state.js', 'live-session.js', 'diagnostics.js', 'room-context.js', 'backup.js', 'data-io.js', 'session-analysis.js', 'session-health.js', 'session-library.js', 'session-tools.js']);
+const featureModules = new Set(['analysis-clock-data.js', 'analysis-metric-view.js', 'analysis-follow.js', 'library-capacity-data.js', 'library-capacity.js', 'library-capacity-view.js', 'automatic-library.js', 'favorite-controls.js', 'favorite-view.js', 'room-total-series.js', 'library-drafts.js', 'library-models.js', 'library-query.js', 'library-transfer.js', 'library-browser-view.js', 'tools-view-helpers.js', 'analysis-chart-data.js', 'analysis-chart-view.js', 'model-history.js', 'model-history-view.js', 'presentation-health.js', 'sample-presentation.js', 'analysis-preference-data.js', 'analysis-preferences.js', 'acquisition-state.js', 'panel-preferences.js', 'library-dock.js', 'library-shell.js', 'recording-export-data.js', 'recording-exports.js', 'display-model.js', 'display-values.js', 'immutable-data.js', 'presentation-data.js', 'status-model.js', 'status-view.js', 'trend-view.js', 'playback-state.js', 'live-session.js', 'diagnostics.js', 'room-context.js', 'backup.js', 'data-io.js', 'session-analysis.js', 'session-health.js', 'session-library.js', 'session-tools.js']);
 const addedFunctions = new Set(['captureLiveSessionFile', 'initializeLifecycle', 'refreshPanelOptions', 'refreshScanCountdown', 'getSessionSamplePolicy', 'initializePresentation', 'paintPanelFrame', 'getSessionWriteStatus', 'writeSessionRecord']); // shared history-gap policy; session/ownership tests
 
 test('unchanged extracted functions preserve 3.4.0; reviewed changes have behavior coverage', () => {
@@ -141,7 +141,7 @@ test('runtime initialization preserves preference loading and startup order', ()
 });
 
 test('module dependencies are explicit and the built script preserves userscript permissions', () => {
-  const allowed = new Set([...baseline.browserGlobals, '__TIERSCOPE_VERSION__', 'Symbol', 'TextEncoder']);
+  const allowed = new Set([...baseline.browserGlobals, '__TIERSCOPE_VERSION__', 'Symbol', 'TextEncoder', 'Intl']);
   for (const {file,ast} of modules) {
     const scope = eslintScope.analyze(ast, {ecmaVersion: 2022, sourceType: 'module'});
     const unresolved = [...new Set(scope.globalScope.through.map(ref => ref.identifier.name))].filter(name => !allowed.has(name));

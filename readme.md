@@ -8,13 +8,13 @@ Install [Tampermonkey](https://www.tampermonkey.net/), follow Tampermonkey’s [
 
 If you used the beta, install from the official link above to follow main releases. Keep only one enabled copy of TierScope.
 
-**Current release: 3.22.0** · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.22.0)
+**Current release: 3.23.0** · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.23.0)
 
 ## Main features
 
 - **Live tracking and replay** — Follow viewer tiers and totals, inspect and zoom charts, and replay live or saved sessions.
 - **Session library** — Organize sessions by model, choose favorites and automatically keep their sessions while tracking.
-- **Summaries and comparisons** — Review audience statistics, compare up to six sessions and explore a model’s history.
+- **Summaries and comparisons** — Review statistics, compare up to six sessions by elapsed or clock time, and explore a model’s history.
 - **Reports and exports** — Download CSV data, TXT reports, animated GIFs or session files you can reopen later.
 - **Session and all-time highs** — Track each room’s audience records, with highlights when counts reach or break a high.
 - **Backup and restore** — Back up your library, records and preferences, and choose your library’s storage limits.

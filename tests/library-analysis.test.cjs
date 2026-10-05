@@ -1,6 +1,18 @@
 const test=require('node:test'),assert=require('node:assert/strict');
 const query=import('../src/library-query.js'),chart=import('../src/analysis-chart-data.js'),analysis=import('../src/session-analysis.js');
 function entry(id,room,time,title=id,notes='',modelFavorite=false){return {id,title,notes,modelFavorite,archive:{room,session:{history:{timestamps:[time]}}}};}
+test('model cards sum actual covered intervals, preserve date bounds and refresh mutable/replaced histories',async()=>{
+ const {createModelCardReader}=await query,{summarizeSession}=await analysis,reader=createModelCardReader();
+ const make=(times,breaks)=>({archive:{room:'model',session:{history:{timestamps:times,breaks,total:times.map(()=>10),anonymous:times.map(()=>0),withTokens:times.map(()=>5)},roomTotalHigh:10,sessionHighs:{total:{value:10}}}}});
+ const a=make([1000,2000,2000,1500,2500,7000,8000],[false,false,false,false,false,true,false]),b=make([1000,3000],[false,false]);
+ const before=JSON.stringify([a,b]),expected=summarizeSession(a.archive).coveredMs+summarizeSession(b.archive).coveredMs;
+ assert.deepEqual(reader.read([b,a]),{first:1000,latest:1000,coveredMs:expected});assert.equal(JSON.stringify([a,b]),before);
+ b.archive.session.history.timestamps[1]=4000;assert.equal(reader.read([b]).coveredMs,3000);
+ const c=make([500,1000],[false,false]);Object.freeze(c.archive.session.history.timestamps);Object.freeze(c.archive.session.history.breaks);Object.freeze(c.archive.session.history);
+ assert.deepEqual(reader.read([a,c]),{first:500,latest:1000,coveredMs:summarizeSession(a.archive).coveredMs+500});
+ assert.deepEqual(reader.read([{...c,title:'Renamed'}]),reader.read([c]));
+ assert.deepEqual(reader.read([make([9000],[false])]),{first:9000,latest:9000,coveredMs:0});assert.deepEqual(reader.read([]),{first:null,latest:null,coveredMs:0});
+});
 test('inclusive local day ends remain correct through a midnight daylight-saving transition',()=>{
  const {execFileSync}=require('node:child_process'),{pathToFileURL}=require('node:url');
  const url=pathToFileURL(require('node:path').join(__dirname,'../src/library-query.js')).href;

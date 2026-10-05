@@ -90,7 +90,7 @@ export function createTierScopeBackup(includeLibrary = true, allowPartialLibrary
         if (saved !== null) preferences[name] = name === 'geometry' || name === 'collapsedRows' ? JSON.parse(saved) : saved;
     }
     const library = includeLibrary ? readSessionLibrary() : { entries: [], damaged: [] };
-    if (library.damaged.length && !allowPartialLibrary) throw new Error('The library contains unreadable recordings. Choose the healthy-recordings option to make a partial backup, or export ATH/preferences separately.');
+    if (library.damaged.length && !allowPartialLibrary) throw new Error('The library contains unreadable sessions. Choose the healthy-sessions option to make a partial backup, or export ATH/preferences separately.');
     const rawAnalysis = GM_getValue(ANALYSIS_PREFERENCE_KEY, null);
     const modelState = includeLibrary ? readModelFavorites(library.entries) : {favorites: new Set(), errors: []};
     if (modelState.errors.length) throw new Error('Some model favorites could not be read. Refresh the library or back up without Library until they can be read.');

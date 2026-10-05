@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.22.0
+// @version      3.23.0
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -2589,7 +2589,7 @@ underlying system, so should run in the browser, Node, or Plask.
   }
   function libraryCapacityNotice(usage, limits) {
     var _a;
-    if ((_a = usage.unavailable) == null ? void 0 : _a.length) return "Some recordings could not be read. Storage usage is incomplete; new saves wait until they can be read or removed.";
+    if ((_a = usage.unavailable) == null ? void 0 : _a.length) return "Some sessions could not be read. Storage usage is incomplete; new saves wait until they can be read or removed.";
     const ratio = Math.max(usage.count / limits.maxSessions, usage.bytes / (limits.maxMegabytes * LIBRARY_MEGABYTE));
     if (ratio >= 1) return "Library limit reached. Existing sessions are kept. Raise the limits or export and remove sessions to make room.";
     if (ratio >= 0.8) return "Library is nearing its limit. Raise the limits or export and remove sessions before it fills up.";
@@ -2644,7 +2644,7 @@ underlying system, so should run in the browser, Node, or Plask.
   function libraryMetadata(value) {
     const favorite = value.favorite === void 0 ? false : value.favorite, notes = value.notes === void 0 ? "" : value.notes;
     if (typeof favorite !== "boolean" || typeof notes !== "string" || notes.length > 2e3 || /[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(notes)) {
-      throw new Error("Recording notes must be plain text of up to 2,000 characters; favorite must be true or false.");
+      throw new Error("Session notes must be plain text of up to 2,000 characters; favorite must be true or false.");
     }
     return __spreadProps(__spreadValues({}, value.favorite === void 0 ? {} : { favorite }), { notes });
   }
@@ -2769,7 +2769,7 @@ underlying system, so should run in the browser, Node, or Plask.
   }
   function planLibraryAdditions(incoming, library = readSessionLibrary()) {
     const limits = readLibraryLimits();
-    if (library.unavailable && library.unavailable.length) throw new Error("Some library records could not be read. Refresh the list before saving more recordings.");
+    if (library.unavailable && library.unavailable.length) throw new Error("Some library records could not be read. Refresh the list before saving more sessions.");
     const entries = library.entries.slice(), writes = [];
     let bytes = library.bytes;
     for (const entry of incoming) {
@@ -2851,11 +2851,11 @@ underlying system, so should run in the browser, Node, or Plask.
   }
   function updateLibraryMetadata(id, patch) {
     const limits = readLibraryLimits();
-    if (!patch || Object.keys(patch).some((key2) => !["title", "notes"].includes(key2))) throw new Error("Invalid recording metadata.");
+    if (!patch || Object.keys(patch).some((key2) => !["title", "notes"].includes(key2))) throw new Error("Invalid session metadata.");
     const key = libraryRecordKey(id), state = readSessionLibrary();
     if (state.unavailable.length) throw new Error("Some library records could not be read. Refresh the list before editing.");
     const entry = state.entries.find((entry2) => entry2.records.some((record) => record.key === key));
-    if (!entry) throw new Error("This recording changed in another tab. Refresh the list.");
+    if (!entry) throw new Error("This session changed in another tab. Refresh the list.");
     const clean = __spreadProps(__spreadValues({}, libraryMetadata(__spreadValues(__spreadValues({}, entry), patch))), { title: libraryTitle(patch.title === void 0 ? entry.title : patch.title) });
     const writes = entry.records.map((record) => __spreadProps(__spreadValues({}, record), { next: JSON.stringify(__spreadValues(__spreadValues({}, JSON.parse(record.value)), clean)) }));
     const bytes = state.bytes + writes.reduce((total, write) => total + new Blob([write.next]).size - new Blob([write.value]).size, 0);
@@ -2863,7 +2863,7 @@ underlying system, so should run in the browser, Node, or Plask.
     const touched = [];
     try {
       for (const write of writes) {
-        if (GM_getValue(write.key, null) !== write.value) throw new Error("This recording changed in another tab. Refresh the list.");
+        if (GM_getValue(write.key, null) !== write.value) throw new Error("This session changed in another tab. Refresh the list.");
         touched.push(write);
         GM_setValue(write.key, write.next);
       }
@@ -2877,7 +2877,7 @@ underlying system, so should run in the browser, Node, or Plask.
           failed = true;
         }
       }
-      if (failed) throw new Error("Some recording edits could not be undone. Refresh the library before retrying.");
+      if (failed) throw new Error("Some session edits could not be undone. Refresh the library before retrying.");
       throw error;
     }
   }
@@ -4842,6 +4842,191 @@ underlying system, so should run in the browser, Node, or Plask.
     }
   }
 
+  // src/analysis-chart-data.js
+  function analysisSampleIndex(times, time) {
+    let left = 0, right = times.length;
+    while (left < right) {
+      const mid = left + right >>> 1;
+      if (times[mid] <= time) left = mid + 1;
+      else right = mid;
+    }
+    return left - 1;
+  }
+  function inspectAnalysisSample(series, time) {
+    const index = analysisSampleIndex(series.times, time);
+    if (index < 0 || time > series.times.at(-1)) return { kind: "outside", index: -1, value: null, timestamp: null };
+    if (series.times[index] !== time && series.breaks[index + 1]) return { kind: "gap", index, value: null, timestamp: null };
+    return { kind: series.times[index] === time ? "sample" : "held", index, value: series.values[index], timestamp: series.timestamps[index] };
+  }
+  function buildAnalysisPlot(series, start, end, width) {
+    const { times, values, breaks } = series;
+    const points = [];
+    let bucket = null, move = true, maximum = 1, last = -1;
+    function flush() {
+      if (!bucket) return;
+      const indices = [bucket.first, bucket.low, bucket.high, bucket.last].sort((a, b) => a - b);
+      indices.forEach((index, i) => {
+        if (i && index === indices[i - 1]) return;
+        points.push({ time: Math.max(start, times[index]), value: values[index], index, move });
+        move = false;
+      });
+      bucket = null;
+    }
+    let first = Math.max(0, analysisSampleIndex(times, start));
+    while (first > 0 && times[first - 1] === start) first--;
+    for (let i = first; i < times.length && times[i] <= end; i++) {
+      if (times[i] < start && (i + 1 === times.length || breaks[i + 1])) continue;
+      const column = end > start ? Math.floor((Math.max(start, times[i]) - start) / (end - start) * width) : 0;
+      if (breaks[i]) {
+        flush();
+        move = true;
+      }
+      if (!bucket || bucket.column !== column) {
+        flush();
+        bucket = { column, first: i, last: i, low: i, high: i };
+      } else {
+        bucket.last = i;
+        if (values[i] < values[bucket.low]) bucket.low = i;
+        if (values[i] > values[bucket.high]) bucket.high = i;
+      }
+      maximum = Math.max(maximum, values[i]);
+      last = i;
+    }
+    flush();
+    if (last >= 0 && last + 1 < times.length && !breaks[last + 1] && times[last + 1] > end && times[last] < end) {
+      points.push({ time: end, value: values[last], index: last, move: false });
+    }
+    return { points, maximum };
+  }
+  function zoomAnalysisWindow(span, start, end, factor, anchor) {
+    if (!Number.isFinite(span) || span < 0 || !Number.isFinite(factor) || factor <= 0) throw new Error("Invalid chart range.");
+    if (!span) return [0, 0];
+    const width = Math.min(span, Math.max(Math.min(1e3, span), (end - start) * factor));
+    const center = Math.max(start, Math.min(end, anchor));
+    const ratio = end > start ? (center - start) / (end - start) : 0.5;
+    const left = Math.max(0, Math.min(span - width, center - width * ratio));
+    return [left, left + width];
+  }
+
+  // src/analysis-clock-data.js
+  var CLOCK_DAY_MS = 24 * 60 * 60 * 1e3;
+  function clockTime(timestamp) {
+    const date = new Date(timestamp);
+    return ((date.getHours() * 60 + date.getMinutes()) * 60 + date.getSeconds()) * 1e3 + date.getMilliseconds();
+  }
+  function clockSessionDuration(archive) {
+    const { timestamps } = archive.session.history;
+    if (!timestamps.length) return 0;
+    let first = Infinity, last = -Infinity;
+    for (const time of timestamps) {
+      first = Math.min(first, time);
+      last = Math.max(last, time);
+    }
+    const start = archive.session.sessionStartedAt;
+    if (typeof start === "number") first = Math.min(first, start);
+    return Math.max(last - first, archive.session.pausedElapsedTime || 0);
+  }
+  function clockPieces(from, to) {
+    const pieces = [];
+    while (from < to) {
+      const date = new Date(from), offset = date.getTimezoneOffset();
+      date.setHours(24, 0, 0, 0);
+      let end = Math.min(to, date.getTime());
+      if (new Date(end - 1).getTimezoneOffset() !== offset) {
+        let lo = from, hi = end;
+        while (hi - lo > 1) {
+          const mid = Math.floor((lo + hi) / 2);
+          if (new Date(mid).getTimezoneOffset() === offset) lo = mid;
+          else hi = mid;
+        }
+        end = hi;
+      }
+      const start = clockTime(from);
+      pieces.push({ start, end: Math.min(CLOCK_DAY_MS, start + end - from) });
+      from = end;
+    }
+    return pieces;
+  }
+  function projectClockSeries(source) {
+    const result = { segments: [], gaps: [], navigation: [], clockChanged: false };
+    let segment = null;
+    function begin() {
+      segment = { times: [], values: [], breaks: [], timestamps: [], indices: [], real: [] };
+      result.segments.push(segment);
+    }
+    function add(time, index, real) {
+      segment.times.push(time);
+      segment.values.push(source.values[index]);
+      segment.breaks.push(false);
+      segment.timestamps.push(source.timestamps[index]);
+      segment.indices.push(index);
+      segment.real.push(real);
+    }
+    for (let i = 0; i < source.timestamps.length; i++) {
+      const current = source.timestamps[i], time = clockTime(current);
+      result.navigation.push(time);
+      if (!i) {
+        begin();
+        add(time, i, true);
+        continue;
+      }
+      const previous = source.timestamps[i - 1];
+      if (current < previous) {
+        result.clockChanged = true;
+        begin();
+        add(time, i, true);
+        continue;
+      }
+      if (current === previous) {
+        if (source.breaks[i]) begin();
+        add(time, i, true);
+        continue;
+      }
+      const pieces = clockPieces(previous, current);
+      if (new Date(previous).getTimezoneOffset() !== new Date(current).getTimezoneOffset()) result.clockChanged = true;
+      if (source.breaks[i]) {
+        result.gaps.push(...pieces);
+        begin();
+        add(time, i, true);
+        continue;
+      }
+      pieces.forEach((piece, j) => {
+        if (j) {
+          begin();
+          add(piece.start, i - 1, false);
+        }
+        add(piece.end, i - 1, false);
+      });
+      if (time !== segment.times.at(-1)) begin();
+      add(time, i, true);
+    }
+    result.navigation = [...new Set(result.navigation)].sort((a, b) => a - b);
+    return result;
+  }
+  function inspectClockSample(projection, time) {
+    const matches = [];
+    for (const segment of projection.segments) {
+      if (time === segment.times.at(-1) && !segment.real.at(-1)) continue;
+      const sample = inspectAnalysisSample(segment, time);
+      if (sample.value === null) continue;
+      const index = segment.indices[sample.index], timestamp = sample.timestamp;
+      const kind = sample.kind === "sample" && segment.real[sample.index] ? "sample" : "held";
+      if (!matches.some((match) => match.index === index)) matches.push({ kind, index, value: sample.value, timestamp });
+    }
+    return { matches, kind: matches.length ? "covered" : projection.gaps.some((gap) => time >= gap.start && time <= gap.end) ? "gap" : "outside" };
+  }
+  function buildClockPlot(projection, start, end, width) {
+    const points = [];
+    let maximum = 1;
+    for (const segment of projection.segments) {
+      if (segment.times[0] > end || segment.times.at(-1) < start) continue;
+      const plot = buildAnalysisPlot(segment, start, end, width);
+      points.push(...plot.points);
+      maximum = Math.max(maximum, plot.maximum);
+    }
+    return { points, maximum };
+  }
+
   // src/analysis-follow.js
   function createAnalysisFollower() {
     let enabled = true, identity = null, signature = "", expired = false;
@@ -5180,7 +5365,7 @@ underlying system, so should run in the browser, Node, or Plask.
   }
   var MAX_COMPARE_RECORDINGS = 6;
   function compareRecordingSet(archives, metric = "room", threshold = 100, sharedLength = true) {
-    if (!archives.length || archives.length > MAX_COMPARE_RECORDINGS) throw new Error("Compare up to six recordings.");
+    if (!archives.length || archives.length > MAX_COMPARE_RECORDINGS) throw new Error("Compare up to six sessions.");
     const spans = archives.map((archive) => analysisSeries(archive, metric).times.at(-1) || 0);
     const limitMs = sharedLength ? Math.min(...spans) : Infinity;
     return {
@@ -5310,7 +5495,7 @@ underlying system, so should run in the browser, Node, or Plask.
       if (saved !== null) preferences[name] = name === "geometry" || name === "collapsedRows" ? JSON.parse(saved) : saved;
     }
     const library = includeLibrary ? readSessionLibrary() : { entries: [], damaged: [] };
-    if (library.damaged.length && !allowPartialLibrary) throw new Error("The library contains unreadable recordings. Choose the healthy-recordings option to make a partial backup, or export ATH/preferences separately.");
+    if (library.damaged.length && !allowPartialLibrary) throw new Error("The library contains unreadable sessions. Choose the healthy-sessions option to make a partial backup, or export ATH/preferences separately.");
     const rawAnalysis = GM_getValue(ANALYSIS_PREFERENCE_KEY, null);
     const modelState = includeLibrary ? readModelFavorites(library.entries) : { favorites: /* @__PURE__ */ new Set(), errors: [] };
     if (modelState.errors.length) throw new Error("Some model favorites could not be read. Refresh the library or back up without Library until they can be read.");
@@ -5770,6 +5955,35 @@ underlying system, so should run in the browser, Node, or Plask.
   }
 
   // src/library-query.js
+  function createModelCardReader() {
+    const cache = /* @__PURE__ */ new WeakMap();
+    function coverage(history) {
+      var _a;
+      const immutable = Object.isFrozen(history) && Object.isFrozen(history.timestamps) && (!history.breaks || Object.isFrozen(history.breaks));
+      if (immutable && cache.has(history)) return cache.get(history);
+      let previous = 0, coveredMs = 0;
+      const origin = history.timestamps[0];
+      for (let i = 1; i < history.timestamps.length; i++) {
+        const next = Math.max(previous, history.timestamps[i] - origin, 0);
+        if (!((_a = history.breaks) == null ? void 0 : _a[i])) coveredMs += next - previous;
+        previous = next;
+      }
+      if (immutable) cache.set(history, coveredMs);
+      return coveredMs;
+    }
+    function read(entries) {
+      let first = Infinity, latest = -Infinity, coveredMs = 0;
+      for (const entry of entries) {
+        const history = entry.archive.session.history, start = history.timestamps[0];
+        if (start === void 0) continue;
+        first = Math.min(first, start);
+        latest = Math.max(latest, start);
+        coveredMs += coverage(history);
+      }
+      return { first: first === Infinity ? null : first, latest: latest === -Infinity ? null : latest, coveredMs };
+    }
+    return { read };
+  }
   function libraryDateBoundary(text, after = false) {
     if (!text) return after ? Infinity : -Infinity;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) throw new Error("Use a valid calendar date.");
@@ -5851,7 +6065,7 @@ underlying system, so should run in the browser, Node, or Plask.
       if (selected.size) selectionTools.open = true;
       selection.textContent = selected.size + " selected" + ([...selected].some((id) => !matching.some((entry) => entry.id === id)) ? " · includes hidden sessions" : "");
       compare.disabled = selected.size < 2 || selected.size > 6;
-      compare.title = "Select 2–6 recordings to compare";
+      compare.title = "Select 2–6 sessions to compare";
       download.disabled = !selected.size;
       for (const row of list.querySelectorAll("[data-library-id]")) row.querySelector("input[type=checkbox]").checked = selected.has(row.dataset.libraryId);
     }
@@ -5891,7 +6105,7 @@ underlying system, so should run in the browser, Node, or Plask.
         favoriteButton(heading, room);
         toolButton(heading, "History overview", () => actions.history(room), "tools-model-history").className = "tools-primary";
       }
-      if (!matching.length) toolNode(list, "p", entries.length ? "No matching recordings." : "Your library is empty. Keep a recording above or import a session file.", "tools-muted");
+      if (!matching.length) toolNode(list, "p", entries.length ? "No matching sessions." : "Your library is empty. Keep a session above or import a session file.", "tools-muted");
       if (browsingFolders) for (const room2 of visible.slice(0, shown)) {
         const recordings = folders.get(room2), row = toolNode(list, "div", void 0, "tools-folder");
         const open = toolButton(row, "", () => {
@@ -5903,10 +6117,12 @@ underlying system, so should run in the browser, Node, or Plask.
           document.getElementById("tools-library-all-models").focus();
         }, "tools-folder-" + room2);
         open.className = "tools-folder-open";
-        open.setAttribute("aria-label", "Open recordings for " + room2);
+        open.setAttribute("aria-label", "Open sessions for " + room2);
         toolNode(open, "span", "▱  " + room2, "tools-folder-name");
-        const latest = Math.max(...recordings.map((entry) => entry.archive.session.history.timestamps[0]));
-        toolNode(open, "span", recordings.length + (recordings.length === 1 ? " recording" : " recordings") + " · Latest " + new Date(latest).toLocaleDateString(), "tools-folder-meta");
+        const summary = actions.cardSummary(recordings);
+        toolNode(open, "span", recordings.length + (recordings.length === 1 ? " session" : " sessions") + " · First " + new Date(summary.first).toLocaleDateString() + " · Latest " + new Date(summary.latest).toLocaleDateString(), "tools-folder-meta");
+        const covered = toolNode(open, "span", "Total covered time " + actions.duration(summary.coveredMs), "tools-folder-meta");
+        covered.title = "Sum of covered intervals in sessions matching the current filters. Gaps and time after the final sample are excluded; overlapping sessions are counted separately.";
         favoriteButton(row, room2, true);
       }
       else for (const entry of visible.slice(0, shown)) {
@@ -5936,7 +6152,7 @@ underlying system, so should run in the browser, Node, or Plask.
         }
         renderRecordingNotes(more, entry, actions);
       }
-      if (visible.length > 50) toolNode(list, "p", "Showing " + Math.min(shown, visible.length) + " of " + visible.length + (browsingFolders ? " model folders." : " matching recordings."), "tools-muted");
+      if (visible.length > 50) toolNode(list, "p", "Showing " + Math.min(shown, visible.length) + " of " + visible.length + (browsingFolders ? " model folders." : " matching sessions."), "tools-muted");
       if (shown < visible.length) toolButton(list, "Show " + Math.min(50, visible.length - shown) + " more", () => {
         shown += 50;
         rows();
@@ -5946,7 +6162,7 @@ underlying system, so should run in the browser, Node, or Plask.
     rows();
   }
   function renderRecordingNotes(parent, entry, actions, missing = false) {
-    const label = toolNode(parent, "label", "Recording notes "), note = toolNode(label, "textarea");
+    const label = toolNode(parent, "label", "Session notes "), note = toolNode(label, "textarea");
     note.maxLength = 2e3;
     note.rows = 3;
     note.value = actions.note(entry).value;
@@ -5959,7 +6175,7 @@ underlying system, so should run in the browser, Node, or Plask.
       const draft = actions.note(entry);
       save.disabled = missing || !draft.dirty;
       discard.disabled = !draft.dirty;
-      status.textContent = missing ? "Recording changed or unavailable. Copy this draft before discarding it." : draft.conflict ? "Saved notes changed elsewhere. Your draft is still here; saving will ask before replacing them." : draft.dirty ? "Unsaved note — kept in this tab until you save or discard it." : "Notes saved.";
+      status.textContent = missing ? "Session changed or unavailable. Copy this draft before discarding it." : draft.conflict ? "Saved notes changed elsewhere. Your draft is still here; saving will ask before replacing them." : draft.dirty ? "Unsaved note — kept in this tab until you save or discard it." : "Notes saved.";
     }
     note.oninput = () => {
       actions.editNote(entry, note.value);
@@ -5970,33 +6186,33 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/library-transfer.js
   function libraryImportBundle(values, version) {
-    if (!Array.isArray(values) || !values.length || values.length > LIBRARY_TRANSFER_MAX_COUNT) throw new Error("Choose 1–10,000 recording files or library bundles.");
+    if (!Array.isArray(values) || !values.length || values.length > LIBRARY_TRANSFER_MAX_COUNT) throw new Error("Choose 1–10,000 session files or library bundles.");
     if (new Blob([JSON.stringify(values)]).size > BACKUP_MAX_BYTES) throw new Error("Selected files exceed 300 MB.");
     const library = [], favoriteModels = /* @__PURE__ */ new Set();
     for (const value of values) {
       if (value && value.format === "TierScopeBackup") {
         const backup = validateTierScopeBackup(value);
-        if (backup.recovery) throw new Error("Use Backup to review and restore a partial backup with missing recordings.");
+        if (backup.recovery) throw new Error("Use Backup to review and restore a partial backup with missing sessions.");
         library.push(...backup.library);
         backup.favoriteModels.forEach((room) => favoriteModels.add(room));
       } else {
         const archive = validateSessionFile(value);
         library.push({ title: archive.room, archive });
       }
-      if (library.length > LIBRARY_TRANSFER_MAX_COUNT) throw new Error("Import up to 10,000 recordings at once.");
+      if (library.length > LIBRARY_TRANSFER_MAX_COUNT) throw new Error("Import up to 10,000 sessions at once.");
     }
-    if (!library.length) throw new Error("These files contain no library recordings.");
+    if (!library.length) throw new Error("These files contain no library sessions.");
     return validateTierScopeBackup({ format: "TierScopeBackup", formatVersion: 1, producerVersion: version, rooms: [], preferences: {}, library, favoriteModels: [...favoriteModels] });
   }
   function importLibraryBundle(bundle) {
     return restoreTierScopeBackup(bundle, { highs: false, preferences: false, library: true });
   }
   function exportLibrarySelection(ids, version) {
-    if (!ids.length || new Set(ids).size !== ids.length) throw new Error("Select one or more recordings.");
+    if (!ids.length || new Set(ids).size !== ids.length) throw new Error("Select one or more sessions.");
     const state = readSessionLibrary();
     const library = ids.map((id) => {
       const entry = state.entries.find((entry2) => entry2.id === id);
-      if (!entry) throw new Error("A selected recording changed or could not be read. Refresh and select it again.");
+      if (!entry) throw new Error("A selected session changed or could not be read. Refresh and select it again.");
       return { title: entry.title, notes: libraryMetadata(entry).notes, archive: entry.archive };
     });
     const rooms = new Set(library.map((entry) => entry.archive.room.toLowerCase())), models = readModelFavorites(state.entries);
@@ -6012,77 +6228,14 @@ underlying system, so should run in the browser, Node, or Plask.
     });
   }
 
-  // src/analysis-chart-data.js
-  function analysisSampleIndex(times, time) {
-    let left = 0, right = times.length;
-    while (left < right) {
-      const mid = left + right >>> 1;
-      if (times[mid] <= time) left = mid + 1;
-      else right = mid;
-    }
-    return left - 1;
-  }
-  function inspectAnalysisSample(series, time) {
-    const index = analysisSampleIndex(series.times, time);
-    if (index < 0 || time > series.times.at(-1)) return { kind: "outside", index: -1, value: null, timestamp: null };
-    if (series.times[index] !== time && series.breaks[index + 1]) return { kind: "gap", index, value: null, timestamp: null };
-    return { kind: series.times[index] === time ? "sample" : "held", index, value: series.values[index], timestamp: series.timestamps[index] };
-  }
-  function buildAnalysisPlot(series, start, end, width) {
-    const { times, values, breaks } = series;
-    const points = [];
-    let bucket = null, move = true, maximum = 1, last = -1;
-    function flush() {
-      if (!bucket) return;
-      const indices = [bucket.first, bucket.low, bucket.high, bucket.last].sort((a, b) => a - b);
-      indices.forEach((index, i) => {
-        if (i && index === indices[i - 1]) return;
-        points.push({ time: Math.max(start, times[index]), value: values[index], index, move });
-        move = false;
-      });
-      bucket = null;
-    }
-    let first = Math.max(0, analysisSampleIndex(times, start));
-    while (first > 0 && times[first - 1] === start) first--;
-    for (let i = first; i < times.length && times[i] <= end; i++) {
-      if (times[i] < start && (i + 1 === times.length || breaks[i + 1])) continue;
-      const column = end > start ? Math.floor((Math.max(start, times[i]) - start) / (end - start) * width) : 0;
-      if (breaks[i]) {
-        flush();
-        move = true;
-      }
-      if (!bucket || bucket.column !== column) {
-        flush();
-        bucket = { column, first: i, last: i, low: i, high: i };
-      } else {
-        bucket.last = i;
-        if (values[i] < values[bucket.low]) bucket.low = i;
-        if (values[i] > values[bucket.high]) bucket.high = i;
-      }
-      maximum = Math.max(maximum, values[i]);
-      last = i;
-    }
-    flush();
-    if (last >= 0 && last + 1 < times.length && !breaks[last + 1] && times[last + 1] > end && times[last] < end) {
-      points.push({ time: end, value: values[last], index: last, move: false });
-    }
-    return { points, maximum };
-  }
-  function zoomAnalysisWindow(span, start, end, factor, anchor) {
-    if (!Number.isFinite(span) || span < 0 || !Number.isFinite(factor) || factor <= 0) throw new Error("Invalid chart range.");
-    if (!span) return [0, 0];
-    const width = Math.min(span, Math.max(Math.min(1e3, span), (end - start) * factor));
-    const center = Math.max(start, Math.min(end, anchor));
-    const ratio = end > start ? (center - start) / (end - start) : 0.5;
-    const left = Math.max(0, Math.min(span - width, center - width * ratio));
-    return [left, left + width];
-  }
-
   // src/analysis-chart-view.js
-  function renderAnalysisChart(parent, series, labels, axisMs, metricLabel, savedState = null) {
+  function renderAnalysisChart(parent, series, labels, axisMs, metricLabel, savedState = null, axisMode = "elapsed") {
+    const element = toolNode(parent, "div");
+    element.id = "tools-chart-view";
+    parent = element;
     let start = 0, end = axisMs, cursor = 0, pinned = false, drag = null, disposed = false;
     const hidden = /* @__PURE__ */ new Set(), controls = toolNode(parent, "div", void 0, "tools-actions");
-    if (savedState) {
+    if (savedState && (savedState.axisMode || "elapsed") === axisMode) {
       ({ start, end, cursor, pinned } = savedState);
       savedState.hidden.forEach((index) => {
         if (index >= 0 && index < series.length) hidden.add(index);
@@ -6093,6 +6246,12 @@ underlying system, so should run in the browser, Node, or Plask.
     let plotCache = null;
     const number = (value) => value.toLocaleString(void 0, { maximumFractionDigits: 2 });
     const elapsed = (ms) => number(ms / 6e4) + "m";
+    const clock = (ms) => {
+      const seconds = Math.floor(ms / 1e3), pad = (n) => String(n).padStart(2, "0");
+      return pad(Math.floor(seconds / 3600)) + ":" + pad(Math.floor(seconds / 60) % 60) + (end - start < 6e4 ? ":" + pad(seconds % 60) : "");
+    };
+    const axisLabel = (ms) => axisMode === "clock" ? clock(ms) : elapsed(ms);
+    const chartLabel = () => metricLabel + (axisMode === "clock" ? " by local time of day, 00:00 to 24:00." : " by real elapsed time.") + " Arrow keys inspect samples; plus and minus zoom; Home and End jump to visible endpoints.";
     const zoomIn = toolButton(controls, "Zoom +", () => zoom(0.5), "tools-chart-zoom-in");
     const zoomOut = toolButton(controls, "Zoom −", () => zoom(2), "tools-chart-zoom-out");
     const panLeft = toolButton(controls, "‹", () => pan(-1), "tools-chart-pan-left");
@@ -6123,7 +6282,7 @@ underlying system, so should run in the browser, Node, or Plask.
       swatch.setAttribute("aria-hidden", "true");
       swatch.style.borderTopStyle = i === newest ? "solid" : "dashed";
       toolNode(control, "span", String.fromCharCode(65 + i) + (series.length > 1 && i === newest ? " · Latest" : "") + " · " + label);
-      control.title = (series.length > 1 ? i === newest ? "Latest recording — solid pink: " : "Earlier recording — dashed: " : "") + label;
+      control.title = (series.length > 1 ? i === newest ? "Latest session — solid pink: " : "Earlier session — dashed: " : "") + label;
       check.onchange = () => {
         if (!check.checked && hidden.size === series.length - 1) {
           check.checked = true;
@@ -6140,17 +6299,17 @@ underlying system, so should run in the browser, Node, or Plask.
     canvas.tabIndex = 0;
     canvas.setAttribute("role", "img");
     parent.insertBefore(canvas, legend);
-    canvas.setAttribute("aria-label", metricLabel + " by real elapsed time. Arrow keys inspect samples; plus and minus zoom; Home and End jump to visible endpoints.");
+    canvas.setAttribute("aria-label", chartLabel());
     const range = toolNode(parent, "p", "", "tools-muted");
     range.id = "tools-chart-range";
     parent.insertBefore(range, legend);
     const settings = toolNode(parent, "div");
-    toolNode(parent, "p", "Aligned from each recording’s first retained sample, using real elapsed time. Move to inspect; click to pin, drag to zoom, or use the buttons and arrow keys. Gaps have no assumed samples. Hidden lines and zoom do not change summary totals or the shared comparison length.", "tools-muted");
+    const hint = toolNode(parent, "p", "", "tools-muted");
     const scroll = toolNode(parent, "div", void 0, "tools-scroll"), table = toolNode(scroll, "table");
     table.id = "tools-chart-inspection";
     const caption = toolNode(table, "caption");
     const header = toolNode(toolNode(table, "thead"), "tr");
-    ["Recording", "Count", "Sample timestamp / status"].forEach((text) => {
+    ["Session", "Count", "Sample timestamp / status"].forEach((text) => {
       toolNode(header, "th", text).scope = "col";
     });
     const body = toolNode(table, "tbody");
@@ -6179,15 +6338,22 @@ underlying system, so should run in the browser, Node, or Plask.
     }
     function inspect() {
       if (disposed) return;
-      caption.textContent = "Cursor " + elapsed(cursor) + (pinned ? " · pinned" : "");
+      caption.textContent = "Cursor " + axisLabel(cursor) + (pinned ? " · pinned" : "");
       pin.textContent = pinned ? "Unpin" : "Pin";
       pin.setAttribute("aria-label", pinned ? "Unpin inspection cursor" : "Pin inspection cursor");
       pin.setAttribute("aria-pressed", String(pinned));
       series.forEach((s, i) => {
-        const sample = inspectAnalysisSample(s, cursor), row = rows[i];
+        const row = rows[i];
         row.row.hidden = hidden.has(i);
-        row.value.textContent = sample.value === null ? "—" : number(sample.value);
-        row.detail.textContent = sample.kind === "gap" ? "Recording gap — no sample" : sample.kind === "outside" ? "Outside recording" : new Date(sample.timestamp).toLocaleString() + " · sample " + (sample.index + 1) + (sample.kind === "held" ? " (held until next sample)" : "");
+        if (axisMode === "clock") {
+          const sample = inspectClockSample(s.clock, cursor);
+          row.value.textContent = sample.matches.length ? sample.matches.map((match) => number(match.value)).join(" / ") : "—";
+          row.detail.textContent = sample.matches.length ? sample.matches.map((match) => new Date(match.timestamp).toLocaleString(void 0, { timeZoneName: "shortOffset" }) + " · sample " + (match.index + 1) + (match.kind === "held" ? " (held until next sample)" : "")).join(" ; ") : sample.kind === "gap" ? "Session gap — no sample" : "Outside session at this clock time";
+        } else {
+          const sample = inspectAnalysisSample(s, cursor);
+          row.value.textContent = sample.value === null ? "—" : number(sample.value);
+          row.detail.textContent = sample.kind === "gap" ? "Session gap — no sample" : sample.kind === "outside" ? "Outside session" : new Date(sample.timestamp).toLocaleString() + " · sample " + (sample.index + 1) + (sample.kind === "held" ? " (held until next sample)" : "");
+        }
       });
       const ctx = canvas.getContext("2d");
       ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
@@ -6228,7 +6394,7 @@ underlying system, so should run in the browser, Node, or Plask.
       }
       const plots = series.map((s, j) => {
         var _a2;
-        return hidden.has(j) ? null : (_a2 = plotCache.plots)[j] || (_a2[j] = buildAnalysisPlot(s, start, end, right - left));
+        return hidden.has(j) ? null : (_a2 = plotCache.plots)[j] || (_a2[j] = axisMode === "clock" ? buildClockPlot(s.clock, start, end, right - left) : buildAnalysisPlot(s, start, end, right - left));
       });
       const maximum = Math.max(1, ...plots.map((plot) => plot ? plot.maximum : 1));
       ctx.strokeStyle = style.getPropertyValue("--panel-divider").trim();
@@ -6243,10 +6409,17 @@ underlying system, so should run in the browser, Node, or Plask.
         ctx.textAlign = "right";
         ctx.fillText(number(maximum * step / 2), left - 5, y + 3);
       }
-      ctx.textAlign = "left";
-      ctx.fillText(elapsed(start), left, bottom + 20);
-      ctx.textAlign = "right";
-      ctx.fillText(elapsed(end), right, bottom + 20);
+      if (axisMode === "clock") {
+        for (let step = 0; step <= 4; step++) {
+          ctx.textAlign = step === 0 ? "left" : step === 4 ? "right" : "center";
+          ctx.fillText(clock(start + (end - start) * step / 4), left + (right - left) * step / 4, bottom + 20);
+        }
+      } else {
+        ctx.textAlign = "left";
+        ctx.fillText(elapsed(start), left, bottom + 20);
+        ctx.textAlign = "right";
+        ctx.fillText(elapsed(end), right, bottom + 20);
+      }
       for (const j of newestFirst.slice().reverse()) {
         const color = colors[colorIndices[j]];
         legendLabels[j].style.color = color;
@@ -6278,7 +6451,8 @@ underlying system, so should run in the browser, Node, or Plask.
           ctx.fill();
         });
       }
-      range.textContent = "Chart window " + elapsed(start) + " – " + elapsed(end) + " · full comparison/recording range " + elapsed(axisMs);
+      range.textContent = "Chart window " + axisLabel(start) + " – " + axisLabel(end) + (axisMode === "clock" ? " · 24h local clock" : " · full comparison/session range " + elapsed(axisMs));
+      hint.textContent = (axisMode === "clock" ? "Aligned by local time of day. Midnight crossings continue at the start of the chart. Clock changes are separate segments; repeated clock times can show multiple dated values. Statistics use full sessions." : "Aligned from each session’s first retained sample, using real elapsed time. Hidden lines and zoom do not change summary totals or the shared comparison length.") + " Move to inspect; click to pin, drag to zoom, or use the buttons and arrow keys. Gaps have no assumed samples.";
       zoomIn.disabled = end - start <= Math.min(1e3, axisMs);
       zoomOut.disabled = end - start >= axisMs;
       panLeft.disabled = start <= 0;
@@ -6340,7 +6514,7 @@ underlying system, so should run in the browser, Node, or Plask.
       else {
         let target = event.key === "ArrowRight" ? end : start;
         for (let j = 0; j < series.length; j++) if (!hidden.has(j)) {
-          const times = series[j].times, index = analysisSampleIndex(times, cursor);
+          const times = axisMode === "clock" ? series[j].clock.navigation : series[j].times, index = analysisSampleIndex(times, cursor);
           if (event.key === "ArrowRight" && index + 1 < times.length) target = Math.min(target, times[index + 1]);
           if (event.key === "ArrowLeft") {
             let i = index;
@@ -6366,19 +6540,26 @@ underlying system, so should run in the browser, Node, or Plask.
     }
     draw();
     return {
+      element,
       canvas,
       settings,
       draw,
-      capture: () => ({ start, end, cursor, pinned, axisMs, hidden: [...hidden] }),
-      update(nextSeries, nextAxis, nextMetricLabel) {
+      capture: () => ({ start, end, cursor, pinned, axisMs, axisMode, hidden: [...hidden] }),
+      update(nextSeries, nextAxis, nextMetricLabel, nextMode = "elapsed") {
         if (disposed) return;
         const previousAxis = axisMs;
         series = nextSeries;
         axisMs = nextAxis;
         metricLabel = nextMetricLabel;
-        fitWindow(previousAxis);
+        if (axisMode !== nextMode) {
+          axisMode = nextMode;
+          start = 0;
+          end = axisMs;
+          cursor = 0;
+          pinned = false;
+        } else fitWindow(previousAxis);
         drag = null;
-        canvas.setAttribute("aria-label", metricLabel + " by real elapsed time. Arrow keys inspect samples; plus and minus zoom; Home and End jump to visible endpoints.");
+        canvas.setAttribute("aria-label", chartLabel());
         draw();
       },
       dispose() {
@@ -6473,11 +6654,11 @@ underlying system, so should run in the browser, Node, or Plask.
       return element;
     }
     if (!recordings.length) {
-      node(parent, "p", "No saved recordings for this model. Return to Recordings to keep or import one.", "tools-muted");
+      node(parent, "p", "No saved sessions for this model. Return to Sessions to keep or import one.", "tools-muted");
       return null;
     }
     const controls = node(parent, "div", void 0, "tools-actions");
-    const label = node(controls, "label", "Recording "), select = node(label, "select");
+    const label = node(controls, "label", "Session "), select = node(label, "select");
     select.id = "tools-history-recording";
     for (const record of [...recordings].reverse()) {
       const option = node(select, "option", date(record.time) + " · " + record.title);
@@ -6498,23 +6679,23 @@ underlying system, so should run in the browser, Node, or Plask.
     comparisonHint.id = "tools-history-compare-hint";
     compare.setAttribute("aria-describedby", comparisonHint.id);
     if (actions.metricControl) actions.metricControl(parent);
-    const legend = node(parent, "p", "● Average · ◆ Peak in recording", "tools-history-legend");
+    const legend = node(parent, "p", "● Average · ◆ Peak in session", "tools-history-legend");
     legend.id = "tools-history-legend";
     const canvas = node(parent, "canvas");
     canvas.id = "tools-history-chart";
     canvas.setAttribute("role", "img");
-    canvas.setAttribute("aria-label", actions.metricLabel + " across saved recordings, positioned by the date of their first retained sample. Use the recording selector above or the table below for the values.");
+    canvas.setAttribute("aria-label", actions.metricLabel + " across saved sessions, positioned by the date of their first retained sample. Use the session selector above or the table below for the values.");
     canvas.setAttribute("aria-describedby", legend.id);
-    node(parent, "p", "One point per recording, using its first retained sample date. Averages use real covered time; gaps and time after the final sample are excluded. Select a point or use the recording selector above.", "tools-muted");
-    node(parent, "h3", "Across these recordings");
+    node(parent, "p", "One point per session, using its first retained sample date. Averages use real covered time; gaps and time after the final sample are excluded. Select a point or use the session selector above.", "tools-muted");
+    node(parent, "h3", "Across these sessions");
     const cards = node(parent, "dl", void 0, "tools-history-stats");
     cards.id = "tools-history-stats";
     function updateCards() {
       cards.replaceChildren();
       for (const [label2, value] of [
-        ["Recordings", recordings.length + " / " + overview.totalCount],
+        ["Sessions", recordings.length + " / " + overview.totalCount],
         ["Time-weighted average", number(overview.mean)],
-        ["Peak in recordings", number(overview.peak)],
+        ["Peak in sessions", number(overview.peak)],
         ["Token holders / registered", percent(overview.tokenShare)],
         ["Covered time (sum)", actions.duration(overview.coveredMs)],
         ["Excluded gaps (sum)", actions.duration(overview.gapMs)]
@@ -6525,13 +6706,13 @@ underlying system, so should run in the browser, Node, or Plask.
       }
     }
     updateCards();
-    node(parent, "p", "Based on the recordings shown here, including new scans while Follow live is on. Token share uses registered-viewer time. These peaks are not ATH. Full-session highs may predate retained samples.", "tools-muted");
-    const warning = node(parent, "p", "Some recording time ranges overlap. Totals sum recordings and may count the same period more than once.", "tools-muted");
+    node(parent, "p", "Based on the sessions shown here, including new scans while Follow live is on. Token share uses registered-viewer time. These peaks are not ATH. Full-session highs may predate retained samples.", "tools-muted");
+    const warning = node(parent, "p", "Some session time ranges overlap. Totals sum sessions and may count the same period more than once.", "tools-muted");
     warning.id = "tools-history-overlap";
     warning.hidden = !overview.overlaps;
     const detail = node(parent, "section", void 0, "tools-current");
     detail.id = "tools-history-detail";
-    detail.setAttribute("aria-label", "Selected recording");
+    detail.setAttribute("aria-label", "Selected session");
     const heading = node(detail, "strong"), meta = node(detail, "p", void 0, "tools-muted");
     const values = node(detail, "p");
     values.setAttribute("aria-live", "polite");
@@ -6598,17 +6779,17 @@ underlying system, so should run in the browser, Node, or Plask.
       legend.style.color = accent;
       legend.replaceChildren();
       node(legend, "span", "● Average");
-      node(legend, "span", " ◆ Peak in recording").style.color = secondary;
+      node(legend, "span", " ◆ Peak in session").style.color = secondary;
     }
     function updateSelection() {
       const record = selected();
       actions.select(record.id);
       heading.textContent = record.title;
       meta.textContent = date(record.time) + " · " + record.samples.toLocaleString() + " samples";
-      values.textContent = "Average " + number(record.mean) + " · Peak in recording " + number(record.peak) + " · Full-session high " + number(record.sessionPeak) + " · Token holders / registered " + percent(record.tokenShare) + " · Covered " + actions.duration(record.coveredMs) + " · Gaps " + actions.duration(record.gapMs);
+      values.textContent = "Average " + number(record.mean) + " · Peak in session " + number(record.peak) + " · Full-session high " + number(record.sessionPeak) + " · Token holders / registered " + percent(record.tokenShare) + " · Covered " + actions.duration(record.coveredMs) + " · Gaps " + actions.duration(record.gapMs);
       const previousCount = record.comparisonIds.length - 1;
       compare.disabled = previousCount === 0;
-      comparisonHint.textContent = previousCount ? "Compare this recording with " + previousCount + " earlier " + (previousCount === 1 ? "recording" : "recordings") + " from this model (" + (previousCount + 1) + " total)." : "No earlier saved recordings for this model.";
+      comparisonHint.textContent = previousCount ? "Compare this session with " + previousCount + " earlier " + (previousCount === 1 ? "session" : "sessions") + " from this model (" + (previousCount + 1) + " total)." : "No earlier saved sessions for this model.";
       table.querySelectorAll("button[data-history-id]").forEach((button2) => button2.setAttribute("aria-pressed", String(button2.dataset.historyId === record.id)));
       draw();
     }
@@ -6631,13 +6812,13 @@ underlying system, so should run in the browser, Node, or Plask.
     };
     const scroll = node(parent, "div", void 0, "tools-scroll"), table = node(scroll, "table");
     table.id = "tools-history-table";
-    node(table, "caption", actions.metricLabel + " · newest recording first");
+    node(table, "caption", actions.metricLabel + " · newest session first");
     const head = node(node(table, "thead"), "tr");
-    ["Recording", "Average", "Peak", "Token share¹", "Covered"].forEach((text) => {
+    ["Session", "Average", "Peak", "Token share¹", "Covered"].forEach((text) => {
       node(head, "th", text).scope = "col";
     });
     const body = node(table, "tbody");
-    const more = button(parent, "Show more recordings", () => {
+    const more = button(parent, "Show more sessions", () => {
       shown += 50;
       rows();
       updateSelection();
@@ -6680,7 +6861,7 @@ underlying system, so should run in the browser, Node, or Plask.
       more.hidden = shown >= recordings.length;
       more.textContent = "Show " + Math.min(50, recordings.length - shown) + " more (" + Math.min(shown, recordings.length) + " / " + recordings.length + ")";
     }
-    node(parent, "p", "¹ Token holders as a proportion of registered viewers. Recordings with no covered interval have no average; recorded peaks remain available. Overlapping dates can be selected individually in the list.", "tools-muted");
+    node(parent, "p", "¹ Token holders as a proportion of registered viewers. Sessions with no covered interval have no average; recorded peaks remain available. Overlapping dates can be selected individually in the list.", "tools-muted");
     rows();
     updateSelection();
     return { canvas, draw, update(next, selectedId = select.value) {
@@ -7089,7 +7270,8 @@ underlying system, so should run in the browser, Node, or Plask.
     let currentArchive = null, liveComparisonArchive = null, library = null, tab = "library", fileRequest = 0, chartObserver = null;
     const libraryReader = createLibraryReader();
     const modelHistoryReader = createModelHistoryReader();
-    let historyLimit = Infinity, historySelected = "";
+    const modelCardReader = createModelCardReader();
+    let historyLimit = Infinity, historySelected = "", compareAxis = "elapsed";
     let optionsLibrary = null, optionsArchive = null, optionsLiveArchive = null, options = [];
     const savedAnalysis = readAnalysisPreferences();
     let { metric, threshold, sharedLength } = savedAnalysis.preferences;
@@ -7206,10 +7388,10 @@ underlying system, so should run in the browser, Node, or Plask.
         const models = readModelFavorites(library.entries);
         library.favoriteModels = models.favorites;
         library.automaticModels = models.automatic;
-        library.favoriteError = migrationError || (models.errors.length ? "Some model favorites could not be read. Refresh to retry; recordings remain available." : "");
+        library.favoriteError = migrationError || (models.errors.length ? "Some model favorites could not be read. Refresh to retry; sessions remain available." : "");
       } catch (error) {
         library.favoriteModels = /* @__PURE__ */ new Set();
-        library.favoriteError = "Model favorites could not be read. Refresh to retry; recordings remain available.";
+        library.favoriteError = "Model favorites could not be read. Refresh to retry; sessions remain available.";
       }
       library.entries = library.entries.map((entry) => {
         var _a;
@@ -7250,13 +7432,13 @@ underlying system, so should run in the browser, Node, or Plask.
         if (!draft.dirty) return;
         const fresh = libraryReader.read();
         const latest = fresh.entries.find((item) => item.id === draft.id || draft.lineage && item.lineage === draft.lineage || item.records.some((record) => record.key === LIBRARY_PREFIX + draft.id));
-        if (!latest) throw new Error("This recording changed or is unavailable. Your draft is kept in Review unsaved notes.");
-        if ((latest.notes || "") !== draft.base && latest.notes !== draft.value && !confirm("Saved notes for this recording changed in another tab. Replace them with your draft?")) return;
+        if (!latest) throw new Error("This session changed or is unavailable. Your draft is kept in Review unsaved notes.");
+        if ((latest.notes || "") !== draft.base && latest.notes !== draft.value && !confirm("Saved notes for this session changed in another tab. Replace them with your draft?")) return;
         updateLibraryMetadata(latest.id, { notes: draft.value });
         noteDrafts.discard(draft.id);
         updateDraftNotice();
         render(tab);
-        tell("Recording notes saved.");
+        tell("Session notes saved.");
       })
     };
     function renderDrafts() {
@@ -7299,7 +7481,7 @@ underlying system, so should run in the browser, Node, or Plask.
       const matches = filteredSources || sourceOptions(), choices = matches.slice();
       const retained = sourceOptions().find((item) => item.id === selected);
       if (retained && !choices.some((item) => item.id === selected)) choices.unshift(__spreadProps(__spreadValues({}, retained), { title: retained.title + " (selected; outside filters)" }));
-      if (selected && selected !== "current" && selected !== "live" && !retained) choices.unshift({ id: selected, title: "Recording changed or removed — choose another" });
+      if (selected && selected !== "current" && selected !== "live" && !retained) choices.unshift({ id: selected, title: "Session changed or removed — choose another" });
       for (const item of choices) {
         const option = node(select, "option", item.title);
         option.value = item.id;
@@ -7340,7 +7522,7 @@ underlying system, so should run in the browser, Node, or Plask.
       if (!follower) return false;
       const context = followContext();
       let reason = context.reason || "", changed = false, candidates = [];
-      if (!follower.check(context.identity)) reason = "Session changed. Choose or refresh a recording to follow the new session.";
+      if (!follower.check(context.identity)) reason = "Session changed. Choose or refresh a session to follow the new session.";
       if (reason && follower.identity) follower.toggle(false);
       if (!reason) {
         if (tab === "history" && follower.enabled && !follower.identity) {
@@ -7363,7 +7545,7 @@ underlying system, so should run in the browser, Node, or Plask.
             const order = compareLibrarySessions(item.archive, liveCapture.archive);
             return order === 0 || order === 1;
           });
-          if (!candidates.length) reason = "This recording differs from the live session. Its snapshot is kept.";
+          if (!candidates.length) reason = "This session differs from the live session. Its snapshot is kept.";
           else changed = follower.update(context.identity, context.signature, candidates, liveCapture.archive);
         }
       }
@@ -7371,7 +7553,7 @@ underlying system, so should run in the browser, Node, or Plask.
         const { check, status } = followControls;
         check.disabled = !!reason;
         check.checked = follower.enabled && !reason;
-        status.textContent = reason || (!follower.enabled ? "Frozen for inspection. Turn on to catch up." : (runtime.isStopped ? "Stopped" : runtime.isPaused ? "Paused" : "Following live") + " · latest sample " + new Date(runtime.history.timestamps.at(-1)).toLocaleTimeString() + (automaticLibraryStatus(context.room).error ? " · Library save pending; showing live data." : "") + (tab === "compare" && sharedLength ? " · Match shared length limits the chart to the shortest recording." : ""));
+        status.textContent = reason || (!follower.enabled ? "Frozen for inspection. Turn on to catch up." : (runtime.isStopped ? "Stopped" : runtime.isPaused ? "Paused" : "Following live") + " · latest sample " + new Date(runtime.history.timestamps.at(-1)).toLocaleTimeString() + (automaticLibraryStatus(context.room).error ? " · Library save pending; showing live data." : "") + (tab === "compare" && compareAxis === "elapsed" && sharedLength ? " · Match shared length limits the chart to the shortest session." : ""));
       }
       return changed;
     }
@@ -7393,7 +7575,7 @@ underlying system, so should run in the browser, Node, or Plask.
       const scrollTop = content.scrollTop;
       if (tab === "history" && historyView) historyView.update(modelHistoryReader.read(followedEntries(), libraryRoom, metric, historyLimit), historySelected);
       else if (tab === "history") render("history");
-      else if ((tab === "summary" || tab === "compare") && analysisView) refreshAnalysis(true, true);
+      else if ((tab === "summary" || tab === "compare") && analysisOutput) refreshAnalysis(true, true);
       content.scrollTop = scrollTop;
     }
     function selectNewFollowSource() {
@@ -7603,7 +7785,7 @@ underlying system, so should run in the browser, Node, or Plask.
       Object.assign(analysisFilters, { room: snapshot.room.toLowerCase(), query: "", from: "", to: "" });
       pickerOpen.compare = false;
       render("compare");
-      (_a = dialog.querySelector("#tools-analysis-chart") || dialog.querySelector("#tools-recording-picker > summary")) == null ? void 0 : _a.focus();
+      (_a = dialog.querySelector("#tools-analysis-chart") || dialog.querySelector("#tools-session-picker > summary")) == null ? void 0 : _a.focus();
     }
     function openHistory(room) {
       readLibrary();
@@ -7636,6 +7818,8 @@ underlying system, so should run in the browser, Node, or Plask.
       libraryFilters.room = libraryRoom || "";
       if (libraryRoom && libraryRoom !== "*" && !state.entries.some((entry) => entry.archive.room.toLowerCase() === libraryRoom)) libraryFilters.room = libraryRoom = "";
       const callbacks = __spreadProps(__spreadValues({
+        cardSummary: (entries) => modelCardReader.read(entries),
+        duration: formatElapsedTime,
         room: (room) => {
           libraryRoom = room;
         },
@@ -7649,7 +7833,7 @@ underlying system, so should run in the browser, Node, or Plask.
         },
         export: (ids) => {
           downloadDataFile(exportLibrarySelection(ids, runtime.TIERSCOPE_VERSION), "TierScope-library-selection-" + (/* @__PURE__ */ new Date()).toISOString().slice(0, 10) + ".json");
-          tell("Selected recordings exported, including titles, notes and favorite models.");
+          tell("Selected sessions exported, including titles, notes and favorite models.");
         },
         favoriteModel: (room) => {
           if (state.favoriteError) throw new Error("Model favorites are not fully available. Refresh before changing them.");
@@ -7673,24 +7857,24 @@ underlying system, so should run in the browser, Node, or Plask.
         highs: (entry) => addArchiveHighs(entry.archive)
       }, noteActions), {
         rename: (entry) => {
-          const title = window.prompt("Recording title (up to 80 characters):", entry.title);
+          const title = window.prompt("Session title (up to 80 characters):", entry.title);
           if (title !== null) {
             renameLibrarySession(entry.id, title);
             render("library");
           }
         },
         delete: (entry) => {
-          if (confirm("Delete this library recording: " + (entry.title || entry.archive.room) + "?\n\nLive tracking, ATH and downloaded files are unchanged.")) {
+          if (confirm("Delete this library session: " + (entry.title || entry.archive.room) + "?\n\nLive tracking, ATH and downloaded files are unchanged.")) {
             removeLibrarySession(entry.id);
             render("library");
-            tell("Library recording deleted.");
+            tell("Library session deleted.");
           }
         }
       });
       renderLibraryBrowser(content, state.entries, libraryFilters, librarySelection, Object.fromEntries(Object.entries(callbacks).map(([key, fn]) => [key, action(fn)])), libraryDisclosures);
       if (state.damaged.length) {
         node(content, "p", state.damaged.length + " unreadable library record(s) were retained.", "tools-muted");
-        if (state.unavailable.length) node(content, "p", "Some records could not be read. The displayed storage size excludes them; saving new recordings waits until they can be read.", "tools-muted");
+        if (state.unavailable.length) node(content, "p", "Some records could not be read. The displayed storage size excludes them; saving new sessions waits until they can be read.", "tools-muted");
         button(content, "Download unreadable records", downloadUnreadableRecords, "tools-recovery-download");
         button(content, "Remove unreadable library records…", () => {
           if (!confirm("Delete the " + state.damaged.length + " unreadable library record(s)? This cannot be undone.")) return;
@@ -7712,7 +7896,7 @@ underlying system, so should run in the browser, Node, or Plask.
         libraryRoom = rooms.size === 1 ? [...rooms][0] : "*";
         Object.assign(libraryFilters, { room: libraryRoom, query: "", from: "", to: "", favorites: false });
         render("library", true);
-        tell("Imported: " + result.recordings + " new, " + result.updatedRecordings + " updated, " + result.favoriteModels + " favorite models added; existing recordings and model choices were preserved.");
+        tell("Imported: " + result.recordings + " new, " + result.updatedRecordings + " updated, " + result.favoriteModels + " favorite models added; existing sessions and model choices were preserved.");
       }, true), "tools-import-session").title = "Import session files or Library bundles. Imported favorites need confirmation before automatic keeping.";
       button(actions, "Refresh", () => render("library"), "tools-refresh-library").title = "Refresh list from this browser";
     }
@@ -7731,6 +7915,50 @@ underlying system, so should run in the browser, Node, or Plask.
         rememberAnalysis({ metric: value });
         changed();
       }), id);
+    }
+    function comparisonAxis(parent) {
+      const controls = node(parent, "div", void 0, "tools-actions");
+      const label = node(controls, "label", "X axis "), select = node(label, "select");
+      select.id = "tools-compare-axis";
+      for (const [value, text] of [["elapsed", "Elapsed time"], ["clock", "24h time of day"]]) {
+        const option = node(select, "option", text);
+        option.value = value;
+      }
+      select.value = compareAxis;
+      const hint = node(parent, "p", "", "tools-muted");
+      hint.id = "tools-compare-axis-hint";
+      select.setAttribute("aria-describedby", hint.id);
+      select.onchange = () => {
+        compareAxis = select.value;
+        updateFollowing();
+        refreshAnalysis();
+      };
+    }
+    function syncComparisonAxis() {
+      if (tab !== "compare") return;
+      const clock = compareAxis === "clock", check = dialog.querySelector("#tools-shared-length");
+      check.disabled = clock;
+      check.checked = sharedLength;
+      check.title = clock ? "Match shared length applies to elapsed-time comparison." : "";
+      dialog.querySelector("#tools-compare-axis-hint").textContent = clock ? "24h uses your local time (" + Intl.DateTimeFormat().resolvedOptions().timeZone + "). Statistics use full sessions; Match shared length applies in elapsed mode." : "";
+    }
+    function clearAnalysisChart() {
+      if (!analysisView) return;
+      const hadFocus = analysisView.element.contains(document.activeElement);
+      analysisStates.set(tab, __spreadProps(__spreadValues({}, analysisSources), { state: analysisView.capture() }));
+      const range = dialog.querySelector("#tools-comparison-range");
+      if (range) content.insertBefore(range, analysisOutput);
+      if (chartObserver) {
+        chartObserver.disconnect();
+        chartObserver = null;
+      }
+      if (chartDispose) chartDispose();
+      analysisView.element.remove();
+      analysisView = null;
+      analysisSources = null;
+      chartDraw = null;
+      chartDispose = null;
+      if (hadFocus) dialog.querySelector("#tools-compare-axis").focus({ preventScroll: true });
     }
     function comparisonRange() {
       const controls = node(content, "div", void 0, "tools-comparison-range");
@@ -7813,7 +8041,7 @@ underlying system, so should run in the browser, Node, or Plask.
       const picker = node(content, "details");
       picker.id = "tools-recording-picker";
       picker.open = pickerOpen[pickerTab];
-      node(picker, "summary", "Choose recordings & filters");
+      node(picker, "summary", "Choose sessions & filters");
       picker.ontoggle = () => {
         if (picker.isConnected) pickerOpen[pickerTab] = picker.open;
       };
@@ -7824,7 +8052,7 @@ underlying system, so should run in the browser, Node, or Plask.
         filteredSources = [];
         tell(error.message, true);
       }
-      node(picker, "p", filteredSources.length + " matching recordings. Existing selections stay available when outside the filters.", "tools-muted");
+      node(picker, "p", filteredSources.length + " matching sessions. Existing selections stay available when outside the filters.", "tools-muted");
       const sourceControls = node(picker, "div", void 0, "tools-actions");
       if (liveComparisonArchive) button(sourceControls, "Refresh live snapshot", () => {
         liveComparisonArchive = captureLiveSessionFile();
@@ -7837,7 +8065,7 @@ underlying system, so should run in the browser, Node, or Plask.
         selectNewFollowSource();
         render(tab);
       }, "tools-refresh-snapshot");
-      selectedA = selectSource(sourceControls, comparing ? "A " : "Recording ", "tools-source-a", selectedA, (value) => {
+      selectedA = selectSource(sourceControls, comparing ? "A " : "Session ", "tools-source-a", selectedA, (value) => {
         selectedA = value;
         selectNewFollowSource();
         render(tab);
@@ -7862,7 +8090,7 @@ underlying system, so should run in the browser, Node, or Plask.
         });
         const used = /* @__PURE__ */ new Set([selectedA, selectedB, ...selectedExtra]);
         const next = filteredSources.find((item) => !used.has(item.id));
-        button(sourceControls, "Add recording", () => {
+        button(sourceControls, "Add session", () => {
           if (next && selectedExtra.length < 4) {
             selectedExtra.push(next.id);
             render(tab);
@@ -7871,6 +8099,7 @@ underlying system, so should run in the browser, Node, or Plask.
         node(sourceControls, "span", 2 + selectedExtra.length + " / 6 slots", "tools-muted");
       }
       followControl(content);
+      if (comparing) comparisonAxis(content);
       metricStrip(content, refreshAnalysis);
       return sourceOptions();
     }
@@ -7887,7 +8116,7 @@ underlying system, so should run in the browser, Node, or Plask.
       const controls = node(content, "div", void 0, "tools-actions");
       const rangeLabel = node(controls, "label", "Show "), range = node(rangeLabel, "select");
       range.id = "tools-history-range";
-      for (const [value, label] of [["Infinity", "All recordings"], ["30", "Latest 30"], ["10", "Latest 10"]]) {
+      for (const [value, label] of [["Infinity", "All sessions"], ["30", "Latest 30"], ["10", "Latest 10"]]) {
         const option = node(range, "option", label);
         option.value = value;
       }
@@ -7900,7 +8129,7 @@ underlying system, so should run in the browser, Node, or Plask.
         readLibrary();
         followers.history.reset();
         render("history");
-      }, "tools-history-refresh").title = "Read the latest saved recordings from this browser";
+      }, "tools-history-refresh").title = "Read the latest saved sessions from this browser";
       followControl(content);
       const overview = modelHistoryReader.read(followedEntries(), libraryRoom, metric, historyLimit);
       const view = renderModelHistoryView(content, overview, {
@@ -7929,7 +8158,7 @@ underlying system, so should run in the browser, Node, or Plask.
           Object.assign(analysisFilters, { room: libraryRoom, query: "", from: "", to: "" });
           pickerOpen.compare = false;
           render("compare");
-          (_a = dialog.querySelector("#tools-analysis-chart") || dialog.querySelector("#tools-recording-picker > summary")) == null ? void 0 : _a.focus();
+          (_a = dialog.querySelector("#tools-analysis-chart") || dialog.querySelector("#tools-session-picker > summary")) == null ? void 0 : _a.focus();
         }
       });
       historyView = view;
@@ -7940,7 +8169,7 @@ underlying system, so should run in the browser, Node, or Plask.
           chartObserver.observe(view.canvas);
         }
       }
-      if (library.damaged.length) node(content, "p", library.damaged.length + " unreadable library record(s) are excluded. Return to Recordings for recovery options.", "tools-muted");
+      if (library.damaged.length) node(content, "p", library.damaged.length + " unreadable library record(s) are excluded. Return to Sessions for recovery options.", "tools-muted");
     }
     function audienceOverview(archive, parent) {
       const overview = summarizeAudience(archive), coverage = overview.audience[0];
@@ -7948,9 +8177,9 @@ underlying system, so should run in the browser, Node, or Plask.
       node(parent, "p", archive.room + " · " + coverage.samples + " samples · Covered time " + formatElapsedTime(coverage.coveredMs) + " · Excluded gaps " + formatElapsedTime(coverage.gapMs) + " · Coverage " + percent(coverage.coverage), "tools-muted");
       const scroll = node(parent, "div", void 0, "tools-scroll"), table = node(scroll, "table");
       table.id = "tools-audience-table";
-      node(table, "caption", "Audience across the retained recording");
+      node(table, "caption", "Audience across the retained session");
       const head = node(node(table, "thead"), "tr");
-      ["Audience", "Time-weighted average", "Peak in recording", "Full-session high"].forEach((label) => {
+      ["Audience", "Time-weighted average", "Peak in session", "Full-session high"].forEach((label) => {
         node(head, "th", label).scope = "col";
       });
       const body = node(table, "tbody");
@@ -7962,7 +8191,7 @@ underlying system, so should run in the browser, Node, or Plask.
         if (summary.peakTime !== null) peak.title = "First recorded at " + new Date(summary.peakTime).toLocaleString();
         node(row, "td", number(summary.sessionPeak));
       }
-      node(parent, "p", "Room audience = registered + anonymous viewers. A full-session high may predate retained history. Hover a recording peak for its first recorded time.", "tools-muted");
+      node(parent, "p", "Room audience = registered + anonymous viewers. A full-session high may predate retained history. Hover a session peak for its first recorded time.", "tools-muted");
       const shares = node(parent, "div");
       shares.id = "tools-audience-shares";
       node(shares, "h3", "Audience proportions");
@@ -7973,7 +8202,7 @@ underlying system, so should run in the browser, Node, or Plask.
     }
     function thresholdTable(archive, parent) {
       if (!summaryThresholds.length) {
-        node(parent, "p", "Not enough covered recording time to calculate average-based thresholds.", "tools-muted");
+        node(parent, "p", "Not enough covered session time to calculate average-based thresholds.", "tools-muted");
         return;
       }
       const scroll = node(parent, "div", void 0, "tools-scroll"), table = node(scroll, "table");
@@ -7990,12 +8219,12 @@ underlying system, so should run in the browser, Node, or Plask.
         node(row, "td", result.durationMs === null ? "Not enough data" : formatElapsedTime(result.durationMs));
         node(row, "td", percent(result.percent));
       }
-      node(parent, "p", "Includes samples equal to the threshold. Percentages use covered recording time; gaps and time after the final sample are excluded.", "tools-muted");
+      node(parent, "p", "Includes samples equal to the threshold. Percentages use covered session time; gaps and time after the final sample are excluded.", "tools-muted");
     }
     function summaryTable(summaries, labels, comparing, parent) {
       const scroll = node(parent, "div", void 0, "tools-scroll"), table = node(scroll, "table");
       table.id = "tools-summary-table";
-      node(table, "caption", ANALYSIS_METRICS[metric] + " — retained recording statistics");
+      node(table, "caption", ANALYSIS_METRICS[metric] + " — retained session statistics");
       const head = node(table, "thead"), headRow = node(head, "tr");
       node(headRow, "th", "Measure");
       labels.forEach((label) => node(headRow, "th", label));
@@ -8003,7 +8232,7 @@ underlying system, so should run in the browser, Node, or Plask.
       const rows = [
         ["Samples in range", (s) => number(s.samples)],
         ["Elapsed span", (s) => formatElapsedTime(s.spanMs)],
-        ["Covered recording time", (s) => formatElapsedTime(s.coveredMs)],
+        ["Covered session time", (s) => formatElapsedTime(s.coveredMs)],
         ["Excluded gaps", (s) => formatElapsedTime(s.gapMs)],
         ["Coverage", (s) => s.coverage === null ? "Not enough data" : number(s.coverage) + "%"],
         ["Time-weighted average", (s) => number(s.mean)],
@@ -8021,16 +8250,20 @@ underlying system, so should run in the browser, Node, or Plask.
       node(parent, "p", "The full-session high can predate retained history and is not limited by “Match shared length.” Token-holder share is weighted by recorded registered-viewer time.", "tools-muted");
     }
     function chart(archives, labels, endMs, ids) {
-      const series = archives.map((archive) => __spreadProps(__spreadValues({}, analysisSeries(archive, metric)), { timestamps: archive.session.history.timestamps }));
+      const axisMode = tab === "compare" ? compareAxis : "elapsed";
+      const series = archives.map((archive) => {
+        const source = __spreadProps(__spreadValues({}, analysisSeries(archive, metric)), { timestamps: archive.session.history.timestamps });
+        return axisMode === "clock" ? __spreadProps(__spreadValues({}, source), { clock: projectClockSeries(source) }) : source;
+      });
       if (analysisView) {
         analysisSources = { archives, ids };
-        analysisView.update(series, endMs, ANALYSIS_METRICS[metric]);
+        analysisView.update(series, endMs, ANALYSIS_METRICS[metric], axisMode);
         return;
       }
       const saved = analysisStates.get(tab);
-      const same = saved && saved.ids.length === ids.length && ids.every((id, index) => saved.archives[saved.ids.indexOf(id)] === archives[index]);
+      const same = saved && (saved.state.axisMode || "elapsed") === axisMode && saved.ids.length === ids.length && ids.every((id, index) => saved.archives[saved.ids.indexOf(id)] === archives[index]);
       const restored = same ? __spreadProps(__spreadValues({}, saved.state), { hidden: saved.state.hidden.map((index) => ids.indexOf(saved.ids[index])) }) : null;
-      const view = renderAnalysisChart(content, series, labels, endMs, ANALYSIS_METRICS[metric], restored);
+      const view = renderAnalysisChart(content, series, labels, endMs, ANALYSIS_METRICS[metric], restored, axisMode);
       const range = dialog.querySelector("#tools-comparison-range");
       if (range) view.settings.appendChild(range);
       content.appendChild(analysisOutput);
@@ -8056,6 +8289,7 @@ underlying system, so should run in the browser, Node, or Plask.
       const comparing = tab === "compare", options2 = sourceOptions();
       if (!analysisOutput) return;
       const { overview, controls, results } = analysisReports;
+      syncComparisonAxis();
       overview.replaceChildren();
       results.replaceChildren();
       controls.hidden = false;
@@ -8063,18 +8297,23 @@ underlying system, so should run in the browser, Node, or Plask.
       const a = options2.find((item) => item.id === selectedA), b = options2.find((item) => item.id === selectedB);
       if (!a || comparing && (!b || selectedExtra.some((id) => !options2.some((item) => item.id === id)))) {
         controls.hidden = true;
-        node(overview, "p", "Choose available recordings in each slot. A previous selection may have changed or been removed; clear filters to find another recording.");
+        node(overview, "p", "Choose available sessions in each slot. A previous selection may have changed or been removed; clear filters to find another session.");
         return;
       }
       if (comparing) {
         if ((/* @__PURE__ */ new Set([selectedA, selectedB, ...selectedExtra])).size !== 2 + selectedExtra.length) {
           controls.hidden = true;
-          node(overview, "p", "Choose a different recording in each comparison slot.");
+          node(overview, "p", "Choose a different session in each comparison slot.");
           return;
         }
         const ids = [.../* @__PURE__ */ new Set([selectedA, selectedB, ...selectedExtra])], recordings = ids.map((id) => options2.find((item) => item.id === id)).filter((item) => !!item);
-        const result = compareRecordingSet(recordings.map((item) => item.archive), metric, threshold, sharedLength);
-        if (redrawChart) chart(recordings.map((item) => item.archive), recordings.map((item) => item.title), result.axisMs, ids);
+        const archives = recordings.map((item) => item.archive), clock = compareAxis === "clock";
+        const result = compareRecordingSet(archives, metric, threshold, !clock && sharedLength);
+        const tooLong = clock ? archives.flatMap((archive, index) => clockSessionDuration(archive) > CLOCK_DAY_MS ? [String.fromCharCode(65 + index)] : []) : [];
+        if (tooLong.length) {
+          clearAnalysisChart();
+          node(overview, "p", "24h chart unavailable: session" + (tooLong.length > 1 ? "s " : " ") + tooLong.join(", ") + " exceed" + (tooLong.length === 1 ? "s" : "") + " 24 hours. Choose Elapsed time or select shorter sessions.", "tools-muted");
+        } else if (redrawChart) chart(archives, recordings.map((item) => item.title), clock ? CLOCK_DAY_MS : result.axisMs, ids);
         summaryTable(result.summaries, recordings.map((item, index) => String.fromCharCode(65 + index)), true, results);
       } else {
         const summary = summarizeSession(a.archive, metric, threshold);
@@ -8112,12 +8351,12 @@ underlying system, so should run in the browser, Node, or Plask.
     function renderBackup() {
       node(content, "h3", "Back up this browser");
       node(content, "p", "Download ATH for every room and your saved preferences: theme, panel size/position, collapsed rows, compact metric, chart window, SH/ATH mode and analysis choices. Keep this file somewhere safe. Session-only controls such as the scan interval are not saved preferences.", "tools-muted");
-      const include = checkbox(content, "tools-backup-library", "Include library recordings and favorite models");
+      const include = checkbox(content, "tools-backup-library", "Include library sessions and favorite models");
       const state = readLibrary();
       let partial = null;
       if (state.damaged.length) {
-        node(content, "p", state.damaged.length + " unreadable library record(s) are retained. You can back up healthy recordings and download the unreadable values separately for recovery.", "tools-muted");
-        partial = checkbox(content, "tools-backup-partial", "Back up healthy recordings; omit unreadable entries", false);
+        node(content, "p", state.damaged.length + " unreadable library record(s) are retained. You can back up healthy sessions and download the unreadable values separately for recovery.", "tools-muted");
+        partial = checkbox(content, "tools-backup-partial", "Back up healthy sessions; omit unreadable entries", false);
         button(content, "Download unreadable records", downloadUnreadableRecords, "tools-backup-recovery");
       }
       const actions = node(content, "div", void 0, "tools-actions");
@@ -8125,10 +8364,10 @@ underlying system, so should run in the browser, Node, or Plask.
         const backup = createTierScopeBackup(include.checked, !!(partial && partial.checked));
         const omitted = backup.recovery ? backup.recovery.omittedLibraryKeys.length : 0;
         downloadDataFile(backup, "TierScope-" + (omitted ? "partial-backup-" : "backup-") + (/* @__PURE__ */ new Date()).toISOString().slice(0, 10) + ".json");
-        tell(omitted ? "Partial backup download requested: " + backup.library.length + " healthy recordings included; " + omitted + " unreadable entries omitted and left untouched. Download unreadable records separately for recovery." : "Backup download requested. Check your browser downloads.", !!omitted);
+        tell(omitted ? "Partial backup download requested: " + backup.library.length + " healthy sessions included; " + omitted + " unreadable entries omitted and left untouched. Download unreadable records separately for recovery." : "Backup download requested. Check your browser downloads.", !!omitted);
       }, "tools-backup-download");
       node(content, "h3", "Restore a backup");
-      node(content, "p", "ATH is merged without lowering existing records. New library sessions are added; fuller versions of the same session update its entry and keep its name. Saved preferences take effect after refreshing your room tabs. Storage limits stay local to this browser; raise them in Sessions → Storage limits if the recordings need more room. Backups up to 300 MB / 10,000 sessions can be opened.", "tools-muted");
+      node(content, "p", "ATH is merged without lowering existing records. New library sessions are added; fuller versions of the same session update its entry and keep its name. Saved preferences take effect after refreshing your room tabs. Storage limits stay local to this browser; raise them in Sessions → Storage limits if the sessions need more room. Backups up to 300 MB / 10,000 sessions can be opened.", "tools-muted");
       button(content, "Choose backup…", () => {
         pendingBackup = null;
         render("backup");
@@ -8140,18 +8379,18 @@ underlying system, so should run in the browser, Node, or Plask.
       }, "tools-backup-open");
       if (pendingBackup) {
         if (pendingBackup.recovery) node(content, "p", "This is a partial backup. " + pendingBackup.recovery.omittedLibraryKeys.length + " unreadable library entries were excluded when it was created; they cannot be restored from this file.", "tools-muted");
-        node(content, "p", pendingBackup.rooms.length + " rooms · " + (Object.keys(pendingBackup.preferences).length + (pendingBackup.analysisPreferences ? 1 : 0)) + " saved preferences · " + pendingBackup.library.length + " recordings", "tools-muted");
+        node(content, "p", pendingBackup.rooms.length + " rooms · " + (Object.keys(pendingBackup.preferences).length + (pendingBackup.analysisPreferences ? 1 : 0)) + " saved preferences · " + pendingBackup.library.length + " sessions", "tools-muted");
         node(content, "p", pendingBackup.favoriteModels.length + " favorite models. Restoring Library adds these where no local model choice exists.", "tools-muted");
         const choices = node(content, "div", void 0, "tools-actions");
-        const highs = checkbox(choices, "tools-restore-highs", "Merge ATH"), preferences = checkbox(choices, "tools-restore-preferences", "Restore preferences"), recordings = checkbox(choices, "tools-restore-library", "Add recordings and favorite models");
+        const highs = checkbox(choices, "tools-restore-highs", "Merge ATH"), preferences = checkbox(choices, "tools-restore-preferences", "Restore preferences"), recordings = checkbox(choices, "tools-restore-library", "Add sessions and favorite models");
         button(content, "Restore selected data", () => {
           if (!highs.checked && !preferences.checked && !recordings.checked) throw new Error("Choose at least one kind of data to restore.");
-          if (!confirm("Restore the selected backup data?\n\nATH will be merged, library recordings added or updated with fuller versions, and selected saved preferences replaced. Your live session is not replaced." + (pendingBackup.recovery ? "\n\nThis partial backup excludes " + pendingBackup.recovery.omittedLibraryKeys.length + " unreadable library entries." : ""))) return;
+          if (!confirm("Restore the selected backup data?\n\nATH will be merged, library sessions added or updated with fuller versions, and selected saved preferences replaced. Your live session is not replaced." + (pendingBackup.recovery ? "\n\nThis partial backup excludes " + pendingBackup.recovery.omittedLibraryKeys.length + " unreadable library entries." : ""))) return;
           const result = restoreTierScopeBackup(pendingBackup, { highs: highs.checked, preferences: preferences.checked, library: recordings.checked });
           library = null;
           if (runtime.playback) setPlaybackAllTimeState(runtime.playback, readAllTimeHighs(displayedHighRoom()));
           repaintHighMode();
-          tell("Restored: " + result.rooms + " room ATH updates, " + result.recordings + " new recordings, " + result.updatedRecordings + " updated recordings, " + result.favoriteModels + " favorite models, " + result.preferences + " preferences." + (result.preferences ? "\nRefresh your room tabs when convenient to apply preferences." : ""));
+          tell("Restored: " + result.rooms + " room ATH updates, " + result.recordings + " new sessions, " + result.updatedRecordings + " updated sessions, " + result.favoriteModels + " favorite models, " + result.preferences + " preferences." + (result.preferences ? "\nRefresh your room tabs when convenient to apply preferences." : ""));
         }, "tools-backup-restore");
       }
     }
@@ -9832,7 +10071,7 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/bootstrap.js
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.22.0";
+    runtime.TIERSCOPE_VERSION = "3.23.0";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;
