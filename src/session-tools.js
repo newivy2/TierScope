@@ -321,7 +321,7 @@ export function openSessionTools(focusTarget) {
         else {
             const label = node(actions, 'label', undefined, 'tools-auto-keep'), check = node(label, 'input');
             check.type = 'checkbox'; check.id = 'tools-auto-keep';
-            node(label, 'span', 'Auto keeping');
+            node(label, 'span', 'Auto');
             const lock = node(label, 'span', '🔒'); lock.dataset.autoLock = ''; lock.setAttribute('aria-hidden', 'true');
             check.onchange = action(() => {
                 const room = star.dataset.favoriteRoom;

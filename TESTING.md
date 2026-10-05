@@ -129,6 +129,6 @@ For history costs, set `TIERSCOPE_BENCH_HISTORY=1 npm run test:library-performan
 The comparison benchmark additionally measures hiding/showing a line and applying a threshold. Paired runs against 3.14.0 use identical fixtures and alternate execution order; timings remain informational.
 
 
-## Live-session Library controls (3.17.0 beta)
+## Live-session Library controls (3.17.0)
 
 `model-history.test.cjs` covers selection of up to five earlier sessions by session start, same-session exclusion after history rollover, room isolation, legacy start fallback and stable date ties. `model-library-browser.cjs` checks checkbox consent/cancellation with mouse and keyboard, locked confirmed favorites, cross-tab changes, pending saves, six-session comparison while a different model is replayed, fixed live snapshots through acquisition and replay closure, storage/list/footer order and both themes. Existing browser download fixtures now use the kept session’s More… actions or the replay card.
