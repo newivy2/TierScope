@@ -1,11 +1,12 @@
 import { BACKUP_MAX_BYTES, restoreTierScopeBackup, validateTierScopeBackup } from './backup.js';
-import { LIBRARY_MAX_COUNT, libraryMetadata, readSessionLibrary } from './session-library.js';
+import { libraryMetadata, readSessionLibrary } from './session-library.js';
 import { validateSessionFile } from './session-file-format.js';
+import { LIBRARY_TRANSFER_MAX_COUNT } from './library-capacity-data.js';
 import { readModelFavorites } from './library-models.js';
 
 export function libraryImportBundle(values, version) {
-    if (!Array.isArray(values) || !values.length || values.length > LIBRARY_MAX_COUNT) throw new Error('Choose 1–500 recording files or library bundles.');
-    if (new Blob([JSON.stringify(values)]).size > BACKUP_MAX_BYTES) throw new Error('Selected files exceed 32 MB.');
+    if (!Array.isArray(values) || !values.length || values.length > LIBRARY_TRANSFER_MAX_COUNT) throw new Error('Choose 1–10,000 recording files or library bundles.');
+    if (new Blob([JSON.stringify(values)]).size > BACKUP_MAX_BYTES) throw new Error('Selected files exceed 300 MB.');
     const library = [], favoriteModels = new Set();
     for (const value of values) {
         if (value && value.format === 'TierScopeBackup') {
@@ -16,7 +17,7 @@ export function libraryImportBundle(values, version) {
         } else {
             const archive = validateSessionFile(value); library.push({title: archive.room, archive});
         }
-        if (library.length > LIBRARY_MAX_COUNT) throw new Error('Import up to 500 recordings at once.');
+        if (library.length > LIBRARY_TRANSFER_MAX_COUNT) throw new Error('Import up to 10,000 recordings at once.');
     }
     if (!library.length) throw new Error('These files contain no library recordings.');
     return validateTierScopeBackup({format: 'TierScopeBackup', formatVersion: 1, producerVersion: version, rooms: [], preferences: {}, library, favoriteModels: [...favoriteModels]});

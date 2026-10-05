@@ -58,7 +58,8 @@ test('silent dropped writes and a full library never replace a valid automatic c
  h.context.GM_setValue=(key,value)=>{if(!key.startsWith('tierscope:library:v1:'))set(key,value);};
  scan(h,3,60000);assert.match(h.d.automaticLibraryStatus('testroom').error,/verified/);assert.deepEqual(clean(records(h)[0]),original);
  h.context.GM_setValue=set;
- h.storage.set('tierscope:library:v1:large_damaged','x'.repeat(25*1024*1024));
+ h.storage.set('tierscope:library-limits:v1',JSON.stringify({schemaVersion:1,maxSessions:1000,maxMegabytes:1}));
+ h.storage.set('tierscope:library:v1:large_damaged','x'.repeat(1024*1024));
  scan(h,4,60000);assert.match(h.d.automaticLibraryStatus('testroom').error,/full/);assert.deepEqual(clean(records(h)[0]),original);
  h.storage.delete('tierscope:library:v1:large_damaged');h.d.keepFavoriteSession('testroom',true);assert.equal(records(h)[0].archive.session.history.timestamps.length,3);
 });
