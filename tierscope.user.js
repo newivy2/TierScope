@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.22.0
+// @version      3.23.0-beta.1
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -4842,6 +4842,191 @@ underlying system, so should run in the browser, Node, or Plask.
     }
   }
 
+  // src/analysis-chart-data.js
+  function analysisSampleIndex(times, time) {
+    let left = 0, right = times.length;
+    while (left < right) {
+      const mid = left + right >>> 1;
+      if (times[mid] <= time) left = mid + 1;
+      else right = mid;
+    }
+    return left - 1;
+  }
+  function inspectAnalysisSample(series, time) {
+    const index = analysisSampleIndex(series.times, time);
+    if (index < 0 || time > series.times.at(-1)) return { kind: "outside", index: -1, value: null, timestamp: null };
+    if (series.times[index] !== time && series.breaks[index + 1]) return { kind: "gap", index, value: null, timestamp: null };
+    return { kind: series.times[index] === time ? "sample" : "held", index, value: series.values[index], timestamp: series.timestamps[index] };
+  }
+  function buildAnalysisPlot(series, start, end, width) {
+    const { times, values, breaks } = series;
+    const points = [];
+    let bucket = null, move = true, maximum = 1, last = -1;
+    function flush() {
+      if (!bucket) return;
+      const indices = [bucket.first, bucket.low, bucket.high, bucket.last].sort((a, b) => a - b);
+      indices.forEach((index, i) => {
+        if (i && index === indices[i - 1]) return;
+        points.push({ time: Math.max(start, times[index]), value: values[index], index, move });
+        move = false;
+      });
+      bucket = null;
+    }
+    let first = Math.max(0, analysisSampleIndex(times, start));
+    while (first > 0 && times[first - 1] === start) first--;
+    for (let i = first; i < times.length && times[i] <= end; i++) {
+      if (times[i] < start && (i + 1 === times.length || breaks[i + 1])) continue;
+      const column = end > start ? Math.floor((Math.max(start, times[i]) - start) / (end - start) * width) : 0;
+      if (breaks[i]) {
+        flush();
+        move = true;
+      }
+      if (!bucket || bucket.column !== column) {
+        flush();
+        bucket = { column, first: i, last: i, low: i, high: i };
+      } else {
+        bucket.last = i;
+        if (values[i] < values[bucket.low]) bucket.low = i;
+        if (values[i] > values[bucket.high]) bucket.high = i;
+      }
+      maximum = Math.max(maximum, values[i]);
+      last = i;
+    }
+    flush();
+    if (last >= 0 && last + 1 < times.length && !breaks[last + 1] && times[last + 1] > end && times[last] < end) {
+      points.push({ time: end, value: values[last], index: last, move: false });
+    }
+    return { points, maximum };
+  }
+  function zoomAnalysisWindow(span, start, end, factor, anchor) {
+    if (!Number.isFinite(span) || span < 0 || !Number.isFinite(factor) || factor <= 0) throw new Error("Invalid chart range.");
+    if (!span) return [0, 0];
+    const width = Math.min(span, Math.max(Math.min(1e3, span), (end - start) * factor));
+    const center = Math.max(start, Math.min(end, anchor));
+    const ratio = end > start ? (center - start) / (end - start) : 0.5;
+    const left = Math.max(0, Math.min(span - width, center - width * ratio));
+    return [left, left + width];
+  }
+
+  // src/analysis-clock-data.js
+  var CLOCK_DAY_MS = 24 * 60 * 60 * 1e3;
+  function clockTime(timestamp) {
+    const date = new Date(timestamp);
+    return ((date.getHours() * 60 + date.getMinutes()) * 60 + date.getSeconds()) * 1e3 + date.getMilliseconds();
+  }
+  function clockSessionDuration(archive) {
+    const { timestamps } = archive.session.history;
+    if (!timestamps.length) return 0;
+    let first = Infinity, last = -Infinity;
+    for (const time of timestamps) {
+      first = Math.min(first, time);
+      last = Math.max(last, time);
+    }
+    const start = archive.session.sessionStartedAt;
+    if (typeof start === "number") first = Math.min(first, start);
+    return Math.max(last - first, archive.session.pausedElapsedTime || 0);
+  }
+  function clockPieces(from, to) {
+    const pieces = [];
+    while (from < to) {
+      const date = new Date(from), offset = date.getTimezoneOffset();
+      date.setHours(24, 0, 0, 0);
+      let end = Math.min(to, date.getTime());
+      if (new Date(end - 1).getTimezoneOffset() !== offset) {
+        let lo = from, hi = end;
+        while (hi - lo > 1) {
+          const mid = Math.floor((lo + hi) / 2);
+          if (new Date(mid).getTimezoneOffset() === offset) lo = mid;
+          else hi = mid;
+        }
+        end = hi;
+      }
+      const start = clockTime(from);
+      pieces.push({ start, end: Math.min(CLOCK_DAY_MS, start + end - from) });
+      from = end;
+    }
+    return pieces;
+  }
+  function projectClockSeries(source) {
+    const result = { segments: [], gaps: [], navigation: [], clockChanged: false };
+    let segment = null;
+    function begin() {
+      segment = { times: [], values: [], breaks: [], timestamps: [], indices: [], real: [] };
+      result.segments.push(segment);
+    }
+    function add(time, index, real) {
+      segment.times.push(time);
+      segment.values.push(source.values[index]);
+      segment.breaks.push(false);
+      segment.timestamps.push(source.timestamps[index]);
+      segment.indices.push(index);
+      segment.real.push(real);
+    }
+    for (let i = 0; i < source.timestamps.length; i++) {
+      const current = source.timestamps[i], time = clockTime(current);
+      result.navigation.push(time);
+      if (!i) {
+        begin();
+        add(time, i, true);
+        continue;
+      }
+      const previous = source.timestamps[i - 1];
+      if (current < previous) {
+        result.clockChanged = true;
+        begin();
+        add(time, i, true);
+        continue;
+      }
+      if (current === previous) {
+        if (source.breaks[i]) begin();
+        add(time, i, true);
+        continue;
+      }
+      const pieces = clockPieces(previous, current);
+      if (new Date(previous).getTimezoneOffset() !== new Date(current).getTimezoneOffset()) result.clockChanged = true;
+      if (source.breaks[i]) {
+        result.gaps.push(...pieces);
+        begin();
+        add(time, i, true);
+        continue;
+      }
+      pieces.forEach((piece, j) => {
+        if (j) {
+          begin();
+          add(piece.start, i - 1, false);
+        }
+        add(piece.end, i - 1, false);
+      });
+      if (time !== segment.times.at(-1)) begin();
+      add(time, i, true);
+    }
+    result.navigation = [...new Set(result.navigation)].sort((a, b) => a - b);
+    return result;
+  }
+  function inspectClockSample(projection, time) {
+    const matches = [];
+    for (const segment of projection.segments) {
+      if (time === segment.times.at(-1) && !segment.real.at(-1)) continue;
+      const sample = inspectAnalysisSample(segment, time);
+      if (sample.value === null) continue;
+      const index = segment.indices[sample.index], timestamp = sample.timestamp;
+      const kind = sample.kind === "sample" && segment.real[sample.index] ? "sample" : "held";
+      if (!matches.some((match) => match.index === index)) matches.push({ kind, index, value: sample.value, timestamp });
+    }
+    return { matches, kind: matches.length ? "covered" : projection.gaps.some((gap) => time >= gap.start && time <= gap.end) ? "gap" : "outside" };
+  }
+  function buildClockPlot(projection, start, end, width) {
+    const points = [];
+    let maximum = 1;
+    for (const segment of projection.segments) {
+      if (segment.times[0] > end || segment.times.at(-1) < start) continue;
+      const plot = buildAnalysisPlot(segment, start, end, width);
+      points.push(...plot.points);
+      maximum = Math.max(maximum, plot.maximum);
+    }
+    return { points, maximum };
+  }
+
   // src/analysis-follow.js
   function createAnalysisFollower() {
     let enabled = true, identity = null, signature = "", expired = false;
@@ -6012,77 +6197,14 @@ underlying system, so should run in the browser, Node, or Plask.
     });
   }
 
-  // src/analysis-chart-data.js
-  function analysisSampleIndex(times, time) {
-    let left = 0, right = times.length;
-    while (left < right) {
-      const mid = left + right >>> 1;
-      if (times[mid] <= time) left = mid + 1;
-      else right = mid;
-    }
-    return left - 1;
-  }
-  function inspectAnalysisSample(series, time) {
-    const index = analysisSampleIndex(series.times, time);
-    if (index < 0 || time > series.times.at(-1)) return { kind: "outside", index: -1, value: null, timestamp: null };
-    if (series.times[index] !== time && series.breaks[index + 1]) return { kind: "gap", index, value: null, timestamp: null };
-    return { kind: series.times[index] === time ? "sample" : "held", index, value: series.values[index], timestamp: series.timestamps[index] };
-  }
-  function buildAnalysisPlot(series, start, end, width) {
-    const { times, values, breaks } = series;
-    const points = [];
-    let bucket = null, move = true, maximum = 1, last = -1;
-    function flush() {
-      if (!bucket) return;
-      const indices = [bucket.first, bucket.low, bucket.high, bucket.last].sort((a, b) => a - b);
-      indices.forEach((index, i) => {
-        if (i && index === indices[i - 1]) return;
-        points.push({ time: Math.max(start, times[index]), value: values[index], index, move });
-        move = false;
-      });
-      bucket = null;
-    }
-    let first = Math.max(0, analysisSampleIndex(times, start));
-    while (first > 0 && times[first - 1] === start) first--;
-    for (let i = first; i < times.length && times[i] <= end; i++) {
-      if (times[i] < start && (i + 1 === times.length || breaks[i + 1])) continue;
-      const column = end > start ? Math.floor((Math.max(start, times[i]) - start) / (end - start) * width) : 0;
-      if (breaks[i]) {
-        flush();
-        move = true;
-      }
-      if (!bucket || bucket.column !== column) {
-        flush();
-        bucket = { column, first: i, last: i, low: i, high: i };
-      } else {
-        bucket.last = i;
-        if (values[i] < values[bucket.low]) bucket.low = i;
-        if (values[i] > values[bucket.high]) bucket.high = i;
-      }
-      maximum = Math.max(maximum, values[i]);
-      last = i;
-    }
-    flush();
-    if (last >= 0 && last + 1 < times.length && !breaks[last + 1] && times[last + 1] > end && times[last] < end) {
-      points.push({ time: end, value: values[last], index: last, move: false });
-    }
-    return { points, maximum };
-  }
-  function zoomAnalysisWindow(span, start, end, factor, anchor) {
-    if (!Number.isFinite(span) || span < 0 || !Number.isFinite(factor) || factor <= 0) throw new Error("Invalid chart range.");
-    if (!span) return [0, 0];
-    const width = Math.min(span, Math.max(Math.min(1e3, span), (end - start) * factor));
-    const center = Math.max(start, Math.min(end, anchor));
-    const ratio = end > start ? (center - start) / (end - start) : 0.5;
-    const left = Math.max(0, Math.min(span - width, center - width * ratio));
-    return [left, left + width];
-  }
-
   // src/analysis-chart-view.js
-  function renderAnalysisChart(parent, series, labels, axisMs, metricLabel, savedState = null) {
+  function renderAnalysisChart(parent, series, labels, axisMs, metricLabel, savedState = null, axisMode = "elapsed") {
+    const element = toolNode(parent, "div");
+    element.id = "tools-chart-view";
+    parent = element;
     let start = 0, end = axisMs, cursor = 0, pinned = false, drag = null, disposed = false;
     const hidden = /* @__PURE__ */ new Set(), controls = toolNode(parent, "div", void 0, "tools-actions");
-    if (savedState) {
+    if (savedState && (savedState.axisMode || "elapsed") === axisMode) {
       ({ start, end, cursor, pinned } = savedState);
       savedState.hidden.forEach((index) => {
         if (index >= 0 && index < series.length) hidden.add(index);
@@ -6093,6 +6215,12 @@ underlying system, so should run in the browser, Node, or Plask.
     let plotCache = null;
     const number = (value) => value.toLocaleString(void 0, { maximumFractionDigits: 2 });
     const elapsed = (ms) => number(ms / 6e4) + "m";
+    const clock = (ms) => {
+      const seconds = Math.floor(ms / 1e3), pad = (n) => String(n).padStart(2, "0");
+      return pad(Math.floor(seconds / 3600)) + ":" + pad(Math.floor(seconds / 60) % 60) + (end - start < 6e4 ? ":" + pad(seconds % 60) : "");
+    };
+    const axisLabel = (ms) => axisMode === "clock" ? clock(ms) : elapsed(ms);
+    const chartLabel = () => metricLabel + (axisMode === "clock" ? " by local time of day, 00:00 to 24:00." : " by real elapsed time.") + " Arrow keys inspect samples; plus and minus zoom; Home and End jump to visible endpoints.";
     const zoomIn = toolButton(controls, "Zoom +", () => zoom(0.5), "tools-chart-zoom-in");
     const zoomOut = toolButton(controls, "Zoom −", () => zoom(2), "tools-chart-zoom-out");
     const panLeft = toolButton(controls, "‹", () => pan(-1), "tools-chart-pan-left");
@@ -6140,12 +6268,12 @@ underlying system, so should run in the browser, Node, or Plask.
     canvas.tabIndex = 0;
     canvas.setAttribute("role", "img");
     parent.insertBefore(canvas, legend);
-    canvas.setAttribute("aria-label", metricLabel + " by real elapsed time. Arrow keys inspect samples; plus and minus zoom; Home and End jump to visible endpoints.");
+    canvas.setAttribute("aria-label", chartLabel());
     const range = toolNode(parent, "p", "", "tools-muted");
     range.id = "tools-chart-range";
     parent.insertBefore(range, legend);
     const settings = toolNode(parent, "div");
-    toolNode(parent, "p", "Aligned from each recording’s first retained sample, using real elapsed time. Move to inspect; click to pin, drag to zoom, or use the buttons and arrow keys. Gaps have no assumed samples. Hidden lines and zoom do not change summary totals or the shared comparison length.", "tools-muted");
+    const hint = toolNode(parent, "p", "", "tools-muted");
     const scroll = toolNode(parent, "div", void 0, "tools-scroll"), table = toolNode(scroll, "table");
     table.id = "tools-chart-inspection";
     const caption = toolNode(table, "caption");
@@ -6179,15 +6307,22 @@ underlying system, so should run in the browser, Node, or Plask.
     }
     function inspect() {
       if (disposed) return;
-      caption.textContent = "Cursor " + elapsed(cursor) + (pinned ? " · pinned" : "");
+      caption.textContent = "Cursor " + axisLabel(cursor) + (pinned ? " · pinned" : "");
       pin.textContent = pinned ? "Unpin" : "Pin";
       pin.setAttribute("aria-label", pinned ? "Unpin inspection cursor" : "Pin inspection cursor");
       pin.setAttribute("aria-pressed", String(pinned));
       series.forEach((s, i) => {
-        const sample = inspectAnalysisSample(s, cursor), row = rows[i];
+        const row = rows[i];
         row.row.hidden = hidden.has(i);
-        row.value.textContent = sample.value === null ? "—" : number(sample.value);
-        row.detail.textContent = sample.kind === "gap" ? "Recording gap — no sample" : sample.kind === "outside" ? "Outside recording" : new Date(sample.timestamp).toLocaleString() + " · sample " + (sample.index + 1) + (sample.kind === "held" ? " (held until next sample)" : "");
+        if (axisMode === "clock") {
+          const sample = inspectClockSample(s.clock, cursor);
+          row.value.textContent = sample.matches.length ? sample.matches.map((match) => number(match.value)).join(" / ") : "—";
+          row.detail.textContent = sample.matches.length ? sample.matches.map((match) => new Date(match.timestamp).toLocaleString(void 0, { timeZoneName: "shortOffset" }) + " · sample " + (match.index + 1) + (match.kind === "held" ? " (held until next sample)" : "")).join(" ; ") : sample.kind === "gap" ? "Recording gap — no sample" : "Outside recording at this clock time";
+        } else {
+          const sample = inspectAnalysisSample(s, cursor);
+          row.value.textContent = sample.value === null ? "—" : number(sample.value);
+          row.detail.textContent = sample.kind === "gap" ? "Recording gap — no sample" : sample.kind === "outside" ? "Outside recording" : new Date(sample.timestamp).toLocaleString() + " · sample " + (sample.index + 1) + (sample.kind === "held" ? " (held until next sample)" : "");
+        }
       });
       const ctx = canvas.getContext("2d");
       ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
@@ -6228,7 +6363,7 @@ underlying system, so should run in the browser, Node, or Plask.
       }
       const plots = series.map((s, j) => {
         var _a2;
-        return hidden.has(j) ? null : (_a2 = plotCache.plots)[j] || (_a2[j] = buildAnalysisPlot(s, start, end, right - left));
+        return hidden.has(j) ? null : (_a2 = plotCache.plots)[j] || (_a2[j] = axisMode === "clock" ? buildClockPlot(s.clock, start, end, right - left) : buildAnalysisPlot(s, start, end, right - left));
       });
       const maximum = Math.max(1, ...plots.map((plot) => plot ? plot.maximum : 1));
       ctx.strokeStyle = style.getPropertyValue("--panel-divider").trim();
@@ -6243,10 +6378,17 @@ underlying system, so should run in the browser, Node, or Plask.
         ctx.textAlign = "right";
         ctx.fillText(number(maximum * step / 2), left - 5, y + 3);
       }
-      ctx.textAlign = "left";
-      ctx.fillText(elapsed(start), left, bottom + 20);
-      ctx.textAlign = "right";
-      ctx.fillText(elapsed(end), right, bottom + 20);
+      if (axisMode === "clock") {
+        for (let step = 0; step <= 4; step++) {
+          ctx.textAlign = step === 0 ? "left" : step === 4 ? "right" : "center";
+          ctx.fillText(clock(start + (end - start) * step / 4), left + (right - left) * step / 4, bottom + 20);
+        }
+      } else {
+        ctx.textAlign = "left";
+        ctx.fillText(elapsed(start), left, bottom + 20);
+        ctx.textAlign = "right";
+        ctx.fillText(elapsed(end), right, bottom + 20);
+      }
       for (const j of newestFirst.slice().reverse()) {
         const color = colors[colorIndices[j]];
         legendLabels[j].style.color = color;
@@ -6278,7 +6420,8 @@ underlying system, so should run in the browser, Node, or Plask.
           ctx.fill();
         });
       }
-      range.textContent = "Chart window " + elapsed(start) + " – " + elapsed(end) + " · full comparison/recording range " + elapsed(axisMs);
+      range.textContent = "Chart window " + axisLabel(start) + " – " + axisLabel(end) + (axisMode === "clock" ? " · 24h local clock" : " · full comparison/recording range " + elapsed(axisMs));
+      hint.textContent = (axisMode === "clock" ? "Aligned by local time of day. Midnight crossings continue at the start of the chart. Clock changes are separate segments; repeated clock times can show multiple dated values. Statistics use full recordings." : "Aligned from each recording’s first retained sample, using real elapsed time. Hidden lines and zoom do not change summary totals or the shared comparison length.") + " Move to inspect; click to pin, drag to zoom, or use the buttons and arrow keys. Gaps have no assumed samples.";
       zoomIn.disabled = end - start <= Math.min(1e3, axisMs);
       zoomOut.disabled = end - start >= axisMs;
       panLeft.disabled = start <= 0;
@@ -6340,7 +6483,7 @@ underlying system, so should run in the browser, Node, or Plask.
       else {
         let target = event.key === "ArrowRight" ? end : start;
         for (let j = 0; j < series.length; j++) if (!hidden.has(j)) {
-          const times = series[j].times, index = analysisSampleIndex(times, cursor);
+          const times = axisMode === "clock" ? series[j].clock.navigation : series[j].times, index = analysisSampleIndex(times, cursor);
           if (event.key === "ArrowRight" && index + 1 < times.length) target = Math.min(target, times[index + 1]);
           if (event.key === "ArrowLeft") {
             let i = index;
@@ -6366,19 +6509,26 @@ underlying system, so should run in the browser, Node, or Plask.
     }
     draw();
     return {
+      element,
       canvas,
       settings,
       draw,
-      capture: () => ({ start, end, cursor, pinned, axisMs, hidden: [...hidden] }),
-      update(nextSeries, nextAxis, nextMetricLabel) {
+      capture: () => ({ start, end, cursor, pinned, axisMs, axisMode, hidden: [...hidden] }),
+      update(nextSeries, nextAxis, nextMetricLabel, nextMode = "elapsed") {
         if (disposed) return;
         const previousAxis = axisMs;
         series = nextSeries;
         axisMs = nextAxis;
         metricLabel = nextMetricLabel;
-        fitWindow(previousAxis);
+        if (axisMode !== nextMode) {
+          axisMode = nextMode;
+          start = 0;
+          end = axisMs;
+          cursor = 0;
+          pinned = false;
+        } else fitWindow(previousAxis);
         drag = null;
-        canvas.setAttribute("aria-label", metricLabel + " by real elapsed time. Arrow keys inspect samples; plus and minus zoom; Home and End jump to visible endpoints.");
+        canvas.setAttribute("aria-label", chartLabel());
         draw();
       },
       dispose() {
@@ -7089,7 +7239,7 @@ underlying system, so should run in the browser, Node, or Plask.
     let currentArchive = null, liveComparisonArchive = null, library = null, tab = "library", fileRequest = 0, chartObserver = null;
     const libraryReader = createLibraryReader();
     const modelHistoryReader = createModelHistoryReader();
-    let historyLimit = Infinity, historySelected = "";
+    let historyLimit = Infinity, historySelected = "", compareAxis = "elapsed";
     let optionsLibrary = null, optionsArchive = null, optionsLiveArchive = null, options = [];
     const savedAnalysis = readAnalysisPreferences();
     let { metric, threshold, sharedLength } = savedAnalysis.preferences;
@@ -7371,7 +7521,7 @@ underlying system, so should run in the browser, Node, or Plask.
         const { check, status } = followControls;
         check.disabled = !!reason;
         check.checked = follower.enabled && !reason;
-        status.textContent = reason || (!follower.enabled ? "Frozen for inspection. Turn on to catch up." : (runtime.isStopped ? "Stopped" : runtime.isPaused ? "Paused" : "Following live") + " · latest sample " + new Date(runtime.history.timestamps.at(-1)).toLocaleTimeString() + (automaticLibraryStatus(context.room).error ? " · Library save pending; showing live data." : "") + (tab === "compare" && sharedLength ? " · Match shared length limits the chart to the shortest recording." : ""));
+        status.textContent = reason || (!follower.enabled ? "Frozen for inspection. Turn on to catch up." : (runtime.isStopped ? "Stopped" : runtime.isPaused ? "Paused" : "Following live") + " · latest sample " + new Date(runtime.history.timestamps.at(-1)).toLocaleTimeString() + (automaticLibraryStatus(context.room).error ? " · Library save pending; showing live data." : "") + (tab === "compare" && compareAxis === "elapsed" && sharedLength ? " · Match shared length limits the chart to the shortest recording." : ""));
       }
       return changed;
     }
@@ -7393,7 +7543,7 @@ underlying system, so should run in the browser, Node, or Plask.
       const scrollTop = content.scrollTop;
       if (tab === "history" && historyView) historyView.update(modelHistoryReader.read(followedEntries(), libraryRoom, metric, historyLimit), historySelected);
       else if (tab === "history") render("history");
-      else if ((tab === "summary" || tab === "compare") && analysisView) refreshAnalysis(true, true);
+      else if ((tab === "summary" || tab === "compare") && analysisOutput) refreshAnalysis(true, true);
       content.scrollTop = scrollTop;
     }
     function selectNewFollowSource() {
@@ -7732,6 +7882,50 @@ underlying system, so should run in the browser, Node, or Plask.
         changed();
       }), id);
     }
+    function comparisonAxis(parent) {
+      const controls = node(parent, "div", void 0, "tools-actions");
+      const label = node(controls, "label", "X axis "), select = node(label, "select");
+      select.id = "tools-compare-axis";
+      for (const [value, text] of [["elapsed", "Elapsed time"], ["clock", "24h time of day"]]) {
+        const option = node(select, "option", text);
+        option.value = value;
+      }
+      select.value = compareAxis;
+      const hint = node(parent, "p", "", "tools-muted");
+      hint.id = "tools-compare-axis-hint";
+      select.setAttribute("aria-describedby", hint.id);
+      select.onchange = () => {
+        compareAxis = select.value;
+        updateFollowing();
+        refreshAnalysis();
+      };
+    }
+    function syncComparisonAxis() {
+      if (tab !== "compare") return;
+      const clock = compareAxis === "clock", check = dialog.querySelector("#tools-shared-length");
+      check.disabled = clock;
+      check.checked = sharedLength;
+      check.title = clock ? "Match shared length applies to elapsed-time comparison." : "";
+      dialog.querySelector("#tools-compare-axis-hint").textContent = clock ? "24h uses your local time (" + Intl.DateTimeFormat().resolvedOptions().timeZone + "). Statistics use full recordings; Match shared length applies in elapsed mode." : "";
+    }
+    function clearAnalysisChart() {
+      if (!analysisView) return;
+      const hadFocus = analysisView.element.contains(document.activeElement);
+      analysisStates.set(tab, __spreadProps(__spreadValues({}, analysisSources), { state: analysisView.capture() }));
+      const range = dialog.querySelector("#tools-comparison-range");
+      if (range) content.insertBefore(range, analysisOutput);
+      if (chartObserver) {
+        chartObserver.disconnect();
+        chartObserver = null;
+      }
+      if (chartDispose) chartDispose();
+      analysisView.element.remove();
+      analysisView = null;
+      analysisSources = null;
+      chartDraw = null;
+      chartDispose = null;
+      if (hadFocus) dialog.querySelector("#tools-compare-axis").focus({ preventScroll: true });
+    }
     function comparisonRange() {
       const controls = node(content, "div", void 0, "tools-comparison-range");
       controls.id = "tools-comparison-range";
@@ -7871,6 +8065,7 @@ underlying system, so should run in the browser, Node, or Plask.
         node(sourceControls, "span", 2 + selectedExtra.length + " / 6 slots", "tools-muted");
       }
       followControl(content);
+      if (comparing) comparisonAxis(content);
       metricStrip(content, refreshAnalysis);
       return sourceOptions();
     }
@@ -8021,16 +8216,20 @@ underlying system, so should run in the browser, Node, or Plask.
       node(parent, "p", "The full-session high can predate retained history and is not limited by “Match shared length.” Token-holder share is weighted by recorded registered-viewer time.", "tools-muted");
     }
     function chart(archives, labels, endMs, ids) {
-      const series = archives.map((archive) => __spreadProps(__spreadValues({}, analysisSeries(archive, metric)), { timestamps: archive.session.history.timestamps }));
+      const axisMode = tab === "compare" ? compareAxis : "elapsed";
+      const series = archives.map((archive) => {
+        const source = __spreadProps(__spreadValues({}, analysisSeries(archive, metric)), { timestamps: archive.session.history.timestamps });
+        return axisMode === "clock" ? __spreadProps(__spreadValues({}, source), { clock: projectClockSeries(source) }) : source;
+      });
       if (analysisView) {
         analysisSources = { archives, ids };
-        analysisView.update(series, endMs, ANALYSIS_METRICS[metric]);
+        analysisView.update(series, endMs, ANALYSIS_METRICS[metric], axisMode);
         return;
       }
       const saved = analysisStates.get(tab);
-      const same = saved && saved.ids.length === ids.length && ids.every((id, index) => saved.archives[saved.ids.indexOf(id)] === archives[index]);
+      const same = saved && (saved.state.axisMode || "elapsed") === axisMode && saved.ids.length === ids.length && ids.every((id, index) => saved.archives[saved.ids.indexOf(id)] === archives[index]);
       const restored = same ? __spreadProps(__spreadValues({}, saved.state), { hidden: saved.state.hidden.map((index) => ids.indexOf(saved.ids[index])) }) : null;
-      const view = renderAnalysisChart(content, series, labels, endMs, ANALYSIS_METRICS[metric], restored);
+      const view = renderAnalysisChart(content, series, labels, endMs, ANALYSIS_METRICS[metric], restored, axisMode);
       const range = dialog.querySelector("#tools-comparison-range");
       if (range) view.settings.appendChild(range);
       content.appendChild(analysisOutput);
@@ -8056,6 +8255,7 @@ underlying system, so should run in the browser, Node, or Plask.
       const comparing = tab === "compare", options2 = sourceOptions();
       if (!analysisOutput) return;
       const { overview, controls, results } = analysisReports;
+      syncComparisonAxis();
       overview.replaceChildren();
       results.replaceChildren();
       controls.hidden = false;
@@ -8073,8 +8273,13 @@ underlying system, so should run in the browser, Node, or Plask.
           return;
         }
         const ids = [.../* @__PURE__ */ new Set([selectedA, selectedB, ...selectedExtra])], recordings = ids.map((id) => options2.find((item) => item.id === id)).filter((item) => !!item);
-        const result = compareRecordingSet(recordings.map((item) => item.archive), metric, threshold, sharedLength);
-        if (redrawChart) chart(recordings.map((item) => item.archive), recordings.map((item) => item.title), result.axisMs, ids);
+        const archives = recordings.map((item) => item.archive), clock = compareAxis === "clock";
+        const result = compareRecordingSet(archives, metric, threshold, !clock && sharedLength);
+        const tooLong = clock ? archives.flatMap((archive, index) => clockSessionDuration(archive) > CLOCK_DAY_MS ? [String.fromCharCode(65 + index)] : []) : [];
+        if (tooLong.length) {
+          clearAnalysisChart();
+          node(overview, "p", "24h chart unavailable: recording" + (tooLong.length > 1 ? "s " : " ") + tooLong.join(", ") + " exceed" + (tooLong.length === 1 ? "s" : "") + " 24 hours. Choose Elapsed time or select shorter recordings.", "tools-muted");
+        } else if (redrawChart) chart(archives, recordings.map((item) => item.title), clock ? CLOCK_DAY_MS : result.axisMs, ids);
         summaryTable(result.summaries, recordings.map((item, index) => String.fromCharCode(65 + index)), true, results);
       } else {
         const summary = summarizeSession(a.archive, metric, threshold);
@@ -9832,7 +10037,7 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/bootstrap.js
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.22.0";
+    runtime.TIERSCOPE_VERSION = "3.23.0-beta.1";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;

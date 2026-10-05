@@ -1,5 +1,7 @@
 # TierScope — Usage and development notes
 
+**3.23.0-beta.1:** [24h comparison review guide](docs/clock-comparison-beta.md). The official release remains 3.22.0.
+
 Detailed reference for **3.22.0** ([Library chart controls guide](docs/library-chart-controls.md)). [Follow live guide](docs/follow-live.md). [Audience trends and ratio guide](docs/audience-trends.md). [Sessions Book guide](docs/sessions-book.md). The simplified Current Live Session card provides Keep in Library, Auto, Compare with previous, and History. File controls are below the session list, and exports remain on stored-session menus and the separate replay card. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation instructions, see the [README](readme.md).
 
 ## Contents
@@ -325,6 +327,10 @@ Time calculations use original timestamps, not evenly paced Replay time. Each sa
 
 Compare up to six distinct recordings (A–F) on the same elapsed-time axis, starting from each recording's first retained sample. The newest selected recording by first retained date is solid pink; older recordings use distinct colors with dashed lines. The legend marks the latest recording and shows matching line styles. Styling follows recording dates when slots change; equal dates use the first tied slot. Hiding a line does not reassign its style. Use **Add recording** for more slots, or select 2–6 recordings in Library and choose **Compare**. The recordings may belong to one model or several. Duplicate slots must be corrected before a comparison is displayed. Comparison keeps its single threshold control; use **Apply threshold** or press Enter to update it. **Match shared length** restricts all selected recordings to the shortest recording's elapsed span. Turn it off to show their complete retained spans on the longest recording’s axis. Gaps remain blank and are excluded separately for each recording, so check coverage when comparing averages. Full-session highs may predate retained history and are not clipped to the comparison range.
 
+In Compare, **X axis → 24h time of day** aligns recordings by the viewer's local clock on a fixed **00:00–24:00** axis. A recording from 23:00 to 01:00 appears at the right edge and continues at the left edge, with no connecting line across the chart. Recording gaps remain blank. Inspection retains the original sample dates and UTC offsets; repeated clock times, including daylight-saving fall-back, can show more than one dated value. Clock jumps split the line instead of inventing coverage. Statistics use full recordings and their real timestamps. **Match shared length** is disabled in this mode; its previous choice returns in Elapsed time. Changing axes resets zoom and the cursor while retaining hidden lines. The axis choice lasts until Library closes.
+
+The 24h chart is unavailable if any selected recording spans more than 24 real hours, including a known start before retained history or an active duration above 24 hours. Exactly 24 hours is allowed. Export dates are not used as recording end times. Long sessions remain available for statistics, storage and elapsed-time comparison. If a followed live recording exceeds the limit, the clock chart closes with an explanation and its reports continue updating.
+
 
 Changing the metric preserves zoom, cursor position, pinning and hidden lines. Applying thresholds updates the statistics without rebuilding the chart or recording selectors. Changing the shared-length setting fits the current window and cursor within the available range. Filters and switching between Summary and Compare retain their separate chart settings while the same recording snapshots remain selected. A different selection or replacement snapshot resets the chart; closing Library clears these chart settings. Statistics still use the complete analysis range, independently of zoom and hidden lines.
 
@@ -528,6 +534,7 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
+| **3.23.0-beta.1** | Add local 24h time-of-day comparisons with midnight-safe lines, dated shared inspection, full-recording statistics and a 24-hour recording limit for this chart mode. |
 | **3.22.0** | Make Library follow background transparency; add single-selection metric icons above analysis charts, move Match shared length below Compare, and place threshold controls beside their report results. |
 | **3.21.0** | Add Follow live to Summary, Compare and Model History for the active session of confirmed favorites; preserve chart controls, frozen views, session identity and independent save feedback. Promote Compare with previous in Current Live Session. |
 | **3.20.0** | Match the With Tokens trend border to yellow, add a pink Room Total trend box to the larger four-column bottom row, adjust delta fonts, and show an Anons/registered ratio from the displayed sample with a 5% equality band. |

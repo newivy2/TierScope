@@ -1,3 +1,4 @@
+import { CLOCK_DAY_MS, clockSessionDuration, projectClockSeries } from './analysis-clock-data.js';
 import { createAnalysisFollower } from './analysis-follow.js';
 import { renderMetricStrip } from './analysis-metric-view.js';
 import { automaticLibraryStatus, keepFavoriteSession } from './automatic-library.js';
@@ -81,7 +82,7 @@ export function openSessionTools(focusTarget) {
     let currentArchive = null, liveComparisonArchive = null, library = null, tab = 'library', fileRequest = 0, chartObserver = null;
     const libraryReader = createLibraryReader();
     const modelHistoryReader = createModelHistoryReader();
-    let historyLimit = Infinity, historySelected = '';
+    let historyLimit = Infinity, historySelected = '', compareAxis = 'elapsed';
     let optionsLibrary = null, optionsArchive = null, optionsLiveArchive = null, options = [];
     const savedAnalysis = readAnalysisPreferences();
     let {metric, threshold, sharedLength} = savedAnalysis.preferences;
@@ -286,7 +287,7 @@ export function openSessionTools(focusTarget) {
                 (runtime.isStopped ? 'Stopped' : runtime.isPaused ? 'Paused' : 'Following live') +
                 ' · latest sample ' + new Date(runtime.history.timestamps.at(-1)).toLocaleTimeString() +
                 (automaticLibraryStatus(context.room).error ? ' · Library save pending; showing live data.' : '') +
-                (tab === 'compare' && sharedLength ? ' · Match shared length limits the chart to the shortest recording.' : ''));
+                (tab === 'compare' && compareAxis === 'elapsed' && sharedLength ? ' · Match shared length limits the chart to the shortest recording.' : ''));
         }
         return changed;
     }
@@ -307,7 +308,7 @@ export function openSessionTools(focusTarget) {
         const scrollTop = content.scrollTop;
         if (tab === 'history' && historyView) historyView.update(modelHistoryReader.read(followedEntries(), libraryRoom, metric, historyLimit), historySelected);
         else if (tab === 'history') render('history');
-        else if ((tab === 'summary' || tab === 'compare') && analysisView) refreshAnalysis(true, true);
+        else if ((tab === 'summary' || tab === 'compare') && analysisOutput) refreshAnalysis(true, true);
         content.scrollTop = scrollTop;
     }
     function selectNewFollowSource() {
@@ -545,6 +546,36 @@ export function openSessionTools(focusTarget) {
         });
         return renderMetricStrip(parent, choices, metric, action(value => { rememberAnalysis({metric: value}); changed(); }), id);
     }
+    function comparisonAxis(parent) {
+        const controls = node(parent, 'div', undefined, 'tools-actions');
+        const label = node(controls, 'label', 'X axis '), select = node(label, 'select'); select.id = 'tools-compare-axis';
+        for (const [value, text] of [['elapsed', 'Elapsed time'], ['clock', '24h time of day']]) {
+            const option = node(select, 'option', text); option.value = value;
+        }
+        select.value = compareAxis;
+        const hint = node(parent, 'p', '', 'tools-muted'); hint.id = 'tools-compare-axis-hint';
+        select.setAttribute('aria-describedby', hint.id);
+        select.onchange = () => { compareAxis = select.value; updateFollowing(); refreshAnalysis(); };
+    }
+    function syncComparisonAxis() {
+        if (tab !== 'compare') return;
+        const clock = compareAxis === 'clock', check = dialog.querySelector('#tools-shared-length');
+        check.disabled = clock; check.checked = sharedLength;
+        check.title = clock ? 'Match shared length applies to elapsed-time comparison.' : '';
+        dialog.querySelector('#tools-compare-axis-hint').textContent = clock ?
+            '24h uses your local time (' + Intl.DateTimeFormat().resolvedOptions().timeZone + '). Statistics use full recordings; Match shared length applies in elapsed mode.' : '';
+    }
+    function clearAnalysisChart() {
+        if (!analysisView) return;
+        const hadFocus = analysisView.element.contains(document.activeElement);
+        analysisStates.set(tab, {...analysisSources, state: analysisView.capture()});
+        const range = dialog.querySelector('#tools-comparison-range');
+        if (range) content.insertBefore(range, analysisOutput);
+        if (chartObserver) { chartObserver.disconnect(); chartObserver = null; }
+        if (chartDispose) chartDispose();
+        analysisView.element.remove(); analysisView = null; analysisSources = null; chartDraw = null; chartDispose = null;
+        if (hadFocus) dialog.querySelector('#tools-compare-axis').focus({preventScroll: true});
+    }
     function comparisonRange() {
         const controls = node(content, 'div', undefined, 'tools-comparison-range'); controls.id = 'tools-comparison-range';
         const label = node(controls, 'label'), check = node(label, 'input'); check.type = 'checkbox'; check.checked = sharedLength; check.id = 'tools-shared-length';
@@ -606,6 +637,7 @@ export function openSessionTools(focusTarget) {
 
         }
         followControl(content);
+        if (comparing) comparisonAxis(content);
         metricStrip(content, refreshAnalysis);
         return sourceOptions();
     }
@@ -710,12 +742,16 @@ export function openSessionTools(focusTarget) {
         node(parent, 'p', 'The full-session high can predate retained history and is not limited by “Match shared length.” Token-holder share is weighted by recorded registered-viewer time.', 'tools-muted');
     }
     function chart(archives, labels, endMs, ids) {
-        const series = archives.map(archive => ({...analysisSeries(archive, metric), timestamps: archive.session.history.timestamps}));
-        if (analysisView) { analysisSources = {archives, ids}; analysisView.update(series, endMs, ANALYSIS_METRICS[metric]); return; }
+        const axisMode = tab === 'compare' ? compareAxis : 'elapsed';
+        const series = archives.map(archive => {
+            const source = {...analysisSeries(archive, metric), timestamps: archive.session.history.timestamps};
+            return axisMode === 'clock' ? {...source, clock: projectClockSeries(source)} : source;
+        });
+        if (analysisView) { analysisSources = {archives, ids}; analysisView.update(series, endMs, ANALYSIS_METRICS[metric], axisMode); return; }
         const saved = analysisStates.get(tab);
-        const same = saved && saved.ids.length === ids.length && ids.every((id, index) => saved.archives[saved.ids.indexOf(id)] === archives[index]);
+        const same = saved && (saved.state.axisMode || 'elapsed') === axisMode && saved.ids.length === ids.length && ids.every((id, index) => saved.archives[saved.ids.indexOf(id)] === archives[index]);
         const restored = same ? {...saved.state, hidden: saved.state.hidden.map(index => ids.indexOf(saved.ids[index]))} : null;
-        const view = renderAnalysisChart(content, series, labels, endMs, ANALYSIS_METRICS[metric], restored);
+        const view = renderAnalysisChart(content, series, labels, endMs, ANALYSIS_METRICS[metric], restored, axisMode);
         const range = dialog.querySelector('#tools-comparison-range');
         if (range) view.settings.appendChild(range);
         content.appendChild(analysisOutput);
@@ -736,6 +772,7 @@ export function openSessionTools(focusTarget) {
         const comparing = tab === 'compare', options = sourceOptions();
         if (!analysisOutput) return;
         const {overview, controls, results} = analysisReports;
+        syncComparisonAxis();
         overview.replaceChildren(); results.replaceChildren(); controls.hidden = false; message.textContent = '';
         const a = options.find(item => item.id === selectedA), b = options.find(item => item.id === selectedB);
         if (!a || comparing && (!b || selectedExtra.some(id => !options.some(item => item.id === id)))) {
@@ -744,8 +781,14 @@ export function openSessionTools(focusTarget) {
         if (comparing) {
             if (new Set([selectedA, selectedB, ...selectedExtra]).size !== 2 + selectedExtra.length) { controls.hidden = true; node(overview, 'p', 'Choose a different recording in each comparison slot.'); return; }
             const ids = [...new Set([selectedA, selectedB, ...selectedExtra])], recordings = ids.map(id => options.find(item => item.id === id)).filter(item => !!item);
-            const result = compareRecordingSet(recordings.map(item => item.archive), metric, threshold, sharedLength);
-            if (redrawChart) chart(recordings.map(item => item.archive), recordings.map(item => item.title), result.axisMs, ids);
+            const archives = recordings.map(item => item.archive), clock = compareAxis === 'clock';
+            const result = compareRecordingSet(archives, metric, threshold, !clock && sharedLength);
+            const tooLong = clock ? archives.flatMap((archive, index) => clockSessionDuration(archive) > CLOCK_DAY_MS ? [String.fromCharCode(65 + index)] : []) : [];
+            if (tooLong.length) {
+                clearAnalysisChart();
+                node(overview, 'p', '24h chart unavailable: recording' + (tooLong.length > 1 ? 's ' : ' ') + tooLong.join(', ') +
+                    ' exceed' + (tooLong.length === 1 ? 's' : '') + ' 24 hours. Choose Elapsed time or select shorter recordings.', 'tools-muted');
+            } else if (redrawChart) chart(archives, recordings.map(item => item.title), clock ? CLOCK_DAY_MS : result.axisMs, ids);
             summaryTable(result.summaries, recordings.map((item, index) => String.fromCharCode(65 + index)), true, results);
         } else {
             const summary = summarizeSession(a.archive, metric, threshold);

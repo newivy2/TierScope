@@ -1,13 +1,15 @@
+import { buildClockPlot, inspectClockSample } from './analysis-clock-data.js';
 import { analysisSampleIndex, buildAnalysisPlot, inspectAnalysisSample, zoomAnalysisWindow } from './analysis-chart-data.js';
 import { toolNode as node, toolButton as button } from './tools-view-helpers.js';
 
 // Receives snapshots of analysis values, not live/playback owners or archives.
 // Cache the chart bitmap between cursor moves; long recordings are only drawn
 // again for zoom, visibility, size or theme changes.
-export function renderAnalysisChart(parent, series, labels, axisMs, metricLabel, savedState = null) {
+export function renderAnalysisChart(parent, series, labels, axisMs, metricLabel, savedState = null, axisMode = 'elapsed') {
+    const element = node(parent, 'div'); element.id = 'tools-chart-view'; parent = element;
     let start = 0, end = axisMs, cursor = 0, pinned = false, drag = null, disposed = false;
     const hidden = new Set(), controls = node(parent, 'div', undefined, 'tools-actions');
-    if (savedState) {
+    if (savedState && (savedState.axisMode || 'elapsed') === axisMode) {
         ({start, end, cursor, pinned} = savedState);
         savedState.hidden.forEach(index => { if (index >= 0 && index < series.length) hidden.add(index); });
         if (hidden.size === series.length) hidden.delete(0);
@@ -16,6 +18,15 @@ export function renderAnalysisChart(parent, series, labels, axisMs, metricLabel,
     let plotCache = null;
     const number = value => value.toLocaleString(undefined, {maximumFractionDigits: 2});
     const elapsed = ms => number(ms / 60000) + 'm';
+    const clock = ms => {
+        const seconds = Math.floor(ms / 1000), pad = n => String(n).padStart(2, '0');
+        return pad(Math.floor(seconds / 3600)) + ':' + pad(Math.floor(seconds / 60) % 60) +
+            (end - start < 60000 ? ':' + pad(seconds % 60) : '');
+    };
+    const axisLabel = ms => axisMode === 'clock' ? clock(ms) : elapsed(ms);
+    const chartLabel = () => metricLabel + (axisMode === 'clock' ? ' by local time of day, 00:00 to 24:00.' : ' by real elapsed time.') +
+        ' Arrow keys inspect samples; plus and minus zoom; Home and End jump to visible endpoints.';
+
     const zoomIn = button(controls, 'Zoom +', () => zoom(0.5), 'tools-chart-zoom-in');
     const zoomOut = button(controls, 'Zoom −', () => zoom(2), 'tools-chart-zoom-out');
     const panLeft = button(controls, '‹', () => pan(-1), 'tools-chart-pan-left'); panLeft.setAttribute('aria-label', 'Pan earlier');
@@ -43,11 +54,11 @@ export function renderAnalysisChart(parent, series, labels, axisMs, metricLabel,
     });
     const canvas = node(parent, 'canvas'); canvas.id = 'tools-analysis-chart'; canvas.tabIndex = 0; canvas.setAttribute('role', 'img');
     parent.insertBefore(canvas, legend);
-    canvas.setAttribute('aria-label', metricLabel + ' by real elapsed time. Arrow keys inspect samples; plus and minus zoom; Home and End jump to visible endpoints.');
+    canvas.setAttribute('aria-label', chartLabel());
     const range = node(parent, 'p', '', 'tools-muted'); range.id = 'tools-chart-range';
     parent.insertBefore(range, legend);
     const settings = node(parent, 'div');
-    node(parent, 'p', 'Aligned from each recording’s first retained sample, using real elapsed time. Move to inspect; click to pin, drag to zoom, or use the buttons and arrow keys. Gaps have no assumed samples. Hidden lines and zoom do not change summary totals or the shared comparison length.', 'tools-muted');
+    const hint = node(parent, 'p', '', 'tools-muted');
     const scroll = node(parent, 'div', undefined, 'tools-scroll'), table = node(scroll, 'table'); table.id = 'tools-chart-inspection';
     const caption = node(table, 'caption');
     const header = node(node(table, 'thead'), 'tr'); ['Recording','Count','Sample timestamp / status'].forEach(text => { node(header, 'th', text).scope = 'col'; });
@@ -69,13 +80,23 @@ export function renderAnalysisChart(parent, series, labels, axisMs, metricLabel,
     }
     function inspect() {
         if (disposed) return;
-        caption.textContent = 'Cursor ' + elapsed(cursor) + (pinned ? ' · pinned' : '');
+        caption.textContent = 'Cursor ' + axisLabel(cursor) + (pinned ? ' · pinned' : '');
         pin.textContent = pinned ? 'Unpin' : 'Pin'; pin.setAttribute('aria-label', pinned ? 'Unpin inspection cursor' : 'Pin inspection cursor'); pin.setAttribute('aria-pressed', String(pinned));
         series.forEach((s, i) => {
-            const sample = inspectAnalysisSample(s, cursor), row = rows[i]; row.row.hidden = hidden.has(i);
-            row.value.textContent = sample.value === null ? '—' : number(sample.value);
-            row.detail.textContent = sample.kind === 'gap' ? 'Recording gap — no sample' : sample.kind === 'outside' ? 'Outside recording' :
-                new Date(sample.timestamp).toLocaleString() + ' · sample ' + (sample.index + 1) + (sample.kind === 'held' ? ' (held until next sample)' : '');
+            const row = rows[i]; row.row.hidden = hidden.has(i);
+            if (axisMode === 'clock') {
+                const sample = inspectClockSample(s.clock, cursor);
+                row.value.textContent = sample.matches.length ? sample.matches.map(match => number(match.value)).join(' / ') : '—';
+                row.detail.textContent = sample.matches.length ? sample.matches.map(match =>
+                    new Date(match.timestamp).toLocaleString(undefined, {timeZoneName: 'shortOffset'}) + ' · sample ' + (match.index + 1) +
+                    (match.kind === 'held' ? ' (held until next sample)' : '')).join(' ; ') :
+                    sample.kind === 'gap' ? 'Recording gap — no sample' : 'Outside recording at this clock time';
+            } else {
+                const sample = inspectAnalysisSample(s, cursor);
+                row.value.textContent = sample.value === null ? '—' : number(sample.value);
+                row.detail.textContent = sample.kind === 'gap' ? 'Recording gap — no sample' : sample.kind === 'outside' ? 'Outside recording' :
+                    new Date(sample.timestamp).toLocaleString() + ' · sample ' + (sample.index + 1) + (sample.kind === 'held' ? ' (held until next sample)' : '');
+            }
         });
         const ctx = canvas.getContext('2d'); ctx.setTransform(ratio, 0, 0, ratio, 0, 0); ctx.clearRect(0, 0, width, height); ctx.drawImage(bitmap, 0, 0, width, height);
         const style = window.getComputedStyle(parent);
@@ -99,14 +120,21 @@ export function renderAnalysisChart(parent, series, labels, axisMs, metricLabel,
             plotCache = {series, start, end, width: right - left, plots: new Array(series.length)};
         }
         const plots = series.map((s, j) => hidden.has(j) ? null :
-            (plotCache.plots[j] ||= buildAnalysisPlot(s, start, end, right - left)));
+            (plotCache.plots[j] ||= axisMode === 'clock' ? buildClockPlot(s.clock, start, end, right - left) : buildAnalysisPlot(s, start, end, right - left)));
         const maximum = Math.max(1, ...plots.map(plot => plot ? plot.maximum : 1));
         ctx.strokeStyle = style.getPropertyValue('--panel-divider').trim(); ctx.fillStyle = style.getPropertyValue('--panel-muted').trim(); ctx.font = '10px Arial';
         for (let step = 0; step <= 2; step++) {
             const y = bottom - step / 2 * (bottom - top); ctx.beginPath(); ctx.moveTo(left,y);ctx.lineTo(right,y);ctx.stroke();
             ctx.textAlign = 'right';ctx.fillText(number(maximum * step / 2),left-5,y+3);
         }
-        ctx.textAlign = 'left';ctx.fillText(elapsed(start),left,bottom+20);ctx.textAlign = 'right';ctx.fillText(elapsed(end),right,bottom+20);
+        if (axisMode === 'clock') {
+            for (let step = 0; step <= 4; step++) {
+                ctx.textAlign = step === 0 ? 'left' : step === 4 ? 'right' : 'center';
+                ctx.fillText(clock(start + (end - start) * step / 4), left + (right - left) * step / 4, bottom + 20);
+            }
+        } else {
+            ctx.textAlign = 'left';ctx.fillText(elapsed(start),left,bottom+20);ctx.textAlign = 'right';ctx.fillText(elapsed(end),right,bottom+20);
+        }
         // Paint the newest last so its solid line stays clear over older dashes.
         for (const j of newestFirst.slice().reverse()) {
             const color = colors[colorIndices[j]];
@@ -126,7 +154,12 @@ export function renderAnalysisChart(parent, series, labels, axisMs, metricLabel,
             });
             ctx.stroke();ctx.setLineDash([]);dots.forEach(([x,y])=>{ctx.beginPath();ctx.arc(x,y,2.5,0,Math.PI*2);ctx.fill();});
         }
-        range.textContent = 'Chart window ' + elapsed(start) + ' – ' + elapsed(end) + ' · full comparison/recording range ' + elapsed(axisMs);
+        range.textContent = 'Chart window ' + axisLabel(start) + ' – ' + axisLabel(end) +
+            (axisMode === 'clock' ? ' · 24h local clock' : ' · full comparison/recording range ' + elapsed(axisMs));
+        hint.textContent = (axisMode === 'clock' ?
+            'Aligned by local time of day. Midnight crossings continue at the start of the chart. Clock changes are separate segments; repeated clock times can show multiple dated values. Statistics use full recordings.' :
+            'Aligned from each recording’s first retained sample, using real elapsed time. Hidden lines and zoom do not change summary totals or the shared comparison length.') +
+            ' Move to inspect; click to pin, drag to zoom, or use the buttons and arrow keys. Gaps have no assumed samples.';
         zoomIn.disabled = end-start <= Math.min(1000,axisMs); zoomOut.disabled = end-start >= axisMs;
         panLeft.disabled = start <= 0; panRight.disabled = end >= axisMs; inspect();
     }
@@ -150,7 +183,7 @@ export function renderAnalysisChart(parent, series, labels, axisMs, metricLabel,
         else {
             let target=event.key==='ArrowRight'?end:start;
             for(let j=0;j<series.length;j++)if(!hidden.has(j)){
-                const times=series[j].times, index=analysisSampleIndex(times,cursor);
+                const times=axisMode === 'clock' ? series[j].clock.navigation : series[j].times, index=analysisSampleIndex(times,cursor);
                 if(event.key==='ArrowRight'&&index+1<times.length)target=Math.min(target,times[index+1]);
                 if(event.key==='ArrowLeft'){
                     let i=index;while(i>=0&&times[i]>=cursor)i--;if(i>=0)target=Math.max(target,times[i]);
@@ -169,13 +202,16 @@ export function renderAnalysisChart(parent, series, labels, axisMs, metricLabel,
         cursor = Math.max(start, Math.min(end, cursor));
     }
     draw();
-    return {canvas, settings, draw,
-        capture: () => ({start, end, cursor, pinned, axisMs, hidden: [...hidden]}),
-        update(nextSeries, nextAxis, nextMetricLabel) {
+    return {element, canvas, settings, draw,
+        capture: () => ({start, end, cursor, pinned, axisMs, axisMode, hidden: [...hidden]}),
+        update(nextSeries, nextAxis, nextMetricLabel, nextMode = 'elapsed') {
             if (disposed) return;
             const previousAxis = axisMs; series = nextSeries; axisMs = nextAxis; metricLabel = nextMetricLabel;
-            fitWindow(previousAxis); drag = null;
-            canvas.setAttribute('aria-label', metricLabel + ' by real elapsed time. Arrow keys inspect samples; plus and minus zoom; Home and End jump to visible endpoints.');
+            if (axisMode !== nextMode) {
+                axisMode = nextMode; start = 0; end = axisMs; cursor = 0; pinned = false;
+            } else fitWindow(previousAxis);
+            drag = null;
+            canvas.setAttribute('aria-label', chartLabel());
             draw();
         },
         dispose() { disposed = true; drag = null; plotCache = null; bitmap.width = bitmap.height = 0; }

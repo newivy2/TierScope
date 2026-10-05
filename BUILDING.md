@@ -104,6 +104,12 @@ The tools coordinator clears the reader and source-label choices on close. Sourc
 
 `analysis-chart-data.js` provides typed binary-search inspection, bounded zoom and pixel-column plot reduction that retains first/last points, extrema and gap boundaries. The chart view receives elapsed series plus original timestamps; it never reads live state, playback or storage. A cached bitmap avoids rescanning history on cursor movement. Zoom, theme, viewport or line visibility rebuild the bitmap. The coordinator disconnects observers and disposes the bitmap on view changes and close. Summary totals are independent of presentation zoom/visibility. Source guards include every new module and still reject application import cycles.
 
+## Time-of-day comparison (3.23.0 beta)
+
+`analysis-clock-data.js` projects immutable analysis series onto local clock coordinates. It splits covered intervals and gaps at local midnight and UTC-offset changes, retaining original sample indices/timestamps separately from synthetic held-value boundaries. Each projected segment has its own drawing path; repeated clock positions can return multiple dated inspection values. Plot reduction and binary-search inspection reuse the existing typed analysis helpers. This data module has no runtime, storage or DOM dependencies.
+
+The tools coordinator guards the 24-hour recording extent before projection and requests full-recording statistics in clock mode. The chart view owns axis-specific zoom/cursor state and receives projected series. Axis switching resets coordinates without changing hidden lines, source archives or persisted preferences. Clearing an unavailable clock chart disposes its bitmap and observer while leaving selectors, threshold inputs and live reports active. The browser fixture checks recovery to elapsed mode after an overlong live recording.
+
 ## Library continuity (3.15.0)
 
 `library-drafts.js` owns temporary plain-text drafts independently of Library DOM lifetimes. It receives entries and returns copies, with no storage/DOM/runtime dependencies. The coordinator keeps one owner for the tab, saves only on an explicit action, checks freshly read notes for conflicts, and clears a draft only after successful persistence or explicit discard. Reconciliation follows IDs and explicit redundant-record aliases; unavailable recordings retain recoverable drafts. A beforeunload handler exists only while drafts remain. Closing Library releases its readers, charts and observers while keeping draft text/metadata for reopening.

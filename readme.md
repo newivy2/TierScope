@@ -10,6 +10,8 @@ If you used the beta, install from the official link above to follow main releas
 
 **Current release: 3.22.0** · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.22.0)
 
+**Beta for review:** [24h time-of-day comparisons](docs/clock-comparison-beta.md).
+
 ## Main features
 
 - **Live tracking and replay** — Follow viewer tiers and totals, inspect and zoom charts, and replay live or saved sessions.
