@@ -49,10 +49,17 @@ export function updateStopControls() {
         reset.title = reset.disabled ? 'Open a room to reset tracking' : 'Reset all tracking data';
     }
     var stop = document.getElementById('btn-control-stop');
-    if (stop) { stop.disabled = runtime.isStopped; stop.style.opacity = runtime.isStopped ? '0.5' : '1'; }
+    if (stop) { stop.disabled = runtime.isStopped || !isBroadcastRoom(); stop.style.opacity = stop.disabled ? '0.5' : '1'; }
     ['btn-auto', 'btn-control-auto'].forEach(function(id) {
         var button = document.getElementById(id);
         if (!button) return;
+        button.disabled = !isBroadcastRoom();
+        if (button.disabled) {
+            button.title = 'Open a broadcast room to track';
+            button.setAttribute('aria-label', 'Open a broadcast room to track');
+            button.style.background = 'var(--panel-button)';
+            return;
+        }
         button.innerHTML = runtime.isStopped ? 'Start' : runtime.isAutoRefreshOn && !isAbsencePaused() ? '⏸' : '▶';
         button.title = runtime.isStopped ? 'Start a new session (keeps this stopped record until normal cleanup)' :
             isAbsencePaused() ? 'Resume recording now; cancel absence slowdown, automatic pause and Stop until the broadcaster returns' :
@@ -105,6 +112,7 @@ export function updateTrackingTimer() {
 }
 
 export function startTrackingTimer() {
+    if (!isBroadcastRoom()) return;
     if (!startSessionClock(Date.now())) return;
     startAcquisitionClock('trackingTimerInterval', updateTrackingTimer, 1000);
     updateTrackingTimer();
@@ -177,6 +185,14 @@ export function resetCountdown() {
 }
 
 export function updateCountdownDisplay() {
+    if (!isBroadcastRoom()) {
+        ['auto-status', 'expanded-countdown', 'control-next-scan'].forEach(function(id) {
+            var element = document.getElementById(id);
+            if (element) { element.textContent = 'Open a room'; element.title = 'Tracking is inactive on this page. Library and saved-file Replay remain available.'; element.style.color = 'var(--panel-muted)'; }
+        });
+        updateMiniFreshness();
+        return;
+    }
     if (checkAbsenceStop()) return;
     var policy = readRequestPolicy();
     if (policy.blocked && runtime.isAutoRefreshOn) pauseForAccessRestriction();
@@ -285,8 +301,8 @@ export function adjustTimer(delta) {
 }
 
 export function startCountdown() {
-    if (runtime.isStopped) return;
     stopAcquisitionClock('countdownInterval');
+    if (!isBroadcastRoom() || runtime.isStopped) return;
     if (!runtime.nextScanAt) resetCountdown();
     updateCountdownDisplay();
     if (runtime.isStopped) return;
@@ -317,6 +333,7 @@ export function pauseAutoRefresh() {
 }
 
 export function toggleAutoRefresh() {
+    if (!isBroadcastRoom()) { updateStopControls(); updateCountdownDisplay(); return; }
     if (runtime.isStopped) { startNewSession(); return; }
     if (checkAbsenceStop()) return;
     var overridingAbsence = isAbsencePaused();

@@ -75,6 +75,11 @@ export function init() {
     updateTrendDisplay();
     updateAcquisitionStatus();
     restorePanelGeometry();
+    if (!isRoom) {
+        stopCountdown(); stopTrackingTimer();
+        updateStopControls(); updateCountdownDisplay(); updateTrackingTimer();
+        return;
+    }
     if (runtime.isStopped) { updateStopControls(); updateCountdownDisplay(); updateTrackingTimer(); return; }
     if (isRoom && isAbsencePaused()) {
         schedulePresenceAcquisition(Date.now(), readRequestPolicy().until);

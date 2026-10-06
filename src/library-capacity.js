@@ -41,7 +41,7 @@ export function readAutomaticKeepingMinutes() {
         const record = JSON.parse(raw);
         if (record.schemaVersion !== 1) throw new Error('Unsupported automatic keeping settings.');
         return validateAutomaticKeepingMinutes(record.minimumMinutes);
-    } catch (error) { throw new Error('Automatic keeping settings could not be read. Save them again in Library → Automatic keeping.'); }
+    } catch (error) { throw new Error('Automatic keeping settings could not be read. Save them again in Library → Storage limits → Automatic keeping.'); }
 }
 function validateAutomaticKeepingMinutes(value) {
     if (!Number.isInteger(value) || value < 0 || value > 1440) throw new Error('Choose a whole number from 0 to 1,440 minutes.');
