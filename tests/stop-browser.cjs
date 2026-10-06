@@ -35,7 +35,8 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   }
   for(const row of [['btn-control-library','btn-replay','btn-control-auto','btn-control-stop','btn-main-reset']]){
    const boxes=await Promise.all(row.map(id=>page.locator('#'+id).boundingBox()));
-   boxes.slice(1).forEach((r,i)=>{assert(r.x>=boxes[i].x+boxes[i].width,'buttons do not overlap');assert(Math.abs(r.y-boxes[i].y)<1,'buttons stay on one row: '+JSON.stringify({row,boxes}));});
+   boxes.slice(1).forEach((r,i)=>{assert(r.x>=boxes[i].x+boxes[i].width,'buttons do not overlap');if(i!==1)assert(Math.abs(r.y-boxes[i].y)<1,'tall navigation buttons and small tracking actions each stay aligned: '+JSON.stringify({row,boxes}));
+    assert(Math.abs(r.y+r.height-(boxes[i].y+boxes[i].height))<1,'all buttons share the same bottom edge');});
   }
   const frozen=await page.locator('#spark-light-blue').evaluate(c=>c.toDataURL());
   const running=await page.evaluate(()=>ViewerTracker.__stop.state());

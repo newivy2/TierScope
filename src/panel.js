@@ -222,17 +222,17 @@ export function createPanel() {
                 '</div>' +
             '</div>' +
 
-            '<div id="control-field" style="margin-top:5px;padding:4px;background:rgba(65,105,225,0.15);border-radius:3px;border:1px solid #4169E1;">' +
-                '<div id="control-session-row" style="display:grid;grid-template-columns:max-content max-content minmax(0,1fr);align-items:center;gap:3px;margin-bottom:4px;white-space:nowrap;">' +
-                    '<span style="font-size:9px;font-weight:bold;color:#4169E1;">🎛️ CONTROLS</span>' +
+            '<div id="control-field" role="group" aria-label="Tracking controls" style="position:relative;margin-top:5px;padding:4px;background:rgba(65,105,225,0.15);border-radius:3px;border:1px solid #4169E1;">' +
+                '<div id="control-session-row" style="display:grid;grid-template-columns:minmax(78px,1fr) max-content minmax(0,1fr);align-items:center;gap:3px;margin-bottom:4px;white-space:nowrap;">' +
+                    '<span aria-hidden="true" style="width:78px;"></span>' +
                     '<span style="font-size:12px;color:var(--panel-warning);font-family:monospace;font-weight:bold;width:9ch;text-align:center;font-variant-numeric:tabular-nums;" id="control-tracking-timer">00:00:00</span>' +
                     '<span style="min-width:0;text-align:right;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums;font-size:11px;color:var(--panel-positive);font-weight:bold;" id="control-next-scan">Next: 60s</span>' +
                 '</div>' +
                 '<div id="control-action-row" style="display:grid;grid-template-columns:minmax(max-content,1fr) auto minmax(0,1fr);align-items:center;gap:3px;">' +
-                    '<div id="control-session-buttons" style="display:flex;gap:2px;align-items:center;">' +
-                    '<button type="button" id="btn-control-library" aria-expanded="false" aria-controls="tierscope-session-tools" aria-label="Open session library" title="Open model folders, session summaries, comparisons and backups" style="font-size:8px;line-height:10px;height:14px;min-width:38px;box-sizing:border-box;margin:0;padding:2px 3px;background:var(--panel-button);color:var(--panel-accent);border:none;border-radius:3px;cursor:pointer;">Library</button>' +
-                    '<button id="btn-replay" style="font-size:8px;line-height:10px;height:14px;min-width:38px;box-sizing:border-box;margin:0;padding:2px 3px;background:var(--panel-button);color:var(--panel-warning);border:none;border-radius:3px;cursor:pointer;" title="Replay recorded history">Replay</button>' +
-                    '</div>' +
+                    '<div style="width:78px;height:14px;"><div id="control-session-buttons" style="position:absolute;top:4px;bottom:4px;left:4px;width:78px;display:grid;grid-template-columns:38px 38px;gap:2px;">' +
+                    '<button type="button" id="btn-control-library" aria-expanded="false" aria-controls="tierscope-session-tools" aria-label="Open session library" title="Open model folders, session summaries, comparisons and backups" style="font-size:9px;font-weight:bold;line-height:12px;min-width:0;box-sizing:border-box;margin:0;padding:2px;background:rgba(255,105,180,0.2);color:var(--panel-accent);border:1px solid var(--panel-accent);border-radius:3px;cursor:pointer;">Library</button>' +
+                    '<button id="btn-replay" style="font-size:8px;line-height:10px;min-width:0;box-sizing:border-box;margin:0;padding:2px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:3px;cursor:pointer;" title="Replay recorded history">Replay</button>' +
+                    '</div></div>' +
                     '<div id="control-action-buttons" style="display:flex;gap:2px;align-items:center;">' +
                         '<button id="btn-control-auto" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#32CD32;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 4px;min-width:24px;" title="Auto-Refresh ON">⏸</button>' +
                         '<button type="button" id="btn-control-stop" aria-label="Stop this session" title="Stop this session and freeze its history and elapsed time" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;white-space:nowrap;">■ Stop</button>' +

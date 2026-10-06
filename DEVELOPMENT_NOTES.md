@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **3.24.1** ([24h comparison guide](docs/clock-comparison.md)). [Library chart controls guide](docs/library-chart-controls.md). [Follow live guide](docs/follow-live.md). [Audience trends and ratio guide](docs/audience-trends.md). [Sessions Book guide](docs/sessions-book.md). [ATH cleanup guide](docs/ath-retention.md). The simplified Current Live Session card provides Keep in Library, Auto, Compare with previous, and History. File controls are below the session list, and exports remain on stored-session menus and the separate replay card. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation instructions, see the [README](readme.md).
+Detailed reference for **3.24.2** ([24h comparison guide](docs/clock-comparison.md)). [Library chart controls guide](docs/library-chart-controls.md). [Follow live guide](docs/follow-live.md). [Audience trends and ratio guide](docs/audience-trends.md). [Sessions Book guide](docs/sessions-book.md). [ATH cleanup guide](docs/ath-retention.md). The simplified Current Live Session card provides Keep in Library, Auto, Compare with previous, and History. File controls are below the session list, and exports remain on stored-session menus and the separate replay card. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation instructions, see the [README](readme.md).
 
 ## Contents
 
@@ -54,7 +54,7 @@ Keep only one enabled copy of TierScope. After an update, refresh existing room 
 | **Library** | Open recordings, model folders, session files and exports, summaries, comparison and backups beside the chart. |
 | **Reset** | Confirm clearing this room’s history, counters, and elapsed time, then request one fresh scan. Keep the automatic-scan pause state and layout preferences. |
 
-The top control row shows **Controls**, elapsed time and the scan countdown/status. The bottom row contains **Library**, **Replay**, play/pause, **Stop**, **Reset** and the theme switch. Library and Replay match the other action buttons, and Library uses the same pink accent as its replay shortcut. Reserved timer space keeps these rows steady as status text changes.
+The elapsed timer sits at the center of the timing row, with scan countdown/status on the right. **Library** and **Replay** span both control rows on the left. Library has a pink border, tinted background and bold label; Replay uses neutral styling. Play/pause, **Stop**, **Reset** and the theme switch retain their size and position in the bottom row. Reserved timer space keeps the layout steady as status text changes. See the [control panel layout guide](docs/control-panel.md).
 
 The expanded footer reserves separate columns for acquisition status, transparency controls and the TierScope logo/version. Growing API sample-age text and changing opacity percentages do not move or resize the slider. Long status messages are abbreviated in their column; hover for the full explanation.
 
@@ -358,7 +358,7 @@ Turning Follow live off freezes that view; turning it back on catches up. Summar
 
 An explicit file-replay source remains fixed even if it belongs to the current room. Reset expires the old binding: select or refresh the new recording and turn Follow live on to follow it. Room navigation closes Library. Removing the favorite or a favorite-setting read failure freezes the display. Existing owner checks continue to reject late acquisition results; Follow live only reads accepted data. Storage failures leave live analysis available and report pending saves.
 
-Current Live Session emphasizes **Compare with previous** with the primary pink border. **Keep in Library** uses a borderless style; neither action moved.
+Current Live Session emphasizes **Compare with previous** with the primary pink border. **Keep in Library** has the same border and background as **History**; neither action moved.
 
 ### Backup and restore
 
@@ -544,6 +544,8 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
+| **3.24.2** | Center the elapsed timer and remove the Controls heading. Give Library and Replay taller buttons, emphasize Library, and preserve tracking-button positions and sizes. Match Keep in Library to History styling. |
+| **3.24.2-beta.1** | Preview the control layout and Library action styling; verify unchanged tracking-button geometry in Chromium and Firefox. |
 | **3.24.1** | Update Sessions Book with Newest/Oldest First, Alphabetical, Favorites First and highest/lowest session counts. Keep sessions ordered by date within models; use filtered card counts for count-based sorting. |
 | **3.24.1-beta.1** | Preview the six sort options and count-based model ordering; make Alphabetical apply to model names while sessions remain newest first regardless of titles. |
 | **3.24.0** | Add confirmed cleanup of ATH for rooms not visited in over 90 days, with a durable grace period for existing records and protection for active tabs and concurrent changes. Stabilize footer status, transparency controls and logo positions. |

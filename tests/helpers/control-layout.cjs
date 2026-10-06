@@ -25,10 +25,13 @@ module.exports = async function checkControlLayout(page) {
     assert(status.x + status.width <= top.x + top.width + .1);
     assert(timer.y >= top.y && timer.y + timer.height <= top.y + top.height + .1, 'elapsed time is on top');
     assert(bottom.y >= top.y + top.height, 'actions follow timing row');
+    assert(Math.abs(timer.x + timer.width / 2 - (top.x + top.width / 2)) < .1, 'elapsed time is centered');
+    assert(buttons[0].height >= top.height + bottom.height, 'Library fills the control area height');
+    assert(buttons[1].height > bottom.height, 'Replay is taller than the small tracking actions');
     for (let i = 0; i < buttons.length; i++) {
       const button = buttons[i];
       assert(button.x >= bottom.x && button.x + button.width <= bottom.x + bottom.width + .1);
-      assert(button.y >= bottom.y && button.y + button.height <= bottom.y + bottom.height + .1, button.id + ' stays on bottom');
+      assert(button.y >= (i < 2 ? top.y : bottom.y) - .1 && button.y + button.height <= bottom.y + bottom.height + .1, button.id + ' stays inside its control area');
       if (i) assert(button.x >= buttons[i - 1].x + buttons[i - 1].width, 'bottom controls follow requested order');
     }
     if (/^(Next|Scanning|Paused|Stopped|Reduced|Check)/.test(sample.text)) assert(!sample.clipped, 'normal status fits: ' + sample.text);
