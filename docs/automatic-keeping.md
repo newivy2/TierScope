@@ -1,6 +1,6 @@
-# Automatic keeping minimum — 3.23.1-beta.1
+# Automatic keeping minimum — 3.23.1
 
-This beta uses the original TierScope interface from main 3.23.0. The journey redesign is not included.
+TierScope keeps its original interface. Automatic keeping for favorites now requires five minutes of recorded coverage by default.
 
 Open **Library → Sessions → Automatic keeping** below the storage counter. Set **Minimum recorded duration (minutes)** and press **Save automatic keeping**. The default is **5 minutes**, shared by favorite models in this browser. Choose a whole number from 0 to 1,440; 0 restores keeping from the first sample.
 

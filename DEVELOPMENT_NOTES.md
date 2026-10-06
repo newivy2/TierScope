@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **3.23.1-beta.1** ([24h comparison guide](docs/clock-comparison.md)). [Library chart controls guide](docs/library-chart-controls.md). [Follow live guide](docs/follow-live.md). [Audience trends and ratio guide](docs/audience-trends.md). [Sessions Book guide](docs/sessions-book.md). The simplified Current Live Session card provides Keep in Library, Auto, Compare with previous, and History. File controls are below the session list, and exports remain on stored-session menus and the separate replay card. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation instructions, see the [README](readme.md).
+Detailed reference for **3.23.1** ([24h comparison guide](docs/clock-comparison.md)). [Library chart controls guide](docs/library-chart-controls.md). [Follow live guide](docs/follow-live.md). [Audience trends and ratio guide](docs/audience-trends.md). [Sessions Book guide](docs/sessions-book.md). The simplified Current Live Session card provides Keep in Library, Auto, Compare with previous, and History. File controls are below the session list, and exports remain on stored-session menus and the separate replay card. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation instructions, see the [README](readme.md).
 
 ## Contents
 
@@ -534,6 +534,7 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
+| **3.23.1** | Add a configurable minimum for automatic Library keeping, defaulting to five minutes of retained sample coverage. Exclude pauses and gaps; preserve manual saving at any duration and existing Library sessions. |
 | **3.23.0** | Release 24h time-of-day comparisons; add First/Latest dates and total covered time to model cards, and use Sessions terminology across Library. |
 | **3.23.0-beta.1** | Add local 24h time-of-day comparisons with midnight-safe lines, dated shared inspection, full-recording statistics and a 24-hour recording limit for this chart mode. |
 | **3.22.0** | Make Library follow background transparency; add single-selection metric icons above analysis charts, move Match shared length below Compare, and place threshold controls beside their report results. |
