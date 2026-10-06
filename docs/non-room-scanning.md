@@ -1,4 +1,4 @@
-# Directory-page tracking guard — 3.23.2-beta.2
+# Directory-page tracking guard — 3.23.2
 
 TierScope starts minimized and leaves live tracking inactive on the Chaturbate homepage, Followed cams, Female cams, Male cams, Couple cams and Trans cams. The existing room-route parser also excludes other recognized directories.
 

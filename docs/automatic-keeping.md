@@ -1,4 +1,4 @@
-# Automatic keeping minimum — 3.23.2-beta.2
+# Automatic keeping minimum — 3.23.2
 
 TierScope keeps its original interface. Automatic keeping for favorites now requires five minutes of recorded coverage by default.
 
