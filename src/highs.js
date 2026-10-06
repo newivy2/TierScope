@@ -1,3 +1,4 @@
+import { prepareAthCleanup, applyAthCleanup } from './ath-maintenance.js';
 import { setAllTimeActionStatus } from './high-feedback.js';
 import { cancelHighPulses } from './high-pulses.js';
 import { displayedAllTimeState, displayedHighRoom } from './high-selectors.js';
@@ -90,4 +91,22 @@ export function recordAcceptedAllTimeHighs(room) {
             time: time, source: 'live' };
     });
     storeAllTimeHighs(room, incoming);
+}
+
+export function clearInactiveAllTimeHighs() {
+    try {
+        const plan = prepareAthCleanup();
+        if (!plan.candidates.length) {
+            setAllTimeActionStatus('No rooms with ATH qualify for the 90-day cleanup.' + (plan.skipped ? ' ' + plan.skipped + ' unreadable room(s) were skipped.' : ''));
+            return;
+        }
+        if (!confirm('Clear all-time highs for ' + plan.candidates.length + ' room(s) not visited in over 90 days?\n\nExisting records receive a 90-day grace period. Active rooms are protected. Saved Library sessions and session highs will remain.' +
+            (plan.skipped ? '\n\n' + plan.skipped + ' unreadable room(s) will be skipped.' : ''))) return;
+        const result = applyAthCleanup(plan);
+        if (isPlaybackCurrent(runtime.playback)) setPlaybackAllTimeState(runtime.playback, readAllTimeHighs(displayedHighRoom()));
+        repaintHighMode();
+        setAllTimeActionStatus('Cleared ATH for ' + result.cleared + ' room(s).' +
+            (result.changed ? ' ' + result.changed + ' room(s) changed or became active and were skipped.' : '') +
+            (result.failed ? ' ' + result.failed + ' room(s) could not be cleared; retained records remain available.' : ''));
+    } catch (error) { setAllTimeActionStatus('Could not inspect old ATH records: ' + error.message); }
 }

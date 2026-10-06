@@ -62,6 +62,7 @@ const reviewedChanges = new Set([
   'getModelNameFromUrl', // complete room routes: maintenance-regressions.test.cjs
   'isBroadcastRoom', // shared room parser: maintenance-regressions.test.cjs
   'resetAllTracking', // valid room required before confirmation: maintenance-regressions.test.cjs
+  'storeAllTimeHighs', // verified immutable writes and ATH grace: ath-retention.test.cjs
   'resetTrackingData', // valid room required before mutation: maintenance-regressions.test.cjs
   'updateStopControls', // disabled directory tracking controls: non-room-scanning.test.cjs
   'startCountdown', 'updateCountdownDisplay', // non-room acquisition and retry isolation: non-room-scanning.test.cjs
@@ -75,8 +76,8 @@ const reviewedChanges = new Set([
 ]);
 // Configurable capacity is covered by library-capacity unit/browser fixtures.
 // Follow-live snapshot ownership: analysis-follow.test.cjs and follow-live-browser.cjs.
-const featureModules = new Set(['analysis-clock-data.js', 'analysis-metric-view.js', 'analysis-follow.js', 'library-capacity-data.js', 'library-capacity.js', 'library-capacity-view.js', 'automatic-library.js', 'favorite-controls.js', 'favorite-view.js', 'room-total-series.js', 'library-drafts.js', 'library-models.js', 'library-query.js', 'library-transfer.js', 'library-browser-view.js', 'tools-view-helpers.js', 'analysis-chart-data.js', 'analysis-chart-view.js', 'model-history.js', 'model-history-view.js', 'presentation-health.js', 'sample-presentation.js', 'analysis-preference-data.js', 'analysis-preferences.js', 'acquisition-state.js', 'panel-preferences.js', 'library-dock.js', 'library-shell.js', 'recording-export-data.js', 'recording-exports.js', 'display-model.js', 'display-values.js', 'immutable-data.js', 'presentation-data.js', 'status-model.js', 'status-view.js', 'trend-view.js', 'playback-state.js', 'live-session.js', 'diagnostics.js', 'room-context.js', 'backup.js', 'data-io.js', 'session-analysis.js', 'session-health.js', 'session-library.js', 'session-tools.js']);
-const addedFunctions = new Set(['captureLiveSessionFile', 'initializeLifecycle', 'refreshPanelOptions', 'refreshScanCountdown', 'getSessionSamplePolicy', 'initializePresentation', 'paintPanelFrame', 'getSessionWriteStatus', 'writeSessionRecord']); // shared history-gap policy; session/ownership tests
+const featureModules = new Set(['ath-retention.js', 'ath-activity.js', 'ath-maintenance.js', 'analysis-clock-data.js', 'analysis-metric-view.js', 'analysis-follow.js', 'library-capacity-data.js', 'library-capacity.js', 'library-capacity-view.js', 'automatic-library.js', 'favorite-controls.js', 'favorite-view.js', 'room-total-series.js', 'library-drafts.js', 'library-models.js', 'library-query.js', 'library-transfer.js', 'library-browser-view.js', 'tools-view-helpers.js', 'analysis-chart-data.js', 'analysis-chart-view.js', 'model-history.js', 'model-history-view.js', 'presentation-health.js', 'sample-presentation.js', 'analysis-preference-data.js', 'analysis-preferences.js', 'acquisition-state.js', 'panel-preferences.js', 'library-dock.js', 'library-shell.js', 'recording-export-data.js', 'recording-exports.js', 'display-model.js', 'display-values.js', 'immutable-data.js', 'presentation-data.js', 'status-model.js', 'status-view.js', 'trend-view.js', 'playback-state.js', 'live-session.js', 'diagnostics.js', 'room-context.js', 'backup.js', 'data-io.js', 'session-analysis.js', 'session-health.js', 'session-library.js', 'session-tools.js']);
+const addedFunctions = new Set(['clearInactiveAllTimeHighs', 'retireInactiveAllTimeRecord', 'captureLiveSessionFile', 'initializeLifecycle', 'refreshPanelOptions', 'refreshScanCountdown', 'getSessionSamplePolicy', 'initializePresentation', 'paintPanelFrame', 'getSessionWriteStatus', 'writeSessionRecord']); // shared history-gap policy; session/ownership tests
 
 test('unchanged extracted functions preserve 3.4.0; reviewed changes have behavior coverage', () => {
   const actual = {};
@@ -135,6 +136,7 @@ test('runtime initialization preserves preference loading and startup order', ()
   tokenColor.value = '#ff69b4';
   tokenColor.raw = "'#ff69b4'";
   const unload = unchanged.find(n => n.expression?.arguments?.[0]?.value === 'beforeunload');
+  assert.equal(unload.expression.arguments[1].body.body.shift().expression.callee.name, 'stopAthActivity', 'release this tab’s ATH lease on departure');
   const flush = unload.expression.arguments[1].body.body.at(-1).consequent.body[0].expression;
   assert.equal(flush.callee.name, 'saveSession'); assert.equal(flush.arguments.length, 2);
   assert.equal(flush.arguments.pop().value, true, 'flush favorite Library checkpoint when leaving');

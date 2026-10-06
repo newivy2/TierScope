@@ -61,7 +61,7 @@ test('panel views have no dependency on owners, live selectors, controllers or s
 });
 
 test('record stores and validation cannot reach session/playback owners, panel code or coordinators', () => {
-  const stores = ['library-capacity.js', 'library-models.js', 'library-transfer.js', 'storage.js', 'highs-store.js', 'session-library.js', 'backup.js', 'session-file-format.js'];
+  const stores = ['ath-retention.js', 'library-capacity.js', 'library-models.js', 'library-transfer.js', 'storage.js', 'highs-store.js', 'session-library.js', 'backup.js', 'session-file-format.js'];
   const permitted = new Set([...stores, 'library-capacity-data.js', 'immutable-data.js', 'analysis-preference-data.js', 'session-analysis.js', 'record-validation.js', 'history-data.js', 'utils.js', 'diagnostics.js', 'room-context.js', 'runtime.js']);
   const metadata = new Set(['activeRoomEpoch', 'activeSessionStorageKey', 'sessionRecordWarnings', 'sessionStorageNotice',
     'sessionStorageStatus', 'tabRecords', 'allTimeCache', 'chartTimeCache',

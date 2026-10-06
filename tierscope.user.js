@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.23.2
+// @version      3.24.0
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -657,6 +657,170 @@ underlying system, so should run in the browser, Node, or Plask.
     }
   });
 
+  // src/runtime.js
+  var runtime = {};
+
+  // src/record-validation.js
+  function getStorageKey(model) {
+    return runtime.STORAGE_KEY_PREFIX + model.toLowerCase();
+  }
+  function isStorageObject(value) {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
+  }
+  function hasStorageField(data, field) {
+    return Object.prototype.hasOwnProperty.call(data, field);
+  }
+  function isStorageNumber(value) {
+    return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER;
+  }
+  function isStorageTimestamp(value) {
+    return Number.isSafeInteger(value) && value >= 0 && value <= 864e13;
+  }
+  function makeStorageId() {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+    return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2) + "-" + Math.random().toString(36).slice(2);
+  }
+
+  // src/ath-retention.js
+  var ATH_VISIT_PREFIX = "tierscope:ath-visit:v1:";
+  var ATH_LEASE_PREFIX = "tierscope:ath-active:v1:";
+  var ATH_RETENTION_MS = 90 * 864e5;
+  var ATH_LEASE_MS = 5 * 6e4;
+  function roomKey(room2) {
+    if (typeof room2 !== "string" || !/^[a-z0-9_-]{1,100}$/i.test(room2) || room2.toLowerCase() === "unknown") throw new Error("Invalid ATH room.");
+    return room2.toLowerCase();
+  }
+  function readAthVisit(room2) {
+    const raw = GM_getValue(ATH_VISIT_PREFIX + roomKey(room2), void 0);
+    if (raw === void 0) return null;
+    const value = JSON.parse(raw);
+    if (!value || value.schemaVersion !== 1 || !isStorageTimestamp(value.graceStartedAt) || !(value.lastVisitedAt === null || isStorageTimestamp(value.lastVisitedAt))) throw new Error("Unreadable ATH visit record.");
+    return value;
+  }
+  function ensureAthGrace(room2, now = Date.now()) {
+    const previous = readAthVisit(room2);
+    if (previous) return previous;
+    const value = { schemaVersion: 1, graceStartedAt: now, lastVisitedAt: null };
+    const raw = JSON.stringify(value), key = ATH_VISIT_PREFIX + roomKey(room2);
+    GM_setValue(key, raw);
+    const stored = readAthVisit(room2);
+    if (!stored) throw new Error("ATH grace period could not be saved.");
+    return stored;
+  }
+  function noteAthVisit(room2, lease2, now = Date.now()) {
+    room2 = roomKey(room2);
+    const leaseKey = ATH_LEASE_PREFIX + room2 + ":" + lease2;
+    const active = JSON.stringify({ schemaVersion: 1, lastSeenAt: now });
+    GM_setValue(leaseKey, active);
+    if (GM_getValue(leaseKey, void 0) !== active) throw new Error("ATH activity could not be saved.");
+    const previous = ensureAthGrace(room2, now);
+    const value = __spreadProps(__spreadValues({}, previous), { lastVisitedAt: Math.max(now, previous.lastVisitedAt || 0) });
+    GM_setValue(ATH_VISIT_PREFIX + room2, JSON.stringify(value));
+    const stored = readAthVisit(room2);
+    if (!stored || stored.lastVisitedAt < value.lastVisitedAt) throw new Error("ATH visit could not be saved.");
+  }
+  function releaseAthLease(room2, lease2) {
+    if (room2) GM_deleteValue(ATH_LEASE_PREFIX + roomKey(room2) + ":" + lease2);
+  }
+  function athActivity(room2, now = Date.now()) {
+    const visit = readAthVisit(room2);
+    if (!visit) throw new Error("ATH visit history is not initialized.");
+    const prefix = ATH_LEASE_PREFIX + roomKey(room2) + ":";
+    let latest = Math.max(visit.graceStartedAt, visit.lastVisitedAt || 0), active = false;
+    for (const key of GM_listValues().filter((key2) => key2.startsWith(prefix))) {
+      const raw = GM_getValue(key, void 0);
+      if (raw === void 0) continue;
+      const value = JSON.parse(raw);
+      if (!value || value.schemaVersion !== 1 || !isStorageTimestamp(value.lastSeenAt)) throw new Error("Unreadable ATH activity record.");
+      latest = Math.max(latest, value.lastSeenAt);
+      if (now - value.lastSeenAt <= ATH_LEASE_MS) active = true;
+    }
+    return { latest, active };
+  }
+
+  // src/room-context.js
+  var NON_ROOM_PATHS = /* @__PURE__ */ new Set([
+    "b",
+    "followed",
+    "featured",
+    "tags",
+    "accounts",
+    "login",
+    "register",
+    "supporter",
+    "settings",
+    "apps",
+    "explore",
+    "trending",
+    "new",
+    "female",
+    "male",
+    "couple",
+    "trans",
+    "hd",
+    "north-american",
+    "european",
+    "asian",
+    "south-american",
+    "exhibitionist",
+    "followed-cams",
+    "female-cams",
+    "trans-cams",
+    "male-cams",
+    "couple-cams",
+    "unknown"
+  ]);
+  function roomFromUrl(url) {
+    try {
+      const path = new URL(url).pathname;
+      const match = path.match(/^\/b\/([a-z0-9_-]{1,100})\/?$/i) || path.match(/^\/([a-z0-9_-]{1,100})\/cam\/?$/i) || path.match(/^\/([a-z0-9_-]{1,100})\/?$/i);
+      return match && !NON_ROOM_PATHS.has(match[1].toLowerCase()) ? match[1] : null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  // src/diagnostics.js
+  function diagnostic(level, message, ...details) {
+    try {
+      console[level]("[TierScope " + runtime.TIERSCOPE_VERSION + "] " + message, ...details);
+    } catch (error) {
+    }
+  }
+
+  // src/ath-activity.js
+  var room = null, lease = null, clock = null;
+  function stopAthActivity() {
+    if (clock !== null) clearInterval(clock);
+    clock = null;
+    try {
+      releaseAthLease(room, lease);
+    } catch (error) {
+    }
+    room = null;
+  }
+  function observeAthRoom() {
+    stopAthActivity();
+    const current = roomFromUrl(location.href);
+    if (!current) return;
+    room = current.toLowerCase();
+    lease = makeStorageId();
+    function heartbeat() {
+      var _a;
+      if (((_a = roomFromUrl(location.href)) == null ? void 0 : _a.toLowerCase()) !== room) {
+        stopAthActivity();
+        return;
+      }
+      try {
+        noteAthVisit(room, lease);
+      } catch (error) {
+        diagnostic("warn", "ATH visit tracking unavailable: " + error.message);
+      }
+    }
+    heartbeat();
+    clock = setInterval(heartbeat, 6e4);
+  }
+
   // src/acquisition-state.js
   var ACQUISITION_FIELDS = Object.freeze([
     "scanEpoch",
@@ -691,8 +855,8 @@ underlying system, so should run in the browser, Node, or Plask.
     acquisitionClockEffects = effects;
     acquisitionClockVersions.clear();
     const fallbackView = Object.freeze({
-      get: (room) => acquisitionState.domFallbackReadyAtByRoom.get(room),
-      has: (room) => acquisitionState.domFallbackReadyAtByRoom.has(room),
+      get: (room2) => acquisitionState.domFallbackReadyAtByRoom.get(room2),
+      has: (room2) => acquisitionState.domFallbackReadyAtByRoom.has(room2),
       get size() {
         return acquisitionState.domFallbackReadyAtByRoom.size;
       },
@@ -713,10 +877,10 @@ underlying system, so should run in the browser, Node, or Plask.
     invalidateAcquisition();
     return acquisitionState.initGuard;
   }
-  function beginAcquisition(url, room, policy, now, stopped) {
+  function beginAcquisition(url, room2, policy, now, stopped) {
     if (acquisitionState.isScanning || stopped || policy.blocked || policy.until > now) return null;
     acquisitionState.isScanning = true;
-    return Object.freeze({ epoch: ++acquisitionState.scanEpoch, generation: acquisitionState.initGuard, url, room, policyRevision: policy.revision });
+    return Object.freeze({ epoch: ++acquisitionState.scanEpoch, generation: acquisitionState.initGuard, url, room: room2, policyRevision: policy.revision });
   }
   function acquisitionContextIsCurrent(context, url) {
     return context.epoch === acquisitionState.scanEpoch && context.generation === acquisitionState.initGuard && context.url === url;
@@ -739,8 +903,8 @@ underlying system, so should run in the browser, Node, or Plask.
     health.userListTabFound = hasUserList;
     if (!health.isHealthy) health.consecutiveFailures++;
   }
-  function deferDOMFallback(room, readyAt) {
-    const key = room.toLowerCase();
+  function deferDOMFallback(room2, readyAt) {
+    const key = room2.toLowerCase();
     acquisitionState.domFallbackReadyAtByRoom.set(key, Math.max(acquisitionState.domFallbackReadyAtByRoom.get(key) || 0, readyAt));
   }
   function selectScanInterval(seconds) {
@@ -821,50 +985,9 @@ underlying system, so should run in the browser, Node, or Plask.
     return true;
   }
 
-  // src/high-feedback.js
-  function setAllTimeActionStatus(message, replayLabel) {
-    var status = document.getElementById("all-time-action-status");
-    if (status) status.textContent = message;
-    var button = document.getElementById("btn-playback-add-all-time");
-    if (button) {
-      button.textContent = replayLabel || "Add to all-time highs";
-      button.title = message || "Add this file's highs to the room named beside this button";
-      button.setAttribute("aria-label", replayLabel ? replayLabel + ". " + message : "Add to all-time highs");
-    }
-  }
-
-  // src/format.js
-  function compactNumber(value) {
-    return value >= 1e6 ? (value / 1e6).toFixed(1).replace(/\.0$/, "") + "m" : value >= 1e4 ? (value / 1e3).toFixed(1).replace(/\.0$/, "") + "k" : String(value);
-  }
-
-  // src/runtime.js
-  var runtime = {};
-
-  // src/record-validation.js
-  function getStorageKey(model) {
-    return runtime.STORAGE_KEY_PREFIX + model.toLowerCase();
-  }
-  function isStorageObject(value) {
-    return value !== null && typeof value === "object" && !Array.isArray(value);
-  }
-  function hasStorageField(data, field) {
-    return Object.prototype.hasOwnProperty.call(data, field);
-  }
-  function isStorageNumber(value) {
-    return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER;
-  }
-  function isStorageTimestamp(value) {
-    return Number.isSafeInteger(value) && value >= 0 && value <= 864e13;
-  }
-  function makeStorageId() {
-    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
-    return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2) + "-" + Math.random().toString(36).slice(2);
-  }
-
   // src/highs-store.js
-  function allTimeRoom(room) {
-    return typeof room === "string" && /^[a-z0-9_-]{1,100}$/i.test(room) && room.toLowerCase() !== "unknown" ? room.toLowerCase() : null;
+  function allTimeRoom(room2) {
+    return typeof room2 === "string" && /^[a-z0-9_-]{1,100}$/i.test(room2) && room2.toLowerCase() !== "unknown" ? room2.toLowerCase() : null;
   }
   function emptyAllTimeHighs() {
     var highs = {};
@@ -885,22 +1008,22 @@ underlying system, so should run in the browser, Node, or Plask.
     });
     return changed;
   }
-  function validateAllTimeRecord(data, room) {
-    if (!isStorageObject(data) || data.schemaVersion !== 1 || data.room !== room || typeof data.epoch !== "string" || !isStorageObject(data.highs)) throw new Error("Unsupported all-time record");
+  function validateAllTimeRecord(data, room2) {
+    if (!isStorageObject(data) || data.schemaVersion !== 1 || data.room !== room2 || typeof data.epoch !== "string" || !isStorageObject(data.highs)) throw new Error("Unsupported all-time record");
     runtime.ALL_TIME_SERIES.forEach(function(key) {
       var high = data.highs[key];
       if (!isStorageObject(high) || !Number.isSafeInteger(high.value) || high.value < 0 || !(high.time === null || isStorageTimestamp(high.time)) || [null, "live", "saved", "file"].indexOf(high.source) === -1 || high.source === null && (high.value !== 0 || high.time !== null)) throw new Error("Invalid all-time high");
     });
   }
-  function readAllTimeHighs(room) {
-    room = allTimeRoom(room);
-    var previous = runtime.allTimeCache.get(room);
-    var state = { room, epoch: "initial", highs: emptyAllTimeHighs(), keys: [], skipped: 0, error: "", pending: false };
-    if (!room) return state;
+  function readAllTimeHighs(room2) {
+    room2 = allTimeRoom(room2);
+    var previous = runtime.allTimeCache.get(room2);
+    var state = { room: room2, epoch: "initial", highs: emptyAllTimeHighs(), keys: [], skipped: 0, error: "", pending: false };
+    if (!room2) return state;
     try {
-      state.epoch = GM_getValue(runtime.ALL_TIME_EPOCH_PREFIX + room, "initial");
+      state.epoch = GM_getValue(runtime.ALL_TIME_EPOCH_PREFIX + room2, "initial");
       if (typeof state.epoch !== "string") throw new Error("Invalid all-time records generation");
-      var prefix = runtime.ALL_TIME_PREFIX + room + ":";
+      var prefix = runtime.ALL_TIME_PREFIX + room2 + ":";
       GM_listValues().filter(function(key) {
         return key.indexOf(prefix) === 0;
       }).forEach(function(key) {
@@ -908,7 +1031,7 @@ underlying system, so should run in the browser, Node, or Plask.
           var raw = GM_getValue(key, void 0);
           if (raw === void 0) return;
           var data = JSON.parse(raw);
-          validateAllTimeRecord(data, room);
+          validateAllTimeRecord(data, room2);
           if (data.epoch !== state.epoch) return;
           mergeAllTimeHighs(state.highs, data.highs);
           state.keys.push(key);
@@ -927,11 +1050,11 @@ underlying system, so should run in the browser, Node, or Plask.
       }
       state.error = "All-time records could not be read. Showing locally available records.";
     }
-    runtime.allTimeCache.set(room, state);
+    runtime.allTimeCache.set(room2, state);
     return state;
   }
-  function storeAllTimeHighs(room, incoming) {
-    var state = readAllTimeHighs(room);
+  function storeAllTimeHighs(room2, incoming) {
+    var state = readAllTimeHighs(room2);
     if (!state.room) return { state, changed: 0, saved: false };
     try {
       validateAllTimeRecord({ schemaVersion: 1, room: state.room, epoch: state.epoch, highs: incoming }, state.room);
@@ -947,7 +1070,13 @@ underlying system, so should run in the browser, Node, or Plask.
       var data = { schemaVersion: 1, room: state.room, epoch: state.epoch, highs: state.highs };
       validateAllTimeRecord(data, state.room);
       var key = runtime.ALL_TIME_PREFIX + state.room + ":" + state.epoch + ":" + makeStorageId();
-      GM_setValue(key, JSON.stringify(data));
+      try {
+        ensureAthGrace(state.room);
+      } catch (error) {
+      }
+      var raw = JSON.stringify(data);
+      GM_setValue(key, raw);
+      if (GM_getValue(key, void 0) !== raw) throw new Error("ATH snapshot could not be verified.");
       if (GM_getValue(runtime.ALL_TIME_EPOCH_PREFIX + state.room, "initial") !== state.epoch) {
         return { state: readAllTimeHighs(state.room), changed: 0, saved: false };
       }
@@ -978,6 +1107,145 @@ underlying system, so should run in the browser, Node, or Plask.
       }
     });
     return highs;
+  }
+  function retireInactiveAllTimeRecord(candidate, guard) {
+    const state = readAllTimeHighs(candidate.room);
+    if (state.error || state.skipped || state.pending || state.epoch !== candidate.epoch || state.keys.length !== candidate.records.length || candidate.records.some((record) => !state.keys.includes(record.key) || GM_getValue(record.key, void 0) !== record.raw) || !guard()) return "changed";
+    const epochKey = runtime.ALL_TIME_EPOCH_PREFIX + state.room, epoch = makeStorageId();
+    const key = runtime.ALL_TIME_PREFIX + state.room + ":" + epoch + ":" + makeStorageId();
+    const raw = JSON.stringify({ schemaVersion: 1, room: state.room, epoch, highs: state.highs });
+    GM_setValue(key, raw);
+    if (GM_getValue(key, void 0) !== raw) throw new Error("ATH safety copy could not be verified.");
+    if (!guard() || GM_getValue(epochKey, "initial") !== candidate.epoch) {
+      GM_deleteValue(key);
+      return "changed";
+    }
+    if (candidate.records.some((record) => GM_getValue(record.key, void 0) !== record.raw) || readAllTimeHighs(state.room).keys.some((other) => !candidate.records.some((record) => record.key === other))) {
+      GM_deleteValue(key);
+      return "changed";
+    }
+    GM_setValue(epochKey, epoch);
+    if (GM_getValue(epochKey, "initial") !== epoch) throw new Error("ATH clear could not be verified.");
+    runtime.allTimeCache.delete(state.room);
+    const preserveConcurrent = () => {
+      const prefix = runtime.ALL_TIME_PREFIX + state.room + ":";
+      const highs = emptyAllTimeHighs();
+      let changed = false;
+      for (const other of GM_listValues().filter((other2) => other2.startsWith(prefix) && other2 !== key)) {
+        const value = GM_getValue(other, void 0);
+        if (value === void 0) continue;
+        const data = JSON.parse(value);
+        validateAllTimeRecord(data, state.room);
+        if (data.epoch !== candidate.epoch || candidate.records.some((record) => record.key === other && record.raw === value)) continue;
+        mergeAllTimeHighs(highs, data.highs);
+        changed = true;
+      }
+      if (changed && GM_getValue(epochKey, "initial") === epoch) {
+        const result = storeAllTimeHighs(state.room, highs);
+        if (!result.saved) throw new Error("Concurrent ATH records could not be preserved.");
+      }
+      return changed;
+    };
+    const unchanged = () => !preserveConcurrent() && guard() && GM_getValue(epochKey, "initial") === epoch && GM_getValue(key, void 0) === raw && !GM_listValues().some((other) => other !== key && other.startsWith(runtime.ALL_TIME_PREFIX + state.room + ":" + epoch + ":"));
+    if (!unchanged()) return "changed";
+    for (const record of candidate.records) {
+      if (!unchanged()) return "changed";
+      if (GM_getValue(record.key, void 0) !== record.raw) return "changed";
+      GM_deleteValue(record.key);
+      if (GM_getValue(record.key, void 0) !== void 0) throw new Error("An old ATH snapshot could not be removed.");
+    }
+    if (!unchanged()) return "changed";
+    GM_deleteValue(key);
+    if (GM_getValue(key, void 0) !== void 0) throw new Error("ATH clear could not be completed.");
+    if (preserveConcurrent() || !guard()) {
+      if (GM_getValue(epochKey, "initial") === epoch) {
+        const result = storeAllTimeHighs(state.room, state.highs);
+        if (!result.saved) throw new Error("ATH records could not be retained after a concurrent visit.");
+      }
+      return "changed";
+    }
+    runtime.allTimeCache.delete(state.room);
+    return "cleared";
+  }
+
+  // src/ath-maintenance.js
+  function initializeAthGrace(now = Date.now()) {
+    const rooms = new Set(GM_listValues().filter((key) => key.startsWith(runtime.ALL_TIME_PREFIX)).map((key) => allTimeRoom(key.slice(runtime.ALL_TIME_PREFIX.length).split(":")[0])).filter((room2) => room2 !== null));
+    let skipped = 0;
+    for (const room2 of rooms) {
+      try {
+        ensureAthGrace(room2, now);
+      } catch (error) {
+        skipped++;
+      }
+    }
+    return skipped;
+  }
+  function inactive(room2, cutoff, now) {
+    var _a;
+    if (((_a = roomFromUrl(location.href)) == null ? void 0 : _a.toLowerCase()) === room2) return false;
+    const activity = athActivity(room2, now);
+    return !activity.active && activity.latest < cutoff;
+  }
+  function prepareAthCleanup(now = Date.now()) {
+    initializeAthGrace(now);
+    const rooms = new Set(GM_listValues().filter((key) => key.startsWith(runtime.ALL_TIME_PREFIX)).map((key) => allTimeRoom(key.slice(runtime.ALL_TIME_PREFIX.length).split(":")[0])).filter((room2) => room2 !== null));
+    const cutoff = now - ATH_RETENTION_MS, candidates = [];
+    let skipped = 0;
+    for (const room2 of rooms) {
+      try {
+        if (!inactive(room2, cutoff, now)) continue;
+        const state = readAllTimeHighs(room2);
+        if (state.error || state.skipped || state.pending) {
+          skipped++;
+          continue;
+        }
+        if (state.keys.length) candidates.push({
+          room: room2,
+          epoch: state.epoch,
+          records: state.keys.map((key) => ({ key, raw: GM_getValue(key, void 0) }))
+        });
+      } catch (error) {
+        skipped++;
+      }
+    }
+    return { cutoff, candidates, skipped };
+  }
+  function applyAthCleanup(plan) {
+    let cleared = 0, changed = 0, failed = 0;
+    for (const candidate of plan.candidates) {
+      try {
+        const guard = () => inactive(candidate.room, plan.cutoff, Date.now());
+        if (!guard()) {
+          changed++;
+          continue;
+        }
+        const result = retireInactiveAllTimeRecord(candidate, guard);
+        if (result === "cleared") cleared++;
+        else if (result === "changed") changed++;
+        else failed++;
+      } catch (error) {
+        failed++;
+      }
+    }
+    return { cleared, changed, failed };
+  }
+
+  // src/high-feedback.js
+  function setAllTimeActionStatus(message, replayLabel) {
+    var status = document.getElementById("all-time-action-status");
+    if (status) status.textContent = message;
+    var button = document.getElementById("btn-playback-add-all-time");
+    if (button) {
+      button.textContent = replayLabel || "Add to all-time highs";
+      button.title = message || "Add this file's highs to the room named beside this button";
+      button.setAttribute("aria-label", replayLabel ? replayLabel + ". " + message : "Add to all-time highs");
+    }
+  }
+
+  // src/format.js
+  function compactNumber(value) {
+    return value >= 1e6 ? (value / 1e6).toFixed(1).replace(/\.0$/, "") + "m" : value >= 1e4 ? (value / 1e3).toFixed(1).replace(/\.0$/, "") + "k" : String(value);
   }
 
   // src/live-session.js
@@ -1112,7 +1380,7 @@ underlying system, so should run in the browser, Node, or Plask.
     }
     return counts;
   }
-  function beginAcceptedSample(snapshot, room, now, policy) {
+  function beginAcceptedSample(snapshot, room2, now, policy) {
     if (pendingSample) throw new Error("A sample is already pending.");
     if (liveSessionState.isStopped) throw new Error("The session is stopped.");
     const state = liveSessionState;
@@ -1134,7 +1402,7 @@ underlying system, so should run in the browser, Node, or Plask.
         const tierSum = snapshot.users.filter((user) => user.tier !== null).length;
         state.lastAcceptedAcquisition.api = { anonymousCount: snapshot.anonymousCount, registeredCount: snapshot.registeredCount, totalUsers: snapshot.totalUsers, ownerCount: owners.length };
         receipt.diagnostics = {
-          room,
+          room: room2,
           anonymousCount: snapshot.anonymousCount,
           registeredCount: snapshot.registeredCount,
           totalUsers: snapshot.totalUsers,
@@ -1366,56 +1634,6 @@ underlying system, so should run in the browser, Node, or Plask.
     return value;
   }
 
-  // src/diagnostics.js
-  function diagnostic(level, message, ...details) {
-    try {
-      console[level]("[TierScope " + runtime.TIERSCOPE_VERSION + "] " + message, ...details);
-    } catch (error) {
-    }
-  }
-
-  // src/room-context.js
-  var NON_ROOM_PATHS = /* @__PURE__ */ new Set([
-    "b",
-    "followed",
-    "featured",
-    "tags",
-    "accounts",
-    "login",
-    "register",
-    "supporter",
-    "settings",
-    "apps",
-    "explore",
-    "trending",
-    "new",
-    "female",
-    "male",
-    "couple",
-    "trans",
-    "hd",
-    "north-american",
-    "european",
-    "asian",
-    "south-american",
-    "exhibitionist",
-    "followed-cams",
-    "female-cams",
-    "trans-cams",
-    "male-cams",
-    "couple-cams",
-    "unknown"
-  ]);
-  function roomFromUrl(url) {
-    try {
-      const path = new URL(url).pathname;
-      const match = path.match(/^\/b\/([a-z0-9_-]{1,100})\/?$/i) || path.match(/^\/([a-z0-9_-]{1,100})\/cam\/?$/i) || path.match(/^\/([a-z0-9_-]{1,100})\/?$/i);
-      return match && !NON_ROOM_PATHS.has(match[1].toLowerCase()) ? match[1] : null;
-    } catch (error) {
-      return null;
-    }
-  }
-
   // src/utils.js
   function getTierMarker(tier) {
     var config = runtime.TIERS[tier];
@@ -1541,8 +1759,8 @@ underlying system, so should run in the browser, Node, or Plask.
   }
   function displayedAllTimeState() {
     if (isPlaybackCurrent(runtime.playback) && runtime.playback.allTimeState) return runtime.playback.allTimeState;
-    var room = displayedHighRoom();
-    return runtime.allTimeCache.get(room) || readAllTimeHighs(room);
+    var room2 = displayedHighRoom();
+    return runtime.allTimeCache.get(room2) || readAllTimeHighs(room2);
   }
   function getSessionHigh(key, current) {
     return readSessionHigh(key, current);
@@ -1723,13 +1941,13 @@ underlying system, so should run in the browser, Node, or Plask.
   var playbackState;
   var playbackClock;
   var playbackRecords = /* @__PURE__ */ new WeakMap();
-  function initializePlaybackState(target, clock) {
+  function initializePlaybackState(target, clock2) {
     playbackState = {
       playback: target.playback,
       presentationMode: target.presentationMode,
       sessionFileLoadGeneration: target.sessionFileLoadGeneration
     };
-    playbackClock = clock;
+    playbackClock = clock2;
     for (const key of PLAYBACK_FIELDS) {
       Object.defineProperty(target, key, { enumerable: true, configurable: false, get: () => playbackState[key] });
     }
@@ -1872,17 +2090,17 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/library-models.js
   var MODEL_FAVORITE_PREFIX = "tierscope:library-model:v1:";
-  function modelFavoriteKey(room) {
-    const normalized = allTimeRoom(room);
+  function modelFavoriteKey(room2) {
+    const normalized = allTimeRoom(room2);
     if (!normalized) throw new Error("Invalid favorite model.");
     return MODEL_FAVORITE_PREFIX + normalized;
   }
   function validateFavoriteModels(value) {
-    if (!Array.isArray(value) || value.length > 1e4 || value.some((room) => !allTimeRoom(room))) throw new Error("Invalid favorite models.");
+    if (!Array.isArray(value) || value.length > 1e4 || value.some((room2) => !allTimeRoom(room2))) throw new Error("Invalid favorite models.");
     return [...new Set(value.map(allTimeRoom))].sort();
   }
-  function readModelFavorite(room) {
-    const key = modelFavoriteKey(room), normalized = allTimeRoom(room), raw = GM_getValue(key, void 0);
+  function readModelFavorite(room2) {
+    const key = modelFavoriteKey(room2), normalized = allTimeRoom(room2), raw = GM_getValue(key, void 0);
     if (raw === void 0) return { favorite: false, autoKeep: false };
     const record = JSON.parse(raw);
     if (record.schemaVersion !== 1 || record.room !== normalized || typeof record.favorite !== "boolean" || record.autoKeep !== void 0 && typeof record.autoKeep !== "boolean") throw new Error("Invalid favorite model record.");
@@ -1892,36 +2110,36 @@ underlying system, so should run in the browser, Node, or Plask.
     const favorites = new Set(entries.filter((entry) => entry.favorite).map((entry) => entry.archive.room.toLowerCase()));
     const errors = [], automatic = /* @__PURE__ */ new Set();
     for (const key of GM_listValues().filter((key2) => key2.startsWith(MODEL_FAVORITE_PREFIX))) {
-      const room = key.slice(MODEL_FAVORITE_PREFIX.length);
+      const room2 = key.slice(MODEL_FAVORITE_PREFIX.length);
       try {
-        if (modelFavoriteKey(room) !== key) throw new Error("Invalid favorite model key.");
-        const record = readModelFavorite(room);
-        if (record.favorite) favorites.add(room);
-        else favorites.delete(room);
-        if (record.autoKeep) automatic.add(room);
+        if (modelFavoriteKey(room2) !== key) throw new Error("Invalid favorite model key.");
+        const record = readModelFavorite(room2);
+        if (record.favorite) favorites.add(room2);
+        else favorites.delete(room2);
+        if (record.autoKeep) automatic.add(room2);
       } catch (error) {
-        favorites.delete(room);
-        errors.push(room);
+        favorites.delete(room2);
+        errors.push(room2);
       }
     }
     return { favorites, automatic, errors };
   }
   function planModelFavoriteWrites(rooms) {
     const writes = [];
-    for (const room of validateFavoriteModels(rooms)) {
-      const key = modelFavoriteKey(room);
+    for (const room2 of validateFavoriteModels(rooms)) {
+      const key = modelFavoriteKey(room2);
       if (GM_getValue(key, void 0) === void 0) writes.push({
         key,
         expectedBefore: void 0,
-        value: JSON.stringify({ schemaVersion: 1, room, favorite: true })
+        value: JSON.stringify({ schemaVersion: 1, room: room2, favorite: true })
       });
     }
     return writes;
   }
-  function setModelFavorite(room, favorite, autoKeep = false) {
-    const key = modelFavoriteKey(room);
+  function setModelFavorite(room2, favorite, autoKeep = false) {
+    const key = modelFavoriteKey(room2);
     if (typeof favorite !== "boolean" || typeof autoKeep !== "boolean" || autoKeep && !favorite) throw new Error("Invalid favorite model choice.");
-    const before = GM_getValue(key, void 0), value = JSON.stringify({ schemaVersion: 1, room: allTimeRoom(room), favorite, autoKeep });
+    const before = GM_getValue(key, void 0), value = JSON.stringify({ schemaVersion: 1, room: allTimeRoom(room2), favorite, autoKeep });
     try {
       GM_setValue(key, value);
       if (GM_getValue(key, void 0) !== value) throw new Error("Favorite changed in another tab. Refresh the library.");
@@ -2306,10 +2524,10 @@ underlying system, so should run in the browser, Node, or Plask.
   function filterLibraryEntries(entries, filters = {}) {
     const start = libraryDateBoundary(filters.from || ""), end = libraryDateBoundary(filters.to || "", true);
     if (start >= end) throw new Error("The start date must not be after the end date.");
-    const query = (filters.query || "").trim().toLowerCase(), room = (filters.room || "").toLowerCase();
+    const query = (filters.query || "").trim().toLowerCase(), room2 = (filters.room || "").toLowerCase();
     const result = entries.filter((entry) => {
       const time = entry.archive.session.history.timestamps[0];
-      return (!room || room === "*" || entry.archive.room.toLowerCase() === room) && time >= start && time < end && (!filters.favorites || entry.modelFavorite) && (!query || (entry.title + " " + entry.archive.room + " " + (entry.notes || "")).toLowerCase().includes(query));
+      return (!room2 || room2 === "*" || entry.archive.room.toLowerCase() === room2) && time >= start && time < end && (!filters.favorites || entry.modelFavorite) && (!query || (entry.title + " " + entry.archive.room + " " + (entry.notes || "")).toLowerCase().includes(query));
     });
     const byDate = (a, b) => b.archive.session.history.timestamps[0] - a.archive.session.history.timestamps[0] || a.id.localeCompare(b.id);
     return result.sort((a, b) => filters.sort === "oldest" ? -byDate(a, b) : filters.sort === "title" ? a.title.localeCompare(b.title) || byDate(a, b) : filters.sort === "model" ? a.archive.room.localeCompare(b.archive.room) || byDate(a, b) : filters.sort === "favorites" ? Number(!!b.modelFavorite) - Number(!!a.modelFavorite) || byDate(a, b) : byDate(a, b));
@@ -2680,8 +2898,8 @@ underlying system, so should run in the browser, Node, or Plask.
     if (location.href !== runtime.lastUrl) throw new Error("No recorded session to save yet.");
     return captureLiveSessionFile();
   }
-  function captureLiveSessionFile(room = getModelName()) {
-    if (!runtime.history.timestamps.length || room === "unknown" || runtime.activeSessionStorageKey !== getStorageKey(room) || room !== getModelNameFromUrl(runtime.lastUrl)) {
+  function captureLiveSessionFile(room2 = getModelName()) {
+    if (!runtime.history.timestamps.length || room2 === "unknown" || runtime.activeSessionStorageKey !== getStorageKey(room2) || room2 !== getModelNameFromUrl(runtime.lastUrl)) {
       throw new Error("No recorded session to save yet.");
     }
     var now = Date.now();
@@ -2715,7 +2933,7 @@ underlying system, so should run in the browser, Node, or Plask.
       format: runtime.SESSION_FILE_FORMAT,
       formatVersion: runtime.SESSION_FILE_VERSION,
       producerVersion: runtime.TIERSCOPE_VERSION,
-      room,
+      room: room2,
       session: data
     });
   }
@@ -2977,11 +3195,11 @@ underlying system, so should run in the browser, Node, or Plask.
   var checkpointInterval = 6e4;
   var reader = createLibraryReader();
   var checkpoint = { room: "", identity: "", signature: "", phase: "", attemptedAt: null, savedAt: null, error: "" };
-  function automaticLibraryStatus(room) {
-    return checkpoint.room === room && checkpoint.identity === room + ":" + runtime.sessionStartedAt + ":" + runtime.activeRoomEpoch ? __spreadValues({}, checkpoint) : { savedAt: null, error: "" };
+  function automaticLibraryStatus(room2) {
+    return checkpoint.room === room2 && checkpoint.identity === room2 + ":" + runtime.sessionStartedAt + ":" + runtime.activeRoomEpoch ? __spreadValues({}, checkpoint) : { savedAt: null, error: "" };
   }
-  function automaticLibraryWarning(room) {
-    const state = automaticLibraryStatus(room);
+  function automaticLibraryWarning(room2) {
+    const state = automaticLibraryStatus(room2);
     return state.error ? {
       saveWarning: true,
       text: "Library save pending",
@@ -2989,20 +3207,20 @@ underlying system, so should run in the browser, Node, or Plask.
       title: "Automatic Library keeping could not finish. Live data remains in this tab. Open Library to retry or download a session file. " + state.error
     } : null;
   }
-  function clearAutomaticLibraryStatus(room) {
-    if (checkpoint.room === room) checkpoint = { room, identity: "", signature: "", phase: "", attemptedAt: null, savedAt: null, error: "" };
+  function clearAutomaticLibraryStatus(room2) {
+    if (checkpoint.room === room2) checkpoint = { room: room2, identity: "", signature: "", phase: "", attemptedAt: null, savedAt: null, error: "" };
     reader.clear();
   }
-  function keepFavoriteSession(room, force = false) {
-    if (!room || room === "unknown" || !runtime.history.timestamps.length) return;
+  function keepFavoriteSession(room2, force = false) {
+    if (!room2 || room2 === "unknown" || !runtime.history.timestamps.length) return;
     try {
-      const key = getStorageKey(room);
+      const key = getStorageKey(room2);
       if (runtime.activeSessionStorageKey !== key) return;
-      const identity = room + ":" + runtime.sessionStartedAt + ":" + runtime.activeRoomEpoch;
-      if (checkpoint.identity !== identity) checkpoint = { room, identity, signature: "", phase: "", attemptedAt: null, savedAt: null, error: "" };
-      const preference = readModelFavorite(room);
+      const identity = room2 + ":" + runtime.sessionStartedAt + ":" + runtime.activeRoomEpoch;
+      if (checkpoint.identity !== identity) checkpoint = { room: room2, identity, signature: "", phase: "", attemptedAt: null, savedAt: null, error: "" };
+      const preference = readModelFavorite(room2);
       if (!preference.autoKeep) {
-        clearAutomaticLibraryStatus(room);
+        clearAutomaticLibraryStatus(room2);
         return;
       }
       if (getRoomEpoch(key) !== runtime.activeRoomEpoch) return;
@@ -3028,14 +3246,14 @@ underlying system, so should run in the browser, Node, or Plask.
       if (!force && (signature === checkpoint.signature && !checkpoint.error || !transition && checkpoint.attemptedAt !== null && Date.now() - checkpoint.attemptedAt < checkpointInterval)) return;
       checkpoint.attemptedAt = Date.now();
       checkpoint.phase = phase;
-      const archive = captureLiveSessionFile(room);
+      const archive = captureLiveSessionFile(room2);
       const result = keepSessionInLibrary(archive, "", reader);
       checkpoint.signature = signature;
       checkpoint.savedAt = Date.now();
       checkpoint.error = "";
       return result;
     } catch (error) {
-      checkpoint.room = room;
+      checkpoint.room = room2;
       checkpoint.error = error.message || String(error);
       return { error: checkpoint.error };
     }
@@ -3066,12 +3284,12 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/session-health.js
   var sessionSaveStates = /* @__PURE__ */ new Map();
-  function noteSessionSave(room, error = "") {
-    const previous = sessionSaveStates.get(room);
-    sessionSaveStates.set(room, { savedAt: error ? previous ? previous.savedAt : null : Date.now(), error });
+  function noteSessionSave(room2, error = "") {
+    const previous = sessionSaveStates.get(room2);
+    sessionSaveStates.set(room2, { savedAt: error ? previous ? previous.savedAt : null : Date.now(), error });
   }
-  function getSessionSaveState(room) {
-    return sessionSaveStates.get(room) || { savedAt: null, error: "" };
+  function getSessionSaveState(room2) {
+    return sessionSaveStates.get(room2) || { savedAt: null, error: "" };
   }
   function sessionSaveWarningModel(state) {
     return state.error ? {
@@ -3625,12 +3843,12 @@ underlying system, so should run in the browser, Node, or Plask.
   }
 
   // src/favorite-view.js
-  function paintFavoriteButton(button, room, state) {
-    button.dataset.favoriteRoom = room;
+  function paintFavoriteButton(button, room2, state) {
+    button.dataset.favoriteRoom = room2;
     button.textContent = state.favorite ? "★" : "☆";
-    button.disabled = room === "unknown" || !!state.error;
+    button.disabled = room2 === "unknown" || !!state.error;
     button.setAttribute("aria-pressed", String(!!state.favorite));
-    button.setAttribute("aria-label", (state.favorite ? "Remove favorite " : "Favorite ") + room);
+    button.setAttribute("aria-label", (state.favorite ? "Remove favorite " : "Favorite ") + room2);
     button.title = state.error || (state.favorite ? state.autoKeep ? "Favorite · automatic keeping on. Click to remove favorite." : "Favorite · automatic keeping off. Enable in Library, or click to remove favorite." : "Favorite this model and automatically keep live sessions in Library. Asks for confirmation.");
     button.style.color = state.favorite ? "var(--panel-accent)" : "var(--panel-muted)";
   }
@@ -4459,12 +4677,12 @@ underlying system, so should run in the browser, Node, or Plask.
       label.textContent = runtime.playback.imported ? "FILE REPLAY" : "PLAYBACK";
       label.title = runtime.playback.archive ? runtime.playback.archive.room : "";
     }
-    var room = document.getElementById("playback-room");
-    if (room) {
+    var room2 = document.getElementById("playback-room");
+    if (room2) {
       var sourceRoom = runtime.playback.imported && runtime.playback.archive ? runtime.playback.archive.room : "";
-      room.textContent = sourceRoom ? "Room: " + sourceRoom : "";
-      room.title = sourceRoom ? "Saved session from " + sourceRoom : "";
-      room.style.display = sourceRoom ? "block" : "none";
+      room2.textContent = sourceRoom ? "Room: " + sourceRoom : "";
+      room2.title = sourceRoom ? "Saved session from " + sourceRoom : "";
+      room2.style.display = sourceRoom ? "block" : "none";
     }
     var fileControls = document.getElementById("playback-file-controls");
     if (fileControls) fileControls.style.display = runtime.playback.imported ? "flex" : "none";
@@ -4567,25 +4785,25 @@ underlying system, so should run in the browser, Node, or Plask.
     }
   }
   function clearAllTimeHighs() {
-    var room = displayedHighRoom();
-    if (!room || !confirm("Clear all-time highs for " + room + "?\n\nSession history and saved files will remain. New accepted samples will start new all-time records.")) return;
+    var room2 = displayedHighRoom();
+    if (!room2 || !confirm("Clear all-time highs for " + room2 + "?\n\nSession history and saved files will remain. New accepted samples will start new all-time records.")) return;
     try {
-      var prefix = runtime.ALL_TIME_PREFIX + room + ":";
+      var prefix = runtime.ALL_TIME_PREFIX + room2 + ":";
       var keys = GM_listValues().filter(function(key) {
         return key.indexOf(prefix) === 0;
       });
-      GM_setValue(runtime.ALL_TIME_EPOCH_PREFIX + room, makeStorageId());
-      runtime.allTimeCache.delete(room);
+      GM_setValue(runtime.ALL_TIME_EPOCH_PREFIX + room2, makeStorageId());
+      runtime.allTimeCache.delete(room2);
       keys.forEach(function(key) {
         try {
           GM_deleteValue(key);
         } catch (error) {
         }
       });
-      var state = readAllTimeHighs(room);
+      var state = readAllTimeHighs(room2);
       if (isPlaybackCurrent(runtime.playback)) setPlaybackAllTimeState(runtime.playback, state);
       repaintHighMode();
-      setAllTimeActionStatus("All-time highs cleared for " + room + ".");
+      setAllTimeActionStatus("All-time highs cleared for " + room2 + ".");
     } catch (error) {
       alert("Could not clear all-time highs: " + error.message);
     }
@@ -4613,7 +4831,7 @@ underlying system, so should run in the browser, Node, or Plask.
     var info = document.getElementById("all-time-info");
     if (info) info.textContent = warning || (state.skipped ? state.skipped + " unreadable all-time record(s) were skipped and retained." : "All-time highs are saved per room in this browser and survive session Reset.");
   }
-  function recordAcceptedAllTimeHighs(room) {
+  function recordAcceptedAllTimeHighs(room2) {
     var index = runtime.history.timestamps.length - 1;
     if (index < 0) return;
     var incoming = emptyAllTimeHighs(), time = runtime.history.timestamps[index];
@@ -4624,7 +4842,23 @@ underlying system, so should run in the browser, Node, or Plask.
         source: "live"
       };
     });
-    storeAllTimeHighs(room, incoming);
+    storeAllTimeHighs(room2, incoming);
+  }
+  function clearInactiveAllTimeHighs() {
+    try {
+      const plan = prepareAthCleanup();
+      if (!plan.candidates.length) {
+        setAllTimeActionStatus("No rooms with ATH qualify for the 90-day cleanup." + (plan.skipped ? " " + plan.skipped + " unreadable room(s) were skipped." : ""));
+        return;
+      }
+      if (!confirm("Clear all-time highs for " + plan.candidates.length + " room(s) not visited in over 90 days?\n\nExisting records receive a 90-day grace period. Active rooms are protected. Saved Library sessions and session highs will remain." + (plan.skipped ? "\n\n" + plan.skipped + " unreadable room(s) will be skipped." : ""))) return;
+      const result = applyAthCleanup(plan);
+      if (isPlaybackCurrent(runtime.playback)) setPlaybackAllTimeState(runtime.playback, readAllTimeHighs(displayedHighRoom()));
+      repaintHighMode();
+      setAllTimeActionStatus("Cleared ATH for " + result.cleared + " room(s)." + (result.changed ? " " + result.changed + " room(s) changed or became active and were skipped." : "") + (result.failed ? " " + result.failed + " room(s) could not be cleared; retained records remain available." : ""));
+    } catch (error) {
+      setAllTimeActionStatus("Could not inspect old ATH records: " + error.message);
+    }
   }
 
   // src/layout.js
@@ -5217,7 +5451,7 @@ underlying system, so should run in the browser, Node, or Plask.
     const label = toolNode(modelRow, "label", "Model ", "tools-model-filter"), model = toolNode(label, "select");
     model.id = prefix + "-model";
     const rooms = [...new Set(entries.map((entry) => entry.archive.room.toLowerCase()))].sort();
-    for (const [value, name] of [["", organization ? "All models (folders)" : "All models"], ...organization ? [["*", "All sessions"]] : [], ...rooms.map((room) => [room, room])]) {
+    for (const [value, name] of [["", organization ? "All models (folders)" : "All models"], ...organization ? [["*", "All sessions"]] : [], ...rooms.map((room2) => [room2, room2])]) {
       const option = toolNode(model, "option", name);
       option.value = value;
     }
@@ -5335,17 +5569,17 @@ underlying system, so should run in the browser, Node, or Plask.
   }
 
   // src/favorite-controls.js
-  function changeModelFavorite(room, enableOnly = false) {
-    const previous = readModelFavorite(room);
+  function changeModelFavorite(room2, enableOnly = false) {
+    const previous = readModelFavorite(room2);
     if (previous.favorite && !enableOnly) {
-      setModelFavorite(room, false);
-      clearAutomaticLibraryStatus(room);
+      setModelFavorite(room2, false);
+      clearAutomaticLibraryStatus(room2);
       return true;
     }
     const limits = readLibraryLimits(), minimumMinutes = readAutomaticKeepingMinutes();
-    if (!confirm("Favorite " + room + " and automatically keep their live sessions?\n\nWhile TierScope is recording this model, sessions will be kept in this browser’s Library after " + minimumMinutes + " minutes of recorded coverage (excluding pauses and gaps). Change this in Library → Storage limits → Automatic keeping. The same session is updated as it grows, at most once per minute as samples arrive, and on pause, Stop or leaving the room. The current live session qualifies once it reaches this minimum. Replay files are never added automatically.\n\nLibrary limits still apply (" + limits.maxSessions.toLocaleString() + " sessions / " + limits.maxMegabytes + " MB). Nothing is deleted automatically. Removing the star stops automatic keeping; sessions already kept remain.")) return false;
-    setModelFavorite(room, true, true);
-    keepFavoriteSession(room, true);
+    if (!confirm("Favorite " + room2 + " and automatically keep their live sessions?\n\nWhile TierScope is recording this model, sessions will be kept in this browser’s Library after " + minimumMinutes + " minutes of recorded coverage (excluding pauses and gaps). Change this in Library → Storage limits → Automatic keeping. The same session is updated as it grows, at most once per minute as samples arrive, and on pause, Stop or leaving the room. The current live session qualifies once it reaches this minimum. Replay files are never added automatically.\n\nLibrary limits still apply (" + limits.maxSessions.toLocaleString() + " sessions / " + limits.maxMegabytes + " MB). Nothing is deleted automatically. Removing the star stops automatic keeping; sessions already kept remain.")) return false;
+    setModelFavorite(room2, true, true);
+    keepFavoriteSession(room2, true);
     return true;
   }
 
@@ -5418,12 +5652,12 @@ underlying system, so should run in the browser, Node, or Plask.
   }
   function summarizeAudience(archive) {
     const audience = ["room", "total", "withTokens", "anonymous"].map((metric) => __spreadValues({ metric }, summarizeSession(archive, metric)));
-    const [room, registered, tokens, anonymous] = audience;
+    const [room2, registered, tokens, anonymous] = audience;
     return {
       audience,
       tokenShareRegistered: registered.tokenShare,
-      tokenShareRoom: room.mean && tokens.mean !== null ? tokens.mean / room.mean * 100 : null,
-      anonymousShareRoom: room.mean && anonymous.mean !== null ? anonymous.mean / room.mean * 100 : null
+      tokenShareRoom: room2.mean && tokens.mean !== null ? tokens.mean / room2.mean * 100 : null,
+      anonymousShareRoom: room2.mean && anonymous.mean !== null ? anonymous.mean / room2.mean * 100 : null
     };
   }
   var ANALYSIS_MAX_THRESHOLDS = 8;
@@ -5542,13 +5776,13 @@ underlying system, so should run in the browser, Node, or Plask.
     }
     const seen = /* @__PURE__ */ new Set();
     const rooms = input.rooms.map((record) => {
-      const room = record && allTimeRoom(record.room);
-      if (!room || seen.has(room)) throw new Error("Invalid or duplicate room in backup.");
-      seen.add(room);
-      validateAllTimeRecord({ schemaVersion: 1, room, epoch: "backup", highs: record.highs }, room);
+      const room2 = record && allTimeRoom(record.room);
+      if (!room2 || seen.has(room2)) throw new Error("Invalid or duplicate room in backup.");
+      seen.add(room2);
+      validateAllTimeRecord({ schemaVersion: 1, room: room2, epoch: "backup", highs: record.highs }, room2);
       const highs = emptyAllTimeHighs();
       mergeAllTimeHighs(highs, record.highs);
-      return { room, highs };
+      return { room: room2, highs };
     });
     const library = input.library.map((entry) => __spreadProps(__spreadValues({ title: libraryTitle(entry.title) }, libraryMetadata(entry)), { archive: validateSessionFile(entry.archive) }));
     const backup = {
@@ -5573,15 +5807,15 @@ underlying system, so should run in the browser, Node, or Plask.
     const rooms = /* @__PURE__ */ new Set();
     for (const key of GM_listValues()) {
       if (key.startsWith(runtime.ALL_TIME_PREFIX)) {
-        const room = allTimeRoom(key.slice(runtime.ALL_TIME_PREFIX.length).split(":")[0]);
-        if (room) rooms.add(room);
+        const room2 = allTimeRoom(key.slice(runtime.ALL_TIME_PREFIX.length).split(":")[0]);
+        if (room2) rooms.add(room2);
       }
     }
-    for (const room of runtime.allTimeCache.keys()) if (allTimeRoom(room)) rooms.add(room);
-    const records = [...rooms].sort().map((room) => {
-      const state = readAllTimeHighs(room);
-      if (state.error || state.skipped) throw new Error("Could not read all ATH records for " + room + ". Existing data was left intact.");
-      return { room, highs: state.highs };
+    for (const room2 of runtime.allTimeCache.keys()) if (allTimeRoom(room2)) rooms.add(room2);
+    const records = [...rooms].sort().map((room2) => {
+      const state = readAllTimeHighs(room2);
+      if (state.error || state.skipped) throw new Error("Could not read all ATH records for " + room2 + ". Existing data was left intact.");
+      return { room: room2, highs: state.highs };
     });
     const preferences = {
       theme: runtime.isDarkMode ? "dark" : "bright",
@@ -5653,8 +5887,8 @@ underlying system, so should run in the browser, Node, or Plask.
         touched.push(__spreadProps(__spreadValues({}, write), { before }));
         GM_setValue(write.key, write.value);
       }
-      for (const { room, epoch } of epochs) {
-        if (GM_getValue(runtime.ALL_TIME_EPOCH_PREFIX + room, "initial") !== epoch) throw new Error("ATH was cleared in another tab during restore.");
+      for (const { room: room2, epoch } of epochs) {
+        if (GM_getValue(runtime.ALL_TIME_EPOCH_PREFIX + room2, "initial") !== epoch) throw new Error("ATH was cleared in another tab during restore.");
       }
       if (newLibrary.length) verifyLibraryCapacity();
     } catch (error) {
@@ -6131,15 +6365,15 @@ underlying system, so should run in the browser, Node, or Plask.
     download.title = "Download one library bundle, including titles, notes and favorite models";
     const list = toolNode(book, "div");
     list.id = "tools-library-list";
-    function favoriteButton(parent2, room, compact = false) {
-      const active = entries.some((entry) => entry.archive.room.toLowerCase() === room && entry.modelFavorite);
-      const control = toolButton(parent2, (active ? "★" : "☆") + (compact ? "" : " Favorite model"), () => actions.favoriteModel(room), "tools-model-favorite-" + room);
+    function favoriteButton(parent2, room2, compact = false) {
+      const active = entries.some((entry) => entry.archive.room.toLowerCase() === room2 && entry.modelFavorite);
+      const control = toolButton(parent2, (active ? "★" : "☆") + (compact ? "" : " Favorite model"), () => actions.favoriteModel(room2), "tools-model-favorite-" + room2);
       control.setAttribute("aria-pressed", String(active));
-      control.setAttribute("aria-label", (active ? "Unfavorite " : "Favorite ") + room);
-      control.title = (active ? "Unfavorite model " : "Favorite model ") + room;
+      control.setAttribute("aria-label", (active ? "Unfavorite " : "Favorite ") + room2);
+      control.title = (active ? "Unfavorite model " : "Favorite model ") + room2;
       if (active) control.className = "tools-primary";
-      if (active && !compact && !entries.some((entry) => entry.archive.room.toLowerCase() === room && entry.autoKeep)) {
-        toolButton(parent2, "Enable automatic keeping…", () => actions.enableAutomatic(room), "tools-model-enable-" + room);
+      if (active && !compact && !entries.some((entry) => entry.archive.room.toLowerCase() === room2 && entry.autoKeep)) {
+        toolButton(parent2, "Enable automatic keeping…", () => actions.enableAutomatic(room2), "tools-model-enable-" + room2);
       }
     }
     function updateSelection() {
@@ -6162,9 +6396,9 @@ underlying system, so should run in the browser, Node, or Plask.
       updateSelection();
       const folders = /* @__PURE__ */ new Map();
       for (const entry of matching) {
-        const room2 = entry.archive.room.toLowerCase();
-        if (!folders.has(room2)) folders.set(room2, []);
-        folders.get(room2).push(entry);
+        const room3 = entry.archive.room.toLowerCase();
+        if (!folders.has(room3)) folders.set(room3, []);
+        folders.get(room3).push(entry);
       }
       const browsingFolders = !filters.room && !filters.query;
       const visible = browsingFolders ? [...folders.keys()] : matching;
@@ -6180,31 +6414,31 @@ underlying system, so should run in the browser, Node, or Plask.
         rows();
         (document.getElementById("tools-folder-" + previous) || searchSummary).focus();
       }, "tools-library-all-models");
-      const room = filters.room && filters.room !== "*" ? filters.room : null;
-      toolNode(heading, "h3", room ? "Folder: " + room : browsingFolders ? "Model folders" : "Search results — all models");
-      if (room) {
-        favoriteButton(heading, room);
-        toolButton(heading, "History overview", () => actions.history(room), "tools-model-history").className = "tools-primary";
+      const room2 = filters.room && filters.room !== "*" ? filters.room : null;
+      toolNode(heading, "h3", room2 ? "Folder: " + room2 : browsingFolders ? "Model folders" : "Search results — all models");
+      if (room2) {
+        favoriteButton(heading, room2);
+        toolButton(heading, "History overview", () => actions.history(room2), "tools-model-history").className = "tools-primary";
       }
       if (!matching.length) toolNode(list, "p", entries.length ? "No matching sessions." : "Your library is empty. Keep a session above or import a session file.", "tools-muted");
-      if (browsingFolders) for (const room2 of visible.slice(0, shown)) {
-        const recordings = folders.get(room2), row = toolNode(list, "div", void 0, "tools-folder");
+      if (browsingFolders) for (const room3 of visible.slice(0, shown)) {
+        const recordings = folders.get(room3), row = toolNode(list, "div", void 0, "tools-folder");
         const open = toolButton(row, "", () => {
-          filters.room = room2;
-          inputs.model.value = room2;
+          filters.room = room3;
+          inputs.model.value = room3;
           shown = 50;
-          actions.room(room2);
+          actions.room(room3);
           rows();
           document.getElementById("tools-library-all-models").focus();
-        }, "tools-folder-" + room2);
+        }, "tools-folder-" + room3);
         open.className = "tools-folder-open";
-        open.setAttribute("aria-label", "Open sessions for " + room2);
-        toolNode(open, "span", "▱  " + room2, "tools-folder-name");
+        open.setAttribute("aria-label", "Open sessions for " + room3);
+        toolNode(open, "span", "▱  " + room3, "tools-folder-name");
         const summary = actions.cardSummary(recordings);
         toolNode(open, "span", recordings.length + (recordings.length === 1 ? " session" : " sessions") + " · First " + new Date(summary.first).toLocaleDateString() + " · Latest " + new Date(summary.latest).toLocaleDateString(), "tools-folder-meta");
         const covered = toolNode(open, "span", "Total covered time " + actions.duration(summary.coveredMs), "tools-folder-meta");
         covered.title = "Sum of covered intervals in sessions matching the current filters. Gaps and time after the final sample are excluded; overlapping sessions are counted separately.";
-        favoriteButton(row, room2, true);
+        favoriteButton(row, room3, true);
       }
       else for (const entry of visible.slice(0, shown)) {
         const row = toolNode(list, "article", void 0, "tools-row");
@@ -6275,7 +6509,7 @@ underlying system, so should run in the browser, Node, or Plask.
         const backup = validateTierScopeBackup(value);
         if (backup.recovery) throw new Error("Use Backup to review and restore a partial backup with missing sessions.");
         library.push(...backup.library);
-        backup.favoriteModels.forEach((room) => favoriteModels.add(room));
+        backup.favoriteModels.forEach((room2) => favoriteModels.add(room2));
       } else {
         const archive = validateSessionFile(value);
         library.push({ title: archive.room, archive });
@@ -6297,7 +6531,7 @@ underlying system, so should run in the browser, Node, or Plask.
       return { title: entry.title, notes: libraryMetadata(entry).notes, archive: entry.archive };
     });
     const rooms = new Set(library.map((entry) => entry.archive.room.toLowerCase())), models = readModelFavorites(state.entries);
-    if (models.errors.some((room) => rooms.has(room))) throw new Error("A selected model’s favorite could not be read. Refresh and try again.");
+    if (models.errors.some((room2) => rooms.has(room2))) throw new Error("A selected model’s favorite could not be read. Refresh and try again.");
     return validateTierScopeBackup({
       format: "TierScopeBackup",
       formatVersion: 1,
@@ -6305,7 +6539,7 @@ underlying system, so should run in the browser, Node, or Plask.
       rooms: [],
       preferences: {},
       library,
-      favoriteModels: [...models.favorites].filter((room) => rooms.has(room))
+      favoriteModels: [...models.favorites].filter((room2) => rooms.has(room2))
     });
   }
 
@@ -6327,11 +6561,11 @@ underlying system, so should run in the browser, Node, or Plask.
     let plotCache = null;
     const number = (value) => value.toLocaleString(void 0, { maximumFractionDigits: 2 });
     const elapsed = (ms) => number(ms / 6e4) + "m";
-    const clock = (ms) => {
+    const clock2 = (ms) => {
       const seconds = Math.floor(ms / 1e3), pad = (n) => String(n).padStart(2, "0");
       return pad(Math.floor(seconds / 3600)) + ":" + pad(Math.floor(seconds / 60) % 60) + (end - start < 6e4 ? ":" + pad(seconds % 60) : "");
     };
-    const axisLabel = (ms) => axisMode === "clock" ? clock(ms) : elapsed(ms);
+    const axisLabel = (ms) => axisMode === "clock" ? clock2(ms) : elapsed(ms);
     const chartLabel = () => metricLabel + (axisMode === "clock" ? " by local time of day, 00:00 to 24:00." : " by real elapsed time.") + " Arrow keys inspect samples; plus and minus zoom; Home and End jump to visible endpoints.";
     const zoomIn = toolButton(controls, "Zoom +", () => zoom(0.5), "tools-chart-zoom-in");
     const zoomOut = toolButton(controls, "Zoom −", () => zoom(2), "tools-chart-zoom-out");
@@ -6493,7 +6727,7 @@ underlying system, so should run in the browser, Node, or Plask.
       if (axisMode === "clock") {
         for (let step = 0; step <= 4; step++) {
           ctx.textAlign = step === 0 ? "left" : step === 4 ? "right" : "center";
-          ctx.fillText(clock(start + (end - start) * step / 4), left + (right - left) * step / 4, bottom + 20);
+          ctx.fillText(clock2(start + (end - start) * step / 4), left + (right - left) * step / 4, bottom + 20);
         }
       } else {
         ctx.textAlign = "left";
@@ -6665,10 +6899,10 @@ underlying system, so should run in the browser, Node, or Plask.
       if (!metrics.has(metric)) metrics.set(metric, summarizeSession(archive, metric));
       return metrics.get(metric);
     }
-    function read(entries, room, metric = "room", limit = Infinity) {
+    function read(entries, room2, metric = "room", limit = Infinity) {
       if (!Object.prototype.hasOwnProperty.call(ANALYSIS_METRICS, metric)) throw new Error("Unknown analysis metric.");
       if (limit !== Infinity && (!Number.isSafeInteger(limit) || limit < 1)) throw new Error("Invalid history limit.");
-      const matching = entries.filter((entry) => entry.archive.room.toLowerCase() === room.toLowerCase()).sort((a, b) => a.archive.session.history.timestamps[0] - b.archive.session.history.timestamps[0] || a.id.localeCompare(b.id));
+      const matching = entries.filter((entry) => entry.archive.room.toLowerCase() === room2.toLowerCase()).sort((a, b) => a.archive.session.history.timestamps[0] - b.archive.session.history.timestamps[0] || a.id.localeCompare(b.id));
       const selected = limit === Infinity ? matching : matching.slice(-limit);
       let coveredMs = 0, gapMs = 0, weighted = 0, registeredWeight = 0, tokenWeight = 0, latestEnd = -Infinity, overlaps = false;
       let peak = null;
@@ -6689,7 +6923,7 @@ underlying system, so should run in the browser, Node, or Plask.
         return __spreadValues({ id: entry.id, title: entry.title || entry.archive.room, time, comparisonIds }, stats);
       });
       return {
-        room: room.toLowerCase(),
+        room: room2.toLowerCase(),
         metric,
         totalCount: matching.length,
         recordings,
@@ -6710,8 +6944,8 @@ underlying system, so should run in the browser, Node, or Plask.
     return (_a = archive.session.sessionStartedAt) != null ? _a : archive.session.history.timestamps[0];
   }
   function previousModelSessionIds(entries, archive) {
-    const start = recordingStart(archive), room = archive.room.toLowerCase();
-    return entries.filter((entry) => entry.archive.room.toLowerCase() === room && recordingStart(entry.archive) < start).sort((a, b) => recordingStart(b.archive) - recordingStart(a.archive) || b.id.localeCompare(a.id)).slice(0, MAX_COMPARE_RECORDINGS - 1).map((entry) => entry.id);
+    const start = recordingStart(archive), room2 = archive.room.toLowerCase();
+    return entries.filter((entry) => entry.archive.room.toLowerCase() === room2 && recordingStart(entry.archive) < start).sort((a, b) => recordingStart(b.archive) - recordingStart(a.archive) || b.id.localeCompare(a.id)).slice(0, MAX_COMPARE_RECORDINGS - 1).map((entry) => entry.id);
   }
 
   // src/model-history-view.js
@@ -7583,17 +7817,17 @@ underlying system, so should run in the browser, Node, or Plask.
       tell(result.saved ? (result.changed ? "All-time highs updated for " : "No higher records for ") + archive.room + "." : result.state.error || "Records changed in another tab. Try again.", !result.saved);
     }
     function followContext() {
-      const room = getModelName(), history = runtime.history;
-      const identity = room + ":" + runtime.sessionStartedAt + ":" + runtime.activeRoomEpoch;
-      if (!current() || room === "unknown" || location.href !== runtime.lastUrl || runtime.activeSessionStorageKey !== getStorageKey(room) || !history.timestamps.length) {
+      const room2 = getModelName(), history = runtime.history;
+      const identity = room2 + ":" + runtime.sessionStartedAt + ":" + runtime.activeRoomEpoch;
+      if (!current() || room2 === "unknown" || location.href !== runtime.lastUrl || runtime.activeSessionStorageKey !== getStorageKey(room2) || !history.timestamps.length) {
         return { identity, reason: "Waiting for a live session in this room." };
       }
       try {
-        if (!readModelFavorite(room).autoKeep) return { identity, reason: "Confirm this model as a favorite to follow their live session." };
+        if (!readModelFavorite(room2).autoKeep) return { identity, reason: "Confirm this model as a favorite to follow their live session." };
       } catch (error) {
         return { identity, reason: "Favorite setting unavailable; this view is frozen." };
       }
-      return { identity, room, signature: [identity, history.timestamps[0], history.timestamps.at(-1), history.timestamps.length, runtime.isPaused, runtime.isStopped, runtime.stoppedAt].join(":") };
+      return { identity, room: room2, signature: [identity, history.timestamps[0], history.timestamps.at(-1), history.timestamps.length, runtime.isPaused, runtime.isStopped, runtime.stoppedAt].join(":") };
     }
     function followedEntries() {
       return followers.history.project(library.entries);
@@ -7678,9 +7912,9 @@ underlying system, so should run in the browser, Node, or Plask.
       const playback = isPlaybackCurrent(runtime.playback) ? runtime.playback : null;
       const source = playback ? playback.archive : runtime.history;
       const history = playback ? source.session.history : runtime.history;
-      const room = playback ? source.room : getModelName();
-      const available = history.timestamps.length > 0 && (playback || runtime.activeSessionStorageKey === getStorageKey(room) && runtime.lastUrl === location.href);
-      const signature = [room, !!playback, history.timestamps.length, history.timestamps.at(-1), runtime.isPaused, runtime.isStopped].join(":");
+      const room2 = playback ? source.room : getModelName();
+      const available = history.timestamps.length > 0 && (playback || runtime.activeSessionStorageKey === getStorageKey(room2) && runtime.lastUrl === location.href);
+      const signature = [room2, !!playback, history.timestamps.length, history.timestamps.at(-1), runtime.isPaused, runtime.isStopped].join(":");
       if (source === observedSource && signature === observedSignature) {
         refreshCards();
         return;
@@ -7703,15 +7937,15 @@ underlying system, so should run in the browser, Node, or Plask.
       refreshCards();
       if ((replaced || firstCapture) && (tab === "summary" && selectedA === "current" || tab === "compare" && [selectedA, selectedB, ...selectedExtra].includes("current"))) render(tab);
     }
-    function favoriteAction(room, enableOnly = false) {
-      if (!changeModelFavorite(room, enableOnly)) return;
-      const state = readModelFavorite(room);
+    function favoriteAction(room2, enableOnly = false) {
+      if (!changeModelFavorite(room2, enableOnly)) return;
+      const state = readModelFavorite(room2);
       document.querySelectorAll("[data-favorite-room]").forEach((button2) => {
-        if (button2.dataset.favoriteRoom === room) paintFavoriteButton(button2, room, state);
+        if (button2.dataset.favoriteRoom === room2) paintFavoriteButton(button2, room2, state);
       });
       render("library");
-      const pending = automaticLibraryStatus(room).error;
-      tell(pending ? "Favorite saved; Library save pending. " + pending : state.autoKeep ? "Favorite saved. Automatic keeping is on for " + room + "." : "Favorite removed. Kept sessions remain in Library.", !!pending);
+      const pending = automaticLibraryStatus(room2).error;
+      tell(pending ? "Favorite saved; Library save pending. " + pending : state.autoKeep ? "Favorite saved. Automatic keeping is on for " + room2 + "." : "Favorite removed. Kept sessions remain in Library.", !!pending);
     }
     function refreshCards() {
       for (const replay of [false, true]) {
@@ -7720,11 +7954,11 @@ underlying system, so should run in the browser, Node, or Plask.
         const playback = isPlaybackCurrent(runtime.playback) ? runtime.playback : null;
         card.hidden = replay && !playback;
         if (card.hidden) continue;
-        const room = replay ? playback.archive.room : getModelName();
+        const room2 = replay ? playback.archive.room : getModelName();
         const history = replay ? playback.archive.session.history : runtime.history;
-        const available = !!history.timestamps.length && (replay || runtime.activeSessionStorageKey === getStorageKey(room) && runtime.lastUrl === location.href);
+        const available = !!history.timestamps.length && (replay || runtime.activeSessionStorageKey === getStorageKey(room2) && runtime.lastUrl === location.href);
         card.querySelector("[data-card-kind]").textContent = replay ? playback.imported ? "File / Library Replay" : "Replay Snapshot" : "Current Live Session";
-        card.querySelector("[data-card-room]").textContent = room === "unknown" ? "Open a model’s room" : room;
+        card.querySelector("[data-card-room]").textContent = room2 === "unknown" ? "Open a model’s room" : room2;
         card.querySelector("[data-card-meta]").textContent = (replay ? "" : runtime.isStopped ? "Stopped · " : runtime.isPaused ? "Paused · " : "") + (available ? history.timestamps.length.toLocaleString() + " samples · " + new Date(history.timestamps[0]).toLocaleString() : "Waiting for the first recorded sample.");
         card.querySelectorAll("[data-current-action]").forEach((button2) => {
           button2.dataset.currentAvailable = String(available);
@@ -7733,39 +7967,39 @@ underlying system, so should run in the browser, Node, or Plask.
         const star = card.querySelector("[data-card-star]"), info = card.querySelector("[data-card-auto]");
         let preference = { favorite: false, autoKeep: false };
         try {
-          if (room !== "unknown") preference = readModelFavorite(room);
+          if (room2 !== "unknown") preference = readModelFavorite(room2);
         } catch (error) {
           preference.error = "Favorites unavailable. Refresh to retry.";
         }
-        paintFavoriteButton(star, room, preference);
-        const status = automaticLibraryStatus(room);
+        paintFavoriteButton(star, room2, preference);
+        const status = automaticLibraryStatus(room2);
         info.textContent = replay ? "Replay is a snapshot. Keep it explicitly to add or update it in Library." : preference.error || (status.error ? "Automatic keep pending: " + status.error : preference.autoKeep ? status.waiting ? "Automatic keeping requires " + status.minimumMinutes + " minutes of recorded coverage · " + formatElapsedTime(status.coveredMs) + " recorded." : status.savedAt ? "Automatically kept at " + new Date(status.savedAt).toLocaleTimeString() + ". Updates as you record." : "Automatic keeping on · waiting for a recorded sample." : preference.favorite ? "Favorite · automatic keeping is off until you confirm." : "Favorite this model to automatically keep their live sessions.");
         info.style.color = !replay && status.error ? "var(--panel-warning)" : "var(--panel-muted)";
         const automatic = card.querySelector("#tools-auto-keep");
         if (automatic) {
           automatic.checked = preference.autoKeep;
-          automatic.disabled = preference.autoKeep || room === "unknown" || !!preference.error;
+          automatic.disabled = preference.autoKeep || room2 === "unknown" || !!preference.error;
           automatic.parentElement.dataset.locked = String(preference.autoKeep);
           automatic.parentElement.title = preference.error || (preference.autoKeep ? "Automatic keeping is on for this favorite. Remove the star to turn it off; kept sessions stay in Library." : "Favorite this model and confirm to automatically keep their live sessions.");
           automatic.parentElement.querySelector("[data-auto-lock]").hidden = !preference.autoKeep;
         }
         const compare = card.querySelector("#tools-compare-previous");
         if (compare) {
-          const previous = available ? previousModelSessionIds((library == null ? void 0 : library.entries) || [], { room, session: {
+          const previous = available ? previousModelSessionIds((library == null ? void 0 : library.entries) || [], { room: room2, session: {
             sessionStartedAt: runtime.sessionStartedAt,
             history: { timestamps: history.timestamps }
           } }) : [];
           compare.disabled = !available || !previous.length;
-          compare.title = !available ? "Record a sample first." : previous.length ? "Compare this live snapshot with " + previous.length + " earlier saved session(s) for " + room + "." : "Keep an earlier session for this model to compare with.";
+          compare.title = !available ? "Record a sample first." : previous.length ? "Compare this live snapshot with " + previous.length + " earlier saved session(s) for " + room2 + "." : "Keep an earlier session for this model to compare with.";
         }
         const retry = card.querySelector("[data-card-retry]");
         retry.hidden = replay || !status.error;
         const historyButton = card.querySelector("[data-card-history]");
-        historyButton.disabled = room === "unknown";
-        historyButton.parentElement.hidden = room === "unknown";
-        const count = (library == null ? void 0 : library.entries.filter((entry) => entry.archive.room.toLowerCase() === room.toLowerCase()).length) || 0;
+        historyButton.disabled = room2 === "unknown";
+        historyButton.parentElement.hidden = room2 === "unknown";
+        const count = (library == null ? void 0 : library.entries.filter((entry) => entry.archive.room.toLowerCase() === room2.toLowerCase()).length) || 0;
         historyButton.textContent = "History · " + count;
-        historyButton.title = count + " saved sessions for " + room;
+        historyButton.title = count + " saved sessions for " + room2;
       }
     }
     function currentCard(replay = false) {
@@ -7812,10 +8046,10 @@ underlying system, so should run in the browser, Node, or Plask.
         lock.dataset.autoLock = "";
         lock.setAttribute("aria-hidden", "true");
         check.onchange = action(() => {
-          const room = star.dataset.favoriteRoom;
+          const room2 = star.dataset.favoriteRoom;
           try {
             refreshCards();
-            if (!readModelFavorite(room).autoKeep) favoriteAction(room, true);
+            if (!readModelFavorite(room2).autoKeep) favoriteAction(room2, true);
           } finally {
             refreshCards();
           }
@@ -7868,9 +8102,9 @@ underlying system, so should run in the browser, Node, or Plask.
       render("compare");
       (_a = dialog.querySelector("#tools-analysis-chart") || dialog.querySelector("#tools-session-picker > summary")) == null ? void 0 : _a.focus();
     }
-    function openHistory(room) {
+    function openHistory(room2) {
       readLibrary();
-      libraryRoom = room;
+      libraryRoom = room2;
       render("history");
       dialog.querySelector("#tools-history-back").focus();
     }
@@ -7914,8 +8148,8 @@ underlying system, so should run in the browser, Node, or Plask.
       const callbacks = __spreadProps(__spreadValues({
         cardSummary: (entries) => modelCardReader.read(entries),
         duration: formatElapsedTime,
-        room: (room) => {
-          libraryRoom = room;
+        room: (room2) => {
+          libraryRoom = room2;
         },
         history: openHistory,
         compare: (ids) => {
@@ -7929,11 +8163,11 @@ underlying system, so should run in the browser, Node, or Plask.
           downloadDataFile(exportLibrarySelection(ids, runtime.TIERSCOPE_VERSION), "TierScope-library-selection-" + (/* @__PURE__ */ new Date()).toISOString().slice(0, 10) + ".json");
           tell("Selected sessions exported, including titles, notes and favorite models.");
         },
-        favoriteModel: (room) => {
+        favoriteModel: (room2) => {
           if (state.favoriteError) throw new Error("Model favorites are not fully available. Refresh before changing them.");
-          favoriteAction(room);
+          favoriteAction(room2);
         },
-        enableAutomatic: (room) => favoriteAction(room, true),
+        enableAutomatic: (room2) => favoriteAction(room2, true),
         replay: (entry) => {
           openSessionReplay(entry.archive);
           observedSignature = "";
@@ -8030,11 +8264,11 @@ underlying system, so should run in the browser, Node, or Plask.
     }
     function syncComparisonAxis() {
       if (tab !== "compare") return;
-      const clock = compareAxis === "clock", check = dialog.querySelector("#tools-shared-length");
-      check.disabled = clock;
+      const clock2 = compareAxis === "clock", check = dialog.querySelector("#tools-shared-length");
+      check.disabled = clock2;
       check.checked = sharedLength;
-      check.title = clock ? "Match shared length applies to elapsed-time comparison." : "";
-      dialog.querySelector("#tools-compare-axis-hint").textContent = clock ? "24h uses your local time (" + Intl.DateTimeFormat().resolvedOptions().timeZone + "). Statistics use full sessions; Match shared length applies in elapsed mode." : "";
+      check.title = clock2 ? "Match shared length applies to elapsed-time comparison." : "";
+      dialog.querySelector("#tools-compare-axis-hint").textContent = clock2 ? "24h uses your local time (" + Intl.DateTimeFormat().resolvedOptions().timeZone + "). Statistics use full sessions; Match shared length applies in elapsed mode." : "";
     }
     function clearAnalysisChart() {
       if (!analysisView) return;
@@ -8401,13 +8635,13 @@ underlying system, so should run in the browser, Node, or Plask.
           return;
         }
         const ids = [.../* @__PURE__ */ new Set([selectedA, selectedB, ...selectedExtra])], recordings = ids.map((id) => options2.find((item) => item.id === id)).filter((item) => !!item);
-        const archives = recordings.map((item) => item.archive), clock = compareAxis === "clock";
-        const result = compareRecordingSet(archives, metric, threshold, !clock && sharedLength);
-        const tooLong = clock ? archives.flatMap((archive, index) => clockSessionDuration(archive) > CLOCK_DAY_MS ? [String.fromCharCode(65 + index)] : []) : [];
+        const archives = recordings.map((item) => item.archive), clock2 = compareAxis === "clock";
+        const result = compareRecordingSet(archives, metric, threshold, !clock2 && sharedLength);
+        const tooLong = clock2 ? archives.flatMap((archive, index) => clockSessionDuration(archive) > CLOCK_DAY_MS ? [String.fromCharCode(65 + index)] : []) : [];
         if (tooLong.length) {
           clearAnalysisChart();
           node(overview, "p", "24h chart unavailable: session" + (tooLong.length > 1 ? "s " : " ") + tooLong.join(", ") + " exceed" + (tooLong.length === 1 ? "s" : "") + " 24 hours. Choose Elapsed time or select shorter sessions.", "tools-muted");
-        } else if (redrawChart) chart(archives, recordings.map((item) => item.title), clock ? CLOCK_DAY_MS : result.axisMs, ids);
+        } else if (redrawChart) chart(archives, recordings.map((item) => item.title), clock2 ? CLOCK_DAY_MS : result.axisMs, ids);
         summaryTable(result.summaries, recordings.map((item, index) => String.fromCharCode(65 + index)), true, results);
       } else {
         const summary = summarizeSession(a.archive, metric, threshold);
@@ -8702,6 +8936,7 @@ underlying system, so should run in the browser, Node, or Plask.
     document.getElementById("mini-high").onclick = toggleHighMode;
     document.getElementById("btn-add-all-time").onclick = addFileToAllTimeHighs;
     document.getElementById("btn-clear-all-time").onclick = clearAllTimeHighs;
+    document.getElementById("btn-clear-inactive-ath").onclick = clearInactiveAllTimeHighs;
     input.onchange = function() {
       var file = input.files && input.files[0];
       if (file) {
@@ -9628,9 +9863,9 @@ underlying system, so should run in the browser, Node, or Plask.
       log("DOM fallback deferred for " + fallbackWait + "s; retaining previous valid data (no history point)");
       return null;
     }
-    var roomKey = context.room.toLowerCase();
+    var roomKey2 = context.room.toLowerCase();
     var fallbackIntervalMs = Math.max(runtime.DOM_FALLBACK_INTERVAL_SECONDS, runtime.scanIntervalSeconds) * 1e3;
-    deferDOMFallback(roomKey, Date.now() + fallbackIntervalMs);
+    deferDOMFallback(roomKey2, Date.now() + fallbackIntervalMs);
     log("Attempting DOM fallback; room=" + context.room);
     try {
       var fallback = await acquireDOMSnapshot(context, returnToChat);
@@ -9643,7 +9878,7 @@ underlying system, so should run in the browser, Node, or Plask.
       diagnostic("warn", "DOM fallback failed: " + err.message + "; retaining previous valid data (no history point)");
       return null;
     } finally {
-      deferDOMFallback(roomKey, Date.now() + fallbackIntervalMs);
+      deferDOMFallback(roomKey2, Date.now() + fallbackIntervalMs);
     }
   }
   function acceptRoomSnapshot(snapshot, modelName) {
@@ -9852,12 +10087,12 @@ underlying system, so should run in the browser, Node, or Plask.
     if (existing) existing.remove();
     var div = document.createElement("div");
     div.id = "cb-tier-tracker";
-    var html = '<div id="tracker-container" style="position:fixed;top:80px;right:20px;background:rgba(20,20,30,0.95);color:var(--panel-text);padding:5px;border-radius:6px;font-family:Arial,sans-serif;font-size:9px;z-index:999999;width:' + runtime.BASE_WIDTH_MINI + 'px;border:1px solid #ff69b4;transition:width 0.3s ease;cursor:default;user-select:none;"><div id="drag-handle" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;border-bottom:1px solid #ff69b4;padding-bottom:3px;cursor:move;"><div id="header-model" style="display:flex;flex:1;min-width:0;align-items:center;gap:3px;margin-left:14px;margin-right:4px;"><span id="header-text" style="flex:0 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:bold;color:var(--panel-accent);font-size:13px;line-height:18px;">TierScope</span><button type="button" id="btn-model-favorite" aria-label="Favorite model" style="flex:0 0 18px;padding:0;border:0;background:transparent;color:var(--panel-muted);font-size:14px;line-height:18px;cursor:pointer;">☆</button></div><div style="display:flex;align-items:center;gap:3px;flex-shrink:0;"><button type="button" id="btn-high-mode" aria-pressed="false" aria-label="Session highs. Switch to all-time highs" style="display:none;min-width:29px;background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;">SH</button><button type="button" id="btn-panel-options" aria-label="Chart window and highs" aria-expanded="false" aria-controls="panel-options" style="display:none;background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;white-space:nowrap;">Full ▾</button><button type="button" id="btn-standard-size" title="Restore standard panel size (100%)" aria-label="Restore standard panel size" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;">100%</button><button id="btn-toggle" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:9px;padding:1px 4px;flex-shrink:0;">+</button></div></div><div id="panel-options" role="group" aria-label="Chart and high options" style="display:none;position:absolute;right:5px;top:29px;width:190px;max-width:calc(100% - 10px);box-sizing:border-box;z-index:5;padding:8px;background:var(--panel-solid);color:var(--panel-text);border:1px solid #ff69b4;border-radius:4px;font-size:11px;box-shadow:0 3px 12px #0008;"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;"><strong>Charts &amp; highs</strong><button type="button" id="panel-options-close" aria-label="Close chart and high options" style="background:var(--panel-button);color:var(--panel-text);border:0;border-radius:3px;cursor:pointer;">×</button></div><label for="chart-window-select">Chart window</label><select id="chart-window-select" style="display:block;width:100%;margin:4px 0 6px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);font-size:11px;"><option value="full">Full history</option><option value="fourHours">Last 4 hours</option><option value="twoHours">Last 2 hours</option><option value="hour">Last hour</option><option value="halfHour">Last 30 minutes</option><option value="quarter">Last 15 minutes</option></select><div style="font-size:10px;color:var(--panel-muted);line-height:1.4;margin-bottom:8px;">Charts only. Downloads keep the full retained history.</div><input type="file" id="session-file-input" accept=".json,application/json" style="display:none;"><div id="session-file-info" style="display:none;margin-top:7px;font-size:10px;line-height:1.4;white-space:pre-line;overflow-wrap:anywhere;color:var(--panel-secondary);"></div><div style="border-top:1px solid var(--panel-divider);margin-top:8px;padding-top:6px;"><strong>All-time highs</strong><div id="all-time-info" style="font-size:10px;line-height:1.4;margin:4px 0;color:var(--panel-secondary);"></div><button type="button" id="btn-add-all-time" style="display:none;width:100%;margin:4px 0;padding:4px;background:#4169E1;color:#fff;border:0;border-radius:3px;cursor:pointer;">Add to all-time highs</button><button type="button" id="btn-clear-all-time" style="display:block;width:100%;margin:4px 0;padding:4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:3px;cursor:pointer;">Clear all-time highs…</button><div id="all-time-action-status" role="status" style="font-size:10px;line-height:1.4;overflow-wrap:anywhere;color:var(--panel-secondary);"></div></div></div><div id="minimized-view" style="display:block;position:relative;"><div style="display:flex;gap:4px;align-items:center;margin-bottom:3px;"><strong id="mini-room-count" style="color:var(--panel-accent);font-size:13px;">0</strong><span style="color:var(--panel-muted);font-size:8px;">in room</span><span id="mini-room-change" style="margin-left:auto;font-size:8px;"></span></div><div style="display:flex;align-items:center;justify-content:space-between;gap:3px;"><button type="button" id="mini-metric" style="background:transparent;border:0;color:var(--panel-secondary);font:inherit;cursor:pointer;padding:2px 0;" aria-label="Cycle chart metric">Room total ▾</button><button type="button" id="mini-high" style="background:transparent;border:0;padding:0;color:var(--panel-subtle);font-size:8px;cursor:pointer;"></button></div><canvas id="mini-chart" width="140" height="36" style="display:block;width:100%;height:36px;" role="img" aria-label="Recent audience history"></canvas><div style="display:flex;justify-content:space-between;gap:4px;margin:3px 0;"><span title="With Tokens">💎 <span id="mini-withtokens" style="color:var(--panel-warning);">0</span> <span id="mini-withtokens-change"></span></span><span title="Registered">📊 <span id="mini-total">0</span> <span id="mini-total-change"></span></span></div><div style="display:flex;align-items:center;gap:3px;"><span id="mini-freshness" style="flex:1;min-width:0;font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">No sample</span><button type="button" id="btn-auto" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;cursor:pointer;" title="Pause or resume scans">⏸</button><button type="button" id="mini-settings-toggle" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;cursor:pointer;" aria-label="Scan interval settings" title="Scan interval settings — adjust how often TierScope scans" aria-expanded="false" aria-controls="mini-settings">◷</button><button type="button" id="btn-expand" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;font-size:9px;cursor:pointer;" title="Expand panel" aria-label="Expand panel">↗</button></div><div id="mini-settings" style="display:none;position:absolute;left:0;right:0;top:17px;background:var(--panel-settings);border:1px solid #ff69b4;border-radius:4px;padding:5px;z-index:2;" role="group" aria-label="Scan interval"><div style="display:flex;justify-content:space-between;align-items:center;font-size:9px;color:var(--panel-secondary);">Scan interval <button type="button" id="mini-settings-close" aria-label="Close scan interval settings" title="Close (Escape)" style="background:var(--panel-button);color:var(--panel-text);border:0;border-radius:3px;cursor:pointer;padding:1px 5px;font-size:13px;">×</button></div><div style="display:flex;align-items:center;justify-content:center;gap:3px;margin:3px 0;padding:2px;background:rgba(var(--panel-row-rgb),0.05);border-radius:3px;"><button id="btn-timer-down" style="background:var(--panel-button-strong);border:none;color:var(--panel-text);border-radius:2px;cursor:pointer;font-size:9px;padding:1px 4px;font-weight:bold;">−</button><span id="timer-display" style="font-size:11px;color:var(--panel-warning);font-weight:bold;min-width:28px;">60s</span><button id="btn-timer-up" style="background:var(--panel-button-strong);border:none;color:var(--panel-text);border-radius:2px;cursor:pointer;font-size:9px;padding:1px 4px;font-weight:bold;">+</button></div><div style="display:flex;gap:2px;justify-content:center;margin-top:3px;"><button class="timer-preset" data-time="30" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">30s</button><button class="timer-preset" data-time="60" style="background:#ff69b4;border:1px solid #ff69b4;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">60s</button><button class="timer-preset" data-time="120" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">2m</button><button class="timer-preset" data-time="300" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">5m</button></div><div id="auto-status" style="margin-top:3px;font-size:8px;color:var(--panel-muted);">Starting...</div></div></div><div id="full-view" style="display:none;"><div id="tier-chart-region" style="display:flow-root;">' + collapsedTrayHtml();
+    var html = '<div id="tracker-container" style="position:fixed;top:80px;right:20px;background:rgba(20,20,30,0.95);color:var(--panel-text);padding:5px;border-radius:6px;font-family:Arial,sans-serif;font-size:9px;z-index:999999;width:' + runtime.BASE_WIDTH_MINI + 'px;border:1px solid #ff69b4;transition:width 0.3s ease;cursor:default;user-select:none;"><div id="drag-handle" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;border-bottom:1px solid #ff69b4;padding-bottom:3px;cursor:move;"><div id="header-model" style="display:flex;flex:1;min-width:0;align-items:center;gap:3px;margin-left:14px;margin-right:4px;"><span id="header-text" style="flex:0 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:bold;color:var(--panel-accent);font-size:13px;line-height:18px;">TierScope</span><button type="button" id="btn-model-favorite" aria-label="Favorite model" style="flex:0 0 18px;padding:0;border:0;background:transparent;color:var(--panel-muted);font-size:14px;line-height:18px;cursor:pointer;">☆</button></div><div style="display:flex;align-items:center;gap:3px;flex-shrink:0;"><button type="button" id="btn-high-mode" aria-pressed="false" aria-label="Session highs. Switch to all-time highs" style="display:none;min-width:29px;background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;">SH</button><button type="button" id="btn-panel-options" aria-label="Chart window and highs" aria-expanded="false" aria-controls="panel-options" style="display:none;background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;white-space:nowrap;">Full ▾</button><button type="button" id="btn-standard-size" title="Restore standard panel size (100%)" aria-label="Restore standard panel size" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;">100%</button><button id="btn-toggle" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-text);border-radius:3px;cursor:pointer;font-size:9px;padding:1px 4px;flex-shrink:0;">+</button></div></div><div id="panel-options" role="group" aria-label="Chart and high options" style="display:none;position:absolute;right:5px;top:29px;width:190px;max-width:calc(100% - 10px);box-sizing:border-box;z-index:5;padding:8px;background:var(--panel-solid);color:var(--panel-text);border:1px solid #ff69b4;border-radius:4px;font-size:11px;box-shadow:0 3px 12px #0008;"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;"><strong>Charts &amp; highs</strong><button type="button" id="panel-options-close" aria-label="Close chart and high options" style="background:var(--panel-button);color:var(--panel-text);border:0;border-radius:3px;cursor:pointer;">×</button></div><label for="chart-window-select">Chart window</label><select id="chart-window-select" style="display:block;width:100%;margin:4px 0 6px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);font-size:11px;"><option value="full">Full history</option><option value="fourHours">Last 4 hours</option><option value="twoHours">Last 2 hours</option><option value="hour">Last hour</option><option value="halfHour">Last 30 minutes</option><option value="quarter">Last 15 minutes</option></select><div style="font-size:10px;color:var(--panel-muted);line-height:1.4;margin-bottom:8px;">Charts only. Downloads keep the full retained history.</div><input type="file" id="session-file-input" accept=".json,application/json" style="display:none;"><div id="session-file-info" style="display:none;margin-top:7px;font-size:10px;line-height:1.4;white-space:pre-line;overflow-wrap:anywhere;color:var(--panel-secondary);"></div><div style="border-top:1px solid var(--panel-divider);margin-top:8px;padding-top:6px;"><strong>All-time highs</strong><div id="all-time-info" style="font-size:10px;line-height:1.4;margin:4px 0;color:var(--panel-secondary);"></div><button type="button" id="btn-add-all-time" style="display:none;width:100%;margin:4px 0;padding:4px;background:#4169E1;color:#fff;border:0;border-radius:3px;cursor:pointer;">Add to all-time highs</button><button type="button" id="btn-clear-all-time" style="display:block;width:100%;margin:4px 0;padding:4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:3px;cursor:pointer;">Clear Room ATH…</button><button type="button" id="btn-clear-inactive-ath" style="display:block;width:100%;margin:4px 0;padding:4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:3px;cursor:pointer;" title="Preview and clear ATH for rooms not visited in over 90 days">Clear inactive ATH (90 days)…</button><div id="all-time-action-status" role="status" style="font-size:10px;line-height:1.4;overflow-wrap:anywhere;color:var(--panel-secondary);"></div></div></div><div id="minimized-view" style="display:block;position:relative;"><div style="display:flex;gap:4px;align-items:center;margin-bottom:3px;"><strong id="mini-room-count" style="color:var(--panel-accent);font-size:13px;">0</strong><span style="color:var(--panel-muted);font-size:8px;">in room</span><span id="mini-room-change" style="margin-left:auto;font-size:8px;"></span></div><div style="display:flex;align-items:center;justify-content:space-between;gap:3px;"><button type="button" id="mini-metric" style="background:transparent;border:0;color:var(--panel-secondary);font:inherit;cursor:pointer;padding:2px 0;" aria-label="Cycle chart metric">Room total ▾</button><button type="button" id="mini-high" style="background:transparent;border:0;padding:0;color:var(--panel-subtle);font-size:8px;cursor:pointer;"></button></div><canvas id="mini-chart" width="140" height="36" style="display:block;width:100%;height:36px;" role="img" aria-label="Recent audience history"></canvas><div style="display:flex;justify-content:space-between;gap:4px;margin:3px 0;"><span title="With Tokens">💎 <span id="mini-withtokens" style="color:var(--panel-warning);">0</span> <span id="mini-withtokens-change"></span></span><span title="Registered">📊 <span id="mini-total">0</span> <span id="mini-total-change"></span></span></div><div style="display:flex;align-items:center;gap:3px;"><span id="mini-freshness" style="flex:1;min-width:0;font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">No sample</span><button type="button" id="btn-auto" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;cursor:pointer;" title="Pause or resume scans">⏸</button><button type="button" id="mini-settings-toggle" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;cursor:pointer;" aria-label="Scan interval settings" title="Scan interval settings — adjust how often TierScope scans" aria-expanded="false" aria-controls="mini-settings">◷</button><button type="button" id="btn-expand" style="background:var(--panel-button);border:0;color:var(--panel-text);border-radius:3px;font-size:9px;cursor:pointer;" title="Expand panel" aria-label="Expand panel">↗</button></div><div id="mini-settings" style="display:none;position:absolute;left:0;right:0;top:17px;background:var(--panel-settings);border:1px solid #ff69b4;border-radius:4px;padding:5px;z-index:2;" role="group" aria-label="Scan interval"><div style="display:flex;justify-content:space-between;align-items:center;font-size:9px;color:var(--panel-secondary);">Scan interval <button type="button" id="mini-settings-close" aria-label="Close scan interval settings" title="Close (Escape)" style="background:var(--panel-button);color:var(--panel-text);border:0;border-radius:3px;cursor:pointer;padding:1px 5px;font-size:13px;">×</button></div><div style="display:flex;align-items:center;justify-content:center;gap:3px;margin:3px 0;padding:2px;background:rgba(var(--panel-row-rgb),0.05);border-radius:3px;"><button id="btn-timer-down" style="background:var(--panel-button-strong);border:none;color:var(--panel-text);border-radius:2px;cursor:pointer;font-size:9px;padding:1px 4px;font-weight:bold;">−</button><span id="timer-display" style="font-size:11px;color:var(--panel-warning);font-weight:bold;min-width:28px;">60s</span><button id="btn-timer-up" style="background:var(--panel-button-strong);border:none;color:var(--panel-text);border-radius:2px;cursor:pointer;font-size:9px;padding:1px 4px;font-weight:bold;">+</button></div><div style="display:flex;gap:2px;justify-content:center;margin-top:3px;"><button class="timer-preset" data-time="30" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">30s</button><button class="timer-preset" data-time="60" style="background:#ff69b4;border:1px solid #ff69b4;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">60s</button><button class="timer-preset" data-time="120" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">2m</button><button class="timer-preset" data-time="300" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 3px;">5m</button></div><div id="auto-status" style="margin-top:3px;font-size:8px;color:var(--panel-muted);">Starting...</div></div></div><div id="full-view" style="display:none;"><div id="tier-chart-region" style="display:flow-root;">' + collapsedTrayHtml();
     Object.keys(runtime.TIERS).forEach(function(key) {
       var t = runtime.TIERS[key];
       html += '<div id="tier-row-' + key + '" data-tier="' + key + '" style="display:flex;align-items:center;padding:1px 3px;margin:1px 0;background:rgba(var(--panel-row-rgb),calc(0.05 * var(--tier-background-scale, 1)));border-radius:3px;border-left:3px solid ' + t.color + ';"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml(key) + '</div><canvas id="spark-' + key + '" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-' + key + '" style="font-weight:bold;color:' + t.color + ';font-size:14px;">0</span><div id="high-' + key + '" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div>';
     });
-    html += '<div id="summary-tier-rows" style="border-top:1px solid var(--panel-divider);margin-top:4px;padding-top:4px;"><div id="tier-row-withtokens" data-tier="withtokens" style="display:flex;align-items:center;padding:2px 3px;background:rgba(255,212,59,0.15);border-radius:3px;border:1px solid var(--panel-warning);margin-bottom:3px;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("withtokens") + '</div><canvas id="spark-withtokens" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-withtokens" style="font-weight:bold;color:var(--panel-warning);font-size:14px;">0</span><span id="pct-withtokens" style="font-size:8px;color:var(--panel-warning);margin-left:2px;">0%</span><div id="high-withtokens" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div><div id="tier-row-total" data-tier="total" style="display:flex;align-items:center;padding:2px 3px;background:rgba(var(--panel-row-rgb),0.1);border-radius:3px;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("total") + '</div><canvas id="spark-total" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-total" style="font-weight:bold;color:var(--panel-text);font-size:14px;">0</span><div id="high-total" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div></div><div id="tier-row-anon" data-tier="anonymous" style="margin-top:5px;padding:5px;background:rgba(136,136,136,0.15);border-radius:3px;border:1px solid #888;"><div style="display:flex;align-items:center;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("anon") + '</div><canvas id="spark-anon" width="105" height="50" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="anon-ratio-full" style="font-size:13px;font-weight:bold;color:#ff69b4;">--</span><div id="anon-registered-ratio" role="img" aria-label="Anons / registered viewers: unavailable" style="font-size:9px;line-height:12px;color:var(--panel-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">—</div><div id="high-anon" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div></div><div id="tier-row-roomTotal" data-tier="roomTotal" style="display:flex;align-items:center;padding:2px 3px;margin-top:3px;border:1px solid var(--panel-accent);border-radius:3px;background:rgba(255,105,180,.08);"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("roomTotal") + '</div><canvas id="spark-roomTotal" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-roomTotal" style="font-weight:bold;color:var(--panel-accent);font-size:14px;">0</span><div id="high-roomTotal" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div></div><div id="trend-section" style="position:relative;border-top:1px solid #4169E1;margin-top:5px;padding-top:5px;"><div id="live-trend"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;flex-wrap:wrap;gap:2px;"><span id="trend-header-label" style="font-size:9px;font-weight:bold;color:#4169E1;">📈 TREND</span><div style="display:flex;gap:2px;flex-wrap:wrap;"><button class="trend-preset-btn" data-mode="last" style="background:#4169E1;border:1px solid #4169E1;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Last</button><button class="trend-preset-btn" data-mode="5min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">5m</button><button class="trend-preset-btn" data-mode="15min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">15m</button><button class="trend-preset-btn" data-mode="30min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">30m</button><button class="trend-preset-btn" data-mode="1hour" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">1h</button><button class="trend-preset-btn" data-mode="start" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Start</button><button id="btn-trend-auto" style="background:#32CD32;border:1px solid #32CD32;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;" title="Auto-escalation ON - Click to disable">AUTO</button></div></div><div id="trend-container" style="min-height:30px;"><div style="font-size:8px;color:var(--panel-faint);text-align:center;padding:8px;">Waiting for scan...</div></div></div><div id="playback-controls" style="display:none;position:absolute;top:5px;left:0;right:0;bottom:0;padding:0 2px;box-sizing:border-box;grid-template-rows:minmax(14px,1fr) 14px 12px;gap:2px;" aria-label="Playback controls"><div style="display:flex;flex-direction:column;justify-content:center;gap:4px;min-width:0;"><div id="playback-file-controls" style="display:none;align-items:center;gap:4px;min-width:0;"><div id="playback-room" style="display:none;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;line-height:12px;font-weight:bold;color:var(--panel-text);"></div></div><div style="display:flex;align-items:center;justify-content:space-between;gap:3px;"><strong id="playback-label" style="font-size:9px;color:var(--panel-warning);">PLAYBACK</strong><button id="playback-play" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#4169E1;color:white;border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Pause</button><select id="playback-speed" aria-label="Playback speed" style="font-size:8px;height:15px;margin:0;padding:0;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select><button type="button" id="btn-playback-library" aria-label="Open session library" aria-expanded="false" aria-controls="tierscope-session-tools" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-accent);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Library</button><button id="playback-return" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Return to Live</button></div></div><div style="display:flex;align-items:center;gap:4px;min-width:0;"><button type="button" id="playback-previous" title="Previous recorded sample (pauses Replay)" aria-label="Previous recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">|&#9664;</button><input id="playback-scrubber" type="range" min="0" max="0" value="0" step="any" aria-label="Playback timeline" style="flex:1;min-width:0;width:100%;height:12px;margin:0;accent-color:var(--panel-warning);cursor:pointer;"><button type="button" id="playback-next" title="Next recorded sample (pauses Replay)" aria-label="Next recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">&#9654;|</button></div><div id="playback-file-actions" style="display:flex;justify-content:center;min-width:0;"><div id="playback-position" style="font-size:9px;line-height:12px;text-align:center;white-space:nowrap;color:var(--panel-secondary);font-family:monospace;">00:00:00 / 00:00:00</div></div></div></div><div id="control-field" style="margin-top:5px;padding:4px;background:rgba(65,105,225,0.15);border-radius:3px;border:1px solid #4169E1;"><div id="control-session-row" style="display:grid;grid-template-columns:max-content max-content minmax(0,1fr);align-items:center;gap:3px;margin-bottom:4px;white-space:nowrap;"><span style="font-size:9px;font-weight:bold;color:#4169E1;">🎛️ CONTROLS</span><span style="font-size:12px;color:var(--panel-warning);font-family:monospace;font-weight:bold;width:9ch;text-align:center;font-variant-numeric:tabular-nums;" id="control-tracking-timer">00:00:00</span><span style="min-width:0;text-align:right;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums;font-size:11px;color:var(--panel-positive);font-weight:bold;" id="control-next-scan">Next: 60s</span></div><div id="control-action-row" style="display:grid;grid-template-columns:minmax(max-content,1fr) auto minmax(0,1fr);align-items:center;gap:3px;"><div id="control-session-buttons" style="display:flex;gap:2px;align-items:center;"><button type="button" id="btn-control-library" aria-expanded="false" aria-controls="tierscope-session-tools" aria-label="Open session library" title="Open model folders, session summaries, comparisons and backups" style="font-size:8px;line-height:10px;height:14px;min-width:38px;box-sizing:border-box;margin:0;padding:2px 3px;background:var(--panel-button);color:var(--panel-accent);border:none;border-radius:3px;cursor:pointer;">Library</button><button id="btn-replay" style="font-size:8px;line-height:10px;height:14px;min-width:38px;box-sizing:border-box;margin:0;padding:2px 3px;background:var(--panel-button);color:var(--panel-warning);border:none;border-radius:3px;cursor:pointer;" title="Replay recorded history">Replay</button></div><div id="control-action-buttons" style="display:flex;gap:2px;align-items:center;"><button id="btn-control-auto" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#32CD32;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 4px;min-width:24px;" title="Auto-Refresh ON">⏸</button><button type="button" id="btn-control-stop" aria-label="Stop this session" title="Stop this session and freeze its history and elapsed time" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;white-space:nowrap;">■ Stop</button><button id="btn-main-reset" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Reset all tracking data"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12"/><path d="M3 3v9h9"/></svg>Reset</button></div><style>#dark-mode-control #dark-mode-track{position:relative;display:block;flex:0 0 22px;width:22px;height:12px;box-sizing:border-box;border:1px solid #9b701d;border-radius:7px;background:#e8b444;transition:background-color .16s ease;}#dark-mode-control #dark-mode-thumb{position:absolute;left:1px;top:1px;width:8px;height:8px;border-radius:50%;background:#4c3300;transform:translateX(10px);transition:transform .16s ease,background-color .16s ease;}#dark-mode-control #dark-mode-moon{color:var(--panel-muted);opacity:.55;}#dark-mode-control #dark-mode-sun{color:#825d00;}#dark-mode-control #dark-mode-toggle:checked~#dark-mode-track{background:#4169e1;border-color:#8ca8ff;}#dark-mode-control #dark-mode-toggle:checked~#dark-mode-track #dark-mode-thumb{transform:translateX(0);background:#fff;}#dark-mode-control #dark-mode-toggle:checked~#dark-mode-moon{color:#b4c5ff;opacity:1;}#dark-mode-control #dark-mode-toggle:checked~#dark-mode-sun{color:var(--panel-muted);opacity:.55;}#dark-mode-control #dark-mode-toggle:focus-visible~#dark-mode-track{outline:2px solid var(--panel-accent);outline-offset:2px;}@media(prefers-reduced-motion:reduce){#dark-mode-control #dark-mode-track,#dark-mode-control #dark-mode-thumb{transition:none;}}</style><label id="dark-mode-control" style="position:relative;justify-self:end;display:inline-flex;align-items:center;gap:2px;height:14px;cursor:pointer;line-height:1;"><input type="checkbox" role="switch" id="dark-mode-toggle" checked aria-label="Dark mode" style="position:absolute;inset:0;z-index:1;width:100%;height:100%;box-sizing:border-box;margin:0;padding:0;border:0;opacity:0;cursor:pointer;"><svg id="dark-mode-moon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" style="flex:none;"><path d="M21 13a9 9 0 0 1-10-10 9 9 0 1 0 10 10Z"/></svg><span id="dark-mode-track" aria-hidden="true"><span id="dark-mode-thumb"></span></span><svg id="dark-mode-sun" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" style="flex:none;"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg></label></div></div><div id="tracker-footer" style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:4px;margin-top:5px;min-height:18px;"><div id="acquisition-status" style="max-width:80px;font-size:7px;color:var(--panel-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="No accepted sample yet">No sample</div><div id="background-slider-controls" style="display:flex;align-items:center;gap:3px;min-width:0;"><svg width="11" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--panel-warning)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink:0;"><path d="M9 18h6M10 22h4M8 14a6 6 0 1 1 8 0c-1 1-1 2-1 4H9c0-2 0-3-1-4Z"/></svg><input type="range" id="opacity-slider" min="30" max="100" value="95" aria-label="Background opacity" style="flex:1;min-width:0;width:100%;height:12px;margin:0;cursor:pointer;accent-color:#ff69b4;" title="Panel, Library and standard tier background opacity"><span id="opacity-value" style="font-size:8px;color:var(--panel-secondary);min-width:23px;">95%</span></div><div id="tierscope-logo" style="justify-self:end;display:flex;flex-direction:column;align-items:center;gap:0;white-space:nowrap;" onmouseenter="this.firstElementChild.style.opacity=1" onmouseleave="this.firstElementChild.style.opacity=0.6"><div style="display:flex;align-items:center;gap:3px;height:8px;opacity:0.6;transition:opacity 0.2s;"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#ff69b4" stroke-width="2" style="flex-shrink:0;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="2" x2="12" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/></svg><span title="TierScope ' + runtime.TIERSCOPE_VERSION + `" style="font-size:7px;line-height:8px;font-family:'Courier New',monospace;font-weight:bold;color:var(--panel-accent);letter-spacing:1px;">TIERSCOPE</span></div><span id="tierscope-version" style="font:bold 8px/10px Arial,sans-serif;letter-spacing:.15px;color:var(--panel-secondary);">` + runtime.TIERSCOPE_VERSION + "</span></div></div></div>";
+    html += '<div id="summary-tier-rows" style="border-top:1px solid var(--panel-divider);margin-top:4px;padding-top:4px;"><div id="tier-row-withtokens" data-tier="withtokens" style="display:flex;align-items:center;padding:2px 3px;background:rgba(255,212,59,0.15);border-radius:3px;border:1px solid var(--panel-warning);margin-bottom:3px;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("withtokens") + '</div><canvas id="spark-withtokens" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-withtokens" style="font-weight:bold;color:var(--panel-warning);font-size:14px;">0</span><span id="pct-withtokens" style="font-size:8px;color:var(--panel-warning);margin-left:2px;">0%</span><div id="high-withtokens" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div><div id="tier-row-total" data-tier="total" style="display:flex;align-items:center;padding:2px 3px;background:rgba(var(--panel-row-rgb),0.1);border-radius:3px;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("total") + '</div><canvas id="spark-total" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-total" style="font-weight:bold;color:var(--panel-text);font-size:14px;">0</span><div id="high-total" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div></div><div id="tier-row-anon" data-tier="anonymous" style="margin-top:5px;padding:5px;background:rgba(136,136,136,0.15);border-radius:3px;border:1px solid #888;"><div style="display:flex;align-items:center;"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("anon") + '</div><canvas id="spark-anon" width="105" height="50" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="anon-ratio-full" style="font-size:13px;font-weight:bold;color:#ff69b4;">--</span><div id="anon-registered-ratio" role="img" aria-label="Anons / registered viewers: unavailable" style="font-size:9px;line-height:12px;color:var(--panel-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">—</div><div id="high-anon" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div></div><div id="tier-row-roomTotal" data-tier="roomTotal" style="display:flex;align-items:center;padding:2px 3px;margin-top:3px;border:1px solid var(--panel-accent);border-radius:3px;background:rgba(255,105,180,.08);"><div style="width:30px;flex-shrink:0;text-align:center;">' + collapseMarkerHtml("roomTotal") + '</div><canvas id="spark-roomTotal" width="105" height="28" style="flex:1;margin:0 4px;"></canvas><div style="text-align:right;width:48px;flex-shrink:0;"><span id="count-roomTotal" style="font-weight:bold;color:var(--panel-accent);font-size:14px;">0</span><div id="high-roomTotal" style="font-size:8px;color:var(--panel-positive);margin-top:1px;white-space:nowrap;">SH:0</div></div></div></div><div id="trend-section" style="position:relative;border-top:1px solid #4169E1;margin-top:5px;padding-top:5px;"><div id="live-trend"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;flex-wrap:wrap;gap:2px;"><span id="trend-header-label" style="font-size:9px;font-weight:bold;color:#4169E1;">📈 TREND</span><div style="display:flex;gap:2px;flex-wrap:wrap;"><button class="trend-preset-btn" data-mode="last" style="background:#4169E1;border:1px solid #4169E1;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Last</button><button class="trend-preset-btn" data-mode="5min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">5m</button><button class="trend-preset-btn" data-mode="15min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">15m</button><button class="trend-preset-btn" data-mode="30min" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">30m</button><button class="trend-preset-btn" data-mode="1hour" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">1h</button><button class="trend-preset-btn" data-mode="start" style="background:var(--panel-button);border:1px solid var(--panel-divider);color:var(--panel-muted);border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;">Start</button><button id="btn-trend-auto" style="background:#32CD32;border:1px solid #32CD32;color:#fff;border-radius:2px;cursor:pointer;font-size:7px;padding:1px 4px;" title="Auto-escalation ON - Click to disable">AUTO</button></div></div><div id="trend-container" style="min-height:30px;"><div style="font-size:8px;color:var(--panel-faint);text-align:center;padding:8px;">Waiting for scan...</div></div></div><div id="playback-controls" style="display:none;position:absolute;top:5px;left:0;right:0;bottom:0;padding:0 2px;box-sizing:border-box;grid-template-rows:minmax(14px,1fr) 14px 12px;gap:2px;" aria-label="Playback controls"><div style="display:flex;flex-direction:column;justify-content:center;gap:4px;min-width:0;"><div id="playback-file-controls" style="display:none;align-items:center;gap:4px;min-width:0;"><div id="playback-room" style="display:none;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;line-height:12px;font-weight:bold;color:var(--panel-text);"></div></div><div style="display:flex;align-items:center;justify-content:space-between;gap:3px;"><strong id="playback-label" style="font-size:9px;color:var(--panel-warning);">PLAYBACK</strong><button id="playback-play" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:#4169E1;color:white;border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Pause</button><select id="playback-speed" aria-label="Playback speed" style="font-size:8px;height:15px;margin:0;padding:0;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select><button type="button" id="btn-playback-library" aria-label="Open session library" aria-expanded="false" aria-controls="tierscope-session-tools" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-accent);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Library</button><button id="playback-return" style="font-size:8px;line-height:12px;margin:0;padding:0 4px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">Return to Live</button></div></div><div style="display:flex;align-items:center;gap:4px;min-width:0;"><button type="button" id="playback-previous" title="Previous recorded sample (pauses Replay)" aria-label="Previous recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">|&#9664;</button><input id="playback-scrubber" type="range" min="0" max="0" value="0" step="any" aria-label="Playback timeline" style="flex:1;min-width:0;width:100%;height:12px;margin:0;accent-color:var(--panel-warning);cursor:pointer;"><button type="button" id="playback-next" title="Next recorded sample (pauses Replay)" aria-label="Next recorded sample" style="flex:0 0 20px;height:14px;padding:0;font-size:9px;line-height:10px;background:var(--panel-button);color:var(--panel-text);border:1px solid var(--panel-divider);border-radius:2px;cursor:pointer;">&#9654;|</button></div><div id="playback-file-actions" style="display:flex;justify-content:center;min-width:0;"><div id="playback-position" style="font-size:9px;line-height:12px;text-align:center;white-space:nowrap;color:var(--panel-secondary);font-family:monospace;">00:00:00 / 00:00:00</div></div></div></div><div id="control-field" style="margin-top:5px;padding:4px;background:rgba(65,105,225,0.15);border-radius:3px;border:1px solid #4169E1;"><div id="control-session-row" style="display:grid;grid-template-columns:max-content max-content minmax(0,1fr);align-items:center;gap:3px;margin-bottom:4px;white-space:nowrap;"><span style="font-size:9px;font-weight:bold;color:#4169E1;">🎛️ CONTROLS</span><span style="font-size:12px;color:var(--panel-warning);font-family:monospace;font-weight:bold;width:9ch;text-align:center;font-variant-numeric:tabular-nums;" id="control-tracking-timer">00:00:00</span><span style="min-width:0;text-align:right;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums;font-size:11px;color:var(--panel-positive);font-weight:bold;" id="control-next-scan">Next: 60s</span></div><div id="control-action-row" style="display:grid;grid-template-columns:minmax(max-content,1fr) auto minmax(0,1fr);align-items:center;gap:3px;"><div id="control-session-buttons" style="display:flex;gap:2px;align-items:center;"><button type="button" id="btn-control-library" aria-expanded="false" aria-controls="tierscope-session-tools" aria-label="Open session library" title="Open model folders, session summaries, comparisons and backups" style="font-size:8px;line-height:10px;height:14px;min-width:38px;box-sizing:border-box;margin:0;padding:2px 3px;background:var(--panel-button);color:var(--panel-accent);border:none;border-radius:3px;cursor:pointer;">Library</button><button id="btn-replay" style="font-size:8px;line-height:10px;height:14px;min-width:38px;box-sizing:border-box;margin:0;padding:2px 3px;background:var(--panel-button);color:var(--panel-warning);border:none;border-radius:3px;cursor:pointer;" title="Replay recorded history">Replay</button></div><div id="control-action-buttons" style="display:flex;gap:2px;align-items:center;"><button id="btn-control-auto" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#32CD32;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 4px;min-width:24px;" title="Auto-Refresh ON">⏸</button><button type="button" id="btn-control-stop" aria-label="Stop this session" title="Stop this session and freeze its history and elapsed time" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;white-space:nowrap;">■ Stop</button><button id="btn-main-reset" style="height:14px;box-sizing:border-box;line-height:10px;margin:0;background:#ff4444;border:none;color:#fff;border-radius:3px;cursor:pointer;font-size:8px;padding:2px 3px;display:flex;align-items:center;gap:2px;" title="Reset all tracking data"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12"/><path d="M3 3v9h9"/></svg>Reset</button></div><style>#dark-mode-control #dark-mode-track{position:relative;display:block;flex:0 0 22px;width:22px;height:12px;box-sizing:border-box;border:1px solid #9b701d;border-radius:7px;background:#e8b444;transition:background-color .16s ease;}#dark-mode-control #dark-mode-thumb{position:absolute;left:1px;top:1px;width:8px;height:8px;border-radius:50%;background:#4c3300;transform:translateX(10px);transition:transform .16s ease,background-color .16s ease;}#dark-mode-control #dark-mode-moon{color:var(--panel-muted);opacity:.55;}#dark-mode-control #dark-mode-sun{color:#825d00;}#dark-mode-control #dark-mode-toggle:checked~#dark-mode-track{background:#4169e1;border-color:#8ca8ff;}#dark-mode-control #dark-mode-toggle:checked~#dark-mode-track #dark-mode-thumb{transform:translateX(0);background:#fff;}#dark-mode-control #dark-mode-toggle:checked~#dark-mode-moon{color:#b4c5ff;opacity:1;}#dark-mode-control #dark-mode-toggle:checked~#dark-mode-sun{color:var(--panel-muted);opacity:.55;}#dark-mode-control #dark-mode-toggle:focus-visible~#dark-mode-track{outline:2px solid var(--panel-accent);outline-offset:2px;}@media(prefers-reduced-motion:reduce){#dark-mode-control #dark-mode-track,#dark-mode-control #dark-mode-thumb{transition:none;}}</style><label id="dark-mode-control" style="position:relative;justify-self:end;display:inline-flex;align-items:center;gap:2px;height:14px;cursor:pointer;line-height:1;"><input type="checkbox" role="switch" id="dark-mode-toggle" checked aria-label="Dark mode" style="position:absolute;inset:0;z-index:1;width:100%;height:100%;box-sizing:border-box;margin:0;padding:0;border:0;opacity:0;cursor:pointer;"><svg id="dark-mode-moon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" style="flex:none;"><path d="M21 13a9 9 0 0 1-10-10 9 9 0 1 0 10 10Z"/></svg><span id="dark-mode-track" aria-hidden="true"><span id="dark-mode-thumb"></span></span><svg id="dark-mode-sun" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" style="flex:none;"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg></label></div></div><div id="tracker-footer" style="display:grid;grid-template-columns:80px minmax(0,1fr) 60px;align-items:center;gap:4px;margin-top:5px;min-height:18px;"><div id="acquisition-status" style="width:100%;min-width:0;max-width:80px;font-variant-numeric:tabular-nums;font-size:7px;color:var(--panel-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="No accepted sample yet">No sample</div><div id="background-slider-controls" style="display:flex;align-items:center;gap:3px;min-width:0;"><svg width="11" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--panel-warning)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink:0;"><path d="M9 18h6M10 22h4M8 14a6 6 0 1 1 8 0c-1 1-1 2-1 4H9c0-2 0-3-1-4Z"/></svg><input type="range" id="opacity-slider" min="30" max="100" value="95" aria-label="Background opacity" style="flex:1;min-width:0;width:100%;height:12px;margin:0;cursor:pointer;accent-color:#ff69b4;" title="Panel, Library and standard tier background opacity"><span id="opacity-value" style="font-size:8px;color:var(--panel-secondary);width:23px;flex:0 0 23px;text-align:right;font-variant-numeric:tabular-nums;">95%</span></div><div id="tierscope-logo" style="justify-self:end;display:flex;flex-direction:column;align-items:center;gap:0;white-space:nowrap;" onmouseenter="this.firstElementChild.style.opacity=1" onmouseleave="this.firstElementChild.style.opacity=0.6"><div style="display:flex;align-items:center;gap:3px;height:8px;opacity:0.6;transition:opacity 0.2s;"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#ff69b4" stroke-width="2" style="flex-shrink:0;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="2" x2="12" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/></svg><span title="TierScope ' + runtime.TIERSCOPE_VERSION + `" style="font-size:7px;line-height:8px;font-family:'Courier New',monospace;font-weight:bold;color:var(--panel-accent);letter-spacing:1px;">TIERSCOPE</span></div><span id="tierscope-version" style="font:bold 8px/10px Arial,sans-serif;letter-spacing:.15px;color:var(--panel-secondary);">` + runtime.TIERSCOPE_VERSION + "</span></div></div></div>";
     div.innerHTML = html;
     document.body.appendChild(div);
     applyPanelTheme(false);
@@ -9900,11 +10135,11 @@ underlying system, so should run in the browser, Node, or Plask.
     modelFavorite.onmousedown = (event) => event.stopPropagation();
     modelFavorite.onclick = (event) => {
       event.stopPropagation();
-      const room = modelFavorite.dataset.favoriteRoom;
+      const room2 = modelFavorite.dataset.favoriteRoom;
       try {
-        if (room && room !== "unknown" && changeModelFavorite(room)) {
+        if (room2 && room2 !== "unknown" && changeModelFavorite(room2)) {
           document.querySelectorAll("[data-favorite-room]").forEach((button) => {
-            if (button.dataset.favoriteRoom === room) paintFavoriteButton(button, room, readModelFavorite(room));
+            if (button.dataset.favoriteRoom === room2) paintFavoriteButton(button, room2, readModelFavorite(room2));
           });
           updateSessionToolsStatus(true);
         }
@@ -10022,6 +10257,12 @@ underlying system, so should run in the browser, Node, or Plask.
     }, delay);
   }
   function init() {
+    try {
+      initializeAthGrace();
+    } catch (error) {
+      log("ATH grace initialization unavailable: " + error.message);
+    }
+    observeAthRoom();
     leavePlayback(false);
     var myGeneration = beginAcquisitionGeneration();
     log("Initializing... (generation " + myGeneration + ")");
@@ -10169,6 +10410,7 @@ underlying system, so should run in the browser, Node, or Plask.
   }
   function checkUrlChange() {
     if (location.href !== runtime.lastUrl) {
+      stopAthActivity();
       if (runtime.panelOptionsCleanup) {
         runtime.panelOptionsCleanup();
         runtime.panelOptionsCleanup = null;
@@ -10199,7 +10441,7 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/bootstrap.js
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.23.2";
+    runtime.TIERSCOPE_VERSION = "3.24.0";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;
@@ -10549,6 +10791,7 @@ underlying system, so should run in the browser, Node, or Plask.
     initializePresentation({ refreshOptions: updatePanelOptions, refreshReplayAvailability: updateReplayAvailability, refreshCountdown: updateCountdownDisplay });
     runtime.urlCheckInterval = setInterval(checkUrlChange, 500);
     window.addEventListener("beforeunload", function() {
+      stopAthActivity();
       cancelGifExport();
       leavePlayback(false);
       var modelName = getModelName();
