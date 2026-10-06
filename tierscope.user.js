@@ -2543,7 +2543,7 @@ underlying system, so should run in the browser, Node, or Plask.
         const count = sessionCounts2.get(roomB) - sessionCounts2.get(roomA);
         return (filters.sort === "fewestSessions" ? -count : count) || roomA.localeCompare(roomB) || byDate(a, b);
       }
-      if (filters.sort === "alphabetical") return roomA.localeCompare(roomB) || a.title.localeCompare(b.title) || byDate(a, b);
+      if (filters.sort === "alphabetical") return roomA.localeCompare(roomB) || byDate(a, b);
       return filters.sort === "oldest" ? -byDate(a, b) : filters.sort === "title" ? a.title.localeCompare(b.title) || byDate(a, b) : filters.sort === "model" ? roomA.localeCompare(roomB) || byDate(a, b) : filters.sort === "favorites" ? Number(!!b.modelFavorite) - Number(!!a.modelFavorite) || byDate(a, b) : byDate(a, b);
     });
   }

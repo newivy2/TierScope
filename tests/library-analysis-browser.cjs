@@ -44,6 +44,8 @@ const file=(name,value)=>({name,mimeType:'application/json',buffer:Buffer.from(J
   }
   await page.selectOption('#tools-library-sort','newest');
   await page.click('#tools-folder-alpha_model');assert.equal(await page.locator('.tools-row').count(),6);
+  await page.selectOption('#tools-library-sort','alphabetical');assert.equal(await page.locator('.tools-row').first().getAttribute('data-library-id'),'organized_5','Alphabetical keeps sessions newest first inside a model');
+  await page.selectOption('#tools-library-sort','newest');
   // Drafts survive list actions, filters, tabs and closing the Library. None of
   // these actions writes notes; explicit Save/Discard controls their lifetime.
   const draftRow=page.locator('[data-library-id=organized_0]');

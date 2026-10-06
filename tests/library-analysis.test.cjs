@@ -86,7 +86,7 @@ test('Sessions Book sorts models by matching session count and alphabetically wi
  const before=JSON.stringify(entries), ids=sort=>filterLibraryEntries(entries,{sort}).map(e=>e.id);
  assert.deepEqual(ids('mostSessions'),['b3','b2','b1','a2','a1','c1']);
  assert.deepEqual(ids('fewestSessions'),['c1','a2','a1','b3','b2','b1']);
- assert.deepEqual(ids('alphabetical'),['a2','a1','b2','b3','b1','c1']);
+ assert.deepEqual(ids('alphabetical'),['a2','a1','b3','b2','b1','c1']);
  assert.deepEqual(ids('newest'),['b3','c1','a2','b2','a1','b1']);
  assert.deepEqual(ids('oldest'),['b1','a1','b2','a2','c1','b3']);
  entries[0].modelFavorite=entries[2].modelFavorite=entries[5].modelFavorite=true;
