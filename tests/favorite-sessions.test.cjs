@@ -1,7 +1,7 @@
 const test = require('node:test'), assert = require('node:assert/strict');
 const {harness, source} = require('./helpers/harness.cjs');
 const extra = source.replace('downloadTrackingReport: downloadTrackingReport,', `__favorites:{readModelFavorite,setModelFavorite,changeModelFavorite,keepFavoriteSession,automaticLibraryStatus,readSessionLibrary,captureLiveSessionFile,captureSessionFile,openSessionReplay,createTierScopeBackup,restoreTierScopeBackup,updateLibraryMetadata,removeLibrarySession,buildAcquisitionStatusModel,loadCollapsedRows,roomTotalSeries},downloadTrackingReport: downloadTrackingReport,`);
-function fresh(storage = new Map()) { const h = harness(storage, extra); h.t.initPanel(); h.d = h.api.__favorites; return h; }
+function fresh(storage = new Map()) { const h = harness(storage, extra); h.context.GM_setValue('tierscope:automatic-keeping:v1', JSON.stringify({schemaVersion:1,minimumMinutes:0})); h.t.initPanel(); h.d = h.api.__favorites; return h; }
 const clean = value => JSON.parse(JSON.stringify(value));
 const records = h => h.d.readSessionLibrary().entries;
 function scan(h, count = 4, advance = 0) { h.advance(advance); h.t.sample(count); h.t.saveSession('testroom'); }

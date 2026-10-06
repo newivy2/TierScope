@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.23.0
+// @version      3.23.1
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -2170,6 +2170,151 @@ underlying system, so should run in the browser, Node, or Plask.
     return Math.max(0, Math.ceil((readyAt - Date.now()) / 1e3));
   }
 
+  // src/library-capacity-data.js
+  var LIBRARY_MEGABYTE = 1024 * 1024;
+  var DEFAULT_LIBRARY_LIMITS = Object.freeze({ maxSessions: 1e3, maxMegabytes: 50 });
+  var LIBRARY_LIMIT_RANGES = Object.freeze({ maxSessions: 1e4, maxMegabytes: 250 });
+  var LIBRARY_TRANSFER_MAX_COUNT = LIBRARY_LIMIT_RANGES.maxSessions;
+  var LIBRARY_TRANSFER_MAX_BYTES = 300 * LIBRARY_MEGABYTE;
+  function validateLibraryLimits(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value) || !("maxSessions" in value) || !("maxMegabytes" in value) || typeof value.maxSessions !== "number" || !Number.isSafeInteger(value.maxSessions) || value.maxSessions < 1 || value.maxSessions > LIBRARY_LIMIT_RANGES.maxSessions || typeof value.maxMegabytes !== "number" || !Number.isSafeInteger(value.maxMegabytes) || value.maxMegabytes < 1 || value.maxMegabytes > LIBRARY_LIMIT_RANGES.maxMegabytes) {
+      throw new Error("Use whole numbers: 1–10,000 sessions and 1–250 MB.");
+    }
+    return { maxSessions: value.maxSessions, maxMegabytes: value.maxMegabytes };
+  }
+  function libraryCapacityNotice(usage, limits) {
+    var _a;
+    if ((_a = usage.unavailable) == null ? void 0 : _a.length) return "Some sessions could not be read. Storage usage is incomplete; new saves wait until they can be read or removed.";
+    const ratio = Math.max(usage.count / limits.maxSessions, usage.bytes / (limits.maxMegabytes * LIBRARY_MEGABYTE));
+    if (ratio >= 1) return "Library limit reached. Existing sessions are kept. Raise the limits or export and remove sessions to make room.";
+    if (ratio >= 0.8) return "Library is nearing its limit. Raise the limits or export and remove sessions before it fills up.";
+    return "";
+  }
+
+  // src/library-capacity.js
+  var LIBRARY_LIMITS_KEY = "tierscope:library-limits:v1";
+  function readLibraryLimits() {
+    try {
+      const raw = GM_getValue(LIBRARY_LIMITS_KEY, void 0);
+      if (raw === void 0) return __spreadValues({}, DEFAULT_LIBRARY_LIMITS);
+      const record = JSON.parse(raw);
+      if (record.schemaVersion !== 1) throw new Error("Unsupported storage limits.");
+      return validateLibraryLimits(record);
+    } catch (error) {
+      throw new Error("Library storage limits could not be read. Open Storage limits to save them again, or refresh to retry.");
+    }
+  }
+  function saveLibraryLimits(value) {
+    const limits = validateLibraryLimits(value), before = GM_getValue(LIBRARY_LIMITS_KEY, void 0);
+    const raw = JSON.stringify(__spreadValues({ schemaVersion: 1 }, limits));
+    try {
+      GM_setValue(LIBRARY_LIMITS_KEY, raw);
+      if (GM_getValue(LIBRARY_LIMITS_KEY, void 0) !== raw) throw new Error("Storage limits could not be verified. Refresh and retry.");
+    } catch (error) {
+      try {
+        if (GM_getValue(LIBRARY_LIMITS_KEY, void 0) === raw) {
+          if (before === void 0) GM_deleteValue(LIBRARY_LIMITS_KEY);
+          else GM_setValue(LIBRARY_LIMITS_KEY, before);
+        }
+      } catch (rollbackError) {
+        throw new Error("Storage limits could not be saved or restored. Refresh to check the current limits.");
+      }
+      throw error;
+    }
+    return limits;
+  }
+  var AUTOMATIC_KEEPING_KEY = "tierscope:automatic-keeping:v1";
+  function readAutomaticKeepingMinutes() {
+    try {
+      const raw = GM_getValue(AUTOMATIC_KEEPING_KEY, void 0);
+      if (raw === void 0) return 5;
+      const record = JSON.parse(raw);
+      if (record.schemaVersion !== 1) throw new Error("Unsupported automatic keeping settings.");
+      return validateAutomaticKeepingMinutes(record.minimumMinutes);
+    } catch (error) {
+      throw new Error("Automatic keeping settings could not be read. Save them again in Library → Automatic keeping.");
+    }
+  }
+  function validateAutomaticKeepingMinutes(value) {
+    if (!Number.isInteger(value) || value < 0 || value > 1440) throw new Error("Choose a whole number from 0 to 1,440 minutes.");
+    return value;
+  }
+  function saveAutomaticKeepingMinutes(value) {
+    const minutes = validateAutomaticKeepingMinutes(value), before = GM_getValue(AUTOMATIC_KEEPING_KEY, void 0);
+    const raw = JSON.stringify({ schemaVersion: 1, minimumMinutes: minutes });
+    try {
+      GM_setValue(AUTOMATIC_KEEPING_KEY, raw);
+      if (GM_getValue(AUTOMATIC_KEEPING_KEY, void 0) !== raw) throw new Error("Automatic keeping settings could not be verified.");
+    } catch (error) {
+      if (GM_getValue(AUTOMATIC_KEEPING_KEY, void 0) === raw) {
+        if (before === void 0) GM_deleteValue(AUTOMATIC_KEEPING_KEY);
+        else GM_setValue(AUTOMATIC_KEEPING_KEY, before);
+      }
+      throw error;
+    }
+    return minutes;
+  }
+
+  // src/library-query.js
+  function recordedCoverageMs(history) {
+    var _a;
+    let previous = 0, coveredMs = 0;
+    const origin = history.timestamps[0];
+    for (let i = 1; i < history.timestamps.length; i++) {
+      const next = Math.max(previous, history.timestamps[i] - origin, 0);
+      if (!((_a = history.breaks) == null ? void 0 : _a[i])) coveredMs += next - previous;
+      previous = next;
+    }
+    return coveredMs;
+  }
+  function createModelCardReader() {
+    const cache = /* @__PURE__ */ new WeakMap();
+    function coverage(history) {
+      const immutable = Object.isFrozen(history) && Object.isFrozen(history.timestamps) && (!history.breaks || Object.isFrozen(history.breaks));
+      if (immutable && cache.has(history)) return cache.get(history);
+      const coveredMs = recordedCoverageMs(history);
+      if (immutable) cache.set(history, coveredMs);
+      return coveredMs;
+    }
+    function read(entries) {
+      let first = Infinity, latest = -Infinity, coveredMs = 0;
+      for (const entry of entries) {
+        const history = entry.archive.session.history, start = history.timestamps[0];
+        if (start === void 0) continue;
+        first = Math.min(first, start);
+        latest = Math.max(latest, start);
+        coveredMs += coverage(history);
+      }
+      return { first: first === Infinity ? null : first, latest: latest === -Infinity ? null : latest, coveredMs };
+    }
+    return { read };
+  }
+  function libraryDateBoundary(text, after = false) {
+    if (!text) return after ? Infinity : -Infinity;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) throw new Error("Use a valid calendar date.");
+    const [year, month, day] = text.split("-").map(Number);
+    const date = /* @__PURE__ */ new Date(0);
+    date.setFullYear(year, month - 1, day);
+    date.setHours(0, 0, 0, 0);
+    if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) throw new Error("Use a valid calendar date.");
+    if (after) {
+      date.setDate(date.getDate() + 1);
+      date.setHours(0, 0, 0, 0);
+    }
+    return date.getTime();
+  }
+  function filterLibraryEntries(entries, filters = {}) {
+    const start = libraryDateBoundary(filters.from || ""), end = libraryDateBoundary(filters.to || "", true);
+    if (start >= end) throw new Error("The start date must not be after the end date.");
+    const query = (filters.query || "").trim().toLowerCase(), room = (filters.room || "").toLowerCase();
+    const result = entries.filter((entry) => {
+      const time = entry.archive.session.history.timestamps[0];
+      return (!room || room === "*" || entry.archive.room.toLowerCase() === room) && time >= start && time < end && (!filters.favorites || entry.modelFavorite) && (!query || (entry.title + " " + entry.archive.room + " " + (entry.notes || "")).toLowerCase().includes(query));
+    });
+    const byDate = (a, b) => b.archive.session.history.timestamps[0] - a.archive.session.history.timestamps[0] || a.id.localeCompare(b.id);
+    return result.sort((a, b) => filters.sort === "oldest" ? -byDate(a, b) : filters.sort === "title" ? a.title.localeCompare(b.title) || byDate(a, b) : filters.sort === "model" ? a.archive.room.localeCompare(b.archive.room) || byDate(a, b) : filters.sort === "favorites" ? Number(!!b.modelFavorite) - Number(!!a.modelFavorite) || byDate(a, b) : byDate(a, b));
+  }
+
   // src/storage.js
   function roomEpochKey(key) {
     return runtime.ROOM_EPOCH_PREFIX + key.slice(runtime.STORAGE_KEY_PREFIX.length);
@@ -2575,60 +2720,6 @@ underlying system, so should run in the browser, Node, or Plask.
     });
   }
 
-  // src/library-capacity-data.js
-  var LIBRARY_MEGABYTE = 1024 * 1024;
-  var DEFAULT_LIBRARY_LIMITS = Object.freeze({ maxSessions: 1e3, maxMegabytes: 50 });
-  var LIBRARY_LIMIT_RANGES = Object.freeze({ maxSessions: 1e4, maxMegabytes: 250 });
-  var LIBRARY_TRANSFER_MAX_COUNT = LIBRARY_LIMIT_RANGES.maxSessions;
-  var LIBRARY_TRANSFER_MAX_BYTES = 300 * LIBRARY_MEGABYTE;
-  function validateLibraryLimits(value) {
-    if (!value || typeof value !== "object" || Array.isArray(value) || !("maxSessions" in value) || !("maxMegabytes" in value) || typeof value.maxSessions !== "number" || !Number.isSafeInteger(value.maxSessions) || value.maxSessions < 1 || value.maxSessions > LIBRARY_LIMIT_RANGES.maxSessions || typeof value.maxMegabytes !== "number" || !Number.isSafeInteger(value.maxMegabytes) || value.maxMegabytes < 1 || value.maxMegabytes > LIBRARY_LIMIT_RANGES.maxMegabytes) {
-      throw new Error("Use whole numbers: 1–10,000 sessions and 1–250 MB.");
-    }
-    return { maxSessions: value.maxSessions, maxMegabytes: value.maxMegabytes };
-  }
-  function libraryCapacityNotice(usage, limits) {
-    var _a;
-    if ((_a = usage.unavailable) == null ? void 0 : _a.length) return "Some sessions could not be read. Storage usage is incomplete; new saves wait until they can be read or removed.";
-    const ratio = Math.max(usage.count / limits.maxSessions, usage.bytes / (limits.maxMegabytes * LIBRARY_MEGABYTE));
-    if (ratio >= 1) return "Library limit reached. Existing sessions are kept. Raise the limits or export and remove sessions to make room.";
-    if (ratio >= 0.8) return "Library is nearing its limit. Raise the limits or export and remove sessions before it fills up.";
-    return "";
-  }
-
-  // src/library-capacity.js
-  var LIBRARY_LIMITS_KEY = "tierscope:library-limits:v1";
-  function readLibraryLimits() {
-    try {
-      const raw = GM_getValue(LIBRARY_LIMITS_KEY, void 0);
-      if (raw === void 0) return __spreadValues({}, DEFAULT_LIBRARY_LIMITS);
-      const record = JSON.parse(raw);
-      if (record.schemaVersion !== 1) throw new Error("Unsupported storage limits.");
-      return validateLibraryLimits(record);
-    } catch (error) {
-      throw new Error("Library storage limits could not be read. Open Storage limits to save them again, or refresh to retry.");
-    }
-  }
-  function saveLibraryLimits(value) {
-    const limits = validateLibraryLimits(value), before = GM_getValue(LIBRARY_LIMITS_KEY, void 0);
-    const raw = JSON.stringify(__spreadValues({ schemaVersion: 1 }, limits));
-    try {
-      GM_setValue(LIBRARY_LIMITS_KEY, raw);
-      if (GM_getValue(LIBRARY_LIMITS_KEY, void 0) !== raw) throw new Error("Storage limits could not be verified. Refresh and retry.");
-    } catch (error) {
-      try {
-        if (GM_getValue(LIBRARY_LIMITS_KEY, void 0) === raw) {
-          if (before === void 0) GM_deleteValue(LIBRARY_LIMITS_KEY);
-          else GM_setValue(LIBRARY_LIMITS_KEY, before);
-        }
-      } catch (rollbackError) {
-        throw new Error("Storage limits could not be saved or restored. Refresh to check the current limits.");
-      }
-      throw error;
-    }
-    return limits;
-  }
-
   // src/session-library.js
   var LIBRARY_PREFIX = "tierscope:library:v1:";
   var LIBRARY_CACHE_MAX_COUNT = 500;
@@ -2916,6 +3007,14 @@ underlying system, so should run in the browser, Node, or Plask.
       }
       if (getRoomEpoch(key) !== runtime.activeRoomEpoch) return;
       const history = runtime.history;
+      const minimumMinutes = readAutomaticKeepingMinutes();
+      checkpoint.minimumMinutes = minimumMinutes;
+      checkpoint.coveredMs = recordedCoverageMs(history);
+      checkpoint.waiting = checkpoint.coveredMs < minimumMinutes * 6e4;
+      if (checkpoint.waiting) {
+        checkpoint.error = "";
+        return;
+      }
       const signature = [
         history.timestamps[0],
         history.timestamps.at(-1),
@@ -5241,8 +5340,8 @@ underlying system, so should run in the browser, Node, or Plask.
       clearAutomaticLibraryStatus(room);
       return true;
     }
-    const limits = readLibraryLimits();
-    if (!confirm("Favorite " + room + " and automatically keep their live sessions?\n\nWhile TierScope is recording this model, sessions will be kept in this browser’s Library. The same session is updated as it grows, at most once per minute as samples arrive, and on pause, Stop or leaving the room. The current live session will be kept too. Replay files are never added automatically.\n\nLibrary limits still apply (" + limits.maxSessions.toLocaleString() + " sessions / " + limits.maxMegabytes + " MB). Nothing is deleted automatically. Removing the star stops automatic keeping; sessions already kept remain.")) return false;
+    const limits = readLibraryLimits(), minimumMinutes = readAutomaticKeepingMinutes();
+    if (!confirm("Favorite " + room + " and automatically keep their live sessions?\n\nWhile TierScope is recording this model, sessions will be kept in this browser’s Library after " + minimumMinutes + " minutes of recorded coverage (excluding pauses and gaps). Change this in Library → Automatic keeping. The same session is updated as it grows, at most once per minute as samples arrive, and on pause, Stop or leaving the room. The current live session qualifies once it reaches this minimum. Replay files are never added automatically.\n\nLibrary limits still apply (" + limits.maxSessions.toLocaleString() + " sessions / " + limits.maxMegabytes + " MB). Nothing is deleted automatically. Removing the star stops automatic keeping; sessions already kept remain.")) return false;
     setModelFavorite(room, true, true);
     keepFavoriteSession(room, true);
     return true;
@@ -5764,6 +5863,39 @@ underlying system, so should run in the browser, Node, or Plask.
     };
     return refresh;
   }
+  function renderAutomaticKeepingSettings(parent, minutes, error, save) {
+    const settings = toolNode(parent, "details");
+    settings.id = "tools-automatic-settings";
+    toolNode(settings, "summary", "Automatic keeping");
+    const form = toolNode(settings, "form");
+    toolNode(form, "p", "For favorite models in this browser. Short sessions stay live without being added automatically. Manual Keep in Library works at any length.", "tools-muted");
+    const label = toolNode(form, "label", "Minimum recorded duration (minutes) "), input = toolNode(label, "input");
+    label.style.display = "grid";
+    input.style.width = "100%";
+    input.id = "tools-automatic-minutes";
+    input.type = "number";
+    input.min = "0";
+    input.max = "1440";
+    input.step = "1";
+    input.required = true;
+    input.value = String(minutes != null ? minutes : 5);
+    toolNode(form, "p", "Default: 5 minutes of retained sample coverage. Pauses and recording gaps do not count. Use 0 to keep from the first sample. Existing saved sessions are never removed.", "tools-muted");
+    const submit = toolButton(form, "Save automatic keeping", null, "tools-automatic-save");
+    submit.type = "submit";
+    const feedback = toolNode(form, "p", error || "", "tools-capacity-warning");
+    feedback.setAttribute("role", "alert");
+    feedback.hidden = !error;
+    form.onsubmit = (event) => {
+      event.preventDefault();
+      if (!form.reportValidity()) return;
+      try {
+        save(input.valueAsNumber);
+      } catch (failure) {
+        feedback.textContent = failure.message;
+        feedback.hidden = false;
+      }
+    };
+  }
 
   // src/library-shell.js
   function libraryShell() {
@@ -5952,62 +6084,6 @@ underlying system, so should run in the browser, Node, or Plask.
         return drafts.size;
       }
     };
-  }
-
-  // src/library-query.js
-  function createModelCardReader() {
-    const cache = /* @__PURE__ */ new WeakMap();
-    function coverage(history) {
-      var _a;
-      const immutable = Object.isFrozen(history) && Object.isFrozen(history.timestamps) && (!history.breaks || Object.isFrozen(history.breaks));
-      if (immutable && cache.has(history)) return cache.get(history);
-      let previous = 0, coveredMs = 0;
-      const origin = history.timestamps[0];
-      for (let i = 1; i < history.timestamps.length; i++) {
-        const next = Math.max(previous, history.timestamps[i] - origin, 0);
-        if (!((_a = history.breaks) == null ? void 0 : _a[i])) coveredMs += next - previous;
-        previous = next;
-      }
-      if (immutable) cache.set(history, coveredMs);
-      return coveredMs;
-    }
-    function read(entries) {
-      let first = Infinity, latest = -Infinity, coveredMs = 0;
-      for (const entry of entries) {
-        const history = entry.archive.session.history, start = history.timestamps[0];
-        if (start === void 0) continue;
-        first = Math.min(first, start);
-        latest = Math.max(latest, start);
-        coveredMs += coverage(history);
-      }
-      return { first: first === Infinity ? null : first, latest: latest === -Infinity ? null : latest, coveredMs };
-    }
-    return { read };
-  }
-  function libraryDateBoundary(text, after = false) {
-    if (!text) return after ? Infinity : -Infinity;
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) throw new Error("Use a valid calendar date.");
-    const [year, month, day] = text.split("-").map(Number);
-    const date = /* @__PURE__ */ new Date(0);
-    date.setFullYear(year, month - 1, day);
-    date.setHours(0, 0, 0, 0);
-    if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) throw new Error("Use a valid calendar date.");
-    if (after) {
-      date.setDate(date.getDate() + 1);
-      date.setHours(0, 0, 0, 0);
-    }
-    return date.getTime();
-  }
-  function filterLibraryEntries(entries, filters = {}) {
-    const start = libraryDateBoundary(filters.from || ""), end = libraryDateBoundary(filters.to || "", true);
-    if (start >= end) throw new Error("The start date must not be after the end date.");
-    const query = (filters.query || "").trim().toLowerCase(), room = (filters.room || "").toLowerCase();
-    const result = entries.filter((entry) => {
-      const time = entry.archive.session.history.timestamps[0];
-      return (!room || room === "*" || entry.archive.room.toLowerCase() === room) && time >= start && time < end && (!filters.favorites || entry.modelFavorite) && (!query || (entry.title + " " + entry.archive.room + " " + (entry.notes || "")).toLowerCase().includes(query));
-    });
-    const byDate = (a, b) => b.archive.session.history.timestamps[0] - a.archive.session.history.timestamps[0] || a.id.localeCompare(b.id);
-    return result.sort((a, b) => filters.sort === "oldest" ? -byDate(a, b) : filters.sort === "title" ? a.title.localeCompare(b.title) || byDate(a, b) : filters.sort === "model" ? a.archive.room.localeCompare(b.archive.room) || byDate(a, b) : filters.sort === "favorites" ? Number(!!b.modelFavorite) - Number(!!a.modelFavorite) || byDate(a, b) : byDate(a, b));
   }
 
   // src/library-browser-view.js
@@ -7658,7 +7734,7 @@ underlying system, so should run in the browser, Node, or Plask.
         }
         paintFavoriteButton(star, room, preference);
         const status = automaticLibraryStatus(room);
-        info.textContent = replay ? "Replay is a snapshot. Keep it explicitly to add or update it in Library." : preference.error || (status.error ? "Automatic keep pending: " + status.error : preference.autoKeep ? status.savedAt ? "Automatically kept at " + new Date(status.savedAt).toLocaleTimeString() + ". Updates as you record." : "Automatic keeping on · waiting for a recorded sample." : preference.favorite ? "Favorite · automatic keeping is off until you confirm." : "Favorite this model to automatically keep their live sessions.");
+        info.textContent = replay ? "Replay is a snapshot. Keep it explicitly to add or update it in Library." : preference.error || (status.error ? "Automatic keep pending: " + status.error : preference.autoKeep ? status.waiting ? "Automatic keeping requires " + status.minimumMinutes + " minutes of recorded coverage · " + formatElapsedTime(status.coveredMs) + " recorded." : status.savedAt ? "Automatically kept at " + new Date(status.savedAt).toLocaleTimeString() + ". Updates as you record." : "Automatic keeping on · waiting for a recorded sample." : preference.favorite ? "Favorite · automatic keeping is off until you confirm." : "Favorite this model to automatically keep their live sessions.");
         info.style.color = !replay && status.error ? "var(--panel-warning)" : "var(--panel-muted)";
         const automatic = card.querySelector("#tools-auto-keep");
         if (automatic) {
@@ -7813,6 +7889,19 @@ underlying system, so should run in the browser, Node, or Plask.
         render("library");
         tell("Storage limits saved for this browser. Existing sessions were kept.");
         dialog.querySelector("#tools-storage-settings > summary").focus();
+      });
+      let automaticMinutes = null, automaticError = "";
+      try {
+        automaticMinutes = readAutomaticKeepingMinutes();
+      } catch (error) {
+        automaticError = error.message;
+      }
+      renderAutomaticKeepingSettings(dialog.querySelector("#tools-library-storage"), automaticMinutes, automaticError, (value) => {
+        saveAutomaticKeepingMinutes(value);
+        keepFavoriteSession(getModelName(), true);
+        render("library");
+        tell("Automatic keeping minimum saved for this browser. Existing sessions were kept.");
+        dialog.querySelector("#tools-automatic-settings > summary").focus();
       });
       if (state.favoriteError) node(content, "p", state.favoriteError, "tools-muted");
       libraryFilters.room = libraryRoom || "";
@@ -10071,7 +10160,7 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/bootstrap.js
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.23.0";
+    runtime.TIERSCOPE_VERSION = "3.23.1";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;

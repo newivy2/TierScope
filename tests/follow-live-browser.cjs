@@ -3,7 +3,7 @@ const {instrument,prepareSource}=require('./helpers/instrument.cjs');
 const engine=process.env.TIERSCOPE_BROWSER||'chromium';
 const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.user.js'),'utf8')).replaceAll('scheduleInit(2000);','')
 .replace('downloadTrackingReport: downloadTrackingReport,',`__follow:{checkUrlChange,scan:performScanThenReturn,
- setup(){loadSession(getModelName());const now=Date.now(),h={timestamps:[now-180000,now-120000,now-60000,now],breaks:[false,false,false,false]};
+ setup(){GM_setValue('tierscope:automatic-keeping:v1',JSON.stringify({schemaVersion:1,minimumMinutes:0}));loadSession(getModelName());const now=Date.now(),h={timestamps:[now-180000,now-120000,now-60000,now],breaks:[false,false,false,false]};
  STORAGE_HISTORY_SERIES.forEach(k=>h[k]=[0,0,0,0]);h.total=[10,20,30,40];h.red=h.total.slice();h.withTokens=h.total.slice();h.anonymous=[5,5,5,5];
  restoreSessionState(normalizeStoredSession({timestamp:now,history:h,sessionStartedAt:now-180000,sessionStartEstimated:false,isPaused:false,pausedElapsedTime:180000}));
  isAutoRefreshOn=false;isMinimized=true;createPanel();toggleView();repaintLivePresentation();

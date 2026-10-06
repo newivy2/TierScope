@@ -1,3 +1,5 @@
+import { readAutomaticKeepingMinutes } from './library-capacity.js';
+import { recordedCoverageMs } from './library-query.js';
 import { readModelFavorite } from './library-models.js';
 import { runtime } from './runtime.js';
 import { getStorageKey } from './record-validation.js';
@@ -39,6 +41,11 @@ export function keepFavoriteSession(room, force = false) {
         if (!preference.autoKeep) { clearAutomaticLibraryStatus(room); return; }
         if (getRoomEpoch(key) !== runtime.activeRoomEpoch) return;
         const history = runtime.history;
+        const minimumMinutes = readAutomaticKeepingMinutes();
+        checkpoint.minimumMinutes = minimumMinutes;
+        checkpoint.coveredMs = recordedCoverageMs(history);
+        checkpoint.waiting = checkpoint.coveredMs < minimumMinutes * 60000;
+        if (checkpoint.waiting) { checkpoint.error = ''; return; }
         const signature = [history.timestamps[0], history.timestamps.at(-1), history.timestamps.length, runtime.isPaused,
             runtime.isStopped, runtime.stoppedAt].join(':');
         const phase = [runtime.isPaused, runtime.isStopped, runtime.stoppedAt].join(':');
