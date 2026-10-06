@@ -22,7 +22,7 @@ export function recordingFilters(parent, entries, state, prefix, changed, organi
     model.value = state.room || ''; model.onchange = () => { state.room = model.value; changed(); };
     if (organization) {
         const label = toolNode(modelRow, 'label', 'Sort ', 'tools-sort-filter'), sort = toolNode(label, 'select'); sort.id = prefix + '-sort';
-        for (const [value, name] of [['newest','Newest first'],['oldest','Oldest first'],['title','Title'],['model','Model'],['favorites','Favorite models first']]) {
+        for (const [value, name] of [['newest','Newest First'],['oldest','Oldest First'],['alphabetical','Alphabetical'],['favorites','Favorites First'],['mostSessions','Highest number of sessions'],['fewestSessions','Lowest number of sessions']]) {
             const option = toolNode(sort, 'option', name); option.value = value;
         }
         sort.value = state.sort || 'newest'; sort.onchange = () => { state.sort = sort.value; changed(); };

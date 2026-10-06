@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.24.0
+// @version      3.24.1-beta.1
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -2530,7 +2530,22 @@ underlying system, so should run in the browser, Node, or Plask.
       return (!room2 || room2 === "*" || entry.archive.room.toLowerCase() === room2) && time >= start && time < end && (!filters.favorites || entry.modelFavorite) && (!query || (entry.title + " " + entry.archive.room + " " + (entry.notes || "")).toLowerCase().includes(query));
     });
     const byDate = (a, b) => b.archive.session.history.timestamps[0] - a.archive.session.history.timestamps[0] || a.id.localeCompare(b.id);
-    return result.sort((a, b) => filters.sort === "oldest" ? -byDate(a, b) : filters.sort === "title" ? a.title.localeCompare(b.title) || byDate(a, b) : filters.sort === "model" ? a.archive.room.localeCompare(b.archive.room) || byDate(a, b) : filters.sort === "favorites" ? Number(!!b.modelFavorite) - Number(!!a.modelFavorite) || byDate(a, b) : byDate(a, b));
+    const sessionCounts2 = /* @__PURE__ */ new Map();
+    if (filters.sort === "mostSessions" || filters.sort === "fewestSessions") {
+      for (const entry of result) {
+        const room3 = entry.archive.room.toLowerCase();
+        sessionCounts2.set(room3, (sessionCounts2.get(room3) || 0) + 1);
+      }
+    }
+    return result.sort((a, b) => {
+      const roomA = a.archive.room.toLowerCase(), roomB = b.archive.room.toLowerCase();
+      if (filters.sort === "mostSessions" || filters.sort === "fewestSessions") {
+        const count = sessionCounts2.get(roomB) - sessionCounts2.get(roomA);
+        return (filters.sort === "fewestSessions" ? -count : count) || roomA.localeCompare(roomB) || byDate(a, b);
+      }
+      if (filters.sort === "alphabetical") return roomA.localeCompare(roomB) || a.title.localeCompare(b.title) || byDate(a, b);
+      return filters.sort === "oldest" ? -byDate(a, b) : filters.sort === "title" ? a.title.localeCompare(b.title) || byDate(a, b) : filters.sort === "model" ? roomA.localeCompare(roomB) || byDate(a, b) : filters.sort === "favorites" ? Number(!!b.modelFavorite) - Number(!!a.modelFavorite) || byDate(a, b) : byDate(a, b);
+    });
   }
 
   // src/storage.js
@@ -5464,7 +5479,7 @@ underlying system, so should run in the browser, Node, or Plask.
     if (organization) {
       const label2 = toolNode(modelRow, "label", "Sort ", "tools-sort-filter"), sort = toolNode(label2, "select");
       sort.id = prefix + "-sort";
-      for (const [value, name] of [["newest", "Newest first"], ["oldest", "Oldest first"], ["title", "Title"], ["model", "Model"], ["favorites", "Favorite models first"]]) {
+      for (const [value, name] of [["newest", "Newest First"], ["oldest", "Oldest First"], ["alphabetical", "Alphabetical"], ["favorites", "Favorites First"], ["mostSessions", "Highest number of sessions"], ["fewestSessions", "Lowest number of sessions"]]) {
         const option = toolNode(sort, "option", name);
         option.value = value;
       }
@@ -10441,7 +10456,7 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/bootstrap.js
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.24.0";
+    runtime.TIERSCOPE_VERSION = "3.24.1-beta.1";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;

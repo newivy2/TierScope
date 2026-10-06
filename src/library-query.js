@@ -62,6 +62,22 @@ export function filterLibraryEntries(entries, filters = {}) {
             (!filters.favorites || entry.modelFavorite) && (!query || (entry.title + ' ' + entry.archive.room + ' ' + (entry.notes || '')).toLowerCase().includes(query));
     });
     const byDate = (a, b) => b.archive.session.history.timestamps[0] - a.archive.session.history.timestamps[0] || a.id.localeCompare(b.id);
-    return result.sort((a, b) => filters.sort === 'oldest' ? -byDate(a, b) : filters.sort === 'title' ? a.title.localeCompare(b.title) || byDate(a, b) :
-        filters.sort === 'model' ? a.archive.room.localeCompare(b.archive.room) || byDate(a, b) : filters.sort === 'favorites' ? Number(!!b.modelFavorite) - Number(!!a.modelFavorite) || byDate(a, b) : byDate(a, b));
+    const sessionCounts = new Map();
+    if (filters.sort === 'mostSessions' || filters.sort === 'fewestSessions') {
+        // Use the same filtered sessions counted by the model cards.
+        for (const entry of result) {
+            const room = entry.archive.room.toLowerCase();
+            sessionCounts.set(room, (sessionCounts.get(room) || 0) + 1);
+        }
+    }
+    return result.sort((a, b) => {
+        const roomA = a.archive.room.toLowerCase(), roomB = b.archive.room.toLowerCase();
+        if (filters.sort === 'mostSessions' || filters.sort === 'fewestSessions') {
+            const count = sessionCounts.get(roomB) - sessionCounts.get(roomA);
+            return (filters.sort === 'fewestSessions' ? -count : count) || roomA.localeCompare(roomB) || byDate(a, b);
+        }
+        if (filters.sort === 'alphabetical') return roomA.localeCompare(roomB) || a.title.localeCompare(b.title) || byDate(a, b);
+        return filters.sort === 'oldest' ? -byDate(a, b) : filters.sort === 'title' ? a.title.localeCompare(b.title) || byDate(a, b) :
+            filters.sort === 'model' ? roomA.localeCompare(roomB) || byDate(a, b) : filters.sort === 'favorites' ? Number(!!b.modelFavorite) - Number(!!a.modelFavorite) || byDate(a, b) : byDate(a, b);
+    });
 }

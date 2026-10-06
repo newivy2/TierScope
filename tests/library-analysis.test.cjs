@@ -78,3 +78,23 @@ test('six-record comparison clips every recording to shared coverage independent
  assert.equal(compareRecordingSet(archives,'room',20,false).axisMs,7000);assert.equal(JSON.stringify(archives),before);
  assert.throws(()=>compareRecordingSet([]));assert.throws(()=>compareRecordingSet([...archives,archives[0]]));
 });
+
+
+test('Sessions Book sorts models by matching session count and alphabetically without changing stored entries',async()=>{
+ const {filterLibraryEntries}=await query;
+ const entries=[entry('b1','beta',1000,'Zulu'),entry('a1','alpha',2000,'Zulu'),entry('b2','BETA',3000,'Alpha'),entry('a2','alpha',4000,'Alpha'),entry('c1','charlie',5000,'Solo'),entry('b3','beta',6000,'Middle')];
+ const before=JSON.stringify(entries), ids=sort=>filterLibraryEntries(entries,{sort}).map(e=>e.id);
+ assert.deepEqual(ids('mostSessions'),['b3','b2','b1','a2','a1','c1']);
+ assert.deepEqual(ids('fewestSessions'),['c1','a2','a1','b3','b2','b1']);
+ assert.deepEqual(ids('alphabetical'),['a2','a1','b2','b3','b1','c1']);
+ assert.deepEqual(ids('newest'),['b3','c1','a2','b2','a1','b1']);
+ assert.deepEqual(ids('oldest'),['b1','a1','b2','a2','c1','b3']);
+ entries[0].modelFavorite=entries[2].modelFavorite=entries[5].modelFavorite=true;
+ assert.deepEqual(ids('favorites'),['b3','b2','b1','c1','a2','a1']);
+ entries[0].modelFavorite=entries[2].modelFavorite=entries[5].modelFavorite=false;
+ const filtered=filterLibraryEntries(entries,{sort:'mostSessions',query:'Alpha'});
+ assert.deepEqual(filtered.map(e=>e.id),['a2','a1','b2'],'filtered counts and alphabetical ties');
+ assert.deepEqual(filterLibraryEntries(entries,{sort:'mostSessions',query:'Zulu'}).map(e=>e.id),['a1','b1'],'equal counts use model name');
+ assert.deepEqual(filterLibraryEntries(entries,{sort:'mostSessions',room:'beta'}).map(e=>e.id),['b3','b2','b1']);
+ assert.equal(JSON.stringify(entries),before);
+});
