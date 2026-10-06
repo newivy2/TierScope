@@ -1,4 +1,4 @@
-# ATH cleanup (review beta)
+# ATH cleanup (3.24.0)
 
 In **Charts & highs**, **Clear Room ATH…** clears the displayed room's records, including the file's room during file Replay. **Clear inactive ATH (90 days)…** previews rooms not visited in more than 90 days. Its confirmation states how many rooms qualify. If none qualify, it shows a message without opening a confirmation.
 

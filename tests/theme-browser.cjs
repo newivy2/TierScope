@@ -62,6 +62,29 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   });
   assert(versionLayout.inside&&versionLayout.separate,'version fits below the logo without touching the opacity controls');
   assert.equal(versionLayout.footerHeight,18,'readable version fits its footer without overlapping controls');
+  async function checkStableFooter() {
+    const result=await page.evaluate(()=>{
+      const status=document.getElementById('acquisition-status'),label=document.getElementById('opacity-value');
+      const oldStatus=status.textContent,oldLabel=label.textContent;
+      const ids=['acquisition-status','background-slider-controls','opacity-slider','opacity-value','tierscope-logo'];
+      const read=()=>ids.map(id=>{const r=document.getElementById(id).getBoundingClientRect();return [r.x,r.y,r.width,r.height];});
+      const baseline=read();let stable=true;
+      for(const text of ['API • 1s','API • 999s','API • 999,999s','Saved • 120 minutes','Session not saved']) {
+        status.textContent=text;
+        for(const percent of ['30%','95%','100%']){label.textContent=percent;stable=stable&&JSON.stringify(read())===JSON.stringify(baseline);}
+      }
+      const slider=document.getElementById('opacity-slider').getBoundingClientRect(),controls=document.getElementById('background-slider-controls').getBoundingClientRect(),logo=document.getElementById('tierscope-logo').getBoundingClientRect();
+      const fits=slider.width>0&&slider.left>=controls.left&&slider.right<=controls.right&&controls.right<=logo.left;
+      status.textContent=oldStatus;label.textContent=oldLabel;
+      return {stable,fits,sliderWidth:slider.width,sliderLeft:slider.left,sliderRight:slider.right,controlsLeft:controls.left,controlsRight:controls.right,logoLeft:logo.left};
+    });
+    assert(result.stable,'API age/status and opacity numbers must not move or resize footer controls');
+    assert(result.fits,'opacity slider remains usable and separate from the logo: '+JSON.stringify(result));
+  }
+  await checkStableFooter();
+  const originalTransform=await panel.evaluate(e=>e.style.transform);
+  for(const scale of [.75,1.5]){await panel.evaluate((e,value)=>{e.style.transform='scale('+value+')';},scale);await checkStableFooter();}
+  await panel.evaluate((e,value)=>{e.style.transform=value;},originalTransform);
   const dark=await styles();assert.equal(dark.panel,'rgba(20, 20, 30, 0.95)');assert.equal(dark.totalLine,'#ffffff');
   const controls=await page.locator('#control-field').boundingBox(),toggle=await page.locator('#dark-mode-control').boundingBox(),actions=await page.locator('#control-action-buttons').boundingBox();
   assert(toggle.x>=actions.x+actions.width,'toggle does not overlap centered action buttons');
@@ -77,6 +100,7 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   assert(brightSwitch.right<brightSwitch.left,'bright indicator sits toward the sun');
   assert.notEqual(brightSwitch.trackColor,darkSwitch.trackColor,'track color identifies the active theme');
   assert.equal(brightSwitch.sunOpacity,'1');
+  await checkStableFooter();
   const bright=await styles();assert.equal(bright.panel,'rgba(248, 249, 252, 0.95)');assert.equal(bright.text,'rgb(32, 35, 48)');assert.equal(bright.totalLine,'#202330');
   for(const key of ['purple','blue','purpleLine','blueLine','highlight','collapsedHigh'])assert.equal(bright[key],dark[key],key+' stays unchanged');
   assert.equal(bright.purpleLine,'#804baa');assert.equal(bright.blueLine,'#393993');assert.equal(bright.highText,'rgb(35, 117, 31)');
@@ -103,6 +127,7 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   assert.equal((await styles()).totalLine,'#202330');
   if(process.env.TIERSCOPE_THEME_SHOTS)await panel.screenshot({path:path.join(process.env.TIERSCOPE_THEME_SHOTS,'bright-replay.png')});
   await page.click('#playback-return');await page.click('#btn-toggle');await page.waitForTimeout(350);
+  assert(await page.locator('#tracker-footer').isHidden(),'compact view keeps its existing footer-free layout');
   await page.click('#mini-metric');await page.click('#mini-metric');
   assert.equal(await page.locator('#mini-chart').evaluate(c=>c.getContext('2d').strokeStyle),'#202330');
   await page.click('#mini-settings-toggle');
