@@ -1,3 +1,4 @@
+import { stopAthActivity } from './ath-activity.js';
 import { initializeAcquisitionState } from './acquisition-state.js';
 import { updatePanelOptions } from './files.js';
 import { cancelGifExport, generateGifFromHistory } from './gif.js';
@@ -311,6 +312,7 @@ export function initializeRuntime() {
     initializePresentation({refreshOptions: updatePanelOptions, refreshReplayAvailability: updateReplayAvailability, refreshCountdown: updateCountdownDisplay});
     runtime.urlCheckInterval = setInterval(checkUrlChange, 500);
     window.addEventListener('beforeunload', function() {
+        stopAthActivity();
         cancelGifExport();
         leavePlayback(false);
         var modelName = getModelName();

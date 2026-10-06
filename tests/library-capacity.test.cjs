@@ -7,7 +7,8 @@ const clean = value => JSON.parse(JSON.stringify(value));
 function fresh(storage = new Map()) { const h = harness(storage, extra); h.context.GM_setValue('tierscope:automatic-keeping:v1', JSON.stringify({schemaVersion:1,minimumMinutes:0})); h.t.initPanel(); h.t.sample(2); h.d = h.api.__capacity; return h; }
 const limits = (maxSessions = 1000, maxMegabytes = 50) => ({maxSessions, maxMegabytes});
 function archive(h, room = 'testroom') { return {...clean(h.d.captureSessionFile()), room}; }
-const snapshot = h => JSON.stringify([...h.storage].sort(([a], [b]) => a.localeCompare(b)));
+// Independent per-tab ATH activity metadata is not Library capacity or content.
+const snapshot = h => JSON.stringify([...h.storage].filter(([key]) => !key.startsWith('tierscope:ath-visit:') && !key.startsWith('tierscope:ath-active:')).sort(([a], [b]) => a.localeCompare(b)));
 
 test('new and existing libraries adopt 1000 sessions / 50 MB without rewriting records; saved limits are local and fresh across tabs', () => {
  const a = fresh(); a.d.keepSessionInLibrary(archive(a)); const before = snapshot(a), b = fresh(a.storage);

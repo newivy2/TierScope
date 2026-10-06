@@ -1,3 +1,5 @@
+import { observeAthRoom, stopAthActivity } from './ath-activity.js';
+import { initializeAthGrace } from './ath-maintenance.js';
 import { isAcquisitionCurrent } from './acquisition-context.js';
 import { beginAcquisitionGeneration, resetAcquisitionForRoom, schedulePresenceAcquisition, startAcquisitionClock, stopAcquisitionClock } from './acquisition-state.js';
 import { drawAllSparklines } from './charts.js';
@@ -27,6 +29,8 @@ export function scheduleInit(delay) {
 }
 
 export function init() {
+    try { initializeAthGrace(); } catch (error) { log('ATH grace initialization unavailable: ' + error.message); }
+    observeAthRoom();
     leavePlayback(false);
     var myGeneration = beginAcquisitionGeneration();
     log('Initializing... (generation ' + myGeneration + ')');
@@ -164,6 +168,7 @@ export function init() {
 
 export function checkUrlChange() {
     if (location.href !== runtime.lastUrl) {
+        stopAthActivity();
         if (runtime.panelOptionsCleanup) { runtime.panelOptionsCleanup(); runtime.panelOptionsCleanup = null; }
         leavePlayback(false);
         var oldModel = getModelNameFromUrl(runtime.lastUrl);

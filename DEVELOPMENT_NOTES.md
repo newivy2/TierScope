@@ -163,7 +163,9 @@ Opening a session file is read-only. To include its peaks, click **Add to all-ti
 
 Replay uses the room's ATH records captured when it opens, so background live scans do not change its comparison. Switching SH/ATH refreshes that comparison from storage; explicitly adding the file also refreshes it. SH retains its existing historical meaning. TXT/CSV/GIF and session-file exports retain their session-based values and formats.
 
-**Clear all-time highs…** in the same menu is a separate, confirmed action for the displayed room (the file's room during FILE REPLAY). It preserves session history and files. After clearing, only new accepted samples or an explicit file addition start new records; reloading an old session does not restore the cleared peaks. A storage failure is reported in the menu and high-value tooltip; unsaved peaks remain local to the open tab and are retried on later accepted scans. Invalid or unsupported stored records are skipped and preserved.
+**Clear Room ATH…** in the same menu is a separate, confirmed action for the displayed room (the file's room during FILE REPLAY). It preserves session history and files. After clearing, only new accepted samples or an explicit file addition start new records; reloading an old session does not restore the cleared peaks. A storage failure is reported in the menu and high-value tooltip; unsaved peaks remain local to the open tab and are retried on later accepted scans. Invalid or unsupported stored records are skipped and preserved.
+
+**Review beta:** [Manual cleanup of ATH for rooms not visited in over 90 days](docs/ath-retention.md). Existing records get a saved 90-day grace period; cleanup previews the room count and protects active rooms.
 
 ### High-value pulses
 

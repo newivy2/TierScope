@@ -1,4 +1,4 @@
-import { addFileToAllTimeHighs, clearAllTimeHighs, toggleHighMode, updateHighControls } from './highs.js';
+import { addFileToAllTimeHighs, clearAllTimeHighs, clearInactiveAllTimeHighs, toggleHighMode, updateHighControls } from './highs.js';
 import { redrawPanelCharts } from './layout.js';
 import { selectChartWindow } from './panel-preferences.js';
 import { isPlaybackCurrent } from './playback-data.js';
@@ -68,6 +68,7 @@ export function bindPanelOptions() {
     document.getElementById('mini-high').onclick = toggleHighMode;
     document.getElementById('btn-add-all-time').onclick = addFileToAllTimeHighs;
     document.getElementById('btn-clear-all-time').onclick = clearAllTimeHighs;
+    document.getElementById('btn-clear-inactive-ath').onclick = clearInactiveAllTimeHighs;
     input.onchange = function() { var file = input.files && input.files[0]; if (file) { close(false); readSessionFile(file); } };
     function outside(event) { if (!menu.contains(event.target) && !button.contains(event.target)) close(false); }
     function escape(event) {

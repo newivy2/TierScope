@@ -1,3 +1,4 @@
+import { ensureAthGrace } from './ath-retention.js';
 import { isStorageObject, isStorageTimestamp, makeStorageId } from './record-validation.js';
 import { runtime } from './runtime.js';
 
@@ -92,7 +93,10 @@ export function storeAllTimeHighs(room, incoming) {
         // higher record. Compact only snapshots included in this merge,
         // after its replacement is safely stored; unseen writes survive.
         var key = runtime.ALL_TIME_PREFIX + state.room + ':' + state.epoch + ':' + makeStorageId();
-        GM_setValue(key, JSON.stringify(data));
+        try { ensureAthGrace(state.room); } catch (error) { /* Missing metadata prevents eligibility for cleanup. */ }
+        var raw = JSON.stringify(data);
+        GM_setValue(key, raw);
+        if (GM_getValue(key, undefined) !== raw) throw new Error('ATH snapshot could not be verified.');
         if (GM_getValue(runtime.ALL_TIME_EPOCH_PREFIX + state.room, 'initial') !== state.epoch) {
             return { state: readAllTimeHighs(state.room), changed: 0, saved: false };
         }
@@ -119,4 +123,69 @@ export function sessionAllTimeHighs(data, source) {
         }
     });
     return highs;
+}
+
+// Keep a verified replacement containing the old highs while retiring snapshots.
+// A visit/write racing cleanup, or a failed delete, retains this safety copy.
+export function retireInactiveAllTimeRecord(candidate, guard) {
+    const state = readAllTimeHighs(candidate.room);
+    if (state.error || state.skipped || state.pending || state.epoch !== candidate.epoch ||
+        state.keys.length !== candidate.records.length || candidate.records.some(record =>
+            !state.keys.includes(record.key) || GM_getValue(record.key, undefined) !== record.raw) || !guard()) return 'changed';
+    const epochKey = runtime.ALL_TIME_EPOCH_PREFIX + state.room, epoch = makeStorageId();
+    const key = runtime.ALL_TIME_PREFIX + state.room + ':' + epoch + ':' + makeStorageId();
+    const raw = JSON.stringify({schemaVersion: 1, room: state.room, epoch, highs: state.highs});
+    GM_setValue(key, raw);
+    if (GM_getValue(key, undefined) !== raw) throw new Error('ATH safety copy could not be verified.');
+    if (!guard() || GM_getValue(epochKey, 'initial') !== candidate.epoch) {
+        GM_deleteValue(key); return 'changed';
+    }
+    if (candidate.records.some(record => GM_getValue(record.key, undefined) !== record.raw) ||
+        readAllTimeHighs(state.room).keys.some(other => !candidate.records.some(record => record.key === other))) {
+        GM_deleteValue(key); return 'changed';
+    }
+    GM_setValue(epochKey, epoch);
+    if (GM_getValue(epochKey, 'initial') !== epoch) throw new Error('ATH clear could not be verified.');
+    runtime.allTimeCache.delete(state.room);
+    // A writer may have read the old generation before we advanced it. Preserve
+    // its unseen/changed snapshot in the current generation before aborting.
+    const preserveConcurrent = () => {
+        const prefix = runtime.ALL_TIME_PREFIX + state.room + ':';
+        const highs = emptyAllTimeHighs(); let changed = false;
+        for (const other of GM_listValues().filter(other => other.startsWith(prefix) && other !== key)) {
+            const value = GM_getValue(other, undefined);
+            if (value === undefined) continue;
+            const data = JSON.parse(value); validateAllTimeRecord(data, state.room);
+            if (data.epoch !== candidate.epoch || candidate.records.some(record => record.key === other && record.raw === value)) continue;
+            mergeAllTimeHighs(highs, data.highs); changed = true;
+        }
+        if (changed && GM_getValue(epochKey, 'initial') === epoch) {
+            const result = storeAllTimeHighs(state.room, highs);
+            if (!result.saved) throw new Error('Concurrent ATH records could not be preserved.');
+        }
+        return changed;
+    };
+    const unchanged = () => !preserveConcurrent() && guard() && GM_getValue(epochKey, 'initial') === epoch &&
+        GM_getValue(key, undefined) === raw && !GM_listValues().some(other => other !== key &&
+            other.startsWith(runtime.ALL_TIME_PREFIX + state.room + ':' + epoch + ':'));
+    if (!unchanged()) return 'changed';
+    for (const record of candidate.records) {
+        if (!unchanged()) return 'changed';
+        if (GM_getValue(record.key, undefined) !== record.raw) return 'changed';
+        GM_deleteValue(record.key);
+        if (GM_getValue(record.key, undefined) !== undefined) throw new Error('An old ATH snapshot could not be removed.');
+    }
+    if (!unchanged()) return 'changed';
+    GM_deleteValue(key);
+    if (GM_getValue(key, undefined) !== undefined) throw new Error('ATH clear could not be completed.');
+    // Recheck after deletion too: storage calls can interleave with another tab.
+    if (preserveConcurrent() || !guard()) {
+        if (GM_getValue(epochKey, 'initial') === epoch) {
+            const result = storeAllTimeHighs(state.room, state.highs);
+            if (!result.saved) throw new Error('ATH records could not be retained after a concurrent visit.');
+        }
+        return 'changed';
+    }
+    runtime.allTimeCache.delete(state.room);
+    return 'cleared';
 }
