@@ -493,10 +493,10 @@ export function openSessionTools(focusTarget) {
         });
         let automaticMinutes = null, automaticError = '';
         try { automaticMinutes = readAutomaticKeepingMinutes(); } catch (error) { automaticError = error.message; }
-        renderAutomaticKeepingSettings(dialog.querySelector('#tools-library-storage'), automaticMinutes, automaticError, value => {
+        renderAutomaticKeepingSettings(dialog.querySelector('#tools-storage-settings'), automaticMinutes, automaticError, value => {
             saveAutomaticKeepingMinutes(value); keepFavoriteSession(getModelName(), true);
             render('library'); tell('Automatic keeping minimum saved for this browser. Existing sessions were kept.');
-            dialog.querySelector('#tools-automatic-settings > summary').focus();
+            dialog.querySelector('#tools-storage-settings > summary').focus();
         });
         if (state.favoriteError) node(content, 'p', state.favoriteError, 'tools-muted');
         libraryFilters.room = libraryRoom || '';

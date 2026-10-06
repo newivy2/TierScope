@@ -44,8 +44,10 @@ export function renderLibraryCapacity(parent, usage, limits, error, save) {
 }
 
 export function renderAutomaticKeepingSettings(parent, minutes, error, save) {
-    const settings = toolNode(parent, 'details'); settings.id = 'tools-automatic-settings';
-    toolNode(settings, 'summary', 'Automatic keeping');
+    const settings = toolNode(parent, 'section'); settings.id = 'tools-automatic-settings';
+    settings.style.borderTop = '1px solid var(--panel-divider)';
+    settings.style.marginTop = '10px';
+    const heading = toolNode(settings, 'h4', 'Automatic keeping'); heading.style.margin = '10px 0 5px';
     const form = toolNode(settings, 'form');
     toolNode(form, 'p', 'For favorite models in this browser. Short sessions stay live without being added automatically. Manual Keep in Library works at any length.', 'tools-muted');
     const label = toolNode(form, 'label', 'Minimum recorded duration (minutes) '), input = toolNode(label, 'input');

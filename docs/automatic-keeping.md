@@ -1,8 +1,8 @@
-# Automatic keeping minimum — 3.23.1
+# Automatic keeping minimum — 3.23.2-beta.2
 
 TierScope keeps its original interface. Automatic keeping for favorites now requires five minutes of recorded coverage by default.
 
-Open **Library → Sessions → Automatic keeping** below the storage counter. Set **Minimum recorded duration (minutes)** and press **Save automatic keeping**. The default is **5 minutes**, shared by favorite models in this browser. Choose a whole number from 0 to 1,440; 0 restores keeping from the first sample.
+Open **Library → Sessions → Storage limits → Automatic keeping** below the storage counter. Set **Minimum recorded duration (minutes)** and press **Save automatic keeping**. The default is **5 minutes**, shared by favorite models in this browser. Choose a whole number from 0 to 1,440; 0 restores keeping from the first sample.
 
 The minimum uses retained sample coverage, excluding pauses, marked recording gaps and backward clock changes. Waiting on a paused page does not count. When the minimum is reached, automatic keeping includes the earlier retained samples and then uses the existing checkpoint schedule. Pause, Stop, Reset and leaving or closing a room do not override the minimum.
 

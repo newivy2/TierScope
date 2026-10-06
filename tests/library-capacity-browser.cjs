@@ -23,18 +23,21 @@ const source = prepareSource(fs.readFileSync(path.join(__dirname, '../tierscope.
   await page.goto('https://tierscope.test/testroom/');await page.addScriptTag({content:instrument(source)});await page.evaluate(()=>ViewerTracker.__capacity.setup());await page.waitForTimeout(350);
   await page.click('#btn-control-library');
   const initial = await page.evaluate(()=>ViewerTracker.__capacity.state());
-  if (!await page.locator('#tools-automatic-settings').evaluate(e=>e.open)) await page.locator('#tools-automatic-settings > summary').click();
+  assert.equal(await page.locator('#tools-storage-settings').getAttribute('open'),null);
+  assert(await page.locator('#tools-automatic-minutes').isHidden(),'automatic keeping is inside the collapsed storage settings');
+  assert.equal(await page.locator('#tools-automatic-settings summary').count(),0,'automatic keeping has no separate disclosure');
+  if (!await page.locator('#tools-storage-settings').evaluate(e=>e.open)) await page.locator('#tools-storage-settings > summary').click();
   assert.equal(await page.locator('#tools-automatic-minutes').inputValue(),'5');
   await page.locator('#tools-automatic-minutes').fill('-1');await page.click('#tools-automatic-save');
   assert.equal(await page.evaluate(()=>ViewerTracker.__capacity.readAutomaticKeepingMinutes()),5);
   await page.locator('#tools-automatic-minutes').fill('10');await page.click('#tools-automatic-save');
   assert.equal(await page.evaluate(()=>ViewerTracker.__capacity.readAutomaticKeepingMinutes()),10);
-  if (!await page.locator('#tools-automatic-settings').evaluate(e=>e.open)) await page.locator('#tools-automatic-settings > summary').click();
+  assert.deepEqual(await page.evaluate(()=>ViewerTracker.__capacity.readLibraryLimits()),{maxSessions:1000,maxMegabytes:50},'saving the automatic minimum does not change capacity');
+  if (!await page.locator('#tools-storage-settings').evaluate(e=>e.open)) await page.locator('#tools-storage-settings > summary').click();
   await page.locator('#tools-automatic-minutes').fill('5');await page.locator('#tools-automatic-minutes').press('Enter');
   assert.equal(await page.evaluate(()=>ViewerTracker.__capacity.readAutomaticKeepingMinutes()),5);
 
   assert.match(await page.locator('#tools-library-usage').textContent(),/0 \/ 1,000 sessions.*0.00 \/ 50 MB/);
-  assert.equal(await page.locator('#tools-storage-settings').getAttribute('open'),null);
   assert(await page.locator('#tools-library-capacity-warning').isHidden());
   const openSettings = async () => { if (await page.locator('#tools-storage-settings').getAttribute('open') === null) await page.locator('#tools-storage-settings > summary').click(); };
   const save = async (sessions, megabytes) => {
@@ -70,7 +73,7 @@ const source = prepareSource(fs.readFileSync(path.join(__dirname, '../tierscope.
   page.once('dialog',d=>d.accept());await page.click('#tools-auto-keep');
   assert.match(await page.locator('[data-card-auto]').first().textContent(),/requires 5 minutes/);
   assert.equal(await page.evaluate(()=>ViewerTracker.__capacity.readSessionLibrary().count),4);
-  if (!await page.locator('#tools-automatic-settings').evaluate(e=>e.open)) await page.locator('#tools-automatic-settings > summary').click();
+  if (!await page.locator('#tools-storage-settings').evaluate(e=>e.open)) await page.locator('#tools-storage-settings > summary').click();
   await page.locator('#tools-automatic-minutes').fill('0');await page.click('#tools-automatic-save');
   // Auto uses the configured allowance and can retry after it is raised.
 

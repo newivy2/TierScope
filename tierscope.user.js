@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.23.2-beta.1
+// @version      3.23.2-beta.2
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -2232,7 +2232,7 @@ underlying system, so should run in the browser, Node, or Plask.
       if (record.schemaVersion !== 1) throw new Error("Unsupported automatic keeping settings.");
       return validateAutomaticKeepingMinutes(record.minimumMinutes);
     } catch (error) {
-      throw new Error("Automatic keeping settings could not be read. Save them again in Library → Automatic keeping.");
+      throw new Error("Automatic keeping settings could not be read. Save them again in Library → Storage limits → Automatic keeping.");
     }
   }
   function validateAutomaticKeepingMinutes(value) {
@@ -5343,7 +5343,7 @@ underlying system, so should run in the browser, Node, or Plask.
       return true;
     }
     const limits = readLibraryLimits(), minimumMinutes = readAutomaticKeepingMinutes();
-    if (!confirm("Favorite " + room + " and automatically keep their live sessions?\n\nWhile TierScope is recording this model, sessions will be kept in this browser’s Library after " + minimumMinutes + " minutes of recorded coverage (excluding pauses and gaps). Change this in Library → Automatic keeping. The same session is updated as it grows, at most once per minute as samples arrive, and on pause, Stop or leaving the room. The current live session qualifies once it reaches this minimum. Replay files are never added automatically.\n\nLibrary limits still apply (" + limits.maxSessions.toLocaleString() + " sessions / " + limits.maxMegabytes + " MB). Nothing is deleted automatically. Removing the star stops automatic keeping; sessions already kept remain.")) return false;
+    if (!confirm("Favorite " + room + " and automatically keep their live sessions?\n\nWhile TierScope is recording this model, sessions will be kept in this browser’s Library after " + minimumMinutes + " minutes of recorded coverage (excluding pauses and gaps). Change this in Library → Storage limits → Automatic keeping. The same session is updated as it grows, at most once per minute as samples arrive, and on pause, Stop or leaving the room. The current live session qualifies once it reaches this minimum. Replay files are never added automatically.\n\nLibrary limits still apply (" + limits.maxSessions.toLocaleString() + " sessions / " + limits.maxMegabytes + " MB). Nothing is deleted automatically. Removing the star stops automatic keeping; sessions already kept remain.")) return false;
     setModelFavorite(room, true, true);
     keepFavoriteSession(room, true);
     return true;
@@ -5866,9 +5866,12 @@ underlying system, so should run in the browser, Node, or Plask.
     return refresh;
   }
   function renderAutomaticKeepingSettings(parent, minutes, error, save) {
-    const settings = toolNode(parent, "details");
+    const settings = toolNode(parent, "section");
     settings.id = "tools-automatic-settings";
-    toolNode(settings, "summary", "Automatic keeping");
+    settings.style.borderTop = "1px solid var(--panel-divider)";
+    settings.style.marginTop = "10px";
+    const heading = toolNode(settings, "h4", "Automatic keeping");
+    heading.style.margin = "10px 0 5px";
     const form = toolNode(settings, "form");
     toolNode(form, "p", "For favorite models in this browser. Short sessions stay live without being added automatically. Manual Keep in Library works at any length.", "tools-muted");
     const label = toolNode(form, "label", "Minimum recorded duration (minutes) "), input = toolNode(label, "input");
@@ -7898,12 +7901,12 @@ underlying system, so should run in the browser, Node, or Plask.
       } catch (error) {
         automaticError = error.message;
       }
-      renderAutomaticKeepingSettings(dialog.querySelector("#tools-library-storage"), automaticMinutes, automaticError, (value) => {
+      renderAutomaticKeepingSettings(dialog.querySelector("#tools-storage-settings"), automaticMinutes, automaticError, (value) => {
         saveAutomaticKeepingMinutes(value);
         keepFavoriteSession(getModelName(), true);
         render("library");
         tell("Automatic keeping minimum saved for this browser. Existing sessions were kept.");
-        dialog.querySelector("#tools-automatic-settings > summary").focus();
+        dialog.querySelector("#tools-storage-settings > summary").focus();
       });
       if (state.favoriteError) node(content, "p", state.favoriteError, "tools-muted");
       libraryFilters.room = libraryRoom || "";
@@ -10196,7 +10199,7 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/bootstrap.js
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.23.2-beta.1";
+    runtime.TIERSCOPE_VERSION = "3.23.2-beta.2";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;
