@@ -36,7 +36,16 @@ const file=(name,value)=>({name,mimeType:'application/json',buffer:Buffer.from(J
   });
   await page.goto('https://tierscope.test/live_room/');await page.addScriptTag({content:instrument(source)});await page.evaluate(()=>ViewerTracker.__organized.setup());await page.waitForTimeout(200);
   const before=await page.evaluate(()=>ViewerTracker.__organized.state()),bounds=await page.locator('#tracker-container').boundingBox();
-  await page.click('#btn-control-library');await openLibraryBook(page);await page.click('#tools-folder-alpha_model');assert.equal(await page.locator('.tools-row').count(),6);
+  await page.click('#btn-control-library');await openLibraryBook(page);
+  assert.deepEqual(await page.locator('#tools-library-sort option').allTextContents(),['Newest First','Oldest First','Alphabetical','Favorites First','Highest number of sessions','Lowest number of sessions']);
+  const folders=()=>page.locator('.tools-folder-open').evaluateAll(nodes=>nodes.map(node=>node.id.replace('tools-folder-','')));
+  for(const [sort,expected] of [['mostSessions',['alpha_model','beta_model']],['fewestSessions',['beta_model','alpha_model']],['alphabetical',['alpha_model','beta_model']],['favorites',['alpha_model','beta_model']],['newest',['alpha_model','beta_model']],['oldest',['beta_model','alpha_model']]]) {
+   await page.selectOption('#tools-library-sort',sort);assert.deepEqual(await folders(),expected,sort+' folder order');
+  }
+  await page.selectOption('#tools-library-sort','newest');
+  await page.click('#tools-folder-alpha_model');assert.equal(await page.locator('.tools-row').count(),6);
+  await page.selectOption('#tools-library-sort','alphabetical');assert.equal(await page.locator('.tools-row').first().getAttribute('data-library-id'),'organized_5','Alphabetical keeps sessions newest first inside a model');
+  await page.selectOption('#tools-library-sort','newest');
   // Drafts survive list actions, filters, tabs and closing the Library. None of
   // these actions writes notes; explicit Save/Discard controls their lifetime.
   const draftRow=page.locator('[data-library-id=organized_0]');

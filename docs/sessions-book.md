@@ -6,6 +6,8 @@ The Sessions tab keeps **Current Live Session**, the session/storage counters an
 
 The book starts with a separate collapsed **Search & sort** menu. All existing model, sorting, favorites, date and text filters are here. Closing search keeps your filters applied, with a visible “Filters active” reminder. Session selection, comparison, notes, replay and exports remain available inside the book. **Open saved file**, **Import to library** and **Refresh** stay outside it at the bottom.
 
+**Sort options:** Newest First, Oldest First, Alphabetical, Favorites First, Highest number of sessions, and Lowest number of sessions. Alphabetical orders model folders by name; sessions within a model remain newest first, regardless of their titles. Session-count sorting uses the sessions matching the active filters, just like the counts on the model cards; ties use model name, with newest sessions first within each model.
+
 Expanded sections and browsing choices survive Refresh and tab changes while Library is open. Closing and reopening Library starts both sections collapsed. Keeping/importing a session opens the book to show it; returning from model history also reveals the relevant folder. These layout changes do not migrate or rewrite saved sessions.
 
 Summary opens with **Choose sessions & filters** collapsed. Thresholds follow the displayed metric’s time-weighted session average: 25% below, the average, and 25% above, rounded to whole viewers. Gaps are excluded. Custom values apply to that snapshot and metric; **Use average** restores the calculated values. A different recording or metric gets fresh defaults.
