@@ -30,8 +30,8 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
  const samples=()=>page.locator('#tools-summary-table tbody tr').first().locator('td').allTextContents();
  const nav=async tab=>{await page.locator('[data-tools-tab='+tab+']').click();};
  await page.click('#btn-control-library');
- const priority=await page.evaluate(()=>{const keep=document.getElementById('tools-keep'),compare=document.getElementById('tools-compare-previous');return {quiet:keep.classList.contains('tools-quiet'),primary:compare.classList.contains('tools-primary'),keepBorder:getComputedStyle(keep).borderColor,top:keep.getBoundingClientRect().top<compare.getBoundingClientRect().top};});
- assert(priority.quiet&&priority.primary&&priority.top);assert.equal(priority.keepBorder,'rgba(0, 0, 0, 0)');
+ const priority=await page.evaluate(()=>{const keep=document.getElementById('tools-keep'),compare=document.getElementById('tools-compare-previous');return {quiet:keep.classList.contains('tools-quiet'),primary:compare.classList.contains('tools-primary'),keepBorder:getComputedStyle(keep).borderColor,historyBorder:getComputedStyle(document.getElementById('tools-room-history')).borderColor,keepBackground:getComputedStyle(keep).backgroundColor,historyBackground:getComputedStyle(document.getElementById('tools-room-history')).backgroundColor,top:keep.getBoundingClientRect().top<compare.getBoundingClientRect().top};});
+ assert(!priority.quiet&&priority.primary&&priority.top);assert.equal(priority.keepBorder,priority.historyBorder);assert.equal(priority.keepBackground,priority.historyBackground);
  await nav('summary');assert(await page.locator('#tools-follow-live').isChecked());assert.deepEqual(await samples(),['4']);
  await page.evaluate(()=>{window.followCanvas=document.getElementById('tools-analysis-chart');window.followMetric=document.getElementById('tools-metric');});
  const fullBefore=await page.locator('#tools-chart-range').textContent();await scan(100);

@@ -434,7 +434,7 @@ export function openSessionTools(focusTarget) {
             const result = keepSessionInLibrary(archive); libraryRoom = archive.room.toLowerCase();
             Object.assign(libraryFilters, {room: libraryRoom, query: '', from: '', to: '', favorites: false});
             render('library', true); tell(result.added ? 'Session kept in the library.' : result.updated ? 'Library session updated; its name and notes were preserved.' : 'An equal or fuller session is already in the library.');
-        }, 'tools-keep').className = replay ? 'tools-primary' : 'tools-quiet';
+        }, 'tools-keep').className = 'tools-history-keep';
         if (replay) currentButton(actions, 'Save file', archive => downloadDataFile(archive, archiveName(archive)), 'tools-save-session');
         else {
             const label = node(actions, 'label', undefined, 'tools-auto-keep'), check = node(label, 'input');

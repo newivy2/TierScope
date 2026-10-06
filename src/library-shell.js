@@ -75,7 +75,7 @@ export function libraryShell() {
 #tierscope-session-tools [data-card-star]{font-size:1.5em;padding:0 3px;border:0;background:transparent;line-height:1.2}
 #tierscope-session-tools .tools-exports{gap:4px;margin:5px 0 8px}
 #tierscope-session-tools .tools-exports button{padding:2px 5px;font-size:.9em}
-#tierscope-session-tools .tools-history-shortcut button{color:var(--panel-accent)}
+#tierscope-session-tools .tools-history-shortcut button,#tierscope-session-tools .tools-history-keep{color:var(--panel-accent)}
 #tierscope-session-tools .tools-history-shortcut[hidden]{display:none}
 #tierscope-session-tools #session-save-info{font-size:.85em;margin-top:4px}
 #tierscope-session-tools .tools-library-bulk{gap:4px;font-size:.9em}
