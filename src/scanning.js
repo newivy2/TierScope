@@ -14,7 +14,7 @@ import { clearRequestFailures, getDOMFallbackWaitSeconds, readRequestPolicy, rec
 import { runtime } from './runtime.js';
 import { saveSession } from './session-persistence.js';
 import { isAbsencePaused } from './session-selectors.js';
-import { getModelName, log } from './utils.js';
+import { getModelName, isBroadcastRoom, log } from './utils.js';
 
 export function parseGetChatUserListResponse(text) {
     if (typeof text !== 'string' || !text.trim()) throw new Error('Empty API response');
@@ -231,6 +231,8 @@ export function acceptRoomSnapshot(snapshot, modelName) {
 }
 
 export async function performScanThenReturn(returnToChat) {
+    // A directory must never enter acquisition or mutate the origin retry policy.
+    if (!isBroadcastRoom()) return;
     if (typeof returnToChat === 'undefined') returnToChat = true;
     if (checkAbsenceStop()) return;
     if (runtime.isScanning || runtime.isStopped) return;

@@ -63,7 +63,8 @@ const reviewedChanges = new Set([
   'isBroadcastRoom', // shared room parser: maintenance-regressions.test.cjs
   'resetAllTracking', // valid room required before confirmation: maintenance-regressions.test.cjs
   'resetTrackingData', // valid room required before mutation: maintenance-regressions.test.cjs
-  'updateStopControls', // disabled directory Reset: all-time-highs-browser.cjs
+  'updateStopControls', // disabled directory tracking controls: non-room-scanning.test.cjs
+  'startCountdown', 'updateCountdownDisplay', // non-room acquisition and retry isolation: non-room-scanning.test.cjs
   // Live-session ownership: state-ownership.test.cjs, session.test.cjs,
   // stop-absence.test.cjs, startup.test.cjs and review-regressions.test.cjs.
   'getAnonymousCount', 'getSessionHigh', 'syncHighTimes', 'saveToHistory',

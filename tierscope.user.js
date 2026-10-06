@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.23.1
+// @version      3.23.2-beta.1
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -3085,6 +3085,7 @@ underlying system, so should run in the browser, Node, or Plask.
   // src/status-model.js
   function buildAcquisitionStatusModel() {
     var model = { text: "", title: "", color: null, saveWarning: false };
+    if (!isBroadcastRoom()) return __spreadProps(__spreadValues({}, model), { text: "No room", title: "Live tracking is inactive on this page. Open a broadcast room to track; Library and saved-file Replay remain available." });
     var warning = sessionSaveWarningModel(getSessionSaveState(getModelName())) || automaticLibraryWarning(getModelName()) || presentationWarningModel(runtime.history, runtime.initGuard, location.href);
     if (warning) return warning;
     if (runtime.isStopped) {
@@ -3125,6 +3126,7 @@ underlying system, so should run in the browser, Node, or Plask.
   }
   function buildFreshnessModel() {
     var model = { text: "", title: "", color: null, saveWarning: false };
+    if (!isBroadcastRoom()) return __spreadProps(__spreadValues({}, model), { text: "No room", title: "Live tracking is inactive on this page. Open a broadcast room to track; Library and saved-file Replay remain available." });
     var warning = sessionSaveWarningModel(getSessionSaveState(getModelName())) || automaticLibraryWarning(getModelName()) || presentationWarningModel(runtime.history, runtime.initGuard, location.href);
     if (warning) return warning;
     if (runtime.isStopped) {
@@ -8918,12 +8920,19 @@ underlying system, so should run in the browser, Node, or Plask.
     }
     var stop = document.getElementById("btn-control-stop");
     if (stop) {
-      stop.disabled = runtime.isStopped;
-      stop.style.opacity = runtime.isStopped ? "0.5" : "1";
+      stop.disabled = runtime.isStopped || !isBroadcastRoom();
+      stop.style.opacity = stop.disabled ? "0.5" : "1";
     }
     ["btn-auto", "btn-control-auto"].forEach(function(id) {
       var button = document.getElementById(id);
       if (!button) return;
+      button.disabled = !isBroadcastRoom();
+      if (button.disabled) {
+        button.title = "Open a broadcast room to track";
+        button.setAttribute("aria-label", "Open a broadcast room to track");
+        button.style.background = "var(--panel-button)";
+        return;
+      }
       button.innerHTML = runtime.isStopped ? "Start" : runtime.isAutoRefreshOn && !isAbsencePaused() ? "⏸" : "▶";
       button.title = runtime.isStopped ? "Start a new session (keeps this stopped record until normal cleanup)" : isAbsencePaused() ? "Resume recording now; cancel absence slowdown, automatic pause and Stop until the broadcaster returns" : runtime.isAutoRefreshOn ? "Pause scans and elapsed time" : "Resume this session";
       button.setAttribute("aria-label", runtime.isStopped ? "Start a new session" : isAbsencePaused() ? "Resume recording" : runtime.isAutoRefreshOn ? "Pause scans" : "Resume scans");
@@ -8969,6 +8978,7 @@ underlying system, so should run in the browser, Node, or Plask.
     checkTrendAutoEscalation();
   }
   function startTrackingTimer() {
+    if (!isBroadcastRoom()) return;
     if (!startSessionClock(Date.now())) return;
     startAcquisitionClock("trackingTimerInterval", updateTrackingTimer, 1e3);
     updateTrackingTimer();
@@ -9032,6 +9042,18 @@ underlying system, so should run in the browser, Node, or Plask.
     updateCountdownDisplay();
   }
   function updateCountdownDisplay() {
+    if (!isBroadcastRoom()) {
+      ["auto-status", "expanded-countdown", "control-next-scan"].forEach(function(id) {
+        var element = document.getElementById(id);
+        if (element) {
+          element.textContent = "Open a room";
+          element.title = "Tracking is inactive on this page. Library and saved-file Replay remain available.";
+          element.style.color = "var(--panel-muted)";
+        }
+      });
+      updateMiniFreshness();
+      return;
+    }
     if (checkAbsenceStop()) return;
     var policy = readRequestPolicy();
     if (policy.blocked && runtime.isAutoRefreshOn) pauseForAccessRestriction();
@@ -9137,8 +9159,8 @@ underlying system, so should run in the browser, Node, or Plask.
     updateCountdownDisplay();
   }
   function startCountdown() {
-    if (runtime.isStopped) return;
     stopAcquisitionClock("countdownInterval");
+    if (!isBroadcastRoom() || runtime.isStopped) return;
     if (!runtime.nextScanAt) resetCountdown();
     updateCountdownDisplay();
     if (runtime.isStopped) return;
@@ -9168,6 +9190,11 @@ underlying system, so should run in the browser, Node, or Plask.
     saveSession(getModelName());
   }
   function toggleAutoRefresh() {
+    if (!isBroadcastRoom()) {
+      updateStopControls();
+      updateCountdownDisplay();
+      return;
+    }
     if (runtime.isStopped) {
       startNewSession();
       return;
@@ -9620,6 +9647,7 @@ underlying system, so should run in the browser, Node, or Plask.
     return beginAcceptedSample(snapshot, modelName, Date.now(), getSessionSamplePolicy());
   }
   async function performScanThenReturn(returnToChat) {
+    if (!isBroadcastRoom()) return;
     if (typeof returnToChat === "undefined") returnToChat = true;
     if (checkAbsenceStop()) return;
     if (runtime.isScanning || runtime.isStopped) return;
@@ -10039,6 +10067,14 @@ underlying system, so should run in the browser, Node, or Plask.
     updateTrendDisplay();
     updateAcquisitionStatus();
     restorePanelGeometry();
+    if (!isRoom) {
+      stopCountdown();
+      stopTrackingTimer();
+      updateStopControls();
+      updateCountdownDisplay();
+      updateTrackingTimer();
+      return;
+    }
     if (runtime.isStopped) {
       updateStopControls();
       updateCountdownDisplay();
@@ -10160,7 +10196,7 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/bootstrap.js
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.23.1";
+    runtime.TIERSCOPE_VERSION = "3.23.2-beta.1";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;

@@ -4,10 +4,11 @@ import { runtime } from './runtime.js';
 import { presentationWarningModel } from './presentation-health.js';
 import { getSessionSaveState, sessionSaveWarningModel } from './session-health.js';
 import { absencePauseDescription, getEffectiveScanIntervalSeconds, isAbsencePaused, stopDescription } from './session-selectors.js';
-import { formatSampleAge, getModelName } from './utils.js';
+import { formatSampleAge, getModelName, isBroadcastRoom } from './utils.js';
 
 export function buildAcquisitionStatusModel() {
     var model = {text: '', title: '', color: null, saveWarning: false};
+    if (!isBroadcastRoom()) return {...model, text: 'No room', title: 'Live tracking is inactive on this page. Open a broadcast room to track; Library and saved-file Replay remain available.'};
     var warning = sessionSaveWarningModel(getSessionSaveState(getModelName())) || automaticLibraryWarning(getModelName()) || presentationWarningModel(runtime.history, runtime.initGuard, location.href);
     if (warning) return warning;
     if (runtime.isStopped) {
@@ -52,6 +53,7 @@ export function buildAcquisitionStatusModel() {
 
 export function buildFreshnessModel() {
     var model = {text: '', title: '', color: null, saveWarning: false};
+    if (!isBroadcastRoom()) return {...model, text: 'No room', title: 'Live tracking is inactive on this page. Open a broadcast room to track; Library and saved-file Replay remain available.'};
     var warning = sessionSaveWarningModel(getSessionSaveState(getModelName())) || automaticLibraryWarning(getModelName()) || presentationWarningModel(runtime.history, runtime.initGuard, location.href);
     if (warning) return warning;
     if (runtime.isStopped) {
