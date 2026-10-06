@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **3.24.1** ([24h comparison guide](docs/clock-comparison.md)). [Library chart controls guide](docs/library-chart-controls.md). [Follow live guide](docs/follow-live.md). [Audience trends and ratio guide](docs/audience-trends.md). [Sessions Book guide](docs/sessions-book.md). The simplified Current Live Session card provides Keep in Library, Auto, Compare with previous, and History. File controls are below the session list, and exports remain on stored-session menus and the separate replay card. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation instructions, see the [README](readme.md).
+Detailed reference for **3.24.1** ([24h comparison guide](docs/clock-comparison.md)). [Library chart controls guide](docs/library-chart-controls.md). [Follow live guide](docs/follow-live.md). [Audience trends and ratio guide](docs/audience-trends.md). [Sessions Book guide](docs/sessions-book.md). [ATH cleanup guide](docs/ath-retention.md). The simplified Current Live Session card provides Keep in Library, Auto, Compare with previous, and History. File controls are below the session list, and exports remain on stored-session menus and the separate replay card. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation instructions, see the [README](readme.md).
 
 ## Contents
 
@@ -48,13 +48,15 @@ Keep only one enabled copy of TierScope. After an update, refresh existing room 
 | Compact-view timer controls | Adjust the interval from 30 to 300 seconds; presets are 30s, 60s, 2m, and 5m. |
 | Row circle or icon | Collapse that row into the strip below the header. |
 | Boxed icon in the collapsed-row strip | Restore its row to its original position. |
-| Lamp slider | Adjust the main background and standard tier-row fills. |
+| Lamp slider | Adjust the panel, Library and standard tier-row backgrounds. |
 | Moon–sun switch at the bottom right of Controls | Moon / blue track for dark mode; sun / amber track for bright mode. Click or press Space when focused to switch. |
 | **Replay** | Open recorded history for the current room. |
 | **Library** | Open recordings, model folders, session files and exports, summaries, comparison and backups beside the chart. |
 | **Reset** | Confirm clearing this room’s history, counters, and elapsed time, then request one fresh scan. Keep the automatic-scan pause state and layout preferences. |
 
 The top control row shows **Controls**, elapsed time and the scan countdown/status. The bottom row contains **Library**, **Replay**, play/pause, **Stop**, **Reset** and the theme switch. Library and Replay match the other action buttons, and Library uses the same pink accent as its replay shortcut. Reserved timer space keeps these rows steady as status text changes.
+
+The expanded footer reserves separate columns for acquisition status, transparency controls and the TierScope logo/version. Growing API sample-age text and changing opacity percentages do not move or resize the slider. Long status messages are abbreviated in their column; hover for the full explanation.
 
 On the homepage and directory pages (including Followed, Female, Male, Couple and Trans cams), TierScope starts minimized with **Open a room**. Live tracking controls are disabled. These pages do not start acquisition, tracking clocks or DOM health checks, even if a Users-tab element is present. Library and saved-file Replay remain available. Directory actions neither create nor clear shared request restrictions; genuine room restrictions still apply across tabs. Opening a broadcast room starts its normal tracking behavior.
 
@@ -165,7 +167,11 @@ Replay uses the room's ATH records captured when it opens, so background live sc
 
 **Clear Room ATH…** in the same menu is a separate, confirmed action for the displayed room (the file's room during FILE REPLAY). It preserves session history and files. After clearing, only new accepted samples or an explicit file addition start new records; reloading an old session does not restore the cleared peaks. A storage failure is reported in the menu and high-value tooltip; unsaved peaks remain local to the open tab and are retried on later accepted scans. Invalid or unsupported stored records are skipped and preserved.
 
-[Manual cleanup of ATH for rooms not visited in over 90 days](docs/ath-retention.md). Existing records get a saved 90-day grace period; cleanup previews the room count and protects active rooms.
+**Clear inactive ATH (90 days)…** in **Charts & highs** previews how many rooms have not been visited in more than 90 days, then asks for confirmation. If none qualify, it shows a message without a confirmation. Cleanup is manual; ATH otherwise remain stored until cleared. Library sessions, session highs, favorites and preferences are preserved.
+
+The cutoff uses recorded visits, not the dates when highs were set. Opening a broadcast room counts as a visit even while tracking is paused or stopped; activity refreshes once a minute while the room stays open. Directory pages and opening another room's saved file do not count as visits to that recorded room. Existing ATH receive a durable **90-day grace period** when this version first finds them; refresh does not restart it.
+
+Cleanup rechecks each room after confirmation and protects activity in other tabs. Changed or unreadable records are skipped, and failed clears are reported. Small visit and generation markers remain to prevent outdated snapshots from restoring retired highs. Visit/activity metadata is not transferred in backups. See the [ATH cleanup guide](docs/ath-retention.md) for grace, tab activity, imports and storage-failure details.
 
 ### High-value pulses
 
@@ -295,7 +301,9 @@ Automatic updates preserve saved names and notes. Draft notes also follow a veri
 
 ### Finding, annotating and moving recordings
 
-Choose a model folder or use **Model** to switch directly between models and **All sessions**. **From** and **Through** use the first retained sample's calendar date in your browser's local timezone; both dates are inclusive, including daylight-saving transitions. An invalid range shows no matches until corrected. Search matches titles, model names and recording notes within the selected model and dates. Sort newest/oldest first, by title or model, or with favorite models first. **Favorites only** includes every recording from starred models and works with the other filters. Filters and selections last while Library is open; **Clear filters** preserves the selection and **Clear** in the selection controls preserves the filters.
+Choose a model folder or use **Model** to switch directly between models and **All sessions**. **From** and **Through** use the first retained sample's calendar date in your browser's local timezone; both dates are inclusive, including daylight-saving transitions. An invalid range shows no matches until corrected. Search matches titles, model names and recording notes within the selected model and dates. **Favorites only** includes every recording from starred models and works with the other filters. Filters and selections last while Library is open; **Clear filters** preserves the selection and **Clear** in the selection controls preserves the filters.
+
+The **Sort** menu offers **Newest First**, **Oldest First**, **Alphabetical**, **Favorites First**, **Highest number of sessions**, and **Lowest number of sessions**. Date sorting uses each session's first retained sample timestamp, including after renaming. Alphabetical orders model folders by name; their sessions stay newest first. Favorites First places starred models' sessions first, with newest sessions first within each model. Session-count sorting uses sessions matching the current filters, consistent with the counts on the model cards. Equal counts use model name; sessions within each model remain newest first.
 
 Use the star in the model header, Current Live Session card, beside a model folder, or **Favorite model** inside the folder. Adding a favorite asks for confirmation before enabling automatic keeping for that model. Existing or imported favorites remain starred with automatic keeping off; use **Enable automatic keeping…** to confirm each one. Removing the star stops automatic keeping and retains sessions already kept. Its choice applies to every recording in that folder and survives deleting individual recordings. Stars set on recordings in beta 1 become model favorites without overriding later model choices. Under a recording’s **More…**, edit up to 2,000 characters of plain-text notes and choose **Save notes**. Unsaved notes stay in this tab through selection, filtering, tab changes and closing/reopening Library. **Save notes** writes the note; **Discard changes** removes the draft. The **unsaved notes · Review** button shows all drafts, including notes for recordings that became unavailable. Those drafts remain available to copy or discard; they are never attached to a different recording by guessing from its date. If saved notes changed in another tab, saving asks before replacing them. A failed save retains the draft. Drafts are temporary: save before refreshing or leaving the site; the browser is asked to warn while drafts remain.
 
@@ -534,10 +542,12 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 ## Version history
 
-
-
 | Version | Notes |
 | --- | --- |
+| **3.24.1** | Update Sessions Book with Newest/Oldest First, Alphabetical, Favorites First and highest/lowest session counts. Keep sessions ordered by date within models; use filtered card counts for count-based sorting. |
+| **3.24.1-beta.1** | Preview the six sort options and count-based model ordering; make Alphabetical apply to model names while sessions remain newest first regardless of titles. |
+| **3.24.0** | Add confirmed cleanup of ATH for rooms not visited in over 90 days, with a durable grace period for existing records and protection for active tabs and concurrent changes. Stabilize footer status, transparency controls and logo positions. |
+| **3.24.0-beta.4** | Preview manual inactive-room ATH cleanup with separate visit/activity metadata, count confirmation, verified safety copies and storage-failure handling. |
 | **3.23.2** | Keep non-broadcast pages minimized and outside live acquisition and shared retry changes; group Automatic keeping under Storage limits. |
 | **3.23.1** | Add a configurable minimum for automatic Library keeping, defaulting to five minutes of retained sample coverage. Exclude pauses and gaps; preserve manual saving at any duration and existing Library sessions. |
 | **3.23.0** | Release 24h time-of-day comparisons; add First/Latest dates and total covered time to model cards, and use Sessions terminology across Library. |
