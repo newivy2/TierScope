@@ -23,7 +23,7 @@ import { createModelCardReader, filterLibraryEntries } from './library-query.js'
 import { recordingFilters } from './tools-view-helpers.js';
 import { exportLibrarySelection, importLibraryBundle, libraryImportBundle } from './library-transfer.js';
 import { renderAnalysisChart } from './analysis-chart-view.js';
-import { createModelHistoryReader, previousModelSessionIds } from './model-history.js';
+import { createModelHistoryReader, latestModelSessionIds, previousModelSessionIds } from './model-history.js';
 import { renderModelHistoryView } from './model-history-view.js';
 import { freezeRecordingData } from './immutable-data.js';
 import { isPlaybackCurrent } from './playback-data.js';
@@ -32,7 +32,7 @@ import { getStorageKey } from './record-validation.js';
 import { downloadRecording } from './recording-exports.js';
 import { downloadTrackingReport } from './reports.js';
 import { runtime } from './runtime.js';
-import { ANALYSIS_METRICS, analysisSeries, averageAnalysisThresholds, compareRecordingSet, parseAnalysisThresholds, summarizeAudience, summarizeSession, summarizeThresholds } from './session-analysis.js';
+import { MAX_COMPARE_RECORDINGS, ANALYSIS_METRICS, analysisSeries, averageAnalysisThresholds, compareRecordingSet, parseAnalysisThresholds, summarizeAudience, summarizeSession, summarizeThresholds } from './session-analysis.js';
 import { captureSessionFile, captureLiveSessionFile } from './session-capture.js';
 import { validateSessionFile } from './session-file-format.js';
 import { getSessionSaveState } from './session-health.js';
@@ -503,6 +503,15 @@ export function openSessionTools(focusTarget) {
         if (libraryRoom && libraryRoom !== '*' && !state.entries.some(entry => entry.archive.room.toLowerCase() === libraryRoom)) libraryFilters.room = libraryRoom = '';
         const callbacks = {
             cardSummary: entries => modelCardReader.read(entries),
+            modelComparisonIds: room => latestModelSessionIds(state.entries, room),
+            compareModel: room => {
+                const ids = latestModelSessionIds(state.entries, room);
+                if (ids.length < 2) return;
+                [selectedA, selectedB] = ids; selectedExtra = ids.slice(2);
+                Object.assign(analysisFilters, {room, query: '', from: '', to: ''});
+                pickerOpen.compare = false; render('compare');
+                dialog.querySelector('#tools-analysis-chart')?.focus();
+            },
             duration: formatElapsedTime,
             room: room => { libraryRoom = room; },
             history: openHistory,
@@ -522,7 +531,7 @@ export function openSessionTools(focusTarget) {
             rename: entry => { const title = window.prompt('Session title (up to 80 characters):', entry.title); if (title !== null) { renameLibrarySession(entry.id, title); render('library'); } },
             delete: entry => { if (confirm('Delete this library session: ' + (entry.title || entry.archive.room) + '?\n\nLive tracking, ATH and downloaded files are unchanged.')) { removeLibrarySession(entry.id); render('library'); tell('Library session deleted.'); } }
         };
-        renderLibraryBrowser(content, state.entries, libraryFilters, librarySelection, Object.fromEntries(Object.entries(callbacks).map(([key, fn]) => [key, action(fn)])), libraryDisclosures);
+        renderLibraryBrowser(content, state.entries, libraryFilters, librarySelection, Object.fromEntries(Object.entries(callbacks).map(([key, fn]) => [key, action(fn)])), libraryDisclosures, MAX_COMPARE_RECORDINGS);
         if (state.damaged.length) {
             node(content, 'p', state.damaged.length + ' unreadable library record(s) were retained.', 'tools-muted');
             if (state.unavailable.length) node(content, 'p', 'Some records could not be read. The displayed storage size excludes them; saving new sessions waits until they can be read.', 'tools-muted');
@@ -642,8 +651,8 @@ export function openSessionTools(focusTarget) {
             });
             const used = new Set([selectedA, selectedB, ...selectedExtra]);
             const next = filteredSources.find(item => !used.has(item.id));
-            button(sourceControls, 'Add session', () => { if (next && selectedExtra.length < 4) { selectedExtra.push(next.id); render(tab); } }, 'tools-compare-add').disabled = selectedExtra.length >= 4 || !next;
-            node(sourceControls, 'span', (2 + selectedExtra.length) + ' / 6 slots', 'tools-muted');
+            button(sourceControls, 'Add session', () => { if (next && selectedExtra.length < MAX_COMPARE_RECORDINGS - 2) { selectedExtra.push(next.id); render(tab); } }, 'tools-compare-add').disabled = selectedExtra.length >= MAX_COMPARE_RECORDINGS - 2 || !next;
+            node(sourceControls, 'span', (2 + selectedExtra.length) + ' / ' + MAX_COMPARE_RECORDINGS + ' slots', 'tools-muted');
 
         }
         followControl(content);

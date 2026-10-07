@@ -45,7 +45,14 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   assert.match(await page.locator('#tools-room-shortcuts').textContent(),/History · 0/);
   assert(await page.evaluate(()=>document.querySelector('.tools-current').contains(document.getElementById('tools-room-shortcuts'))));
   await page.click('#tools-room-history');assert.match(await page.locator('#tools-content').textContent(),/No saved sessions for this model/);
-  await page.click('#tools-history-back');assert.equal(await page.evaluate(()=>document.activeElement.id),'tools-sessions-book-toggle');await openLibraryBook(page,false);await page.click('#tools-folder-history_model');
+  await page.click('#tools-history-back');assert.equal(await page.evaluate(()=>document.activeElement.id),'tools-sessions-book-toggle');await openLibraryBook(page,false);
+  assert(await page.locator('#tools-folder-compare-other_model').isDisabled());
+  await page.locator('#tools-folder-compare-history_model').focus();await page.keyboard.press('Enter');
+  assert.deepEqual(await page.locator('[id^=tools-source-]').evaluateAll(els=>els.map(e=>e.value)),['history_2','history_1','history_0']);
+  assert.equal(await page.locator('#tools-recording-picker').getAttribute('open'),null);
+  assert.equal(await page.evaluate(()=>document.activeElement.id),'tools-analysis-chart');
+  assert.deepEqual(await page.evaluate(()=>ViewerTracker.__modelHistory.state()),before);
+  await page.click('[data-tools-tab=library]');await openLibraryBook(page,false);await page.click('#tools-folder-history_model');
   await page.locator('#tools-model-history').focus();await page.keyboard.press('Enter');
   assert.equal(await page.evaluate(()=>document.activeElement.id),'tools-history-back');
   const stats=()=>page.locator('#tools-history-stats dd').allTextContents();
@@ -127,13 +134,19 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   await page.selectOption('#tools-history-range','10');assert.equal(await page.locator('#tools-history-recording option').count(),10);assert.equal((await stats())[0],'10 / 55');
   assert.deepEqual(await page.locator('#tools-history-recording option').evaluateAll(options=>options.map(o=>o.value)),Array.from({length:10},(_,i)=>'history_'+(54-i)));
   await page.selectOption('#tools-history-recording','history_45');await page.click('#tools-history-compare');
-  assert.deepEqual(await page.locator('[id^=tools-source-]').evaluateAll(selects=>selects.map(s=>s.value)),['history_45','history_44','history_43','history_42','history_41','history_40']);
-  assert.equal(await page.locator('#tools-chart-inspection tbody tr').count(),6);assert.equal(await page.locator('#tools-analysis-model').inputValue(),'history_model');
+  assert.deepEqual(await page.locator('[id^=tools-source-]').evaluateAll(selects=>selects.map(s=>s.value)),Array.from({length:12},(_,i)=>'history_'+(45-i)));
+  assert.equal(await page.locator('#tools-chart-inspection tbody tr').count(),12);assert.equal(await page.locator('#tools-analysis-model').inputValue(),'history_model');
   await page.click('[data-tools-tab=library]');await page.click('#tools-model-history');
   await page.selectOption('#tools-history-range','30');assert.equal(await page.locator('#tools-history-table tbody tr').count(),30);
   await page.click('#tools-history-back');assert.equal(await page.evaluate(()=>document.activeElement.id),'tools-model-history');
   await page.click('#tools-model-history');await page.keyboard.press('Escape');assert.equal(await page.locator('#tierscope-session-tools').count(),0);assert.equal(await page.evaluate(()=>document.activeElement.id),'btn-control-library');
-  await page.click('#btn-control-library');await openLibraryBook(page,false);await page.click('#tools-folder-history_model');await page.click('#tools-model-history');
+  await page.click('#btn-control-library');await openLibraryBook(page,false);
+  await page.locator('#tools-library-search-menu').evaluate(e=>e.open=true);await page.locator('#tools-library-from').fill('2026-10-01');
+  assert.match(await page.locator('#tools-folder-compare-history_model').getAttribute('title'),/12 latest stored sessions/);
+  await page.click('#tools-folder-compare-history_model');
+  assert.deepEqual(await page.locator('[id^=tools-source-]').evaluateAll(els=>els.map(e=>e.value)),Array.from({length:12},(_,i)=>'history_'+(54-i)));
+  assert.equal(await page.locator('#tools-analysis-from').inputValue(),'','card comparison uses full model history');
+  await page.click('[data-tools-tab=library]');await page.click('#tools-library-clear');await openLibraryBook(page,false);await page.click('#tools-folder-history_model');await page.click('#tools-model-history');
   await page.evaluate(()=>{history.pushState({},'', '/next_room/');ViewerTracker.__modelHistory.checkUrlChange();});
   assert.equal(await page.locator('#tierscope-session-tools').count(),0,'navigation disposes history view');
   // Opening Library on this model's actual page offers its saved history directly.
@@ -143,7 +156,7 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   await roomPage.screenshot({path:'/tmp/tierscope-model-history-shortcut-'+engine+'.png'});
   await roomPage.locator('#tools-room-history').focus();await roomPage.keyboard.press('Enter');
   assert.equal(await roomPage.locator('#tools-history-recording').inputValue(),'history_54');await roomPage.click('#tools-history-compare');
-  assert.deepEqual(await roomPage.locator('[id^=tools-source-]').evaluateAll(selects=>selects.map(s=>s.value)),['history_54','history_53','history_52','history_51','history_50','history_49']);
+  assert.deepEqual(await roomPage.locator('[id^=tools-source-]').evaluateAll(selects=>selects.map(s=>s.value)),Array.from({length:12},(_,i)=>'history_'+(54-i)));
   await roomPage.evaluate(()=>{history.pushState({},'', '/tags/testroom/');ViewerTracker.__modelHistory.checkUrlChange();});
   await roomPage.click('#btn-control-library');assert(await roomPage.locator('#tools-room-history').isHidden(),'directory pages have no model shortcut');
   await roomPage.close();

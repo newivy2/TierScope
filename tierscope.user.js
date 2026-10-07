@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.24.2
+// @version      3.25.0-beta.1
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -2177,9 +2177,13 @@ underlying system, so should run in the browser, Node, or Plask.
       /** @type {Record<import('./session-types').Tier, number>} */
       Object.fromEntries(tiers.map((key) => [key, 0]))
     );
+    const genderCounts = { female: 0, trans: 0 };
     for (const user of session.users.values()) {
       if (counts[user.tier] !== void 0) counts[user.tier]++;
-      if (user.gender === "female" || user.gender === "trans") counts["female-trans"]++;
+      if (user.gender === "female" || user.gender === "trans") {
+        counts["female-trans"]++;
+        genderCounts[user.gender]++;
+      }
     }
     const total = session.users.size;
     const withTokens = tiers.filter((key) => key !== "gray" && key !== "female-trans").reduce((sum, key) => sum + counts[key], 0);
@@ -2187,6 +2191,7 @@ underlying system, so should run in the browser, Node, or Plask.
     const anonymousCount = acquisition && acquisition.source === "API" ? acquisition.api.anonymousCount : Math.max(0, session.roomTotal - total);
     return {
       counts,
+      genderCounts,
       total,
       withTokens,
       anonymousCount,
@@ -3430,6 +3435,7 @@ underlying system, so should run in the browser, Node, or Plask.
     if (runtime.highMode !== "ath" && frame.fullRoomTotal > 0 && frame.fullRoomTotal >= frame.roomTotalHigh) highlights.roomTotal = true;
     return freezeRecordingData({
       counts: __spreadValues({}, frame.counts),
+      genderCounts: frame.genderCounts ? __spreadValues({}, frame.genderCounts) : null,
       total: frame.total,
       withTokens: frame.withTokens,
       anonymousCount: frame.anonymousCount,
@@ -3733,6 +3739,9 @@ underlying system, so should run in the browser, Node, or Plask.
     const ratio = anonymous / registered;
     return ratio >= 0.95 && ratio <= 1.05 ? "1:1" : ratio.toFixed(1) + "x";
   }
+  function femaleTransDescription(frame) {
+    return frame.genderCounts ? "Female: " + frame.genderCounts.female.toLocaleString() + "\nTrans: " + frame.genderCounts.trans.toLocaleString() : "Female / trans: " + frame.counts["female-trans"].toLocaleString() + "\nSeparate female/trans counts unavailable in this saved sample.";
+  }
 
   // src/status-view.js
   function renderStatus(element, model) {
@@ -3879,6 +3888,8 @@ underlying system, so should run in the browser, Node, or Plask.
     var displayHistory = frame.history;
     var highlights = frame.highlights;
     updateCollapsedRowStatus(frame, highlights);
+    var genderRow = document.getElementById("tier-row-female-trans");
+    if (genderRow) genderRow.title = femaleTransDescription(frame);
     var withTokensPct = total > 0 ? Math.round(withTokens / total * 100) + "%" : "0%";
     var registeredPct = fullRoomTotal > 0 ? Math.round(total / fullRoomTotal * 100) + "%" : "0%";
     var headerText = document.getElementById("header-text");
@@ -4006,6 +4017,7 @@ underlying system, so should run in the browser, Node, or Plask.
       var high = displayHigh(frame, historyKey, value);
       var context = frame.isPlayback ? "Replay" : frame.isRestored ? "Saved sample" : "Latest sample";
       button.title = row.label + ": " + value.toLocaleString() + " (" + displayHighLabel(high) + "). " + displayHighDescription(high) + ". " + context + ". Click to restore row.";
+      if (row.key === "female-trans") button.title += "\n" + femaleTransDescription(frame);
       button.setAttribute("aria-label", "Restore " + row.label + " row. " + context + ": " + value.toLocaleString());
       button.style.background = highlights && highlights[historyKey] ? "rgba(50, 205, 50, 0.22)" : "rgba(var(--panel-row-rgb),calc(0.05 * var(--tier-background-scale, 1)))";
     });
@@ -5713,9 +5725,9 @@ underlying system, so should run in the browser, Node, or Plask.
       axisMs: sharedLength ? limitMs : Math.max(spanA, spanB)
     };
   }
-  var MAX_COMPARE_RECORDINGS = 6;
+  var MAX_COMPARE_RECORDINGS = 12;
   function compareRecordingSet(archives, metric = "room", threshold = 100, sharedLength = true) {
-    if (!archives.length || archives.length > MAX_COMPARE_RECORDINGS) throw new Error("Compare up to six sessions.");
+    if (!archives.length || archives.length > MAX_COMPARE_RECORDINGS) throw new Error("Compare up to twelve sessions.");
     const spans = archives.map((archive) => analysisSeries(archive, metric).times.at(-1) || 0);
     const limitMs = sharedLength ? Math.min(...spans) : Infinity;
     return {
@@ -6187,7 +6199,8 @@ underlying system, so should run in the browser, Node, or Plask.
 #tierscope-session-tools .tools-row{border:1px solid var(--panel-divider);border-left:3px solid #ff69b480;background:rgba(var(--panel-row-rgb),.035);border-radius:4px;padding:8px;margin:6px 0;overflow-wrap:anywhere}
 #tierscope-session-tools .tools-row strong{font-size:1.05em}
 #tierscope-session-tools .tools-folder{margin:5px 0;display:flex;gap:5px;align-items:stretch}
-#tierscope-session-tools .tools-folder .tools-folder-open{display:flex;flex-direction:column;gap:4px;flex:1;text-align:left;padding:9px;border-left:3px solid #ff69b480;background:rgba(var(--panel-row-rgb),.04)}
+#tierscope-session-tools .tools-folder .tools-folder-open{display:flex;flex-direction:column;gap:4px;flex:1;min-width:0;text-align:left;padding:9px;border-left:3px solid #ff69b480;background:rgba(var(--panel-row-rgb),.04)}
+#tierscope-session-tools .tools-folder-actions{display:flex;flex-direction:column;justify-content:center;gap:4px;flex-shrink:0}
 #tierscope-session-tools .tools-folder-name{font-weight:bold;color:var(--panel-text);overflow-wrap:anywhere}
 #tierscope-session-tools .tools-folder-meta{font-size:.9em;color:var(--panel-muted)}
 #tierscope-session-tools .tools-search{display:flex;width:100%;gap:6px;align-items:center;margin:8px 0}
@@ -6341,7 +6354,7 @@ underlying system, so should run in the browser, Node, or Plask.
   }
 
   // src/library-browser-view.js
-  function renderLibraryBrowser(parent, entries, filters, selected, actions, disclosures) {
+  function renderLibraryBrowser(parent, entries, filters, selected, actions, disclosures, comparisonLimit) {
     const present = new Set(entries.map((entry) => entry.id));
     for (const id of selected) if (!present.has(id)) selected.delete(id);
     let shown = 50;
@@ -6394,8 +6407,8 @@ underlying system, so should run in the browser, Node, or Plask.
     function updateSelection() {
       if (selected.size) selectionTools.open = true;
       selection.textContent = selected.size + " selected" + ([...selected].some((id) => !matching.some((entry) => entry.id === id)) ? " · includes hidden sessions" : "");
-      compare.disabled = selected.size < 2 || selected.size > 6;
-      compare.title = "Select 2–6 sessions to compare";
+      compare.disabled = selected.size < 2 || selected.size > comparisonLimit;
+      compare.title = "Select 2–" + comparisonLimit + " sessions to compare";
       download.disabled = !selected.size;
       for (const row of list.querySelectorAll("[data-library-id]")) row.querySelector("input[type=checkbox]").checked = selected.has(row.dataset.libraryId);
     }
@@ -6453,7 +6466,13 @@ underlying system, so should run in the browser, Node, or Plask.
         toolNode(open, "span", recordings.length + (recordings.length === 1 ? " session" : " sessions") + " · First " + new Date(summary.first).toLocaleDateString() + " · Latest " + new Date(summary.latest).toLocaleDateString(), "tools-folder-meta");
         const covered = toolNode(open, "span", "Total covered time " + actions.duration(summary.coveredMs), "tools-folder-meta");
         covered.title = "Sum of covered intervals in sessions matching the current filters. Gaps and time after the final sample are excluded; overlapping sessions are counted separately.";
-        favoriteButton(row, room3, true);
+        const controls = toolNode(row, "div", void 0, "tools-folder-actions");
+        favoriteButton(controls, room3, true);
+        const ids = actions.modelComparisonIds(room3);
+        const compareModel = toolButton(controls, "Compare", () => actions.compareModel(room3), "tools-folder-compare-" + room3);
+        compareModel.disabled = ids.length < 2;
+        compareModel.setAttribute("aria-label", "Compare stored sessions for " + room3);
+        compareModel.title = ids.length < 2 ? "Keep at least two sessions for this model to compare." : "Compare the " + ids.length + " latest stored sessions for " + room3 + ", independently of the search filters.";
       }
       else for (const entry of visible.slice(0, shown)) {
         const row = toolNode(list, "article", void 0, "tools-row");
@@ -6601,7 +6620,9 @@ underlying system, so should run in the browser, Node, or Plask.
     const dark = ["#ff69b4", "#79baff", "#68d391", "#ffd166", "#c4a3ff", "#ff987d"];
     const bright = ["#b42370", "#175db0", "#176f36", "#835900", "#7140a6", "#a23c20"];
     const newestFirst = series.map((s, i) => i).sort((a, b) => series[b].timestamps[0] - series[a].timestamps[0] || a - b);
-    const colorIndices = series.map((s, i) => newestFirst.indexOf(i));
+    const ranks = series.map((s, i) => newestFirst.indexOf(i));
+    const colorIndices = ranks.map((rank) => rank < 6 ? rank : 1 + (rank - 6) % 5);
+    const opacities = ranks.map((rank) => rank < 6 ? 1 : Math.max(0.35, 0.85 - (rank - 6) * 0.1));
     const newest = newestFirst[0];
     const legendLabels = labels.map((label, i) => {
       const control = toolNode(legend, "label"), check = toolNode(control, "input");
@@ -6611,8 +6632,9 @@ underlying system, so should run in the browser, Node, or Plask.
       const swatch = toolNode(control, "span", "", "tools-series-swatch");
       swatch.setAttribute("aria-hidden", "true");
       swatch.style.borderTopStyle = i === newest ? "solid" : "dashed";
+      swatch.style.opacity = String(opacities[i]);
       toolNode(control, "span", String.fromCharCode(65 + i) + (series.length > 1 && i === newest ? " · Latest" : "") + " · " + label);
-      control.title = (series.length > 1 ? i === newest ? "Latest session — solid pink: " : "Earlier session — dashed: " : "") + label;
+      control.title = (series.length > 1 ? i === newest ? "Latest session — solid pink: " : "Earlier session — dashed" + (ranks[i] >= 6 ? ", " + Math.round(opacities[i] * 100) + "% opacity" : "") + ": " : "") + label;
       check.onchange = () => {
         if (!check.checked && hidden.size === series.length - 1) {
           check.checked = true;
@@ -6755,6 +6777,7 @@ underlying system, so should run in the browser, Node, or Plask.
         legendLabels[j].style.color = color;
         legendLabels[j].querySelector("input").disabled = hidden.size === series.length - 1 && !hidden.has(j);
         if (hidden.has(j)) continue;
+        ctx.globalAlpha = opacities[j];
         ctx.strokeStyle = ctx.fillStyle = color;
         ctx.lineWidth = 1.8;
         ctx.lineCap = "butt";
@@ -6781,6 +6804,7 @@ underlying system, so should run in the browser, Node, or Plask.
           ctx.fill();
         });
       }
+      ctx.globalAlpha = 1;
       range.textContent = "Chart window " + axisLabel(start) + " – " + axisLabel(end) + (axisMode === "clock" ? " · 24h local clock" : " · full comparison/session range " + elapsed(axisMs));
       hint.textContent = (axisMode === "clock" ? "Aligned by local time of day. Midnight crossings continue at the start of the chart. Clock changes are separate segments; repeated clock times can show multiple dated values. Statistics use full sessions." : "Aligned from each session’s first retained sample, using real elapsed time. Hidden lines and zoom do not change summary totals or the shared comparison length.") + " Move to inspect; click to pin, drag to zoom, or use the buttons and arrow keys. Gaps have no assumed samples.";
       zoomIn.disabled = end - start <= Math.min(1e3, axisMs);
@@ -6961,6 +6985,9 @@ underlying system, so should run in the browser, Node, or Plask.
   function previousModelSessionIds(entries, archive) {
     const start = recordingStart(archive), room2 = archive.room.toLowerCase();
     return entries.filter((entry) => entry.archive.room.toLowerCase() === room2 && recordingStart(entry.archive) < start).sort((a, b) => recordingStart(b.archive) - recordingStart(a.archive) || b.id.localeCompare(a.id)).slice(0, MAX_COMPARE_RECORDINGS - 1).map((entry) => entry.id);
+  }
+  function latestModelSessionIds(entries, room2) {
+    return entries.filter((entry) => entry.archive.room.toLowerCase() === room2.toLowerCase()).sort((a, b) => b.archive.session.history.timestamps[0] - a.archive.session.history.timestamps[0] || b.id.localeCompare(a.id)).slice(0, MAX_COMPARE_RECORDINGS).map((entry) => entry.id);
   }
 
   // src/model-history-view.js
@@ -8162,6 +8189,18 @@ underlying system, so should run in the browser, Node, or Plask.
       if (libraryRoom && libraryRoom !== "*" && !state.entries.some((entry) => entry.archive.room.toLowerCase() === libraryRoom)) libraryFilters.room = libraryRoom = "";
       const callbacks = __spreadProps(__spreadValues({
         cardSummary: (entries) => modelCardReader.read(entries),
+        modelComparisonIds: (room2) => latestModelSessionIds(state.entries, room2),
+        compareModel: (room2) => {
+          var _a;
+          const ids = latestModelSessionIds(state.entries, room2);
+          if (ids.length < 2) return;
+          [selectedA, selectedB] = ids;
+          selectedExtra = ids.slice(2);
+          Object.assign(analysisFilters, { room: room2, query: "", from: "", to: "" });
+          pickerOpen.compare = false;
+          render("compare");
+          (_a = dialog.querySelector("#tools-analysis-chart")) == null ? void 0 : _a.focus();
+        },
         duration: formatElapsedTime,
         room: (room2) => {
           libraryRoom = room2;
@@ -8214,7 +8253,7 @@ underlying system, so should run in the browser, Node, or Plask.
           }
         }
       });
-      renderLibraryBrowser(content, state.entries, libraryFilters, librarySelection, Object.fromEntries(Object.entries(callbacks).map(([key, fn]) => [key, action(fn)])), libraryDisclosures);
+      renderLibraryBrowser(content, state.entries, libraryFilters, librarySelection, Object.fromEntries(Object.entries(callbacks).map(([key, fn]) => [key, action(fn)])), libraryDisclosures, MAX_COMPARE_RECORDINGS);
       if (state.damaged.length) {
         node(content, "p", state.damaged.length + " unreadable library record(s) were retained.", "tools-muted");
         if (state.unavailable.length) node(content, "p", "Some records could not be read. The displayed storage size excludes them; saving new sessions waits until they can be read.", "tools-muted");
@@ -8434,12 +8473,12 @@ underlying system, so should run in the browser, Node, or Plask.
         const used = /* @__PURE__ */ new Set([selectedA, selectedB, ...selectedExtra]);
         const next = filteredSources.find((item) => !used.has(item.id));
         button(sourceControls, "Add session", () => {
-          if (next && selectedExtra.length < 4) {
+          if (next && selectedExtra.length < MAX_COMPARE_RECORDINGS - 2) {
             selectedExtra.push(next.id);
             render(tab);
           }
-        }, "tools-compare-add").disabled = selectedExtra.length >= 4 || !next;
-        node(sourceControls, "span", 2 + selectedExtra.length + " / 6 slots", "tools-muted");
+        }, "tools-compare-add").disabled = selectedExtra.length >= MAX_COMPARE_RECORDINGS - 2 || !next;
+        node(sourceControls, "span", 2 + selectedExtra.length + " / " + MAX_COMPARE_RECORDINGS + " slots", "tools-muted");
       }
       followControl(content);
       if (comparing) comparisonAxis(content);
@@ -10456,7 +10495,7 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/bootstrap.js
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.24.2";
+    runtime.TIERSCOPE_VERSION = "3.25.0-beta.1";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;

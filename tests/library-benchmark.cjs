@@ -7,6 +7,8 @@ const capacityMode=process.env.TIERSCOPE_BENCH_CAPACITY==='1';
 const automaticMode=process.env.TIERSCOPE_BENCH_AUTOMATIC==='1';
 const historyMode=process.env.TIERSCOPE_BENCH_HISTORY==='1';
 const compareMode=process.env.TIERSCOPE_BENCH_COMPARE==='1';
+const compareCount=Number(process.env.TIERSCOPE_BENCH_COMPARE_COUNT||6);
+assert(Number.isInteger(compareCount)&&compareCount>=2&&compareCount<=12);
 assert(Number(historyMode)+Number(compareMode)+Number(automaticMode)<=1,'Choose one benchmark mode');
 assert(Number.isFinite(throttle)&&throttle>=1);assert(Number.isInteger(rounds)&&rounds>0);
 const sourceFile=process.env.TIERSCOPE_SOURCE||path.join(root,'tierscope.user.js');
@@ -55,8 +57,8 @@ const source=prepareSource(fs.readFileSync(sourceFile,'utf8')).replaceAll('sched
  if(${compareMode}){
   const choose=(id,value)=>{const input=document.getElementById(id);input.value=value;input.dispatchEvent(new Event('change'));};
   tab('compare');choose('tools-source-a','bench_0');choose('tools-source-b','bench_1');
-  for(let i=2;i<6;i++){click('tools-compare-add');choose('tools-source-'+String.fromCharCode(97+i),'bench_'+i);}
-  measure('sixRecordingMetric',()=>click('tools-metric-withTokens'));
+  for(let i=2;i<${compareCount};i++){click('tools-compare-add');choose('tools-source-'+String.fromCharCode(97+i),'bench_'+i);}
+  measure('selectedRecordingMetric',()=>click('tools-metric-withTokens'));
   measure('zoomIn',()=>click('tools-chart-zoom-in'));
   const canvas=document.getElementById('tools-analysis-chart'),bounds=canvas.getBoundingClientRect(),costs=[];
   for(let i=0;i<140;i++){
@@ -119,7 +121,7 @@ const source=prepareSource(fs.readFileSync(sourceFile,'utf8')).replaceAll('sched
     const cdp=await page.context().newCDPSession(page);if(throttle>1)await cdp.send('Emulation.setCPUThrottlingRate',{rate:throttle});
     await cdp.send('HeapProfiler.collectGarbage');const beforeHeap=(await cdp.send('Runtime.getHeapUsage')).usedSize;
     if(process.env.TIERSCOPE_PROFILE_PATH){await cdp.send('Profiler.enable');await cdp.send('Profiler.start');}
-    const result=await page.evaluate(()=>ViewerTracker.__libraryBench.run());assert.equal(compareMode?result.compareRecordings:historyMode?result.historyRecordings:result.backupRecordings,compareMode?6:count);measurements.push(result);
+    const result=await page.evaluate(()=>ViewerTracker.__libraryBench.run());assert.equal(compareMode?result.compareRecordings:historyMode?result.historyRecordings:result.backupRecordings,compareMode?compareCount:count);measurements.push(result);
     if(process.env.TIERSCOPE_PROFILE_PATH){const {profile}=await cdp.send('Profiler.stop');fs.writeFileSync(process.env.TIERSCOPE_PROFILE_PATH+'-'+label+'-'+i+'.json',JSON.stringify(profile));}
     await cdp.send('HeapProfiler.collectGarbage');const openHeap=(await cdp.send('Runtime.getHeapUsage')).usedSize;
     await page.evaluate(async()=>{if(document.getElementById('tierscope-session-tools'))document.getElementById('btn-control-library').click();await new Promise(requestAnimationFrame);if(document.getElementById('tierscope-session-tools'))throw Error('Library did not close');});

@@ -33,7 +33,7 @@ export function buildPanelDisplayModel(frame) {
         catch (error) { favorite = {...favorite, error: 'Favorite unavailable. Open Library and refresh to retry.'}; }
     }
     if (runtime.highMode !== 'ath' && frame.fullRoomTotal > 0 && frame.fullRoomTotal >= frame.roomTotalHigh) highlights.roomTotal = true;
-    return freezeRecordingData({counts: {...frame.counts}, total: frame.total, withTokens: frame.withTokens,
+    return freezeRecordingData({counts: {...frame.counts}, genderCounts: frame.genderCounts ? {...frame.genderCounts} : null, total: frame.total, withTokens: frame.withTokens,
         anonymousCount: frame.anonymousCount, fullRoomTotal: frame.fullRoomTotal, roomTotalHigh: frame.roomTotalHigh,
         history: captureDisplayHistory(frame.history), historyEndIndex: frame.historyEndIndex,
         isPlayback: frame.isPlayback === true, isRestored: frame.isRestored === true,

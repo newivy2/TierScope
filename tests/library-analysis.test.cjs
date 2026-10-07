@@ -76,7 +76,7 @@ test('six-record comparison clips every recording to shared coverage independent
  assert.equal(shared.axisMs,2000);assert.equal(shared.summaries.length,6);assert.equal(shared.summaries[0].mean,15);
  assert.equal(shared.summaries[1].coveredMs,1000);assert.equal(shared.summaries[1].gapMs,1000);assert.equal(shared.summaries[1].peak,21);assert.equal(shared.summaries[1].sessionPeak,999);
  assert.equal(compareRecordingSet(archives,'room',20,false).axisMs,7000);assert.equal(JSON.stringify(archives),before);
- assert.throws(()=>compareRecordingSet([]));assert.throws(()=>compareRecordingSet([...archives,archives[0]]));
+ assert.throws(()=>compareRecordingSet([]));assert.throws(()=>compareRecordingSet(Array.from({length:13},()=>archives[0])));
 });
 
 
@@ -97,4 +97,15 @@ test('Sessions Book sorts models by matching session count and alphabetically wi
  assert.deepEqual(filterLibraryEntries(entries,{sort:'mostSessions',query:'Zulu'}).map(e=>e.id),['a1','b1'],'equal counts use model name');
  assert.deepEqual(filterLibraryEntries(entries,{sort:'mostSessions',room:'beta'}).map(e=>e.id),['b3','b2','b1']);
  assert.equal(JSON.stringify(entries),before);
+});
+
+
+test('twelve recordings preserve independent statistics and reject a thirteenth', async () => {
+ const {compareRecordingSet, MAX_COMPARE_RECORDINGS}=await analysis;
+ const archives=Array.from({length:12},(_,i)=>({room:'model'+i,session:{history:{timestamps:[1000,2000,3000],breaks:[false,false,i===10],total:[i,i+1,i+2],anonymous:[0,0,0],withTokens:[0,0,0]},roomTotalHigh:100,sessionHighs:{total:{value:100}}}}));
+ assert.equal(MAX_COMPARE_RECORDINGS,12);
+ const firstSix=compareRecordingSet(archives.slice(0,6)), full=compareRecordingSet(archives);
+ assert.equal(full.summaries.length,12); assert.deepEqual(full.summaries.slice(0,6),firstSix.summaries);
+ assert.equal(full.summaries[10].coveredMs,1000);assert.equal(full.summaries[11].coveredMs,2000);
+ assert.throws(()=>compareRecordingSet([...archives,archives[0]]),/twelve/);
 });

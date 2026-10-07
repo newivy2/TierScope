@@ -2,7 +2,7 @@
 
 [Install TierScope](https://raw.githubusercontent.com/newivy2/TierScope/main/tierscope.user.js). Keep one enabled copy of TierScope and refresh room tabs. [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.23.0).
 
-Open **Library → Compare**, select two to six sessions, and choose **X axis → 24h time of day**. Sessions align on the same local clock from **00:00 to 24:00**, making it easier to compare audiences at similar times on different dates.
+Open **Library → Compare**, select two to twelve sessions, and choose **X axis → 24h time of day**. Sessions align on the same local clock from **00:00 to 24:00**, making it easier to compare audiences at similar times on different dates.
 
 - A session from 23:00 to 01:00 appears at the right edge and continues at the left. There is no line joining the edges through the middle of the chart.
 - Gaps remain blank. Counts are held only between accepted samples in recorded intervals; the final sample adds no assumed duration.

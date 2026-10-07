@@ -1,5 +1,5 @@
 import { updateCompactDashboard } from './compact-view.js';
-import { anonymousRegisteredRatio, displayHigh, displayHighDescription, displayHighLabel } from './display-values.js';
+import { anonymousRegisteredRatio, femaleTransDescription, displayHigh, displayHighDescription, displayHighLabel } from './display-values.js';
 import { paintFavoriteButton } from './favorite-view.js';
 
 export function paintPanelFrame(frame) {
@@ -12,6 +12,8 @@ export function paintPanelFrame(frame) {
     var displayHistory = frame.history;
     var highlights = frame.highlights;
     updateCollapsedRowStatus(frame, highlights);
+    var genderRow = document.getElementById('tier-row-female-trans');
+    if (genderRow) genderRow.title = femaleTransDescription(frame);
     var withTokensPct = total > 0 ? Math.round((withTokens / total) * 100) + '%' : '0%';
     var registeredPct = fullRoomTotal > 0 ? Math.round((total / fullRoomTotal) * 100) + '%' : '0%';
     var headerText = document.getElementById('header-text');
@@ -131,6 +133,7 @@ export function updateCollapsedRowStatus(frame, highlights) {
         var context = frame.isPlayback ? 'Replay' : frame.isRestored ? 'Saved sample' : 'Latest sample';
         button.title = row.label + ': ' + value.toLocaleString() + ' (' + displayHighLabel(high) +
             '). ' + displayHighDescription(high) + '. ' + context + '. Click to restore row.';
+        if (row.key === 'female-trans') button.title += '\n' + femaleTransDescription(frame);
         button.setAttribute('aria-label', 'Restore ' + row.label + ' row. ' + context + ': ' + value.toLocaleString());
         button.style.background = highlights && highlights[historyKey] ?
             'rgba(50, 205, 50, 0.22)' : 'rgba(var(--panel-row-rgb),calc(0.05 * var(--tier-background-scale, 1)))';

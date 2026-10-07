@@ -14,6 +14,14 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   a.session.roomTotalHigh=45+i;a.session.roomTotalHighTime=start+120000;
   GM_setValue('tierscope:library:v1:organized_'+i,JSON.stringify({schemaVersion:1,addedAt:now,title:i===0?'alpha_model':'Recording '+(i+1),favorite:i===0,notes:i===0?'Opening day':'',archive:a}));
  }
+ },extended(){
+ const base=captureSessionFile();for(let i=0;i<13;i++){
+ const a=JSON.parse(JSON.stringify(base)),start=Date.UTC(2026,8,i+1,12);a.room='extended_model';
+ a.session.history.timestamps=a.session.history.timestamps.map((_,j)=>start+j*60000);a.session.sessionStartedAt=start;a.session.timestamp=start+180000;
+ for(const key of STORAGE_HISTORY_SERIES){if(key!=='anonymous')a.session.history[key]=a.session.history[key].map(v=>v+i);a.session.sessionHighs[key]={value:Math.max(...a.session.history[key]),time:start+120000};}
+ a.session.roomTotalHigh=45+i;a.session.roomTotalHighTime=start+120000;
+ GM_setValue('tierscope:library:v1:extended_'+i,JSON.stringify({schemaVersion:1,addedAt:start,title:'Extended '+i,archive:a}));
+ }
  },library:readSessionLibrary,archive:captureSessionFile,
  state:()=>({history:JSON.stringify(history),paused:isPaused,mode:presentationMode,ath:JSON.stringify(readAllTimeHighs(getModelName()).highs)}),
  theme:()=>{isDarkMode=!isDarkMode;applyPanelTheme();},
@@ -30,7 +38,7 @@ const file=(name,value)=>({name,mimeType:'application/json',buffer:Buffer.from(J
    window.GM_setValue=(k,v)=>localStorage.setItem(k,JSON.stringify(v));window.GM_deleteValue=k=>localStorage.removeItem(k);
    window.analysisStrokes=[];const stroke=CanvasRenderingContext2D.prototype.stroke;
    CanvasRenderingContext2D.prototype.stroke=function(...args){
-    if(!this.canvas.id&&document.getElementById('tools-analysis-chart'))window.analysisStrokes.push({color:this.strokeStyle,dash:this.getLineDash()});
+    if(!this.canvas.id&&document.getElementById('tools-analysis-chart'))window.analysisStrokes.push({color:this.strokeStyle,dash:this.getLineDash(),alpha:this.globalAlpha});
     return stroke.apply(this,args);
    };
   });
@@ -112,7 +120,7 @@ const file=(name,value)=>({name,mimeType:'application/json',buffer:Buffer.from(J
   await page.screenshot({path:'/tmp/tierscope-314-'+engine+'-library.png'});
   const download=page.waitForEvent('download');await page.click('#tools-export-selected');const bundle=JSON.parse(fs.readFileSync(await(await download).path(),'utf8'));
   assert.equal(bundle.library.length,6);assert.deepEqual(bundle.rooms,[]);assert.deepEqual(bundle.preferences,{});assert.deepEqual(bundle.favoriteModels,['alpha_model']);assert(bundle.library.some(e=>e.notes.includes('Remember this')));
-  await page.click('#tools-compare-selected');assert.equal(await page.locator('[id^=tools-source-]').count(),6);assert(await page.locator('#tools-compare-add').isDisabled());
+  await page.click('#tools-compare-selected');assert.equal(await page.locator('[id^=tools-source-]').count(),6);assert(await page.locator('#tools-compare-add').isEnabled());
   const defaultLabel=await page.locator('#tools-source-a option[value=organized_0]').textContent();assert.equal(defaultLabel.split('alpha_model').length-1,1,'default model title is not duplicated');assert.match(defaultLabel,/10\/1\/2026/);
   assert.match(await page.locator('#tools-source-a option[value=organized_1]').textContent(),/alpha_model — Recording 2 —/,'custom titles remain visible');
   assert.equal(await page.locator('#tools-summary-table thead th').count(),7);assert.equal(await page.locator('#tools-chart-inspection tbody tr').count(),6);
@@ -222,7 +230,43 @@ const file=(name,value)=>({name,mimeType:'application/json',buffer:Buffer.from(J
   // Closing/reopening keeps metadata while clearing transient selections.
   await page.keyboard.press('Escape');await page.click('#btn-control-library');await openLibraryBook(page);await page.selectOption('#tools-library-model','alpha_model');await page.check('#tools-library-favorites');
   assert.equal(await page.locator('.tools-row').count(),6);assert.match(await page.locator('.tools-recording-note').textContent(),/Remember this/);assert.match(await page.locator('#tools-library-selected').textContent(),/^0 selected/);
+  // Twelve slots retain the six established styles; only the older six fade.
+  await page.evaluate(()=>ViewerTracker.__organized.extended());await page.click('#tools-refresh-library');
+  await page.click('#tools-library-clear');await page.selectOption('#tools-library-model','extended_model');
+  await page.locator('#tools-library-selection').evaluate(e=>e.open=true);await page.click('#tools-select-matching');
+  assert(await page.locator('#tools-compare-selected').isDisabled(),'thirteen selected sessions cannot be compared');
+  await page.locator('[data-library-id="extended_0"] input[type=checkbox]').uncheck();
+  assert(await page.locator('#tools-compare-selected').isEnabled());await page.click('#tools-compare-selected');
+  assert.equal(await page.locator('[id^=tools-source-]').count(),12);assert(await page.locator('#tools-compare-add').isDisabled());
+  assert.equal(await page.locator('#tools-summary-table thead th').count(),13);
+  const styles=()=>page.locator('.tools-chart-legend label').evaluateAll(labels=>labels.map(e=>({opacity:Number(e.querySelector('.tools-series-swatch').style.opacity),dash:e.querySelector('.tools-series-swatch').style.borderTopStyle,color:e.style.color})));
+  let twelve=await styles();assert.deepEqual(twelve.map(s=>Math.round(s.opacity*100)),[100,100,100,100,100,100,85,75,65,55,45,35]);
+  assert.equal(twelve[0].dash,'solid');assert(twelve.slice(1).every(s=>s.dash==='dashed'));
+  await page.evaluate(()=>window.analysisStrokes=[]);await page.click('#tools-chart-reset');
+  const alphas=await page.evaluate(()=>window.analysisStrokes.filter(s=>['#b42370','#175db0','#176f36','#835900','#7140a6','#a23c20'].includes(s.color)).map(s=>Math.round(s.alpha*100)));
+  assert.deepEqual(alphas,[35,45,55,65,75,85,100,100,100,100,100,100]);
+  await page.locator('#tools-content').evaluate(e=>e.scrollTop=0);
+  await page.locator('#tools-recording-picker').evaluate(e=>e.open=false);
+  await page.screenshot({path:'/tmp/tierscope-twelve-'+engine+'-bright.png'});
+  const oldest=await page.locator('#tools-source-l').inputValue(),newest=await page.locator('#tools-source-a').inputValue();
+  await page.locator('#tools-recording-picker').evaluate(e=>e.open=true);
+  await page.selectOption('#tools-source-a',oldest);await page.selectOption('#tools-source-l',newest);
+  twelve=await styles();assert.equal(twelve[0].opacity,.35);assert.equal(twelve[11].opacity,1);assert.equal(twelve[11].dash,'solid');
+  await page.locator('[data-analysis-series="5"]').uncheck();assert.deepEqual(await styles(),twelve,'hidden lines do not reassign opacity');
+  assert.equal(await page.locator('#tools-chart-inspection tbody tr:visible').count(),11);
+  await page.locator('[data-analysis-series="5"]').check();
+  await page.locator('#tools-analysis-chart').focus();await page.keyboard.press('Home');
+  assert.equal(await page.locator('#tools-chart-inspection tbody tr').count(),12);
+  await page.selectOption('#tools-compare-axis','clock');
+  assert.equal(await page.locator('#tools-chart-inspection tbody tr').count(),12);
+  await page.evaluate(()=>ViewerTracker.__organized.theme());await page.waitForTimeout(80);
+  assert.equal((await styles())[0].opacity,.35);assert.equal((await styles())[11].opacity,1);
+  await page.locator('#tools-recording-picker').evaluate(e=>e.open=false);await page.locator('#tools-content').evaluate(e=>e.scrollTop=0);
+  await page.screenshot({path:'/tmp/tierscope-twelve-'+engine+'-dark.png'});
+  await page.setViewportSize({width:380,height:740});await page.waitForTimeout(80);
+  assert((await page.locator('#tierscope-session-tools').evaluate(e=>e.scrollWidth-e.clientWidth))<=1);
+  assert.deepEqual(await page.evaluate(()=>ViewerTracker.__organized.state()),before);
   await page.evaluate(()=>{history.pushState({},'', '/next_room/');ViewerTracker.__organized.checkUrlChange();});assert.equal(await page.locator('#tierscope-session-tools').count(),0);
-  assert.deepEqual(errors,[]);console.log(engine+': filtered library, metadata, bulk transfer, six-way comparison, cursor/gaps, zoom/pan, themes and isolation passed');
+  assert.deepEqual(errors,[]);console.log(engine+': filtered library, metadata, bulk transfer, six/twelve-way comparison, progressive opacity, cursor/gaps, zoom/pan, themes and isolation passed');
  }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

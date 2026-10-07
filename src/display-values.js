@@ -10,3 +10,9 @@ export function anonymousRegisteredRatio(anonymous, registered) {
     const ratio = anonymous / registered;
     return ratio >= 0.95 && ratio <= 1.05 ? '1:1' : ratio.toFixed(1) + 'x';
 }
+
+// Legacy recordings retain only the combined tier, never infer a split.
+export function femaleTransDescription(frame) {
+    return frame.genderCounts ? 'Female: ' + frame.genderCounts.female.toLocaleString() + '\nTrans: ' + frame.genderCounts.trans.toLocaleString() :
+        'Female / trans: ' + frame.counts['female-trans'].toLocaleString() + '\nSeparate female/trans counts unavailable in this saved sample.';
+}

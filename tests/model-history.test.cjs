@@ -31,18 +31,18 @@ test('latest recording windows are chronological with stable ties and retain sep
   for (const limit of [0,-1,NaN,1.5]) assert.throws(()=>reader.read(entries,'model','room',limit));
   assert.throws(()=>reader.read(entries,'model','unknown'));
 });
-test('history comparisons use the selected recording and five nearest earlier recordings from the same model', async () => {
+test('history comparisons use the selected recording and eleven nearest earlier recordings from the same model', async () => {
   const {createModelHistoryReader}=await modulePromise, reader=createModelHistoryReader();
   const entries=Array.from({length:12},(_,i)=>entry('r'+i,'Model',[i*1000,i*1000+500],[i,i+1]));
   entries.splice(4,0,entry('other','another',[3500,3800],[999,999]));
   const before=JSON.stringify(entries), all=reader.read(entries,'model');
   assert.deepEqual(all.recordings[0].comparisonIds,['r0']);
   assert.deepEqual(all.recordings[2].comparisonIds,['r2','r1','r0']);
-  assert.deepEqual(all.recordings.at(-1).comparisonIds,['r11','r10','r9','r8','r7','r6']);
+  assert.deepEqual(all.recordings.at(-1).comparisonIds,Array.from({length:12},(_,i)=>'r'+(11-i)));
   const latest=reader.read(entries,'model','room',3);
-  assert.deepEqual(latest.recordings[0].comparisonIds,['r9','r8','r7','r6','r5','r4'],'earlier selections are not limited to the chart window');
+  assert.deepEqual(latest.recordings[0].comparisonIds,Array.from({length:10},(_,i)=>'r'+(9-i)),'earlier selections are not limited to the chart window');
   latest.recordings[0].comparisonIds.length=0;
-  assert.equal(reader.read(entries,'model','room',3).recordings[0].comparisonIds.length,6);
+  assert.equal(reader.read(entries,'model','room',3).recordings[0].comparisonIds.length,10);
   assert.equal(JSON.stringify(entries),before);
   const ties=reader.read([entry('b','model',[1],[2]),entry('a','model',[1],[1])],'model');
   assert.deepEqual(ties.recordings[1].comparisonIds,['b','a']);
@@ -75,14 +75,14 @@ test('cached immutable recordings refresh by archive identity and never cache mu
 });
 
 
-test('live comparison selects five earlier sessions, excluding current copies, later sessions and other rooms', async () => {
+test('live comparison selects up to eleven earlier sessions, excluding current copies, later sessions and other rooms', async () => {
   const {previousModelSessionIds}=await modulePromise;
   const live=entry('live','MODEL',[10000,11000],[10,20]); live.archive.session.sessionStartedAt=8000;
   const older=Array.from({length:7},(_,i)=>entry('r'+i,'model',[i*1000,i*1000+500],[1,2]));
   const same=entry('saved-live','model',[8000,9000],[1,2]); same.archive.session.sessionStartedAt=8000;
   const entries=[...older,same,entry('other','other',[7000],[1]),entry('later','model',[12000],[1]),entry('overlap','model',[9000],[1])];
   const before=JSON.stringify(entries);
-  assert.deepEqual(previousModelSessionIds(entries,live.archive),['r6','r5','r4','r3','r2']);
+  assert.deepEqual(previousModelSessionIds(entries,live.archive),['r6','r5','r4','r3','r2','r1','r0']);
   assert.equal(JSON.stringify(entries),before);
   assert.deepEqual(previousModelSessionIds([same],live.archive),[]);
   assert.deepEqual(previousModelSessionIds([],live.archive),[]);
@@ -94,4 +94,21 @@ test('live comparison handles legacy start fallback, shorter histories and stabl
   const entries=[entry('a','model',[2000],[1]),entry('b','model',[2000],[2]),entry('future','model',[5000],[3])];
   assert.deepEqual(previousModelSessionIds(entries,live.archive),['b','a']);
   assert.deepEqual(previousModelSessionIds(entries.slice(0,1),live.archive),['a']);
+});
+
+test('live comparison caps at eleven earlier sessions and keeps them newest first',async()=>{
+ const {previousModelSessionIds}=await modulePromise;
+ const entries=Array.from({length:15},(_,i)=>entry('r'+i,'model',[i*1000,i*1000+500],[1,2]));
+ const live=entry('live','model',[20000,21000],[1,2]);
+ assert.deepEqual(previousModelSessionIds(entries,live.archive),Array.from({length:11},(_,i)=>'r'+(14-i)));
+});
+
+
+test('model card comparison chooses up to twelve latest stored sessions, with stable ties and no mutation',async()=>{
+ const {latestModelSessionIds}=await modulePromise;
+ const entries=Array.from({length:15},(_,i)=>entry('r'+i,'Model',[i*1000,i*1000+500],[1,2]));
+ entries.push(entry('other','another',[999999],[1]));const before=JSON.stringify(entries);
+ assert.deepEqual(latestModelSessionIds(entries,'MODEL'),Array.from({length:12},(_,i)=>'r'+(14-i)));
+ assert.equal(JSON.stringify(entries),before);assert.deepEqual(latestModelSessionIds(entries,'absent'),[]);
+ assert.deepEqual(latestModelSessionIds([entry('a','model',[1],[1]),entry('b','MODEL',[1],[2])],'model'),['b','a']);
 });
