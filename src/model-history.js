@@ -60,3 +60,11 @@ export function previousModelSessionIds(entries, archive) {
         .sort((a, b) => recordingStart(b.archive) - recordingStart(a.archive) || b.id.localeCompare(a.id))
         .slice(0, MAX_COMPARE_RECORDINGS - 1).map(entry => entry.id);
 }
+
+// Card shortcut uses complete stored history, independently of browse filters.
+/** @param {{id:string, archive:DatedArchive}[]} entries @param {string} room */
+export function latestModelSessionIds(entries, room) {
+    return entries.filter(entry => entry.archive.room.toLowerCase() === room.toLowerCase())
+        .sort((a, b) => b.archive.session.history.timestamps[0] - a.archive.session.history.timestamps[0] || b.id.localeCompare(a.id))
+        .slice(0, MAX_COMPARE_RECORDINGS).map(entry => entry.id);
+}

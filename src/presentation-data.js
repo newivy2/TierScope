@@ -17,14 +17,15 @@ export function captureDisplayHistory(history) {
  */
 export function liveDisplayData(session, tiers) {
     const counts = /** @type {Record<import('./session-types').Tier, number>} */ (Object.fromEntries(tiers.map(key => [key, 0])));
+    const genderCounts = {female: 0, trans: 0};
     for (const user of session.users.values()) {
         if (counts[user.tier] !== undefined) counts[user.tier]++;
-        if (user.gender === 'female' || user.gender === 'trans') counts['female-trans']++;
+        if (user.gender === 'female' || user.gender === 'trans') { counts['female-trans']++; genderCounts[user.gender]++; }
     }
     const total = session.users.size;
     const withTokens = tiers.filter(key => key !== 'gray' && key !== 'female-trans').reduce((sum, key) => sum + counts[key], 0);
     const acquisition = session.lastAcceptedAcquisition;
     const anonymousCount = acquisition && acquisition.source === 'API' ? acquisition.api.anonymousCount : Math.max(0, session.roomTotal - total);
-    return {counts, total, withTokens, anonymousCount, fullRoomTotal: Math.max(session.roomTotal, total + anonymousCount),
+    return {counts, genderCounts, total, withTokens, anonymousCount, fullRoomTotal: Math.max(session.roomTotal, total + anonymousCount),
         roomTotalHigh: session.roomTotalHigh, history: session.history, isPlayback: false};
 }

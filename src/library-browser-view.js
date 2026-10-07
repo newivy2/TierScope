@@ -1,7 +1,7 @@
 import { filterLibraryEntries } from './library-query.js';
 import { recordingFilters, toolButton as button, toolNode as node } from './tools-view-helpers.js';
 
-export function renderLibraryBrowser(parent, entries, filters, selected, actions, disclosures) {
+export function renderLibraryBrowser(parent, entries, filters, selected, actions, disclosures, comparisonLimit) {
     const present = new Set(entries.map(entry => entry.id));
     for (const id of selected) if (!present.has(id)) selected.delete(id);
     let shown = 50;
@@ -33,7 +33,7 @@ export function renderLibraryBrowser(parent, entries, filters, selected, actions
     function updateSelection() {
         if (selected.size) selectionTools.open = true;
         selection.textContent = selected.size + ' selected' + ([...selected].some(id => !matching.some(entry => entry.id === id)) ? ' · includes hidden sessions' : '');
-        compare.disabled = selected.size < 2 || selected.size > 6; compare.title = 'Select 2–6 sessions to compare'; download.disabled = !selected.size;
+        compare.disabled = selected.size < 2 || selected.size > comparisonLimit; compare.title = 'Select 2–' + comparisonLimit + ' sessions to compare'; download.disabled = !selected.size;
         for (const row of list.querySelectorAll('[data-library-id]')) row.querySelector('input[type=checkbox]').checked = selected.has(row.dataset.libraryId);
     }
     function rows() {
@@ -70,7 +70,14 @@ export function renderLibraryBrowser(parent, entries, filters, selected, actions
                 ' · First ' + new Date(summary.first).toLocaleDateString() + ' · Latest ' + new Date(summary.latest).toLocaleDateString(), 'tools-folder-meta');
             const covered = node(open, 'span', 'Total covered time ' + actions.duration(summary.coveredMs), 'tools-folder-meta');
             covered.title = 'Sum of covered intervals in sessions matching the current filters. Gaps and time after the final sample are excluded; overlapping sessions are counted separately.';
-            favoriteButton(row, room, true);
+            const controls = node(row, 'div', undefined, 'tools-folder-actions');
+            favoriteButton(controls, room, true);
+            const ids = actions.modelComparisonIds(room);
+            const compareModel = button(controls, 'Compare', () => actions.compareModel(room), 'tools-folder-compare-' + room);
+            compareModel.disabled = ids.length < 2;
+            compareModel.setAttribute('aria-label', 'Compare stored sessions for ' + room);
+            compareModel.title = ids.length < 2 ? 'Keep at least two sessions for this model to compare.' :
+                'Compare the ' + ids.length + ' latest stored sessions for ' + room + ', independently of the search filters.';
         } else for (const entry of visible.slice(0, shown)) {
             const row = node(list, 'article', undefined, 'tools-row'); row.dataset.libraryId = entry.id;
             const title = node(row, 'label'), check = node(title, 'input'); check.type = 'checkbox'; check.checked = selected.has(entry.id);

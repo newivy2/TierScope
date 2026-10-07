@@ -38,14 +38,19 @@ export function renderAnalysisChart(parent, series, labels, axisMs, metricLabel,
     const bright = ['#b42370','#175db0','#176f36','#835900','#7140a6','#a23c20'];
     // Use recording dates, not slot order or evenly paced replay positions.
     const newestFirst = series.map((s, i) => i).sort((a, b) => series[b].timestamps[0] - series[a].timestamps[0] || a - b);
-    const colorIndices = series.map((s, i) => newestFirst.indexOf(i));
+    const ranks = series.map((s, i) => newestFirst.indexOf(i));
+    // Preserve the six established colors; older sessions reuse dashed colors
+    // other than the newest pink, with a readable opacity floor in both themes.
+    const colorIndices = ranks.map(rank => rank < 6 ? rank : 1 + (rank - 6) % 5);
+    const opacities = ranks.map(rank => rank < 6 ? 1 : Math.max(0.35, 0.85 - (rank - 6) * 0.1));
     const newest = newestFirst[0];
     const legendLabels = labels.map((label, i) => {
         const control = node(legend, 'label'), check = node(control, 'input'); check.type = 'checkbox'; check.checked = !hidden.has(i); check.dataset.analysisSeries = String(i);
         const swatch = node(control, 'span', '', 'tools-series-swatch'); swatch.setAttribute('aria-hidden', 'true');
         swatch.style.borderTopStyle = i === newest ? 'solid' : 'dashed';
+        swatch.style.opacity = String(opacities[i]);
         node(control, 'span', String.fromCharCode(65 + i) + (series.length > 1 && i === newest ? ' · Latest' : '') + ' · ' + label);
-        control.title = (series.length > 1 ? (i === newest ? 'Latest session — solid pink: ' : 'Earlier session — dashed: ') : '') + label;
+        control.title = (series.length > 1 ? (i === newest ? 'Latest session — solid pink: ' : 'Earlier session — dashed' + (ranks[i] >= 6 ? ', ' + Math.round(opacities[i] * 100) + '% opacity' : '') + ': ') : '') + label;
         check.onchange = () => {
             if (!check.checked && hidden.size === series.length - 1) { check.checked = true; return; }
             if (check.checked) hidden.delete(i); else hidden.add(i); draw();
@@ -141,6 +146,7 @@ export function renderAnalysisChart(parent, series, labels, axisMs, metricLabel,
             legendLabels[j].style.color = color;
             legendLabels[j].querySelector('input').disabled = hidden.size === series.length - 1 && !hidden.has(j);
             if (hidden.has(j)) continue;
+            ctx.globalAlpha = opacities[j];
             ctx.strokeStyle = ctx.fillStyle = color;ctx.lineWidth = 1.8;ctx.lineCap = 'butt';
             ctx.setLineDash(j === newest ? [] : [6,4]);ctx.beginPath();
             let previousY = 0;
@@ -154,6 +160,7 @@ export function renderAnalysisChart(parent, series, labels, axisMs, metricLabel,
             });
             ctx.stroke();ctx.setLineDash([]);dots.forEach(([x,y])=>{ctx.beginPath();ctx.arc(x,y,2.5,0,Math.PI*2);ctx.fill();});
         }
+        ctx.globalAlpha = 1;
         range.textContent = 'Chart window ' + axisLabel(start) + ' – ' + axisLabel(end) +
             (axisMode === 'clock' ? ' · 24h local clock' : ' · full comparison/session range ' + elapsed(axisMs));
         hint.textContent = (axisMode === 'clock' ?

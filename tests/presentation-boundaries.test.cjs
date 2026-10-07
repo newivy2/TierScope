@@ -71,3 +71,22 @@ test('replay presentation stays on its captured recording while scans keep advan
   h.t.leavePlayback();
   assert.equal(h.e('count-red').textContent, '9');
 });
+
+
+test('female/trans tooltip uses the supplied live sample and never invents a saved breakdown',async()=>{
+ const h=setup();
+ h.setResponse('0,testroom|o|f|0,one|t|f|0,two|t|s|0,three|t|s|0,four|t|m|0');
+ await h.t.performScanThenReturn();
+ const model=h.d.buildPanelDisplayModel(h.d.buildLiveDisplayFrame());
+ assert.deepEqual(clean(model.genderCounts),{female:2,trans:2}); assert.equal(model.counts['female-trans'],4);
+ h.advance(60000); await scan(h,3);
+ h.d.paintPanelFrame(model);
+ assert.match(h.e('tier-row-female-trans').title,/Female: 2\nTrans: 2/);
+ assert.match(h.e('restore-row-female-trans').title,/Female: 2\nTrans: 2/);
+ assert.deepEqual(clean(model.genderCounts),{female:2,trans:2}); assertFrozen(model.genderCounts);
+ assert(h.t.enterPlayback());
+ const frame=h.d.getPlaybackFrame(h.d.runtime.playback.snapshot,0);
+ h.d.paintPanelFrame(h.d.buildPanelDisplayModel(frame));
+ assert.match(h.e('tier-row-female-trans').title,/unavailable in this saved sample/);
+ assert.doesNotMatch(h.e('tier-row-female-trans').title,/Female: 2/);
+});
