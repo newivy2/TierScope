@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **3.24.2** ([24h comparison guide](docs/clock-comparison.md)). [Library chart controls guide](docs/library-chart-controls.md). [Follow live guide](docs/follow-live.md). [Audience trends and ratio guide](docs/audience-trends.md). [Sessions Book guide](docs/sessions-book.md). [ATH cleanup guide](docs/ath-retention.md). The simplified Current Live Session card provides Keep in Library, Auto, Compare with previous, and History. File controls are below the session list, and exports remain on stored-session menus and the separate replay card. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation instructions, see the [README](readme.md).
+Detailed reference for **3.25.0**. [Twelve-session comparison guide](docs/twelve-session-comparisons.md). [24h comparison guide](docs/clock-comparison.md). [Library chart controls guide](docs/library-chart-controls.md). [Follow live guide](docs/follow-live.md). [Audience trends and ratio guide](docs/audience-trends.md). [Sessions Book guide](docs/sessions-book.md). [ATH cleanup guide](docs/ath-retention.md). The simplified Current Live Session card provides Keep in Library, Auto, Compare with previous, and History. File controls are below the session list, and exports remain on stored-session menus and the separate replay card. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation instructions, see the [README](readme.md).
 
 ## Contents
 
@@ -544,6 +544,7 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
+| **3.25.0** | Release twelve-session comparisons with the newest six styles preserved and progressively transparent older lines. Add model-card Compare for the newest stored sessions, expand Compare with previous, and show separate female/trans live counts in tier tooltips. |
 | **3.25.0-beta.1** | Preview comparisons with up to twelve sessions; preserve the newest six styles and progressively fade the older six. Expand Compare with previous, add direct latest-session comparison on model cards, and add live female/trans counts to the tier tooltip without changing saved-session formats. |
 | **3.24.2** | Center the elapsed timer and remove the Controls heading. Give Library and Replay taller buttons, emphasize Library, and preserve tracking-button positions and sizes. Match Keep in Library to History styling. |
 | **3.24.2-beta.1** | Preview the control layout and Library action styling; verify unchanged tracking-button geometry in Chromium and Firefox. |
@@ -636,6 +637,6 @@ A room-level storage access failure can still make saving read-only. Individual 
 | 2.9.8.0 | Broadcaster detection, tracking keys, and CSS. |
 | 2.9.7.3 | Base reference. |
 
-### Female / trans tooltip (3.25.0 beta)
+### Female / trans tooltip (3.25.0)
 
 Hover over the expanded tier or its collapsed restore button for separate female and trans counts from the displayed live sample. Counts use the acquisition gender data and include the same users as the combined tier. Saved/restored samples and Replay store only the combined tier, so their tooltip reports that separate counts are unavailable. No extra gender histories are written.

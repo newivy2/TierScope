@@ -1,4 +1,4 @@
-# Twelve-session comparisons — 3.25.0 review beta
+# Twelve-session comparisons — 3.25.0
 
 Compare up to **12 sessions** in Library, including through **Compare with previous** on the live card or Model History. These shortcuts choose the selected/current session and up to eleven earlier sessions from the same model. Each model card also has **Compare**, which selects that model’s newest twelve stored sessions independently of browse filters and opens the chart immediately. It is disabled with an explanation when fewer than two stored sessions exist. Manual comparisons can mix models.
 
@@ -8,7 +8,7 @@ Elapsed-time and 24h time-of-day comparisons retain shared inspection, zoom, pin
 
 Hover over the **Female / trans** tier, or its collapsed row button, to see separate female and trans counts from the displayed live sample. These use the genders reported by the existing acquisition paths and do not change the combined tier. Saved sessions and Replay retain only the combined count; their tooltip explains that the separate breakdown is unavailable.
 
-For review, try six and twelve sessions in both themes, change slot order, hide a line, inspect a gap and switch the time axis. Hover over the expanded and collapsed Female / trans row after a live scan, then check a saved Replay.
+To explore the controls, try six and twelve sessions in both themes, change slot order, hide a line, inspect a gap and switch the time axis. Hover over the expanded and collapsed Female / trans row after a live scan, then check a saved Replay.
 
 ## Performance check
 
