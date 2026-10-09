@@ -7,7 +7,7 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
  STORAGE_HISTORY_SERIES.forEach(k=>h[k]=[0,0,0,0]);h.total=[10,20,30,40];h.red=h.total.slice();h.withTokens=h.total.slice();h.anonymous=[5,5,5,5];
  restoreSessionState(normalizeStoredSession({timestamp:now,history:h,sessionStartedAt:now-180000,sessionStartEstimated:false,isPaused:false,pausedElapsedTime:180000}));
  isAutoRefreshOn=false;isMinimized=true;createPanel();toggleView();repaintLivePresentation();
- const archive=captureLiveSessionFile();for(let i=1;i<=11;i++){const a=JSON.parse(JSON.stringify(archive)),d=i*86400000,s=a.session;s.timestamp-=d;s.sessionStartedAt-=d;s.history.timestamps=s.history.timestamps.map(t=>t-d);if(s.roomTotalHighTime!==null)s.roomTotalHighTime-=d;Object.values(s.sessionHighs).forEach(h=>{if(h.time!=null)h.time-=d;});keepSessionInLibrary(a,'Previous '+i);}
+ const archive=captureLiveSessionFile();for(let i=1;i<=29;i++){const a=JSON.parse(JSON.stringify(archive)),d=i*86400000,s=a.session;s.timestamp-=d;s.sessionStartedAt-=d;s.history.timestamps=s.history.timestamps.map(t=>t-d);if(s.roomTotalHighTime!==null)s.roomTotalHighTime-=d;Object.values(s.sessionHighs).forEach(h=>{if(h.time!=null)h.time-=d;});keepSessionInLibrary(a,'Previous '+i);}
  setModelFavorite(getModelName(),true,true);saveSession(getModelName(),true);
  const original=captureLiveSessionFile;window.followCaptures=0;captureLiveSessionFile=function(...args){window.followCaptures++;return original(...args);};},
  status:updateSessionToolsStatus,library:readSessionLibrary,live:captureLiveSessionFile,forceSave:()=>saveSession(getModelName(),true),
@@ -54,7 +54,7 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
  const savedBefore=await page.evaluate(()=>JSON.stringify(ViewerTracker.__follow.library().entries));await scan(600,61000);assert.deepEqual(await samples(),['10']);assert.match(await page.locator('#tools-follow-status').textContent(),/Library save pending/);
  assert.equal(await page.evaluate(()=>JSON.stringify(ViewerTracker.__follow.library().entries)),savedBefore);
  await page.evaluate(()=>{window.GM_setValue=window.originalSet;ViewerTracker.__follow.forceSave();});
- await nav('library');await page.click('#tools-compare-previous');assert(await page.locator('#tools-follow-live').isChecked());assert.equal((await samples()).length,12);
+ await nav('library');await page.click('#tools-compare-previous');assert(await page.locator('#tools-follow-live').isChecked());assert.equal((await samples()).length,30);
  await page.uncheck('#tools-shared-length');
  await page.uncheck('[data-analysis-series="1"]');await page.click('#tools-chart-zoom-in');await page.locator('#tools-analysis-chart').focus();await page.keyboard.press('End');
  const compareBefore=await samples(),compareZoom=(await page.locator('#tools-chart-range').textContent()).split(' · ')[0],compareCursor=await page.locator('#tools-chart-inspection caption').textContent();
@@ -90,6 +90,6 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
  await scan(60);const covered=await page.locator('#tools-summary-table tbody tr').nth(2).textContent(),mean=await page.locator('#tools-audience-table tbody tr').first().locator('td').first().textContent();
  await scan(80,600000);assert.deepEqual(await samples(),['3']);assert.equal(await page.locator('#tools-summary-table tbody tr').nth(2).textContent(),covered);assert.equal(await page.locator('#tools-audience-table tbody tr').first().locator('td').first().textContent(),mean,'new gap does not add viewer-time to the average');
  await page.evaluate(()=>{window.history.pushState({},'', '/next_model/');ViewerTracker.__follow.checkUrlChange();});assert.equal(await page.locator('#tierscope-session-tools').count(),0);
- assert.deepEqual(errors,[]);console.log('PASS Follow live in Summary, twelve-way Compare and Model History; freeze/catch-up, controls/thresholds, Auto lineage, storage failure, replay, favorite revocation, Reset/navigation, themes and layout');
+ assert.deepEqual(errors,[]);console.log('PASS Follow live in Summary, thirty-way Compare and Model History; freeze/catch-up, controls/thresholds, Auto lineage, storage failure, replay, favorite revocation, Reset/navigation, themes and layout');
  }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

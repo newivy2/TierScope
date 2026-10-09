@@ -95,10 +95,10 @@ export function compareSessions(a, b, metric = 'room', threshold = 100, sharedLe
         limitMs, axisMs: sharedLength ? limitMs : Math.max(spanA, spanB) };
 }
 
-export const MAX_COMPARE_RECORDINGS = 12;
+export const MAX_COMPARE_RECORDINGS = 30;
 /** @param {AnalysisArchive[]} archives @param {string} metric @param {number} threshold @param {boolean} sharedLength */
 export function compareRecordingSet(archives, metric = 'room', threshold = 100, sharedLength = true) {
-    if (!archives.length || archives.length > MAX_COMPARE_RECORDINGS) throw new Error('Compare up to twelve sessions.');
+    if (!archives.length || archives.length > MAX_COMPARE_RECORDINGS) throw new Error('Compare up to thirty sessions.');
     const spans = archives.map(archive => analysisSeries(archive, metric).times.at(-1) || 0);
     const limitMs = sharedLength ? Math.min(...spans) : Infinity;
     return {summaries: archives.map(archive => summarizeSession(archive, metric, threshold, limitMs)),

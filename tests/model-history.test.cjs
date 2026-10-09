@@ -31,7 +31,7 @@ test('latest recording windows are chronological with stable ties and retain sep
   for (const limit of [0,-1,NaN,1.5]) assert.throws(()=>reader.read(entries,'model','room',limit));
   assert.throws(()=>reader.read(entries,'model','unknown'));
 });
-test('history comparisons use the selected recording and eleven nearest earlier recordings from the same model', async () => {
+test('history comparisons use the selected recording and twenty-nine nearest earlier recordings from the same model', async () => {
   const {createModelHistoryReader}=await modulePromise, reader=createModelHistoryReader();
   const entries=Array.from({length:12},(_,i)=>entry('r'+i,'Model',[i*1000,i*1000+500],[i,i+1]));
   entries.splice(4,0,entry('other','another',[3500,3800],[999,999]));
@@ -96,19 +96,19 @@ test('live comparison handles legacy start fallback, shorter histories and stabl
   assert.deepEqual(previousModelSessionIds(entries.slice(0,1),live.archive),['a']);
 });
 
-test('live comparison caps at eleven earlier sessions and keeps them newest first',async()=>{
+test('live comparison caps at twenty-nine earlier sessions and keeps them newest first',async()=>{
  const {previousModelSessionIds}=await modulePromise;
- const entries=Array.from({length:15},(_,i)=>entry('r'+i,'model',[i*1000,i*1000+500],[1,2]));
- const live=entry('live','model',[20000,21000],[1,2]);
- assert.deepEqual(previousModelSessionIds(entries,live.archive),Array.from({length:11},(_,i)=>'r'+(14-i)));
+ const entries=Array.from({length:45},(_,i)=>entry('r'+i,'model',[i*1000,i*1000+500],[1,2]));
+ const live=entry('live','model',[50000,51000],[1,2]);
+ assert.deepEqual(previousModelSessionIds(entries,live.archive),Array.from({length:29},(_,i)=>'r'+(44-i)));
 });
 
 
-test('model card comparison chooses up to twelve latest stored sessions, with stable ties and no mutation',async()=>{
+test('model card comparison chooses up to thirty latest stored sessions, with stable ties and no mutation',async()=>{
  const {latestModelSessionIds}=await modulePromise;
- const entries=Array.from({length:15},(_,i)=>entry('r'+i,'Model',[i*1000,i*1000+500],[1,2]));
+ const entries=Array.from({length:45},(_,i)=>entry('r'+i,'Model',[i*1000,i*1000+500],[1,2]));
  entries.push(entry('other','another',[999999],[1]));const before=JSON.stringify(entries);
- assert.deepEqual(latestModelSessionIds(entries,'MODEL'),Array.from({length:12},(_,i)=>'r'+(14-i)));
+ assert.deepEqual(latestModelSessionIds(entries,'MODEL'),Array.from({length:30},(_,i)=>'r'+(44-i)));
  assert.equal(JSON.stringify(entries),before);assert.deepEqual(latestModelSessionIds(entries,'absent'),[]);
  assert.deepEqual(latestModelSessionIds([entry('a','model',[1],[1]),entry('b','MODEL',[1],[2])],'model'),['b','a']);
 });

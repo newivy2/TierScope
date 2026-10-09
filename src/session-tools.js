@@ -22,6 +22,7 @@ import { renderLibraryBrowser, renderRecordingNotes } from './library-browser-vi
 import { createModelCardReader, filterLibraryEntries } from './library-query.js';
 import { recordingFilters } from './tools-view-helpers.js';
 import { exportLibrarySelection, importLibraryBundle, libraryImportBundle } from './library-transfer.js';
+import { comparisonLabel } from './analysis-chart-data.js';
 import { renderAnalysisChart } from './analysis-chart-view.js';
 import { createModelHistoryReader, latestModelSessionIds, previousModelSessionIds } from './model-history.js';
 import { renderModelHistoryView } from './model-history-view.js';
@@ -646,8 +647,8 @@ export function openSessionTools(focusTarget) {
             if (!selectedB) selectedB = (sourceOptions().find(item => item.id !== selectedA) || sourceOptions()[0]).id;
             selectedB = selectSource(sourceControls, 'B ', 'tools-source-b', selectedB, value => { selectedB = value; selectNewFollowSource(); render(tab); });
             selectedExtra.forEach((id, index) => {
-                selectedExtra[index] = selectSource(sourceControls, String.fromCharCode(67 + index) + ' ', 'tools-source-' + String.fromCharCode(99 + index), id, value => { selectedExtra[index] = value; selectNewFollowSource(); render(tab); });
-                button(sourceControls, 'Remove ' + String.fromCharCode(67 + index), () => { selectedExtra.splice(index, 1); render(tab); });
+                selectedExtra[index] = selectSource(sourceControls, comparisonLabel(index + 2) + ' ', 'tools-source-' + comparisonLabel(index + 2).toLowerCase(), id, value => { selectedExtra[index] = value; selectNewFollowSource(); render(tab); });
+                button(sourceControls, 'Remove ' + comparisonLabel(index + 2), () => { selectedExtra.splice(index, 1); render(tab); });
             });
             const used = new Set([selectedA, selectedB, ...selectedExtra]);
             const next = filteredSources.find(item => !used.has(item.id));
@@ -802,13 +803,13 @@ export function openSessionTools(focusTarget) {
             const ids = [...new Set([selectedA, selectedB, ...selectedExtra])], recordings = ids.map(id => options.find(item => item.id === id)).filter(item => !!item);
             const archives = recordings.map(item => item.archive), clock = compareAxis === 'clock';
             const result = compareRecordingSet(archives, metric, threshold, !clock && sharedLength);
-            const tooLong = clock ? archives.flatMap((archive, index) => clockSessionDuration(archive) > CLOCK_DAY_MS ? [String.fromCharCode(65 + index)] : []) : [];
+            const tooLong = clock ? archives.flatMap((archive, index) => clockSessionDuration(archive) > CLOCK_DAY_MS ? [comparisonLabel(index)] : []) : [];
             if (tooLong.length) {
                 clearAnalysisChart();
                 node(overview, 'p', '24h chart unavailable: session' + (tooLong.length > 1 ? 's ' : ' ') + tooLong.join(', ') +
                     ' exceed' + (tooLong.length === 1 ? 's' : '') + ' 24 hours. Choose Elapsed time or select shorter sessions.', 'tools-muted');
             } else if (redrawChart) chart(archives, recordings.map(item => item.title), clock ? CLOCK_DAY_MS : result.axisMs, ids);
-            summaryTable(result.summaries, recordings.map((item, index) => String.fromCharCode(65 + index)), true, results);
+            summaryTable(result.summaries, recordings.map((item, index) => comparisonLabel(index)), true, results);
         } else {
             const summary = summarizeSession(a.archive, metric, threshold);
             // A custom choice belongs to this displayed snapshot and metric only.

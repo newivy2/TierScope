@@ -76,7 +76,7 @@ test('six-record comparison clips every recording to shared coverage independent
  assert.equal(shared.axisMs,2000);assert.equal(shared.summaries.length,6);assert.equal(shared.summaries[0].mean,15);
  assert.equal(shared.summaries[1].coveredMs,1000);assert.equal(shared.summaries[1].gapMs,1000);assert.equal(shared.summaries[1].peak,21);assert.equal(shared.summaries[1].sessionPeak,999);
  assert.equal(compareRecordingSet(archives,'room',20,false).axisMs,7000);assert.equal(JSON.stringify(archives),before);
- assert.throws(()=>compareRecordingSet([]));assert.throws(()=>compareRecordingSet(Array.from({length:13},()=>archives[0])));
+ assert.throws(()=>compareRecordingSet([]));assert.throws(()=>compareRecordingSet(Array.from({length:31},()=>archives[0])));
 });
 
 
@@ -100,12 +100,27 @@ test('Sessions Book sorts models by matching session count and alphabetically wi
 });
 
 
-test('twelve recordings preserve independent statistics and reject a thirteenth', async () => {
+test('thirty recordings preserve independent statistics and reject a thirty-first', async () => {
  const {compareRecordingSet, MAX_COMPARE_RECORDINGS}=await analysis;
- const archives=Array.from({length:12},(_,i)=>({room:'model'+i,session:{history:{timestamps:[1000,2000,3000],breaks:[false,false,i===10],total:[i,i+1,i+2],anonymous:[0,0,0],withTokens:[0,0,0]},roomTotalHigh:100,sessionHighs:{total:{value:100}}}}));
- assert.equal(MAX_COMPARE_RECORDINGS,12);
+ const archives=Array.from({length:30},(_,i)=>({room:'model'+i,session:{history:{timestamps:[1000,2000,3000],breaks:[false,false,i===10],total:[i,i+1,i+2],anonymous:[0,0,0],withTokens:[0,0,0]},roomTotalHigh:100,sessionHighs:{total:{value:100}}}}));
+ assert.equal(MAX_COMPARE_RECORDINGS,30);
  const firstSix=compareRecordingSet(archives.slice(0,6)), full=compareRecordingSet(archives);
- assert.equal(full.summaries.length,12); assert.deepEqual(full.summaries.slice(0,6),firstSix.summaries);
+ assert.equal(full.summaries.length,30); assert.deepEqual(full.summaries.slice(0,6),firstSix.summaries);
  assert.equal(full.summaries[10].coveredMs,1000);assert.equal(full.summaries[11].coveredMs,2000);
- assert.throws(()=>compareRecordingSet([...archives,archives[0]]),/twelve/);
+ assert.throws(()=>compareRecordingSet([...archives,archives[0]]),/thirty/);
+});
+
+
+test('comparison fading begins after the newest line, with moderate foreground and a faint background',async()=>{
+ const {comparisonOpacity,COMPARISON_BACKGROUND_OPACITY}=await chart;
+ const recent=Array.from({length:12},(_,i)=>comparisonOpacity(i));
+ assert.equal(recent[0],1);assert.equal(recent.at(-1),.45);
+ for(let i=1;i<recent.length;i++){assert(recent[i]<recent[i-1]);assert(recent[i]>.12);}
+ for(let i=12;i<30;i++)assert.equal(comparisonOpacity(i),COMPARISON_BACKGROUND_OPACITY);
+});
+
+test('comparison labels stay readable and source IDs remain usable past the alphabet',async()=>{
+ const {comparisonLabel}=await chart;
+ assert.deepEqual([0,11,25,26,27,29].map(comparisonLabel),['A','L','Z','AA','AB','AD']);
+ assert.equal(new Set(Array.from({length:30},(_,i)=>comparisonLabel(i))).size,30);
 });

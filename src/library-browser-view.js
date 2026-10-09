@@ -77,7 +77,7 @@ export function renderLibraryBrowser(parent, entries, filters, selected, actions
             compareModel.disabled = ids.length < 2;
             compareModel.setAttribute('aria-label', 'Compare stored sessions for ' + room);
             compareModel.title = ids.length < 2 ? 'Keep at least two sessions for this model to compare.' :
-                'Compare the ' + ids.length + ' latest stored sessions for ' + room + ', independently of the search filters.';
+                'Compare the ' + ids.length + ' latest stored sessions for ' + room + ', independently of the search filters. Sessions after the newest twelve form a faint chart background.';
         } else for (const entry of visible.slice(0, shown)) {
             const row = node(list, 'article', undefined, 'tools-row'); row.dataset.libraryId = entry.id;
             const title = node(row, 'label'), check = node(title, 'input'); check.type = 'checkbox'; check.checked = selected.has(entry.id);

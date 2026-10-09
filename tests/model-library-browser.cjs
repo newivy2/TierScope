@@ -138,7 +138,7 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
  await page.locator('#tools-compare-previous').focus();await page.keyboard.press('Enter');
  assert.equal(await page.locator('[data-tools-tab=compare]').getAttribute('aria-pressed'),'true');
  assert.equal(await page.locator('#tools-recording-picker').getAttribute('open'),null);
- assert.deepEqual(await page.locator('[id^=tools-source-]').evaluateAll(els=>els.map(e=>e.value)),['live',...priorIds.slice(0,11)]);
+ assert.deepEqual(await page.locator('[id^=tools-source-]').evaluateAll(els=>els.map(e=>e.value)),['live',...priorIds.slice(0,29)]);
  assert.equal(await page.locator('#tools-analysis-chart').count(),1);
  assert.deepEqual(await page.evaluate(()=>ViewerTracker.__models.state()),beforeCompare);
  assert.equal(await page.evaluate(()=>JSON.stringify(ViewerTracker.__models.library().entries)),storedBefore);
@@ -153,6 +153,6 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
  assert(await page.evaluate(()=>{const r=document.getElementById('tracker-container').getBoundingClientRect();return document.getElementById('tracker-container').contains(document.elementFromPoint(r.x+10,r.y+10));}));
  assert.equal(await page.locator('#tools-content').evaluate(e=>e.scrollWidth<=e.clientWidth),true);
  await page.screenshot({path:'/tmp/tierscope-317-'+engine+'-narrow.png'});
- assert.deepEqual(errors,[]);console.log('PASS collapsed Sessions Book and search, keyboard/focus, fold and tab state, draft/selection retention, simplified live card, favorite consent, up-to-twelve-session comparison, footer controls, themes and isolation');
+ assert.deepEqual(errors,[]);console.log('PASS collapsed Sessions Book and search, keyboard/focus, fold and tab state, draft/selection retention, simplified live card, favorite consent, up-to-thirty-session comparison, footer controls, themes and isolation');
  } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

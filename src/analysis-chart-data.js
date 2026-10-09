@@ -63,3 +63,22 @@ export function zoomAnalysisWindow(span, start, end, factor, anchor) {
     const left = Math.max(0, Math.min(span - width, center - width * ratio));
     return [left, left + width];
 }
+
+// The most recent twelve remain individually readable; older sessions are a
+// faint background. Apply background opacity once to their composited layer.
+export const COMPARISON_FOREGROUND_COUNT = 12;
+export const COMPARISON_BACKGROUND_OPACITY = 0.12;
+/** @param {number} rank */
+export function comparisonOpacity(rank) {
+    return rank < COMPARISON_FOREGROUND_COUNT ? (100 - rank * 5) / 100 : COMPARISON_BACKGROUND_OPACITY;
+}
+
+// Preserve A–Z labels and valid source IDs when comparisons reach AA–AD.
+/** @param {number} index */
+export function comparisonLabel(index) {
+    let label = '';
+    for (let value = index + 1; value > 0; value = Math.floor((value - 1) / 26)) {
+        label = String.fromCharCode(65 + (value - 1) % 26) + label;
+    }
+    return label;
+}

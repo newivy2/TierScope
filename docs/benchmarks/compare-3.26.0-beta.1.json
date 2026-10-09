@@ -1,0 +1,1197 @@
+{
+  "description": "Sequential Chromium comparison runs, 4x CPU throttling, three fresh-page rounds per case and count. Synthetic sessions of one model have separate dates. Bulk selection opens the comparison once; individual slot-by-slot setup is excluded. Full samples remain available for cursor inspection and statistics.",
+  "runs": {
+    "12": {
+      "source": "tierscope.user.js",
+      "historyMode": false,
+      "compareMode": true,
+      "automaticMode": false,
+      "capacityMode": false,
+      "cpuThrottle": 4,
+      "rounds": 3,
+      "cases": [
+        {
+          "label": "small",
+          "version": "3.26.0-beta.1",
+          "recordings": 12,
+          "samplesPerRecording": 300,
+          "bytes": 208430,
+          "measurements": [
+            {
+              "open": {
+                "ms": 97.90000000596046,
+                "storageReads": 12
+              },
+              "openBook": {
+                "ms": 10.699999988079071,
+                "storageReads": 0
+              },
+              "openSearch": {
+                "ms": 13.400000005960464,
+                "storageReads": 0
+              },
+              "folder": {
+                "ms": 23.200000017881393,
+                "storageReads": 0
+              },
+              "selectSessions": {
+                "ms": 5.5,
+                "storageReads": 0
+              },
+              "openComparison": {
+                "ms": 172.7999999821186,
+                "storageReads": 12
+              },
+              "selectedRecordingMetric": {
+                "ms": 75.30000001192093,
+                "storageReads": 0
+              },
+              "zoomIn": {
+                "ms": 26.69999998807907,
+                "storageReads": 0
+              },
+              "cursor": {
+                "meanMs": 4.172499999900659,
+                "p95Ms": 5.0999999940395355,
+                "maxMs": 5.799999982118607
+              },
+              "fullRange": {
+                "ms": 48.5,
+                "storageReads": 0
+              },
+              "hideLine": {
+                "ms": 33,
+                "storageReads": 0
+              },
+              "showLine": {
+                "ms": 40.5,
+                "storageReads": 0
+              },
+              "threshold": {
+                "ms": 24.399999976158142,
+                "storageReads": 0
+              },
+              "compareRecordings": 12,
+              "nodes": 555,
+              "heap": {
+                "before": 2084480,
+                "open": 2912264,
+                "closed": 2426056
+              }
+            },
+            {
+              "open": {
+                "ms": 107.40000000596046,
+                "storageReads": 12
+              },
+              "openBook": {
+                "ms": 8.400000005960464,
+                "storageReads": 0
+              },
+              "openSearch": {
+                "ms": 14.5,
+                "storageReads": 0
+              },
+              "folder": {
+                "ms": 23.399999976158142,
+                "storageReads": 0
+              },
+              "selectSessions": {
+                "ms": 4.800000011920929,
+                "storageReads": 0
+              },
+              "openComparison": {
+                "ms": 197.5,
+                "storageReads": 12
+              },
+              "selectedRecordingMetric": {
+                "ms": 77.09999999403954,
+                "storageReads": 0
+              },
+              "zoomIn": {
+                "ms": 31.700000017881393,
+                "storageReads": 0
+              },
+              "cursor": {
+                "meanMs": 4.939999999602636,
+                "p95Ms": 6.4000000059604645,
+                "maxMs": 7.9000000059604645
+              },
+              "fullRange": {
+                "ms": 46.30000001192093,
+                "storageReads": 0
+              },
+              "hideLine": {
+                "ms": 37.70000001788139,
+                "storageReads": 0
+              },
+              "showLine": {
+                "ms": 41.79999998211861,
+                "storageReads": 0
+              },
+              "threshold": {
+                "ms": 22.600000023841858,
+                "storageReads": 0
+              },
+              "compareRecordings": 12,
+              "nodes": 555,
+              "heap": {
+                "before": 2084480,
+                "open": 2912212,
+                "closed": 2426016
+              }
+            },
+            {
+              "open": {
+                "ms": 92.7999999821186,
+                "storageReads": 12
+              },
+              "openBook": {
+                "ms": 8,
+                "storageReads": 0
+              },
+              "openSearch": {
+                "ms": 13.800000011920929,
+                "storageReads": 0
+              },
+              "folder": {
+                "ms": 21.69999998807907,
+                "storageReads": 0
+              },
+              "selectSessions": {
+                "ms": 5.5999999940395355,
+                "storageReads": 0
+              },
+              "openComparison": {
+                "ms": 159.80000001192093,
+                "storageReads": 12
+              },
+              "selectedRecordingMetric": {
+                "ms": 68.09999999403954,
+                "storageReads": 0
+              },
+              "zoomIn": {
+                "ms": 23.30000001192093,
+                "storageReads": 0
+              },
+              "cursor": {
+                "meanMs": 3.768333333233992,
+                "p95Ms": 4.5999999940395355,
+                "maxMs": 5
+              },
+              "fullRange": {
+                "ms": 43.599999994039536,
+                "storageReads": 0
+              },
+              "hideLine": {
+                "ms": 31.80000001192093,
+                "storageReads": 0
+              },
+              "showLine": {
+                "ms": 34.400000005960464,
+                "storageReads": 0
+              },
+              "threshold": {
+                "ms": 18.400000005960464,
+                "storageReads": 0
+              },
+              "compareRecordings": 12,
+              "nodes": 555,
+              "heap": {
+                "before": 2084540,
+                "open": 2912332,
+                "closed": 2426116
+              }
+            }
+          ]
+        },
+        {
+          "label": "many",
+          "version": "3.26.0-beta.1",
+          "recordings": 500,
+          "samplesPerRecording": 500,
+          "bytes": 14102890,
+          "measurements": [
+            {
+              "open": {
+                "ms": 778.1999999880791,
+                "storageReads": 500
+              },
+              "openBook": {
+                "ms": 5.9000000059604645,
+                "storageReads": 0
+              },
+              "openSearch": {
+                "ms": 14.300000011920929,
+                "storageReads": 0
+              },
+              "folder": {
+                "ms": 65.09999999403954,
+                "storageReads": 0
+              },
+              "selectSessions": {
+                "ms": 8.299999982118607,
+                "storageReads": 0
+              },
+              "openComparison": {
+                "ms": 1097.6000000238419,
+                "storageReads": 500
+              },
+              "selectedRecordingMetric": {
+                "ms": 89.2999999821186,
+                "storageReads": 0
+              },
+              "zoomIn": {
+                "ms": 33.099999994039536,
+                "storageReads": 0
+              },
+              "cursor": {
+                "meanMs": 4.185833333184322,
+                "p95Ms": 5.700000017881393,
+                "maxMs": 6.699999988079071
+              },
+              "fullRange": {
+                "ms": 63,
+                "storageReads": 0
+              },
+              "hideLine": {
+                "ms": 50.599999994039536,
+                "storageReads": 0
+              },
+              "showLine": {
+                "ms": 53.599999994039536,
+                "storageReads": 0
+              },
+              "threshold": {
+                "ms": 26.900000005960464,
+                "storageReads": 0
+              },
+              "compareRecordings": 12,
+              "nodes": 6411,
+              "heap": {
+                "before": 16150880,
+                "open": 19771072,
+                "closed": 2547132
+              }
+            },
+            {
+              "open": {
+                "ms": 778.1999999880791,
+                "storageReads": 500
+              },
+              "openBook": {
+                "ms": 8.300000011920929,
+                "storageReads": 0
+              },
+              "openSearch": {
+                "ms": 14,
+                "storageReads": 0
+              },
+              "folder": {
+                "ms": 67.5,
+                "storageReads": 0
+              },
+              "selectSessions": {
+                "ms": 9.099999994039536,
+                "storageReads": 0
+              },
+              "openComparison": {
+                "ms": 1318,
+                "storageReads": 500
+              },
+              "selectedRecordingMetric": {
+                "ms": 99.59999999403954,
+                "storageReads": 0
+              },
+              "zoomIn": {
+                "ms": 33.30000001192093,
+                "storageReads": 0
+              },
+              "cursor": {
+                "meanMs": 4.810833333432674,
+                "p95Ms": 6.5999999940395355,
+                "maxMs": 8
+              },
+              "fullRange": {
+                "ms": 68.7000000178814,
+                "storageReads": 0
+              },
+              "hideLine": {
+                "ms": 52.69999998807907,
+                "storageReads": 0
+              },
+              "showLine": {
+                "ms": 54.900000005960464,
+                "storageReads": 0
+              },
+              "threshold": {
+                "ms": 38.30000001192093,
+                "storageReads": 0
+              },
+              "compareRecordings": 12,
+              "nodes": 6411,
+              "heap": {
+                "before": 16151360,
+                "open": 19774432,
+                "closed": 2546988
+              }
+            },
+            {
+              "open": {
+                "ms": 977.3000000119209,
+                "storageReads": 500
+              },
+              "openBook": {
+                "ms": 9.299999982118607,
+                "storageReads": 0
+              },
+              "openSearch": {
+                "ms": 17.299999982118607,
+                "storageReads": 0
+              },
+              "folder": {
+                "ms": 92.09999999403954,
+                "storageReads": 0
+              },
+              "selectSessions": {
+                "ms": 22.799999982118607,
+                "storageReads": 0
+              },
+              "openComparison": {
+                "ms": 1323.4000000059605,
+                "storageReads": 500
+              },
+              "selectedRecordingMetric": {
+                "ms": 103.40000000596046,
+                "storageReads": 0
+              },
+              "zoomIn": {
+                "ms": 47.400000005960464,
+                "storageReads": 0
+              },
+              "cursor": {
+                "meanMs": 5.291666666666667,
+                "p95Ms": 6.5999999940395355,
+                "maxMs": 7
+              },
+              "fullRange": {
+                "ms": 60.69999998807907,
+                "storageReads": 0
+              },
+              "hideLine": {
+                "ms": 56.30000001192093,
+                "storageReads": 0
+              },
+              "showLine": {
+                "ms": 58.5,
+                "storageReads": 0
+              },
+              "threshold": {
+                "ms": 30.5,
+                "storageReads": 0
+              },
+              "compareRecordings": 12,
+              "nodes": 6411,
+              "heap": {
+                "before": 16151420,
+                "open": 19771604,
+                "closed": 2547032
+              }
+            }
+          ]
+        },
+        {
+          "label": "long",
+          "version": "3.26.0-beta.1",
+          "recordings": 36,
+          "samplesPerRecording": 10000,
+          "bytes": 19543058,
+          "measurements": [
+            {
+              "open": {
+                "ms": 1177.9000000059605,
+                "storageReads": 36
+              },
+              "openBook": {
+                "ms": 7.699999988079071,
+                "storageReads": 0
+              },
+              "openSearch": {
+                "ms": 14,
+                "storageReads": 0
+              },
+              "folder": {
+                "ms": 45.30000001192093,
+                "storageReads": 0
+              },
+              "selectSessions": {
+                "ms": 8.5,
+                "storageReads": 0
+              },
+              "openComparison": {
+                "ms": 835.6999999880791,
+                "storageReads": 36
+              },
+              "selectedRecordingMetric": {
+                "ms": 666.8000000119209,
+                "storageReads": 0
+              },
+              "zoomIn": {
+                "ms": 364.69999998807907,
+                "storageReads": 0
+              },
+              "cursor": {
+                "meanMs": 6.230000000198682,
+                "p95Ms": 13.900000005960464,
+                "maxMs": 23.19999998807907
+              },
+              "fullRange": {
+                "ms": 1167.5999999940395,
+                "storageReads": 0
+              },
+              "hideLine": {
+                "ms": 534.7999999821186,
+                "storageReads": 0
+              },
+              "showLine": {
+                "ms": 870.0999999940395,
+                "storageReads": 0
+              },
+              "threshold": {
+                "ms": 168.40000000596046,
+                "storageReads": 0
+              },
+              "compareRecordings": 12,
+              "nodes": 843,
+              "heap": {
+                "before": 23622064,
+                "open": 29916224,
+                "closed": 4634856
+              }
+            },
+            {
+              "open": {
+                "ms": 1431.0999999940395,
+                "storageReads": 36
+              },
+              "openBook": {
+                "ms": 10.599999994039536,
+                "storageReads": 0
+              },
+              "openSearch": {
+                "ms": 17.700000017881393,
+                "storageReads": 0
+              },
+              "folder": {
+                "ms": 56.69999998807907,
+                "storageReads": 0
+              },
+              "selectSessions": {
+                "ms": 8.700000017881393,
+                "storageReads": 0
+              },
+              "openComparison": {
+                "ms": 973,
+                "storageReads": 36
+              },
+              "selectedRecordingMetric": {
+                "ms": 796.2999999821186,
+                "storageReads": 0
+              },
+              "zoomIn": {
+                "ms": 412.5,
+                "storageReads": 0
+              },
+              "cursor": {
+                "meanMs": 5.931666666766008,
+                "p95Ms": 8.5,
+                "maxMs": 17.799999982118607
+              },
+              "fullRange": {
+                "ms": 663.9000000059605,
+                "storageReads": 0
+              },
+              "hideLine": {
+                "ms": 555.1999999880791,
+                "storageReads": 0
+              },
+              "showLine": {
+                "ms": 621,
+                "storageReads": 0
+              },
+              "threshold": {
+                "ms": 92.69999998807907,
+                "storageReads": 0
+              },
+              "compareRecordings": 12,
+              "nodes": 843,
+              "heap": {
+                "before": 23622000,
+                "open": 29915920,
+                "closed": 4634576
+              }
+            },
+            {
+              "open": {
+                "ms": 1203.800000011921,
+                "storageReads": 36
+              },
+              "openBook": {
+                "ms": 9,
+                "storageReads": 0
+              },
+              "openSearch": {
+                "ms": 15.699999988079071,
+                "storageReads": 0
+              },
+              "folder": {
+                "ms": 45.400000005960464,
+                "storageReads": 0
+              },
+              "selectSessions": {
+                "ms": 7.5,
+                "storageReads": 0
+              },
+              "openComparison": {
+                "ms": 854.5999999940395,
+                "storageReads": 36
+              },
+              "selectedRecordingMetric": {
+                "ms": 749.7000000178814,
+                "storageReads": 0
+              },
+              "zoomIn": {
+                "ms": 355.19999998807907,
+                "storageReads": 0
+              },
+              "cursor": {
+                "meanMs": 5.113333333532015,
+                "p95Ms": 7.299999982118607,
+                "maxMs": 13.5
+              },
+              "fullRange": {
+                "ms": 774,
+                "storageReads": 0
+              },
+              "hideLine": {
+                "ms": 502.19999998807907,
+                "storageReads": 0
+              },
+              "showLine": {
+                "ms": 505.90000000596046,
+                "storageReads": 0
+              },
+              "threshold": {
+                "ms": 129.2999999821186,
+                "storageReads": 0
+              },
+              "compareRecordings": 12,
+              "nodes": 843,
+              "heap": {
+                "before": 23621296,
+                "open": 29914664,
+                "closed": 4633368
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "30": {
+      "source": "tierscope.user.js",
+      "historyMode": false,
+      "compareMode": true,
+      "automaticMode": false,
+      "capacityMode": false,
+      "cpuThrottle": 4,
+      "rounds": 3,
+      "cases": [
+        {
+          "label": "small",
+          "version": "3.26.0-beta.1",
+          "recordings": 30,
+          "samplesPerRecording": 300,
+          "bytes": 521090,
+          "measurements": [
+            {
+              "open": {
+                "ms": 115,
+                "storageReads": 30
+              },
+              "openBook": {
+                "ms": 12.900000005960464,
+                "storageReads": 0
+              },
+              "openSearch": {
+                "ms": 14.5,
+                "storageReads": 0
+              },
+              "folder": {
+                "ms": 35,
+                "storageReads": 0
+              },
+              "selectSessions": {
+                "ms": 11.399999976158142,
+                "storageReads": 0
+              },
+              "openComparison": {
+                "ms": 391.19999998807907,
+                "storageReads": 30
+              },
+              "selectedRecordingMetric": {
+                "ms": 146.59999999403954,
+                "storageReads": 0
+              },
+              "zoomIn": {
+                "ms": 57.80000001192093,
+                "storageReads": 0
+              },
+              "cursor": {
+                "meanMs": 8.43250000004967,
+                "p95Ms": 12.900000005960464,
+                "maxMs": 30.899999976158142
+              },
+              "fullRange": {
+                "ms": 90.80000001192093,
+                "storageReads": 0
+              },
+              "hideLine": {
+                "ms": 83.59999999403954,
+                "storageReads": 0
+              },
+              "showLine": {
+                "ms": 91.40000000596046,
+                "storageReads": 0
+              },
+              "threshold": {
+                "ms": 44.30000001192093,
+                "storageReads": 0
+              },
+              "compareRecordings": 30,
+              "nodes": 1725,
+              "heap": {
+                "before": 2398384,
+                "open": 3531968,
+                "closed": 2438504
+              }
+            },
+            {
+              "open": {
+                "ms": 109.2999999821186,
+                "storageReads": 30
+              },
+              "openBook": {
+                "ms": 7.4000000059604645,
+                "storageReads": 0
+              },
+              "openSearch": {
+                "ms": 13.700000017881393,
+                "storageReads": 0
+              },
+              "folder": {
+                "ms": 33.79999998211861,
+                "storageReads": 0
+              },
+              "selectSessions": {
+                "ms": 10.399999976158142,
+                "storageReads": 0
+              },
+              "openComparison": {
+                "ms": 367.40000000596046,
+                "storageReads": 30
+              },
+              "selectedRecordingMetric": {
+                "ms": 138,
+                "storageReads": 0
+              },
+              "zoomIn": {
+                "ms": 51.69999998807907,
+                "storageReads": 0
+              },
+              "cursor": {
+                "meanMs": 7.638333333283663,
+                "p95Ms": 9.5,
+                "maxMs": 18.400000005960464
+              },
+              "fullRange": {
+                "ms": 79.80000001192093,
+                "storageReads": 0
+              },
+              "hideLine": {
+                "ms": 82,
+                "storageReads": 0
+              },
+              "showLine": {
+                "ms": 83.2000000178814,
+                "storageReads": 0
+              },
+              "threshold": {
+                "ms": 37.400000005960464,
+                "storageReads": 0
+              },
+              "compareRecordings": 30,
+              "nodes": 1725,
+              "heap": {
+                "before": 2398324,
+                "open": 3532180,
+                "closed": 2438728
+              }
+            },
+            {
+              "open": {
+                "ms": 119.59999999403954,
+                "storageReads": 30
+              },
+              "openBook": {
+                "ms": 8.100000023841858,
+                "storageReads": 0
+              },
+              "openSearch": {
+                "ms": 15.099999994039536,
+                "storageReads": 0
+              },
+              "folder": {
+                "ms": 39.29999998211861,
+                "storageReads": 0
+              },
+              "selectSessions": {
+                "ms": 10.300000011920929,
+                "storageReads": 0
+              },
+              "openComparison": {
+                "ms": 378.09999999403954,
+                "storageReads": 30
+              },
+              "selectedRecordingMetric": {
+                "ms": 144.80000001192093,
+                "storageReads": 0
+              },
+              "zoomIn": {
+                "ms": 59.19999998807907,
+                "storageReads": 0
+              },
+              "cursor": {
+                "meanMs": 8.726666666567326,
+                "p95Ms": 14.300000011920929,
+                "maxMs": 22.30000001192093
+              },
+              "fullRange": {
+                "ms": 121.2999999821186,
+                "storageReads": 0
+              },
+              "hideLine": {
+                "ms": 85.2000000178814,
+                "storageReads": 0
+              },
+              "showLine": {
+                "ms": 84.5,
+                "storageReads": 0
+              },
+              "threshold": {
+                "ms": 40.89999997615814,
+                "storageReads": 0
+              },
+              "compareRecordings": 30,
+              "nodes": 1725,
+              "heap": {
+                "before": 2398468,
+                "open": 3532248,
+                "closed": 2438804
+              }
+            }
+          ]
+        },
+        {
+          "label": "many",
+          "version": "3.26.0-beta.1",
+          "recordings": 500,
+          "samplesPerRecording": 500,
+          "bytes": 14102890,
+          "measurements": [
+            {
+              "open": {
+                "ms": 929.4000000059605,
+                "storageReads": 500
+              },
+              "openBook": {
+                "ms": 7.799999982118607,
+                "storageReads": 0
+              },
+              "openSearch": {
+                "ms": 15.5,
+                "storageReads": 0
+              },
+              "folder": {
+                "ms": 92.30000001192093,
+                "storageReads": 0
+              },
+              "selectSessions": {
+                "ms": 16.80000001192093,
+                "storageReads": 0
+              },
+              "openComparison": {
+                "ms": 4086.5999999940395,
+                "storageReads": 500
+              },
+              "selectedRecordingMetric": {
+                "ms": 246.30000001192093,
+                "storageReads": 0
+              },
+              "zoomIn": {
+                "ms": 86.19999998807907,
+                "storageReads": 0
+              },
+              "cursor": {
+                "meanMs": 11.590833333383005,
+                "p95Ms": 16.5,
+                "maxMs": 30.599999994039536
+              },
+              "fullRange": {
+                "ms": 150,
+                "storageReads": 0
+              },
+              "hideLine": {
+                "ms": 137.7000000178814,
+                "storageReads": 0
+              },
+              "showLine": {
+                "ms": 140.59999999403954,
+                "storageReads": 0
+              },
+              "threshold": {
+                "ms": 51.400000005960464,
+                "storageReads": 0
+              },
+              "compareRecordings": 30,
+              "nodes": 15825,
+              "heap": {
+                "before": 16150880,
+                "open": 20302828,
+                "closed": 2552780
+              }
+            },
+            {
+              "open": {
+                "ms": 813.7000000178814,
+                "storageReads": 500
+              },
+              "openBook": {
+                "ms": 8.199999988079071,
+                "storageReads": 0
+              },
+              "openSearch": {
+                "ms": 15.300000011920929,
+                "storageReads": 0
+              },
+              "folder": {
+                "ms": 69.19999998807907,
+                "storageReads": 0
+              },
+              "selectSessions": {
+                "ms": 13.299999982118607,
+                "storageReads": 0
+              },
+              "openComparison": {
+                "ms": 2811.4000000059605,
+                "storageReads": 500
+              },
+              "selectedRecordingMetric": {
+                "ms": 193.7000000178814,
+                "storageReads": 0
+              },
+              "zoomIn": {
+                "ms": 72.5,
+                "storageReads": 0
+              },
+              "cursor": {
+                "meanMs": 9.251666666318973,
+                "p95Ms": 11,
+                "maxMs": 30.100000023841858
+              },
+              "fullRange": {
+                "ms": 134.2000000178814,
+                "storageReads": 0
+              },
+              "hideLine": {
+                "ms": 123.5,
+                "storageReads": 0
+              },
+              "showLine": {
+                "ms": 125.5,
+                "storageReads": 0
+              },
+              "threshold": {
+                "ms": 44.900000005960464,
+                "storageReads": 0
+              },
+              "compareRecordings": 30,
+              "nodes": 15825,
+              "heap": {
+                "before": 16150880,
+                "open": 20300860,
+                "closed": 2553320
+              }
+            },
+            {
+              "open": {
+                "ms": 792.3000000119209,
+                "storageReads": 500
+              },
+              "openBook": {
+                "ms": 8.5,
+                "storageReads": 0
+              },
+              "openSearch": {
+                "ms": 14,
+                "storageReads": 0
+              },
+              "folder": {
+                "ms": 64.90000000596046,
+                "storageReads": 0
+              },
+              "selectSessions": {
+                "ms": 13.199999988079071,
+                "storageReads": 0
+              },
+              "openComparison": {
+                "ms": 2609.7000000178814,
+                "storageReads": 500
+              },
+              "selectedRecordingMetric": {
+                "ms": 191.19999998807907,
+                "storageReads": 0
+              },
+              "zoomIn": {
+                "ms": 78.7000000178814,
+                "storageReads": 0
+              },
+              "cursor": {
+                "meanMs": 8.431666666766008,
+                "p95Ms": 12.5,
+                "maxMs": 23.599999994039536
+              },
+              "fullRange": {
+                "ms": 136.59999999403954,
+                "storageReads": 0
+              },
+              "hideLine": {
+                "ms": 121.5,
+                "storageReads": 0
+              },
+              "showLine": {
+                "ms": 124.80000001192093,
+                "storageReads": 0
+              },
+              "threshold": {
+                "ms": 43.30000001192093,
+                "storageReads": 0
+              },
+              "compareRecordings": 30,
+              "nodes": 15825,
+              "heap": {
+                "before": 16150880,
+                "open": 20303012,
+                "closed": 2553472
+              }
+            }
+          ]
+        },
+        {
+          "label": "long",
+          "version": "3.26.0-beta.1",
+          "recordings": 36,
+          "samplesPerRecording": 10000,
+          "bytes": 19543058,
+          "measurements": [
+            {
+              "open": {
+                "ms": 1093.5999999940395,
+                "storageReads": 36
+              },
+              "openBook": {
+                "ms": 8.099999994039536,
+                "storageReads": 0
+              },
+              "openSearch": {
+                "ms": 13.700000017881393,
+                "storageReads": 0
+              },
+              "folder": {
+                "ms": 43.29999998211861,
+                "storageReads": 0
+              },
+              "selectSessions": {
+                "ms": 10.700000017881393,
+                "storageReads": 0
+              },
+              "openComparison": {
+                "ms": 1969.4000000059605,
+                "storageReads": 36
+              },
+              "selectedRecordingMetric": {
+                "ms": 1901.8999999761581,
+                "storageReads": 0
+              },
+              "zoomIn": {
+                "ms": 1464.9000000059605,
+                "storageReads": 0
+              },
+              "cursor": {
+                "meanMs": 7.966666666915019,
+                "p95Ms": 8.900000005960464,
+                "maxMs": 9.699999988079071
+              },
+              "fullRange": {
+                "ms": 1760.5999999940395,
+                "storageReads": 0
+              },
+              "hideLine": {
+                "ms": 1645.0999999940395,
+                "storageReads": 0
+              },
+              "showLine": {
+                "ms": 1695.300000011921,
+                "storageReads": 0
+              },
+              "threshold": {
+                "ms": 154.40000000596046,
+                "storageReads": 0
+              },
+              "compareRecordings": 30,
+              "nodes": 1905,
+              "heap": {
+                "before": 23621772,
+                "open": 32322252,
+                "closed": 4641596
+              }
+            },
+            {
+              "open": {
+                "ms": 1240.699999988079,
+                "storageReads": 36
+              },
+              "openBook": {
+                "ms": 8.300000011920929,
+                "storageReads": 0
+              },
+              "openSearch": {
+                "ms": 15.699999988079071,
+                "storageReads": 0
+              },
+              "folder": {
+                "ms": 47.5,
+                "storageReads": 0
+              },
+              "selectSessions": {
+                "ms": 12.100000023841858,
+                "storageReads": 0
+              },
+              "openComparison": {
+                "ms": 2244.399999976158,
+                "storageReads": 36
+              },
+              "selectedRecordingMetric": {
+                "ms": 2144.600000023842,
+                "storageReads": 0
+              },
+              "zoomIn": {
+                "ms": 1570.7999999821186,
+                "storageReads": 0
+              },
+              "cursor": {
+                "meanMs": 8.819166666766007,
+                "p95Ms": 10,
+                "maxMs": 10.5
+              },
+              "fullRange": {
+                "ms": 2020.2999999821186,
+                "storageReads": 0
+              },
+              "hideLine": {
+                "ms": 1884.699999988079,
+                "storageReads": 0
+              },
+              "showLine": {
+                "ms": 1878.300000011921,
+                "storageReads": 0
+              },
+              "threshold": {
+                "ms": 189.09999999403954,
+                "storageReads": 0
+              },
+              "compareRecordings": 30,
+              "nodes": 1905,
+              "heap": {
+                "before": 23621984,
+                "open": 32323128,
+                "closed": 4642400
+              }
+            },
+            {
+              "open": {
+                "ms": 1106,
+                "storageReads": 36
+              },
+              "openBook": {
+                "ms": 7.399999976158142,
+                "storageReads": 0
+              },
+              "openSearch": {
+                "ms": 14.099999994039536,
+                "storageReads": 0
+              },
+              "folder": {
+                "ms": 41.20000001788139,
+                "storageReads": 0
+              },
+              "selectSessions": {
+                "ms": 10.199999988079071,
+                "storageReads": 0
+              },
+              "openComparison": {
+                "ms": 2075.5999999940395,
+                "storageReads": 36
+              },
+              "selectedRecordingMetric": {
+                "ms": 1922.7000000178814,
+                "storageReads": 0
+              },
+              "zoomIn": {
+                "ms": 1436.800000011921,
+                "storageReads": 0
+              },
+              "cursor": {
+                "meanMs": 7.685000000149012,
+                "p95Ms": 8.799999982118607,
+                "maxMs": 9.400000005960464
+              },
+              "fullRange": {
+                "ms": 1738.3999999761581,
+                "storageReads": 0
+              },
+              "hideLine": {
+                "ms": 1629.8999999761581,
+                "storageReads": 0
+              },
+              "showLine": {
+                "ms": 1680.3999999761581,
+                "storageReads": 0
+              },
+              "threshold": {
+                "ms": 146.80000001192093,
+                "storageReads": 0
+              },
+              "compareRecordings": 30,
+              "nodes": 1905,
+              "heap": {
+                "before": 23611116,
+                "open": 32310784,
+                "closed": 4630128
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
