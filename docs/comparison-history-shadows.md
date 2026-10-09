@@ -1,4 +1,4 @@
-# Comparison fading and history shadows — 3.26.0 review beta
+# Comparison fading and history shadows — 3.26.0
 
 Compare up to **30 sessions from one model**, or **12 sessions across different models**, in Library. The newest session stays solid pink and fully opaque. The next eleven sessions are dashed and fade gradually through **95%, 90%, 85%, 80%, 75%, 70%, 65%, 60%, 55%, 50% and 45% opacity**.
 
