@@ -1,7 +1,7 @@
 import { filterLibraryEntries } from './library-query.js';
 import { recordingFilters, toolButton as button, toolNode as node } from './tools-view-helpers.js';
 
-export function renderLibraryBrowser(parent, entries, filters, selected, actions, disclosures, comparisonLimit) {
+export function renderLibraryBrowser(parent, entries, filters, selected, actions, disclosures) {
     const present = new Set(entries.map(entry => entry.id));
     for (const id of selected) if (!present.has(id)) selected.delete(id);
     let shown = 50;
@@ -12,6 +12,7 @@ export function renderLibraryBrowser(parent, entries, filters, selected, actions
     const inputs = recordingFilters(search, entries, filters, 'tools-library', () => { shown = 50; actions.room(filters.room); rows(); }, true);
     const selectionTools = node(book, 'details'); selectionTools.id = 'tools-library-selection'; selectionTools.open = selected.size > 0;
     node(selectionTools, 'summary', 'Select sessions for Compare or export');
+    node(selectionTools, 'p', 'Compare up to 30 sessions from one model, or 12 across models.', 'tools-muted');
     const bulk = node(selectionTools, 'div', undefined, 'tools-actions tools-library-bulk'), selection = node(bulk, 'span'); selection.id = 'tools-library-selected';
     let matching = [];
     button(bulk, 'Select matching', () => { matching.forEach(entry => selected.add(entry.id)); updateSelection(); }, 'tools-select-matching');
@@ -33,7 +34,11 @@ export function renderLibraryBrowser(parent, entries, filters, selected, actions
     function updateSelection() {
         if (selected.size) selectionTools.open = true;
         selection.textContent = selected.size + ' selected' + ([...selected].some(id => !matching.some(entry => entry.id === id)) ? ' · includes hidden sessions' : '');
-        compare.disabled = selected.size < 2 || selected.size > comparisonLimit; compare.title = 'Select 2–' + comparisonLimit + ' sessions to compare'; download.disabled = !selected.size;
+        const comparisonLimit = actions.comparisonLimit([...selected]);
+        if (selected.size > comparisonLimit) selection.textContent += ' · Comparison limit: ' + comparisonLimit;
+        compare.disabled = selected.size < 2 || selected.size > comparisonLimit;
+        compare.title = 'Select 2–' + comparisonLimit + ' sessions to compare. Up to 30 from one model, or 12 across models.';
+        download.disabled = !selected.size;
         for (const row of list.querySelectorAll('[data-library-id]')) row.querySelector('input[type=checkbox]').checked = selected.has(row.dataset.libraryId);
     }
     function rows() {

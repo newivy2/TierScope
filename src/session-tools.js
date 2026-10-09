@@ -33,7 +33,7 @@ import { getStorageKey } from './record-validation.js';
 import { downloadRecording } from './recording-exports.js';
 import { downloadTrackingReport } from './reports.js';
 import { runtime } from './runtime.js';
-import { MAX_COMPARE_RECORDINGS, ANALYSIS_METRICS, analysisSeries, averageAnalysisThresholds, compareRecordingSet, parseAnalysisThresholds, summarizeAudience, summarizeSession, summarizeThresholds } from './session-analysis.js';
+import { ANALYSIS_METRICS, analysisSeries, averageAnalysisThresholds, compareRecordingSet, comparisonRecordingLimit, parseAnalysisThresholds, summarizeAudience, summarizeSession, summarizeThresholds } from './session-analysis.js';
 import { captureSessionFile, captureLiveSessionFile } from './session-capture.js';
 import { validateSessionFile } from './session-file-format.js';
 import { getSessionSaveState } from './session-health.js';
@@ -502,7 +502,9 @@ export function openSessionTools(focusTarget) {
         if (state.favoriteError) node(content, 'p', state.favoriteError, 'tools-muted');
         libraryFilters.room = libraryRoom || '';
         if (libraryRoom && libraryRoom !== '*' && !state.entries.some(entry => entry.archive.room.toLowerCase() === libraryRoom)) libraryFilters.room = libraryRoom = '';
+        const archiveById = new Map(state.entries.map(entry => [entry.id, entry.archive]));
         const callbacks = {
+            comparisonLimit: ids => comparisonRecordingLimit(ids.map(id => archiveById.get(id)).filter(archive => !!archive)),
             cardSummary: entries => modelCardReader.read(entries),
             modelComparisonIds: room => latestModelSessionIds(state.entries, room),
             compareModel: room => {
@@ -532,7 +534,7 @@ export function openSessionTools(focusTarget) {
             rename: entry => { const title = window.prompt('Session title (up to 80 characters):', entry.title); if (title !== null) { renameLibrarySession(entry.id, title); render('library'); } },
             delete: entry => { if (confirm('Delete this library session: ' + (entry.title || entry.archive.room) + '?\n\nLive tracking, ATH and downloaded files are unchanged.')) { removeLibrarySession(entry.id); render('library'); tell('Library session deleted.'); } }
         };
-        renderLibraryBrowser(content, state.entries, libraryFilters, librarySelection, Object.fromEntries(Object.entries(callbacks).map(([key, fn]) => [key, action(fn)])), libraryDisclosures, MAX_COMPARE_RECORDINGS);
+        renderLibraryBrowser(content, state.entries, libraryFilters, librarySelection, Object.fromEntries(Object.entries(callbacks).map(([key, fn]) => [key, action(fn)])), libraryDisclosures);
         if (state.damaged.length) {
             node(content, 'p', state.damaged.length + ' unreadable library record(s) were retained.', 'tools-muted');
             if (state.unavailable.length) node(content, 'p', 'Some records could not be read. The displayed storage size excludes them; saving new sessions waits until they can be read.', 'tools-muted');
@@ -639,6 +641,7 @@ export function openSessionTools(focusTarget) {
         try { filteredSources = filterLibraryEntries(sourceOptions(), analysisFilters); }
         catch (error) { filteredSources = []; tell(error.message, true); }
         node(picker, 'p', filteredSources.length + ' matching sessions. Existing selections stay available when outside the filters.', 'tools-muted');
+        if (comparing) node(picker, 'p', 'Compare up to 30 sessions from one model, or 12 across models.', 'tools-muted');
         const sourceControls = node(picker, 'div', undefined, 'tools-actions');
         if (liveComparisonArchive) button(sourceControls, 'Refresh live snapshot', () => { liveComparisonArchive = captureLiveSessionFile(); selectNewFollowSource(); render(tab); }, 'tools-refresh-live-snapshot');
         if (currentArchive) button(sourceControls, 'Refresh current / replayed snapshot', () => { currentArchive = captureSessionFile(); currentArchiveIsReplay = isPlaybackCurrent(runtime.playback); selectNewFollowSource(); render(tab); }, 'tools-refresh-snapshot');
@@ -651,9 +654,13 @@ export function openSessionTools(focusTarget) {
                 button(sourceControls, 'Remove ' + comparisonLabel(index + 2), () => { selectedExtra.splice(index, 1); render(tab); });
             });
             const used = new Set([selectedA, selectedB, ...selectedExtra]);
-            const next = filteredSources.find(item => !used.has(item.id));
-            button(sourceControls, 'Add session', () => { if (next && selectedExtra.length < MAX_COMPARE_RECORDINGS - 2) { selectedExtra.push(next.id); render(tab); } }, 'tools-compare-add').disabled = selectedExtra.length >= MAX_COMPARE_RECORDINGS - 2 || !next;
-            node(sourceControls, 'span', (2 + selectedExtra.length) + ' / ' + MAX_COMPARE_RECORDINGS + ' slots', 'tools-muted');
+            const archives = sourceOptions().filter(item => used.has(item.id)).map(item => item.archive);
+            const count = 2 + selectedExtra.length, limit = comparisonRecordingLimit(archives);
+            const next = filteredSources.find(item => !used.has(item.id) && count + 1 <= comparisonRecordingLimit([...archives, item.archive]));
+            const add = button(sourceControls, 'Add session', () => { if (next && count < limit) { selectedExtra.push(next.id); render(tab); } }, 'tools-compare-add');
+            add.disabled = count >= limit || !next;
+            add.title = 'Up to 30 sessions from one model, or 12 across models. Additional sessions must match this limit and the filters.';
+            node(sourceControls, 'span', count + ' / ' + limit + ' slots', 'tools-muted').id = 'tools-compare-slots';
 
         }
         followControl(content);
@@ -802,6 +809,10 @@ export function openSessionTools(focusTarget) {
             if (new Set([selectedA, selectedB, ...selectedExtra]).size !== 2 + selectedExtra.length) { controls.hidden = true; node(overview, 'p', 'Choose a different session in each comparison slot.'); return; }
             const ids = [...new Set([selectedA, selectedB, ...selectedExtra])], recordings = ids.map(id => options.find(item => item.id === id)).filter(item => !!item);
             const archives = recordings.map(item => item.archive), clock = compareAxis === 'clock';
+            if (archives.length > comparisonRecordingLimit(archives)) {
+                clearAnalysisChart(); controls.hidden = true;
+                node(overview, 'p', 'Compare up to twelve sessions across different models. Select one model for up to thirty sessions.', 'tools-muted'); return;
+            }
             const result = compareRecordingSet(archives, metric, threshold, !clock && sharedLength);
             const tooLong = clock ? archives.flatMap((archive, index) => clockSessionDuration(archive) > CLOCK_DAY_MS ? [comparisonLabel(index)] : []) : [];
             if (tooLong.length) {

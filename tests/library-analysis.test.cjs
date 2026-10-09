@@ -102,12 +102,27 @@ test('Sessions Book sorts models by matching session count and alphabetically wi
 
 test('thirty recordings preserve independent statistics and reject a thirty-first', async () => {
  const {compareRecordingSet, MAX_COMPARE_RECORDINGS}=await analysis;
- const archives=Array.from({length:30},(_,i)=>({room:'model'+i,session:{history:{timestamps:[1000,2000,3000],breaks:[false,false,i===10],total:[i,i+1,i+2],anonymous:[0,0,0],withTokens:[0,0,0]},roomTotalHigh:100,sessionHighs:{total:{value:100}}}}));
+ const archives=Array.from({length:30},(_,i)=>({room:i%2?'Model':'model',session:{history:{timestamps:[1000,2000,3000],breaks:[false,false,i===10],total:[i,i+1,i+2],anonymous:[0,0,0],withTokens:[0,0,0]},roomTotalHigh:100,sessionHighs:{total:{value:100}}}}));
  assert.equal(MAX_COMPARE_RECORDINGS,30);
  const firstSix=compareRecordingSet(archives.slice(0,6)), full=compareRecordingSet(archives);
  assert.equal(full.summaries.length,30); assert.deepEqual(full.summaries.slice(0,6),firstSix.summaries);
  assert.equal(full.summaries[10].coveredMs,1000);assert.equal(full.summaries[11].coveredMs,2000);
  assert.throws(()=>compareRecordingSet([...archives,archives[0]]),/thirty/);
+});
+
+test('mixed-model comparisons allow twelve sessions while expanded history requires one model',async()=>{
+ const {comparisonRecordingLimit,compareRecordingSet,MIXED_MODEL_COMPARE_RECORDINGS}=await analysis;
+ const make=room=>({room,session:{history:{timestamps:[0,1000],total:[10,20],anonymous:[0,0],withTokens:[5,10]},roomTotalHigh:20,sessionHighs:{}}});
+ const same=Array.from({length:30},(_,i)=>make(i%2?'MODEL':'model')),mixed=same.slice(0,12);
+ mixed[11]=make('other');
+ const before=JSON.stringify([same,mixed]);
+ assert.equal(MIXED_MODEL_COMPARE_RECORDINGS,12);
+ assert.equal(comparisonRecordingLimit([]),30);assert.equal(comparisonRecordingLimit(same),30);assert.equal(comparisonRecordingLimit(mixed),12);
+ assert.equal(compareRecordingSet(mixed).summaries.length,12);
+ assert.deepEqual(compareRecordingSet(same).summaries.slice(0,11),compareRecordingSet(mixed).summaries.slice(0,11));
+ assert.throws(()=>compareRecordingSet([...mixed,make('model')]),/twelve.*different models/);
+ assert.throws(()=>compareRecordingSet([...same.slice(0,29),make('other')]),/twelve.*different models/);
+ assert.equal(JSON.stringify([same,mixed]),before);
 });
 
 

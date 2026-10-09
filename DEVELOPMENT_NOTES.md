@@ -544,6 +544,7 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
+| **3.26.0-beta.2** | Limit expanded comparisons to thirty sessions from one model, retaining twelve across models. Explain selection limits, keep export available, and preserve slots when a changed selection needs correction. |
 | **3.26.0-beta.1** | Preview comparisons with up to thirty sessions. Fade each earlier foreground line from the start; keep the newest twelve distinct and composite older sessions as a faint background without opacity buildup. Expand comparison shortcuts and use A–Z, AA–AD labels. |
 | **3.25.0** | Release twelve-session comparisons with the newest six styles preserved and progressively transparent older lines. Add model-card Compare for the newest stored sessions, expand Compare with previous, and show separate female/trans live counts in tier tooltips. |
 | **3.25.0-beta.1** | Preview comparisons with up to twelve sessions; preserve the newest six styles and progressively fade the older six. Expand Compare with previous, add direct latest-session comparison on model cards, and add live female/trans counts to the tier tooltip without changing saved-session formats. |
@@ -644,4 +645,4 @@ Hover over the expanded tier or its collapsed restore button for separate female
 
 ### Comparison fading and background history (3.26.0 beta)
 
-The [beta comparison guide](docs/comparison-history-shadows.md) describes the thirty-session limit, progressive 100%–45% foreground opacity and the older-session layer at 12%. Background traces remain available for inspection and statistics. Compare with previous selects up to 29 earlier sessions, and model-card Compare selects up to 30 newest stored sessions. Labels continue through AA–AD.
+The [beta comparison guide](docs/comparison-history-shadows.md) describes the thirty-session limit for one model (twelve across models), progressive 100%–45% foreground opacity and the older-session layer at 12%. Background traces remain available for inspection and statistics. Compare with previous selects up to 29 earlier sessions, and model-card Compare selects up to 30 newest stored sessions. Labels continue through AA–AD.

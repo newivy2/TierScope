@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.26.0-beta.1
+// @version      3.26.0-beta.2
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -5738,8 +5738,13 @@ underlying system, so should run in the browser, Node, or Plask.
     };
   }
   var MAX_COMPARE_RECORDINGS = 30;
+  var MIXED_MODEL_COMPARE_RECORDINGS = 12;
+  function comparisonRecordingLimit(archives) {
+    return new Set(archives.map((archive) => archive.room.toLowerCase())).size > 1 ? MIXED_MODEL_COMPARE_RECORDINGS : MAX_COMPARE_RECORDINGS;
+  }
   function compareRecordingSet(archives, metric = "room", threshold = 100, sharedLength = true) {
     if (!archives.length || archives.length > MAX_COMPARE_RECORDINGS) throw new Error("Compare up to thirty sessions.");
+    if (archives.length > comparisonRecordingLimit(archives)) throw new Error("Compare up to twelve sessions across different models. Select one model for up to thirty sessions.");
     const spans = archives.map((archive) => analysisSeries(archive, metric).times.at(-1) || 0);
     const limitMs = sharedLength ? Math.min(...spans) : Infinity;
     return {
@@ -6366,7 +6371,7 @@ underlying system, so should run in the browser, Node, or Plask.
   }
 
   // src/library-browser-view.js
-  function renderLibraryBrowser(parent, entries, filters, selected, actions, disclosures, comparisonLimit) {
+  function renderLibraryBrowser(parent, entries, filters, selected, actions, disclosures) {
     const present = new Set(entries.map((entry) => entry.id));
     for (const id of selected) if (!present.has(id)) selected.delete(id);
     let shown = 50;
@@ -6389,6 +6394,7 @@ underlying system, so should run in the browser, Node, or Plask.
     selectionTools.id = "tools-library-selection";
     selectionTools.open = selected.size > 0;
     toolNode(selectionTools, "summary", "Select sessions for Compare or export");
+    toolNode(selectionTools, "p", "Compare up to 30 sessions from one model, or 12 across models.", "tools-muted");
     const bulk = toolNode(selectionTools, "div", void 0, "tools-actions tools-library-bulk"), selection = toolNode(bulk, "span");
     selection.id = "tools-library-selected";
     let matching = [];
@@ -6419,8 +6425,10 @@ underlying system, so should run in the browser, Node, or Plask.
     function updateSelection() {
       if (selected.size) selectionTools.open = true;
       selection.textContent = selected.size + " selected" + ([...selected].some((id) => !matching.some((entry) => entry.id === id)) ? " · includes hidden sessions" : "");
+      const comparisonLimit = actions.comparisonLimit([...selected]);
+      if (selected.size > comparisonLimit) selection.textContent += " · Comparison limit: " + comparisonLimit;
       compare.disabled = selected.size < 2 || selected.size > comparisonLimit;
-      compare.title = "Select 2–" + comparisonLimit + " sessions to compare";
+      compare.title = "Select 2–" + comparisonLimit + " sessions to compare. Up to 30 from one model, or 12 across models.";
       download.disabled = !selected.size;
       for (const row of list.querySelectorAll("[data-library-id]")) row.querySelector("input[type=checkbox]").checked = selected.has(row.dataset.libraryId);
     }
@@ -8214,7 +8222,9 @@ underlying system, so should run in the browser, Node, or Plask.
       if (state.favoriteError) node(content, "p", state.favoriteError, "tools-muted");
       libraryFilters.room = libraryRoom || "";
       if (libraryRoom && libraryRoom !== "*" && !state.entries.some((entry) => entry.archive.room.toLowerCase() === libraryRoom)) libraryFilters.room = libraryRoom = "";
+      const archiveById = new Map(state.entries.map((entry) => [entry.id, entry.archive]));
       const callbacks = __spreadProps(__spreadValues({
+        comparisonLimit: (ids) => comparisonRecordingLimit(ids.map((id) => archiveById.get(id)).filter((archive) => !!archive)),
         cardSummary: (entries) => modelCardReader.read(entries),
         modelComparisonIds: (room2) => latestModelSessionIds(state.entries, room2),
         compareModel: (room2) => {
@@ -8280,7 +8290,7 @@ underlying system, so should run in the browser, Node, or Plask.
           }
         }
       });
-      renderLibraryBrowser(content, state.entries, libraryFilters, librarySelection, Object.fromEntries(Object.entries(callbacks).map(([key, fn]) => [key, action(fn)])), libraryDisclosures, MAX_COMPARE_RECORDINGS);
+      renderLibraryBrowser(content, state.entries, libraryFilters, librarySelection, Object.fromEntries(Object.entries(callbacks).map(([key, fn]) => [key, action(fn)])), libraryDisclosures);
       if (state.damaged.length) {
         node(content, "p", state.damaged.length + " unreadable library record(s) were retained.", "tools-muted");
         if (state.unavailable.length) node(content, "p", "Some records could not be read. The displayed storage size excludes them; saving new sessions waits until they can be read.", "tools-muted");
@@ -8462,6 +8472,7 @@ underlying system, so should run in the browser, Node, or Plask.
         tell(error.message, true);
       }
       node(picker, "p", filteredSources.length + " matching sessions. Existing selections stay available when outside the filters.", "tools-muted");
+      if (comparing) node(picker, "p", "Compare up to 30 sessions from one model, or 12 across models.", "tools-muted");
       const sourceControls = node(picker, "div", void 0, "tools-actions");
       if (liveComparisonArchive) button(sourceControls, "Refresh live snapshot", () => {
         liveComparisonArchive = captureLiveSessionFile();
@@ -8498,14 +8509,18 @@ underlying system, so should run in the browser, Node, or Plask.
           });
         });
         const used = /* @__PURE__ */ new Set([selectedA, selectedB, ...selectedExtra]);
-        const next = filteredSources.find((item) => !used.has(item.id));
-        button(sourceControls, "Add session", () => {
-          if (next && selectedExtra.length < MAX_COMPARE_RECORDINGS - 2) {
+        const archives = sourceOptions().filter((item) => used.has(item.id)).map((item) => item.archive);
+        const count = 2 + selectedExtra.length, limit = comparisonRecordingLimit(archives);
+        const next = filteredSources.find((item) => !used.has(item.id) && count + 1 <= comparisonRecordingLimit([...archives, item.archive]));
+        const add = button(sourceControls, "Add session", () => {
+          if (next && count < limit) {
             selectedExtra.push(next.id);
             render(tab);
           }
-        }, "tools-compare-add").disabled = selectedExtra.length >= MAX_COMPARE_RECORDINGS - 2 || !next;
-        node(sourceControls, "span", 2 + selectedExtra.length + " / " + MAX_COMPARE_RECORDINGS + " slots", "tools-muted");
+        }, "tools-compare-add");
+        add.disabled = count >= limit || !next;
+        add.title = "Up to 30 sessions from one model, or 12 across models. Additional sessions must match this limit and the filters.";
+        node(sourceControls, "span", count + " / " + limit + " slots", "tools-muted").id = "tools-compare-slots";
       }
       followControl(content);
       if (comparing) comparisonAxis(content);
@@ -8717,6 +8732,12 @@ underlying system, so should run in the browser, Node, or Plask.
         }
         const ids = [.../* @__PURE__ */ new Set([selectedA, selectedB, ...selectedExtra])], recordings = ids.map((id) => options2.find((item) => item.id === id)).filter((item) => !!item);
         const archives = recordings.map((item) => item.archive), clock2 = compareAxis === "clock";
+        if (archives.length > comparisonRecordingLimit(archives)) {
+          clearAnalysisChart();
+          controls.hidden = true;
+          node(overview, "p", "Compare up to twelve sessions across different models. Select one model for up to thirty sessions.", "tools-muted");
+          return;
+        }
         const result = compareRecordingSet(archives, metric, threshold, !clock2 && sharedLength);
         const tooLong = clock2 ? archives.flatMap((archive, index) => clockSessionDuration(archive) > CLOCK_DAY_MS ? [comparisonLabel(index)] : []) : [];
         if (tooLong.length) {
@@ -10522,7 +10543,7 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/bootstrap.js
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.26.0-beta.1";
+    runtime.TIERSCOPE_VERSION = "3.26.0-beta.2";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;
