@@ -1,5 +1,5 @@
 import { buildClockPlot, inspectClockSample } from './analysis-clock-data.js';
-import { analysisSampleIndex, buildAnalysisPlot, inspectAnalysisSample, zoomAnalysisWindow } from './analysis-chart-data.js';
+import { COMPARISON_BACKGROUND_OPACITY, COMPARISON_FOREGROUND_COUNT, comparisonLabel, comparisonOpacity, analysisSampleIndex, buildAnalysisPlot, inspectAnalysisSample, zoomAnalysisWindow } from './analysis-chart-data.js';
 import { toolNode as node, toolButton as button } from './tools-view-helpers.js';
 
 // Receives snapshots of analysis values, not live/playback owners or archives.
@@ -39,18 +39,17 @@ export function renderAnalysisChart(parent, series, labels, axisMs, metricLabel,
     // Use recording dates, not slot order or evenly paced replay positions.
     const newestFirst = series.map((s, i) => i).sort((a, b) => series[b].timestamps[0] - series[a].timestamps[0] || a - b);
     const ranks = series.map((s, i) => newestFirst.indexOf(i));
-    // Preserve the six established colors; older sessions reuse dashed colors
-    // other than the newest pink, with a readable opacity floor in both themes.
+    // Dates own styling even after slot changes or hiding foreground lines.
     const colorIndices = ranks.map(rank => rank < 6 ? rank : 1 + (rank - 6) % 5);
-    const opacities = ranks.map(rank => rank < 6 ? 1 : Math.max(0.35, 0.85 - (rank - 6) * 0.1));
+    const opacities = ranks.map(comparisonOpacity);
     const newest = newestFirst[0];
     const legendLabels = labels.map((label, i) => {
         const control = node(legend, 'label'), check = node(control, 'input'); check.type = 'checkbox'; check.checked = !hidden.has(i); check.dataset.analysisSeries = String(i);
         const swatch = node(control, 'span', '', 'tools-series-swatch'); swatch.setAttribute('aria-hidden', 'true');
         swatch.style.borderTopStyle = i === newest ? 'solid' : 'dashed';
         swatch.style.opacity = String(opacities[i]);
-        node(control, 'span', String.fromCharCode(65 + i) + (series.length > 1 && i === newest ? ' · Latest' : '') + ' · ' + label);
-        control.title = (series.length > 1 ? (i === newest ? 'Latest session — solid pink: ' : 'Earlier session — dashed' + (ranks[i] >= 6 ? ', ' + Math.round(opacities[i] * 100) + '% opacity' : '') + ': ') : '') + label;
+        node(control, 'span', comparisonLabel(i) + (series.length > 1 && i === newest ? ' · Latest' : '') + ' · ' + label);
+        control.title = (series.length > 1 ? (i === newest ? 'Latest session — solid pink: ' : (ranks[i] >= COMPARISON_FOREGROUND_COUNT ? 'Background session — dashed' : 'Earlier session — dashed') + ', ' + Math.round(opacities[i] * 100) + '% opacity' + ': ') : '') + label;
         check.onchange = () => {
             if (!check.checked && hidden.size === series.length - 1) { check.checked = true; return; }
             if (check.checked) hidden.delete(i); else hidden.add(i); draw();
@@ -69,10 +68,10 @@ export function renderAnalysisChart(parent, series, labels, axisMs, metricLabel,
     const header = node(node(table, 'thead'), 'tr'); ['Session','Count','Sample timestamp / status'].forEach(text => { node(header, 'th', text).scope = 'col'; });
     const body = node(table, 'tbody');
     const rows = series.map((s, i) => {
-        const row = node(body, 'tr'); node(row, 'th', String.fromCharCode(65 + i)).scope = 'row';
+        const row = node(body, 'tr'); node(row, 'th', comparisonLabel(i)).scope = 'row';
         return {row, value: node(row, 'td'), detail: node(row, 'td')};
     });
-    const bitmap = document.createElement('canvas');
+    const bitmap = document.createElement('canvas'), backgroundBitmap = document.createElement('canvas');
     let width = 260, height = 200, ratio = 1, left = 52, right = 248, top = 15, bottom = 164;
     const timeAt = event => {
         const bounds = canvas.getBoundingClientRect(), x = (event.clientX - bounds.left) * width / bounds.width;
@@ -140,25 +139,38 @@ export function renderAnalysisChart(parent, series, labels, axisMs, metricLabel,
         } else {
             ctx.textAlign = 'left';ctx.fillText(elapsed(start),left,bottom+20);ctx.textAlign = 'right';ctx.fillText(elapsed(end),right,bottom+20);
         }
-        // Paint the newest last so its solid line stays clear over older dashes.
-        for (const j of newestFirst.slice().reverse()) {
-            const color = colors[colorIndices[j]];
-            legendLabels[j].style.color = color;
-            legendLabels[j].querySelector('input').disabled = hidden.size === series.length - 1 && !hidden.has(j);
-            if (hidden.has(j)) continue;
-            ctx.globalAlpha = opacities[j];
-            ctx.strokeStyle = ctx.fillStyle = color;ctx.lineWidth = 1.8;ctx.lineCap = 'butt';
-            ctx.setLineDash(j === newest ? [] : [6,4]);ctx.beginPath();
+        const backgroundColor = style.getPropertyValue('--panel-muted').trim();
+        function paintSeries(target, j, color) {
+            target.strokeStyle = target.fillStyle = color; target.lineWidth = ranks[j] >= COMPARISON_FOREGROUND_COUNT ? 1.2 : 1.8; target.lineCap = 'butt';
+            target.setLineDash(j === newest ? [] : [6,4]); target.beginPath();
             let previousY = 0;
-            const dots = [];
-            const points = plots[j].points;
+            const dots = [], points = plots[j].points;
             points.forEach((point, i) => {
                 const x = left + (point.time-start)/(end-start||1)*(right-left), y = bottom - point.value/maximum*(bottom-top);
-                if (point.move) ctx.moveTo(x,y); else {ctx.lineTo(x,previousY);ctx.lineTo(x,y);}
+                if (point.move) target.moveTo(x,y); else {target.lineTo(x,previousY);target.lineTo(x,y);}
                 if (point.move && (i+1===points.length || points[i+1].move)) dots.push([x,y]);
                 previousY=y;
             });
-            ctx.stroke();ctx.setLineDash([]);dots.forEach(([x,y])=>{ctx.beginPath();ctx.arc(x,y,2.5,0,Math.PI*2);ctx.fill();});
+            target.stroke(); target.setLineDash([]); dots.forEach(([x,y])=>{target.beginPath();target.arc(x,y,2.5,0,Math.PI*2);target.fill();});
+        }
+        const backgroundIndices = newestFirst.filter(j => ranks[j] >= COMPARISON_FOREGROUND_COUNT && !hidden.has(j));
+        // Composite the background once: overlapping old traces never build
+        // up opacity and overwhelm the recent sessions.
+        backgroundBitmap.width = backgroundIndices.length ? width * ratio : 0;
+        backgroundBitmap.height = backgroundIndices.length ? height * ratio : 0;
+        if (backgroundIndices.length) {
+            const backgroundCtx = backgroundBitmap.getContext('2d'); backgroundCtx.scale(ratio, ratio);
+            for (const j of backgroundIndices) paintSeries(backgroundCtx, j, backgroundColor);
+            ctx.globalAlpha = COMPARISON_BACKGROUND_OPACITY; ctx.drawImage(backgroundBitmap, 0, 0, width, height); ctx.globalAlpha = 1;
+        }
+        // Paint the newest last so its solid pink line remains clear.
+        for (const j of newestFirst.slice().reverse()) {
+            const background = ranks[j] >= COMPARISON_FOREGROUND_COUNT;
+            const color = background ? backgroundColor : colors[colorIndices[j]];
+            legendLabels[j].style.color = color;
+            legendLabels[j].querySelector('input').disabled = hidden.size === series.length - 1 && !hidden.has(j);
+            if (hidden.has(j) || background) continue;
+            ctx.globalAlpha = opacities[j]; paintSeries(ctx, j, color);
         }
         ctx.globalAlpha = 1;
         range.textContent = 'Chart window ' + axisLabel(start) + ' – ' + axisLabel(end) +
@@ -166,7 +178,8 @@ export function renderAnalysisChart(parent, series, labels, axisMs, metricLabel,
         hint.textContent = (axisMode === 'clock' ?
             'Aligned by local time of day. Midnight crossings continue at the start of the chart. Clock changes are separate segments; repeated clock times can show multiple dated values. Statistics use full sessions.' :
             'Aligned from each session’s first retained sample, using real elapsed time. Hidden lines and zoom do not change summary totals or the shared comparison length.') +
-            ' Move to inspect; click to pin, drag to zoom, or use the buttons and arrow keys. Gaps have no assumed samples.';
+            ' Move to inspect; click to pin, drag to zoom, or use the buttons and arrow keys. Gaps have no assumed samples.' +
+            (series.length > COMPARISON_FOREGROUND_COUNT ? ' The newest twelve lines fade progressively; older sessions form a faint background. Each session remains inspectable and can be hidden.' : ' The newest line is opaque; earlier sessions fade progressively.');
         zoomIn.disabled = end-start <= Math.min(1000,axisMs); zoomOut.disabled = end-start >= axisMs;
         panLeft.disabled = start <= 0; panRight.disabled = end >= axisMs; inspect();
     }
@@ -221,6 +234,6 @@ export function renderAnalysisChart(parent, series, labels, axisMs, metricLabel,
             canvas.setAttribute('aria-label', chartLabel());
             draw();
         },
-        dispose() { disposed = true; drag = null; plotCache = null; bitmap.width = bitmap.height = 0; }
+        dispose() { disposed = true; drag = null; plotCache = null; bitmap.width = bitmap.height = backgroundBitmap.width = backgroundBitmap.height = 0; }
     };
 }

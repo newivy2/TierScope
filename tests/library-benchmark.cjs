@@ -8,7 +8,7 @@ const automaticMode=process.env.TIERSCOPE_BENCH_AUTOMATIC==='1';
 const historyMode=process.env.TIERSCOPE_BENCH_HISTORY==='1';
 const compareMode=process.env.TIERSCOPE_BENCH_COMPARE==='1';
 const compareCount=Number(process.env.TIERSCOPE_BENCH_COMPARE_COUNT||6);
-assert(Number.isInteger(compareCount)&&compareCount>=2&&compareCount<=12);
+assert(Number.isInteger(compareCount)&&compareCount>=2&&compareCount<=30);
 assert(Number(historyMode)+Number(compareMode)+Number(automaticMode)<=1,'Choose one benchmark mode');
 assert(Number.isFinite(throttle)&&throttle>=1);assert(Number.isInteger(rounds)&&rounds>0);
 const sourceFile=process.env.TIERSCOPE_SOURCE||path.join(root,'tierscope.user.js');
@@ -25,8 +25,8 @@ const source=prepareSource(fs.readFileSync(sourceFile,'utf8')).replaceAll('sched
  isAutoRefreshOn=false;isMinimized=true;createPanel();toggleView();saveSession(getModelName());
  const base=captureSessionFile();let bytes=0;
  for(let i=0;i<count;i++){
-  const archive=JSON.parse(JSON.stringify(base));archive.room=${automaticMode}&&i===0?base.room:'model'+String(${historyMode}?0:i%100).padStart(3,'0');
-  const offset=(${historyMode}?i:Math.floor(i/100))*864000000;
+  const archive=JSON.parse(JSON.stringify(base));archive.room=${automaticMode}&&i===0?base.room:'model'+String((${historyMode}||${compareMode})?0:i%100).padStart(3,'0');
+  const offset=((${historyMode}||${compareMode})?i:Math.floor(i/100))*864000000;
   archive.session.history.timestamps=archive.session.history.timestamps.map(t=>t-offset);archive.session.timestamp-=offset;archive.session.sessionStartedAt-=offset;
   for(const high of Object.values(archive.session.sessionHighs))if(high.time!==null)high.time-=offset;
   if(archive.session.roomTotalHighTime!==null)archive.session.roomTotalHighTime-=offset;
@@ -55,9 +55,8 @@ const source=prepareSource(fs.readFileSync(sourceFile,'utf8')).replaceAll('sched
  measure('openSearch',()=>click('tools-library-search-toggle'));
  measure('folder',()=>click('tools-folder-model000'));
  if(${compareMode}){
-  const choose=(id,value)=>{const input=document.getElementById(id);input.value=value;input.dispatchEvent(new Event('change'));};
-  tab('compare');choose('tools-source-a','bench_0');choose('tools-source-b','bench_1');
-  for(let i=2;i<${compareCount};i++){click('tools-compare-add');choose('tools-source-'+String.fromCharCode(97+i),'bench_'+i);}
+  measure('selectSessions',()=>{for(let i=0;i<${compareCount};i++)document.querySelector('[data-library-id="bench_'+i+'"] input[type=checkbox]').click();});
+  measure('openComparison',()=>click('tools-compare-selected'));
   measure('selectedRecordingMetric',()=>click('tools-metric-withTokens'));
   measure('zoomIn',()=>click('tools-chart-zoom-in'));
   const canvas=document.getElementById('tools-analysis-chart'),bounds=canvas.getBoundingClientRect(),costs=[];
@@ -111,7 +110,7 @@ const source=prepareSource(fs.readFileSync(sourceFile,'utf8')).replaceAll('sched
  const browser=await chromium.launch({headless:true,executablePath:process.env.TIERSCOPE_CHROMIUM_PATH,args:JSON.parse(process.env.TIERSCOPE_CHROMIUM_ARGS||'[]')});
  try{
   const output={source:path.basename(sourceFile),historyMode,compareMode,automaticMode,capacityMode,cpuThrottle:throttle,rounds,cases:[]};
-  for(const [label,count,samples] of (capacityMode ? [['defaultCapacity',1000,750]] : [['small',12,300],['many',500,500],['long',36,10000]])){
+  for(const [label,count,samples] of (capacityMode ? [['defaultCapacity',1000,750]] : [['small',Math.max(12,compareCount),300],['many',500,500],['long',36,10000]])){
    const measurements=[];let size;
    for(let i=0;i<rounds;i++){
     const page=await browser.newPage({viewport:{width:1400,height:1100}}),errors=[];page.on('pageerror',error=>errors.push(error.message));

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.25.0
+// @version      3.26.0
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -5269,6 +5269,18 @@ underlying system, so should run in the browser, Node, or Plask.
     const left = Math.max(0, Math.min(span - width, center - width * ratio));
     return [left, left + width];
   }
+  var COMPARISON_FOREGROUND_COUNT = 12;
+  var COMPARISON_BACKGROUND_OPACITY = 0.12;
+  function comparisonOpacity(rank) {
+    return rank < COMPARISON_FOREGROUND_COUNT ? (100 - rank * 5) / 100 : COMPARISON_BACKGROUND_OPACITY;
+  }
+  function comparisonLabel(index) {
+    let label = "";
+    for (let value = index + 1; value > 0; value = Math.floor((value - 1) / 26)) {
+      label = String.fromCharCode(65 + (value - 1) % 26) + label;
+    }
+    return label;
+  }
 
   // src/analysis-clock-data.js
   var CLOCK_DAY_MS = 24 * 60 * 60 * 1e3;
@@ -5725,9 +5737,14 @@ underlying system, so should run in the browser, Node, or Plask.
       axisMs: sharedLength ? limitMs : Math.max(spanA, spanB)
     };
   }
-  var MAX_COMPARE_RECORDINGS = 12;
+  var MAX_COMPARE_RECORDINGS = 30;
+  var MIXED_MODEL_COMPARE_RECORDINGS = 12;
+  function comparisonRecordingLimit(archives) {
+    return new Set(archives.map((archive) => archive.room.toLowerCase())).size > 1 ? MIXED_MODEL_COMPARE_RECORDINGS : MAX_COMPARE_RECORDINGS;
+  }
   function compareRecordingSet(archives, metric = "room", threshold = 100, sharedLength = true) {
-    if (!archives.length || archives.length > MAX_COMPARE_RECORDINGS) throw new Error("Compare up to twelve sessions.");
+    if (!archives.length || archives.length > MAX_COMPARE_RECORDINGS) throw new Error("Compare up to thirty sessions.");
+    if (archives.length > comparisonRecordingLimit(archives)) throw new Error("Compare up to twelve sessions across different models. Select one model for up to thirty sessions.");
     const spans = archives.map((archive) => analysisSeries(archive, metric).times.at(-1) || 0);
     const limitMs = sharedLength ? Math.min(...spans) : Infinity;
     return {
@@ -6354,7 +6371,7 @@ underlying system, so should run in the browser, Node, or Plask.
   }
 
   // src/library-browser-view.js
-  function renderLibraryBrowser(parent, entries, filters, selected, actions, disclosures, comparisonLimit) {
+  function renderLibraryBrowser(parent, entries, filters, selected, actions, disclosures) {
     const present = new Set(entries.map((entry) => entry.id));
     for (const id of selected) if (!present.has(id)) selected.delete(id);
     let shown = 50;
@@ -6377,6 +6394,7 @@ underlying system, so should run in the browser, Node, or Plask.
     selectionTools.id = "tools-library-selection";
     selectionTools.open = selected.size > 0;
     toolNode(selectionTools, "summary", "Select sessions for Compare or export");
+    toolNode(selectionTools, "p", "Compare up to 30 sessions from one model, or 12 across models.", "tools-muted");
     const bulk = toolNode(selectionTools, "div", void 0, "tools-actions tools-library-bulk"), selection = toolNode(bulk, "span");
     selection.id = "tools-library-selected";
     let matching = [];
@@ -6407,8 +6425,10 @@ underlying system, so should run in the browser, Node, or Plask.
     function updateSelection() {
       if (selected.size) selectionTools.open = true;
       selection.textContent = selected.size + " selected" + ([...selected].some((id) => !matching.some((entry) => entry.id === id)) ? " · includes hidden sessions" : "");
+      const comparisonLimit = actions.comparisonLimit([...selected]);
+      if (selected.size > comparisonLimit) selection.textContent += " · Comparison limit: " + comparisonLimit;
       compare.disabled = selected.size < 2 || selected.size > comparisonLimit;
-      compare.title = "Select 2–" + comparisonLimit + " sessions to compare";
+      compare.title = "Select 2–" + comparisonLimit + " sessions to compare. Up to 30 from one model, or 12 across models.";
       download.disabled = !selected.size;
       for (const row of list.querySelectorAll("[data-library-id]")) row.querySelector("input[type=checkbox]").checked = selected.has(row.dataset.libraryId);
     }
@@ -6472,7 +6492,7 @@ underlying system, so should run in the browser, Node, or Plask.
         const compareModel = toolButton(controls, "Compare", () => actions.compareModel(room3), "tools-folder-compare-" + room3);
         compareModel.disabled = ids.length < 2;
         compareModel.setAttribute("aria-label", "Compare stored sessions for " + room3);
-        compareModel.title = ids.length < 2 ? "Keep at least two sessions for this model to compare." : "Compare the " + ids.length + " latest stored sessions for " + room3 + ", independently of the search filters.";
+        compareModel.title = ids.length < 2 ? "Keep at least two sessions for this model to compare." : "Compare the " + ids.length + " latest stored sessions for " + room3 + ", independently of the search filters. Sessions after the newest twelve form a faint chart background.";
       }
       else for (const entry of visible.slice(0, shown)) {
         const row = toolNode(list, "article", void 0, "tools-row");
@@ -6622,7 +6642,7 @@ underlying system, so should run in the browser, Node, or Plask.
     const newestFirst = series.map((s, i) => i).sort((a, b) => series[b].timestamps[0] - series[a].timestamps[0] || a - b);
     const ranks = series.map((s, i) => newestFirst.indexOf(i));
     const colorIndices = ranks.map((rank) => rank < 6 ? rank : 1 + (rank - 6) % 5);
-    const opacities = ranks.map((rank) => rank < 6 ? 1 : Math.max(0.35, 0.85 - (rank - 6) * 0.1));
+    const opacities = ranks.map(comparisonOpacity);
     const newest = newestFirst[0];
     const legendLabels = labels.map((label, i) => {
       const control = toolNode(legend, "label"), check = toolNode(control, "input");
@@ -6633,8 +6653,8 @@ underlying system, so should run in the browser, Node, or Plask.
       swatch.setAttribute("aria-hidden", "true");
       swatch.style.borderTopStyle = i === newest ? "solid" : "dashed";
       swatch.style.opacity = String(opacities[i]);
-      toolNode(control, "span", String.fromCharCode(65 + i) + (series.length > 1 && i === newest ? " · Latest" : "") + " · " + label);
-      control.title = (series.length > 1 ? i === newest ? "Latest session — solid pink: " : "Earlier session — dashed" + (ranks[i] >= 6 ? ", " + Math.round(opacities[i] * 100) + "% opacity" : "") + ": " : "") + label;
+      toolNode(control, "span", comparisonLabel(i) + (series.length > 1 && i === newest ? " · Latest" : "") + " · " + label);
+      control.title = (series.length > 1 ? i === newest ? "Latest session — solid pink: " : (ranks[i] >= COMPARISON_FOREGROUND_COUNT ? "Background session — dashed" : "Earlier session — dashed") + ", " + Math.round(opacities[i] * 100) + "% opacity: " : "") + label;
       check.onchange = () => {
         if (!check.checked && hidden.size === series.length - 1) {
           check.checked = true;
@@ -6667,10 +6687,10 @@ underlying system, so should run in the browser, Node, or Plask.
     const body = toolNode(table, "tbody");
     const rows = series.map((s, i) => {
       const row = toolNode(body, "tr");
-      toolNode(row, "th", String.fromCharCode(65 + i)).scope = "row";
+      toolNode(row, "th", comparisonLabel(i)).scope = "row";
       return { row, value: toolNode(row, "td"), detail: toolNode(row, "td") };
     });
-    const bitmap = document.createElement("canvas");
+    const bitmap = document.createElement("canvas"), backgroundBitmap = document.createElement("canvas");
     let width = 260, height = 200, ratio = 1, left = 52, right = 248, top = 15, bottom = 164;
     const timeAt = (event) => {
       const bounds = canvas.getBoundingClientRect(), x = (event.clientX - bounds.left) * width / bounds.width;
@@ -6772,41 +6792,56 @@ underlying system, so should run in the browser, Node, or Plask.
         ctx.textAlign = "right";
         ctx.fillText(elapsed(end), right, bottom + 20);
       }
-      for (const j of newestFirst.slice().reverse()) {
-        const color = colors[colorIndices[j]];
-        legendLabels[j].style.color = color;
-        legendLabels[j].querySelector("input").disabled = hidden.size === series.length - 1 && !hidden.has(j);
-        if (hidden.has(j)) continue;
-        ctx.globalAlpha = opacities[j];
-        ctx.strokeStyle = ctx.fillStyle = color;
-        ctx.lineWidth = 1.8;
-        ctx.lineCap = "butt";
-        ctx.setLineDash(j === newest ? [] : [6, 4]);
-        ctx.beginPath();
+      const backgroundColor = style.getPropertyValue("--panel-muted").trim();
+      function paintSeries(target, j, color) {
+        target.strokeStyle = target.fillStyle = color;
+        target.lineWidth = ranks[j] >= COMPARISON_FOREGROUND_COUNT ? 1.2 : 1.8;
+        target.lineCap = "butt";
+        target.setLineDash(j === newest ? [] : [6, 4]);
+        target.beginPath();
         let previousY = 0;
-        const dots = [];
-        const points = plots[j].points;
+        const dots = [], points = plots[j].points;
         points.forEach((point, i) => {
           const x = left + (point.time - start) / (end - start || 1) * (right - left), y = bottom - point.value / maximum * (bottom - top);
-          if (point.move) ctx.moveTo(x, y);
+          if (point.move) target.moveTo(x, y);
           else {
-            ctx.lineTo(x, previousY);
-            ctx.lineTo(x, y);
+            target.lineTo(x, previousY);
+            target.lineTo(x, y);
           }
           if (point.move && (i + 1 === points.length || points[i + 1].move)) dots.push([x, y]);
           previousY = y;
         });
-        ctx.stroke();
-        ctx.setLineDash([]);
+        target.stroke();
+        target.setLineDash([]);
         dots.forEach(([x, y]) => {
-          ctx.beginPath();
-          ctx.arc(x, y, 2.5, 0, Math.PI * 2);
-          ctx.fill();
+          target.beginPath();
+          target.arc(x, y, 2.5, 0, Math.PI * 2);
+          target.fill();
         });
+      }
+      const backgroundIndices = newestFirst.filter((j) => ranks[j] >= COMPARISON_FOREGROUND_COUNT && !hidden.has(j));
+      backgroundBitmap.width = backgroundIndices.length ? width * ratio : 0;
+      backgroundBitmap.height = backgroundIndices.length ? height * ratio : 0;
+      if (backgroundIndices.length) {
+        const backgroundCtx = backgroundBitmap.getContext("2d");
+        backgroundCtx.scale(ratio, ratio);
+        for (const j of backgroundIndices) paintSeries(backgroundCtx, j, backgroundColor);
+        ctx.globalAlpha = COMPARISON_BACKGROUND_OPACITY;
+        ctx.drawImage(backgroundBitmap, 0, 0, width, height);
+        ctx.globalAlpha = 1;
+      }
+      for (const j of newestFirst.slice().reverse()) {
+        const background = ranks[j] >= COMPARISON_FOREGROUND_COUNT;
+        const color = background ? backgroundColor : colors[colorIndices[j]];
+        legendLabels[j].style.color = color;
+        legendLabels[j].querySelector("input").disabled = hidden.size === series.length - 1 && !hidden.has(j);
+        if (hidden.has(j) || background) continue;
+        ctx.globalAlpha = opacities[j];
+        paintSeries(ctx, j, color);
       }
       ctx.globalAlpha = 1;
       range.textContent = "Chart window " + axisLabel(start) + " – " + axisLabel(end) + (axisMode === "clock" ? " · 24h local clock" : " · full comparison/session range " + elapsed(axisMs));
-      hint.textContent = (axisMode === "clock" ? "Aligned by local time of day. Midnight crossings continue at the start of the chart. Clock changes are separate segments; repeated clock times can show multiple dated values. Statistics use full sessions." : "Aligned from each session’s first retained sample, using real elapsed time. Hidden lines and zoom do not change summary totals or the shared comparison length.") + " Move to inspect; click to pin, drag to zoom, or use the buttons and arrow keys. Gaps have no assumed samples.";
+      hint.textContent = (axisMode === "clock" ? "Aligned by local time of day. Midnight crossings continue at the start of the chart. Clock changes are separate segments; repeated clock times can show multiple dated values. Statistics use full sessions." : "Aligned from each session’s first retained sample, using real elapsed time. Hidden lines and zoom do not change summary totals or the shared comparison length.") + " Move to inspect; click to pin, drag to zoom, or use the buttons and arrow keys. Gaps have no assumed samples." + (series.length > COMPARISON_FOREGROUND_COUNT ? " The newest twelve lines fade progressively; older sessions form a faint background. Each session remains inspectable and can be hidden." : " The newest line is opaque; earlier sessions fade progressively.");
       zoomIn.disabled = end - start <= Math.min(1e3, axisMs);
       zoomOut.disabled = end - start >= axisMs;
       panLeft.disabled = start <= 0;
@@ -6920,7 +6955,7 @@ underlying system, so should run in the browser, Node, or Plask.
         disposed = true;
         drag = null;
         plotCache = null;
-        bitmap.width = bitmap.height = 0;
+        bitmap.width = bitmap.height = backgroundBitmap.width = backgroundBitmap.height = 0;
       }
     };
   }
@@ -8187,7 +8222,9 @@ underlying system, so should run in the browser, Node, or Plask.
       if (state.favoriteError) node(content, "p", state.favoriteError, "tools-muted");
       libraryFilters.room = libraryRoom || "";
       if (libraryRoom && libraryRoom !== "*" && !state.entries.some((entry) => entry.archive.room.toLowerCase() === libraryRoom)) libraryFilters.room = libraryRoom = "";
+      const archiveById = new Map(state.entries.map((entry) => [entry.id, entry.archive]));
       const callbacks = __spreadProps(__spreadValues({
+        comparisonLimit: (ids) => comparisonRecordingLimit(ids.map((id) => archiveById.get(id)).filter((archive) => !!archive)),
         cardSummary: (entries) => modelCardReader.read(entries),
         modelComparisonIds: (room2) => latestModelSessionIds(state.entries, room2),
         compareModel: (room2) => {
@@ -8253,7 +8290,7 @@ underlying system, so should run in the browser, Node, or Plask.
           }
         }
       });
-      renderLibraryBrowser(content, state.entries, libraryFilters, librarySelection, Object.fromEntries(Object.entries(callbacks).map(([key, fn]) => [key, action(fn)])), libraryDisclosures, MAX_COMPARE_RECORDINGS);
+      renderLibraryBrowser(content, state.entries, libraryFilters, librarySelection, Object.fromEntries(Object.entries(callbacks).map(([key, fn]) => [key, action(fn)])), libraryDisclosures);
       if (state.damaged.length) {
         node(content, "p", state.damaged.length + " unreadable library record(s) were retained.", "tools-muted");
         if (state.unavailable.length) node(content, "p", "Some records could not be read. The displayed storage size excludes them; saving new sessions waits until they can be read.", "tools-muted");
@@ -8435,6 +8472,7 @@ underlying system, so should run in the browser, Node, or Plask.
         tell(error.message, true);
       }
       node(picker, "p", filteredSources.length + " matching sessions. Existing selections stay available when outside the filters.", "tools-muted");
+      if (comparing) node(picker, "p", "Compare up to 30 sessions from one model, or 12 across models.", "tools-muted");
       const sourceControls = node(picker, "div", void 0, "tools-actions");
       if (liveComparisonArchive) button(sourceControls, "Refresh live snapshot", () => {
         liveComparisonArchive = captureLiveSessionFile();
@@ -8460,25 +8498,29 @@ underlying system, so should run in the browser, Node, or Plask.
           render(tab);
         });
         selectedExtra.forEach((id, index) => {
-          selectedExtra[index] = selectSource(sourceControls, String.fromCharCode(67 + index) + " ", "tools-source-" + String.fromCharCode(99 + index), id, (value) => {
+          selectedExtra[index] = selectSource(sourceControls, comparisonLabel(index + 2) + " ", "tools-source-" + comparisonLabel(index + 2).toLowerCase(), id, (value) => {
             selectedExtra[index] = value;
             selectNewFollowSource();
             render(tab);
           });
-          button(sourceControls, "Remove " + String.fromCharCode(67 + index), () => {
+          button(sourceControls, "Remove " + comparisonLabel(index + 2), () => {
             selectedExtra.splice(index, 1);
             render(tab);
           });
         });
         const used = /* @__PURE__ */ new Set([selectedA, selectedB, ...selectedExtra]);
-        const next = filteredSources.find((item) => !used.has(item.id));
-        button(sourceControls, "Add session", () => {
-          if (next && selectedExtra.length < MAX_COMPARE_RECORDINGS - 2) {
+        const archives = sourceOptions().filter((item) => used.has(item.id)).map((item) => item.archive);
+        const count = 2 + selectedExtra.length, limit = comparisonRecordingLimit(archives);
+        const next = filteredSources.find((item) => !used.has(item.id) && count + 1 <= comparisonRecordingLimit([...archives, item.archive]));
+        const add = button(sourceControls, "Add session", () => {
+          if (next && count < limit) {
             selectedExtra.push(next.id);
             render(tab);
           }
-        }, "tools-compare-add").disabled = selectedExtra.length >= MAX_COMPARE_RECORDINGS - 2 || !next;
-        node(sourceControls, "span", 2 + selectedExtra.length + " / " + MAX_COMPARE_RECORDINGS + " slots", "tools-muted");
+        }, "tools-compare-add");
+        add.disabled = count >= limit || !next;
+        add.title = "Up to 30 sessions from one model, or 12 across models. Additional sessions must match this limit and the filters.";
+        node(sourceControls, "span", count + " / " + limit + " slots", "tools-muted").id = "tools-compare-slots";
       }
       followControl(content);
       if (comparing) comparisonAxis(content);
@@ -8690,13 +8732,19 @@ underlying system, so should run in the browser, Node, or Plask.
         }
         const ids = [.../* @__PURE__ */ new Set([selectedA, selectedB, ...selectedExtra])], recordings = ids.map((id) => options2.find((item) => item.id === id)).filter((item) => !!item);
         const archives = recordings.map((item) => item.archive), clock2 = compareAxis === "clock";
+        if (archives.length > comparisonRecordingLimit(archives)) {
+          clearAnalysisChart();
+          controls.hidden = true;
+          node(overview, "p", "Compare up to twelve sessions across different models. Select one model for up to thirty sessions.", "tools-muted");
+          return;
+        }
         const result = compareRecordingSet(archives, metric, threshold, !clock2 && sharedLength);
-        const tooLong = clock2 ? archives.flatMap((archive, index) => clockSessionDuration(archive) > CLOCK_DAY_MS ? [String.fromCharCode(65 + index)] : []) : [];
+        const tooLong = clock2 ? archives.flatMap((archive, index) => clockSessionDuration(archive) > CLOCK_DAY_MS ? [comparisonLabel(index)] : []) : [];
         if (tooLong.length) {
           clearAnalysisChart();
           node(overview, "p", "24h chart unavailable: session" + (tooLong.length > 1 ? "s " : " ") + tooLong.join(", ") + " exceed" + (tooLong.length === 1 ? "s" : "") + " 24 hours. Choose Elapsed time or select shorter sessions.", "tools-muted");
         } else if (redrawChart) chart(archives, recordings.map((item) => item.title), clock2 ? CLOCK_DAY_MS : result.axisMs, ids);
-        summaryTable(result.summaries, recordings.map((item, index) => String.fromCharCode(65 + index)), true, results);
+        summaryTable(result.summaries, recordings.map((item, index) => comparisonLabel(index)), true, results);
       } else {
         const summary = summarizeSession(a.archive, metric, threshold);
         const continuing = liveUpdate && (summaryThresholdSource == null ? void 0 : summaryThresholdSource.id) === a.id && summaryThresholdSource.metric === metric;
@@ -10495,7 +10543,7 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/bootstrap.js
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.25.0";
+    runtime.TIERSCOPE_VERSION = "3.26.0";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;

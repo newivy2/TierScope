@@ -15,13 +15,21 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   GM_setValue('tierscope:library:v1:organized_'+i,JSON.stringify({schemaVersion:1,addedAt:now,title:i===0?'alpha_model':'Recording '+(i+1),favorite:i===0,notes:i===0?'Opening day':'',archive:a}));
  }
  },extended(){
- const base=captureSessionFile();for(let i=0;i<13;i++){
+ const base=captureSessionFile();for(let i=0;i<31;i++){
  const a=JSON.parse(JSON.stringify(base)),start=Date.UTC(2026,8,i+1,12);a.room='extended_model';
  a.session.history.timestamps=a.session.history.timestamps.map((_,j)=>start+j*60000);a.session.sessionStartedAt=start;a.session.timestamp=start+180000;
  for(const key of STORAGE_HISTORY_SERIES){if(key!=='anonymous')a.session.history[key]=a.session.history[key].map(v=>v+i);a.session.sessionHighs[key]={value:Math.max(...a.session.history[key]),time:start+120000};}
  a.session.roomTotalHigh=45+i;a.session.roomTotalHighTime=start+120000;
  GM_setValue('tierscope:library:v1:extended_'+i,JSON.stringify({schemaVersion:1,addedAt:start,title:'Extended '+i,archive:a}));
  }
+ },probeShadow(){
+ const host=document.createElement('div');host.style.width='300px';document.getElementById('tools-content').appendChild(host);
+ const samples=Array.from({length:30},(_,i)=>({times:[0,60000],values:[i<12?20:8,i<12?20:8],breaks:[false,false],timestamps:[100000-i*1000,160000-i*1000]}));
+ const view=renderAnalysisChart(host,samples,samples.map((_,i)=>'Probe '+i),60000,'Probe');
+ const canvas=view.canvas,ratio=window.devicePixelRatio||1;
+ const pixels=canvas.getContext('2d').getImageData(80*ratio,98*ratio,100*ratio,14*ratio).data;
+ let maxAlpha=0;for(let i=3;i<pixels.length;i+=4)maxAlpha=Math.max(maxAlpha,pixels[i]);
+ view.dispose();host.remove();return maxAlpha;
  },library:readSessionLibrary,archive:captureSessionFile,
  state:()=>({history:JSON.stringify(history),paused:isPaused,mode:presentationMode,ath:JSON.stringify(readAllTimeHighs(getModelName()).highs)}),
  theme:()=>{isDarkMode=!isDarkMode;applyPanelTheme();},
@@ -36,7 +44,9 @@ const file=(name,value)=>({name,mimeType:'application/json',buffer:Buffer.from(J
   await context.addInitScript(()=>{
    window.GM_listValues=()=>Object.keys(localStorage);window.GM_getValue=(k,d)=>localStorage.getItem(k)===null?d:JSON.parse(localStorage.getItem(k));
    window.GM_setValue=(k,v)=>localStorage.setItem(k,JSON.stringify(v));window.GM_deleteValue=k=>localStorage.removeItem(k);
-   window.analysisStrokes=[];const stroke=CanvasRenderingContext2D.prototype.stroke;
+   window.analysisStrokes=[];window.analysisComposites=[];const drawImage=CanvasRenderingContext2D.prototype.drawImage;
+   CanvasRenderingContext2D.prototype.drawImage=function(...args){if(!this.canvas.id&&this.globalAlpha<1)window.analysisComposites.push(this.globalAlpha);return drawImage.apply(this,args);};
+   const stroke=CanvasRenderingContext2D.prototype.stroke;
    CanvasRenderingContext2D.prototype.stroke=function(...args){
     if(!this.canvas.id&&document.getElementById('tools-analysis-chart'))window.analysisStrokes.push({color:this.strokeStyle,dash:this.getLineDash(),alpha:this.globalAlpha});
     return stroke.apply(this,args);
@@ -130,7 +140,7 @@ const file=(name,value)=>({name,mimeType:'application/json',buffer:Buffer.from(J
   assert.equal(await page.locator('.tools-chart-legend label').nth(2).locator('.tools-series-swatch').evaluate(e=>e.style.borderTopStyle),'solid');
   assert.equal(await page.locator('.tools-chart-legend label').nth(0).locator('.tools-series-swatch').evaluate(e=>e.style.borderTopStyle),'dashed');
   assert.match(await page.locator('.tools-chart-legend label').nth(2).getAttribute('title'),/Latest session — solid pink/);
-  await page.evaluate(()=>window.analysisStrokes=[]);await page.click('#tools-chart-reset');
+  await page.evaluate(()=>{window.analysisStrokes=[];window.analysisComposites=[];});await page.click('#tools-chart-reset');
   const darkStrokes=await page.evaluate(()=>window.analysisStrokes.filter(s=>['#ff69b4','#79baff','#68d391','#ffd166','#c4a3ff','#ff987d'].includes(s.color)));
   assert(darkStrokes.some(s=>s.color==='#ff69b4'));assert(darkStrokes.some(s=>s.color!=='#ff69b4'));
   for(const s of darkStrokes)assert.deepEqual(s.dash,s.color==='#ff69b4'?[]:[6,4]);
@@ -230,43 +240,86 @@ const file=(name,value)=>({name,mimeType:'application/json',buffer:Buffer.from(J
   // Closing/reopening keeps metadata while clearing transient selections.
   await page.keyboard.press('Escape');await page.click('#btn-control-library');await openLibraryBook(page);await page.selectOption('#tools-library-model','alpha_model');await page.check('#tools-library-favorites');
   assert.equal(await page.locator('.tools-row').count(),6);assert.match(await page.locator('.tools-recording-note').textContent(),/Remember this/);assert.match(await page.locator('#tools-library-selected').textContent(),/^0 selected/);
-  // Twelve slots retain the six established styles; only the older six fade.
+  // Thirty slots: twelve progressively faded foreground lines, eighteen faint background traces.
   await page.evaluate(()=>ViewerTracker.__organized.extended());await page.click('#tools-refresh-library');
   await page.click('#tools-library-clear');await page.selectOption('#tools-library-model','extended_model');
+  // Hidden selections count toward the mixed-model cap without restricting export.
+  await page.locator('#tools-library-selection').evaluate(e=>e.open=true);
+  for(let i=19;i<=30;i++)await page.locator('[data-library-id="extended_'+i+'"] input[type=checkbox]').check();
+  await page.selectOption('#tools-library-model','alpha_model');await page.locator('[data-library-id="organized_0"] input[type=checkbox]').check();
+  assert.match(await page.locator('#tools-library-selected').textContent(),/^13 selected.*Comparison limit: 12/);
+  assert(await page.locator('#tools-compare-selected').isDisabled());assert(await page.locator('#tools-export-selected').isEnabled());
+  assert.match(await page.locator('#tools-compare-selected').getAttribute('title'),/12 across models/);
+  await page.selectOption('#tools-library-model','extended_model');await page.locator('[data-library-id="extended_19"] input[type=checkbox]').uncheck();
+  assert(await page.locator('#tools-compare-selected').isEnabled());await page.click('#tools-compare-selected');
+  await page.locator('#tools-recording-picker').evaluate(e=>e.open=true);
+  assert.equal(await page.locator('#tools-compare-slots').textContent(),'12 / 12 slots');
+  assert(await page.locator('#tools-compare-add').isDisabled());assert.equal(await page.locator('#tools-summary-table thead th').count(),13);
+  // Returning all slots to one model enables expansion and skips unrelated snapshots.
+  await page.selectOption('#tools-source-l','extended_19');assert.equal(await page.locator('#tools-compare-slots').textContent(),'12 / 30 slots');
+  assert(await page.locator('#tools-compare-add').isEnabled());await page.click('#tools-compare-add');
+  const thirteenth=await page.locator('#tools-source-m').inputValue();assert.match(thirteenth,/^extended_/);
+  assert.equal(await page.locator('#tools-summary-table thead th').count(),14);
+  await page.selectOption('#tools-source-m','organized_0');
+  assert.equal(await page.locator('#tools-compare-slots').textContent(),'13 / 12 slots');assert(await page.locator('#tools-compare-add').isDisabled());
+  assert.equal(await page.locator('#tools-analysis-chart').count(),0);assert.equal(await page.locator('#tools-summary-table').count(),0);
+  assert.match(await page.locator('#tools-analysis-output').textContent(),/twelve sessions across different models/);
+  await page.selectOption('#tools-source-m',thirteenth);assert.equal(await page.locator('#tools-analysis-chart').count(),1);
+  assert.equal(await page.locator('#tools-summary-table thead th').count(),14);
+  await page.click('[data-tools-tab=library]');await page.click('#tools-clear-selection');await page.selectOption('#tools-library-model','extended_model');
   await page.locator('#tools-library-selection').evaluate(e=>e.open=true);await page.click('#tools-select-matching');
-  assert(await page.locator('#tools-compare-selected').isDisabled(),'thirteen selected sessions cannot be compared');
+  assert(await page.locator('#tools-compare-selected').isDisabled(),'thirty-one selected sessions cannot be compared');
   await page.locator('[data-library-id="extended_0"] input[type=checkbox]').uncheck();
   assert(await page.locator('#tools-compare-selected').isEnabled());await page.click('#tools-compare-selected');
-  assert.equal(await page.locator('[id^=tools-source-]').count(),12);assert(await page.locator('#tools-compare-add').isDisabled());
-  assert.equal(await page.locator('#tools-summary-table thead th').count(),13);
+  assert.equal(await page.locator('[id^=tools-source-]').count(),30);assert(await page.locator('#tools-compare-add').isDisabled());
+  assert.equal(await page.locator('#tools-summary-table thead th').count(),31);
+  const lastSlot=await page.locator('#tools-source-ad').inputValue();
+  await page.getByRole('button',{name:'Remove AD',exact:true}).click();assert.equal(await page.locator('[id^=tools-source-]').count(),29);
+  assert(await page.locator('#tools-compare-add').isEnabled());await page.click('#tools-compare-add');
+  assert.match(await page.locator('#tools-source-ad').inputValue(),/^extended_/,'Add stays in the selected model above twelve sessions');
+  await page.selectOption('#tools-source-ad',lastSlot);assert.equal(await page.locator('[id^=tools-source-]').count(),30);
+  assert(await page.locator('#tools-compare-add').isDisabled());
   const styles=()=>page.locator('.tools-chart-legend label').evaluateAll(labels=>labels.map(e=>({opacity:Number(e.querySelector('.tools-series-swatch').style.opacity),dash:e.querySelector('.tools-series-swatch').style.borderTopStyle,color:e.style.color})));
-  let twelve=await styles();assert.deepEqual(twelve.map(s=>Math.round(s.opacity*100)),[100,100,100,100,100,100,85,75,65,55,45,35]);
-  assert.equal(twelve[0].dash,'solid');assert(twelve.slice(1).every(s=>s.dash==='dashed'));
-  await page.evaluate(()=>window.analysisStrokes=[]);await page.click('#tools-chart-reset');
+  let thirty=await styles();assert.deepEqual(thirty.map(s=>Math.round(s.opacity*100)),[100,95,90,85,80,75,70,65,60,55,50,45,...Array(18).fill(12)]);
+  assert.equal(thirty[0].dash,'solid');assert(thirty.slice(1).every(s=>s.dash==='dashed'));
+  await page.evaluate(()=>{window.analysisStrokes=[];window.analysisComposites=[];});await page.click('#tools-chart-reset');
   const alphas=await page.evaluate(()=>window.analysisStrokes.filter(s=>['#b42370','#175db0','#176f36','#835900','#7140a6','#a23c20'].includes(s.color)).map(s=>Math.round(s.alpha*100)));
-  assert.deepEqual(alphas,[35,45,55,65,75,85,100,100,100,100,100,100]);
+  assert.deepEqual(alphas,[45,50,55,60,65,70,75,80,85,90,95,100]);
+  assert.deepEqual(await page.evaluate(()=>window.analysisComposites.map(alpha=>Math.round(alpha*100))),[12],'old traces composite once at 12% opacity without accumulating');
+  assert.equal(await page.locator('#tools-source-aa').count(),1);assert.equal(await page.locator('#tools-source-ad').count(),1);
+  assert.match(await page.locator('.tools-chart-legend label').nth(29).textContent(),/^AD/);
   await page.locator('#tools-content').evaluate(e=>e.scrollTop=0);
   await page.locator('#tools-recording-picker').evaluate(e=>e.open=false);
-  await page.screenshot({path:'/tmp/tierscope-twelve-'+engine+'-bright.png'});
-  const oldest=await page.locator('#tools-source-l').inputValue(),newest=await page.locator('#tools-source-a').inputValue();
+  await page.screenshot({path:'/tmp/tierscope-shadow-'+engine+'-bright.png'});
+  const previewClip=await page.evaluate(()=>{const l=document.getElementById('tierscope-session-tools').getBoundingClientRect(),p=document.getElementById('tracker-container').getBoundingClientRect();return {x:Math.min(l.left,p.left),y:Math.min(l.top,p.top),width:Math.max(l.right,p.right)-Math.min(l.left,p.left),height:Math.max(l.bottom,p.bottom)-Math.min(l.top,p.top)};});
+  await page.screenshot({path:'/tmp/tierscope-shadow-preview-'+engine+'-bright.png',clip:previewClip});
+  const oldest=await page.locator('#tools-source-ad').inputValue(),newest=await page.locator('#tools-source-a').inputValue();
   await page.locator('#tools-recording-picker').evaluate(e=>e.open=true);
-  await page.selectOption('#tools-source-a',oldest);await page.selectOption('#tools-source-l',newest);
-  twelve=await styles();assert.equal(twelve[0].opacity,.35);assert.equal(twelve[11].opacity,1);assert.equal(twelve[11].dash,'solid');
-  await page.locator('[data-analysis-series="5"]').uncheck();assert.deepEqual(await styles(),twelve,'hidden lines do not reassign opacity');
-  assert.equal(await page.locator('#tools-chart-inspection tbody tr:visible').count(),11);
+  await page.selectOption('#tools-source-a',oldest);await page.selectOption('#tools-source-ad',newest);
+  thirty=await styles();assert.equal(thirty[0].opacity,.12);assert.equal(thirty[29].opacity,1);assert.equal(thirty[29].dash,'solid');
+  await page.locator('[data-analysis-series="5"]').uncheck();assert.deepEqual(await styles(),thirty,'hidden lines do not reassign opacity');
+  assert.equal(await page.locator('#tools-chart-inspection tbody tr:visible').count(),29);
   await page.locator('[data-analysis-series="5"]').check();
+  await page.locator('[data-analysis-series="13"]').uncheck();
+  assert.deepEqual(await styles(),thirty,'hiding a background session does not reassign foreground styles');
+  assert.equal(await page.locator('#tools-chart-inspection tbody tr:visible').count(),29);
+  await page.locator('[data-analysis-series="13"]').check();
   await page.locator('#tools-analysis-chart').focus();await page.keyboard.press('Home');
-  assert.equal(await page.locator('#tools-chart-inspection tbody tr').count(),12);
+  assert.equal(await page.locator('#tools-chart-inspection tbody tr').count(),30);
   await page.selectOption('#tools-compare-axis','clock');
-  assert.equal(await page.locator('#tools-chart-inspection tbody tr').count(),12);
+  assert.equal(await page.locator('#tools-chart-inspection tbody tr').count(),30);
   await page.evaluate(()=>ViewerTracker.__organized.theme());await page.waitForTimeout(80);
-  assert.equal((await styles())[0].opacity,.35);assert.equal((await styles())[11].opacity,1);
+  assert.equal((await styles())[0].opacity,.12);assert.equal((await styles())[29].opacity,1);
   await page.locator('#tools-recording-picker').evaluate(e=>e.open=false);await page.locator('#tools-content').evaluate(e=>e.scrollTop=0);
-  await page.screenshot({path:'/tmp/tierscope-twelve-'+engine+'-dark.png'});
+  await page.selectOption('#tools-compare-axis','elapsed');
+  await page.screenshot({path:'/tmp/tierscope-shadow-'+engine+'-dark.png'});
+  await page.screenshot({path:'/tmp/tierscope-shadow-preview-'+engine+'-dark.png',clip:previewClip});
   await page.setViewportSize({width:380,height:740});await page.waitForTimeout(80);
   assert((await page.locator('#tierscope-session-tools').evaluate(e=>e.scrollWidth-e.clientWidth))<=1);
+  const shadowAlpha=await page.evaluate(()=>ViewerTracker.__organized.probeShadow());
+  assert(shadowAlpha>=20&&shadowAlpha<=32,'eighteen coincident background traces remain around 12% opacity: '+shadowAlpha);
   assert.deepEqual(await page.evaluate(()=>ViewerTracker.__organized.state()),before);
   await page.evaluate(()=>{history.pushState({},'', '/next_room/');ViewerTracker.__organized.checkUrlChange();});assert.equal(await page.locator('#tierscope-session-tools').count(),0);
-  assert.deepEqual(errors,[]);console.log(engine+': filtered library, metadata, bulk transfer, six/twelve-way comparison, progressive opacity, cursor/gaps, zoom/pan, themes and isolation passed');
+  assert.deepEqual(errors,[]);console.log(engine+': filtered library, metadata, bulk transfer, twelve-model/thirty-session limits, progressive fading and composited shadows, cursor/gaps, zoom/pan, themes and isolation passed');
  }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});
