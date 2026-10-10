@@ -77,11 +77,17 @@ test('record stores and validation cannot reach session/playback owners, panel c
 test('owners and data/view layers remain outside every import cycle', () => {
   const protectedModules = ['acquisition-state.js', 'panel-preferences.js', 'live-session.js', 'playback-state.js', 'playback-data.js', 'display-model.js', 'presentation-data.js',
     'presentation.js', 'presentation-status.js', 'status-model.js', 'session-selectors.js', 'session-capture.js', 'high-selectors.js',
-    'request-policy.js', 'storage.js', 'highs-store.js', 'backup.js', 'session-library.js', 'session-file-format.js',
+    'request-policy.js', 'request-policy-data.js', 'connection-status.js', 'storage.js', 'highs-store.js', 'backup.js', 'session-library.js', 'session-file-format.js',
     'panel-view.js', 'compact-view.js', 'trend-view.js', 'status-view.js', 'chart-view.js', 'library-dock.js', 'library-shell.js', 'model-history-view.js', 'library-browser-view.js', 'tools-view-helpers.js', 'analysis-chart-view.js', 'analysis-metric-view.js', 'recording-export-data.js'];
   for (const file of protectedModules) {
     assert(!graph[file].some(dependency => dependencies(dependency).has(file)), file);
   }
+});
+
+test('retry policy calculations cannot depend on browser, storage, owners or controllers', () => {
+  assert.deepEqual(graph['request-policy-data.js'], []);
+  assert.deepEqual([...runtimeFields(modules['request-policy-data.js'].ast)], []);
+  assert(!/\b(?:document|navigator|window|location|fetch|Date|GM_\w+)\b/.test(modules['request-policy-data.js'].source));
 });
 
 test('drawing health and analysis preferences cannot depend on session or presentation controllers', () => {

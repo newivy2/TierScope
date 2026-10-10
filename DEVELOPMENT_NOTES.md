@@ -1,6 +1,6 @@
 # TierScope — Usage and development notes
 
-Detailed reference for **3.26.0**. [Comparison fading and history guide](docs/comparison-history-shadows.md). [24h comparison guide](docs/clock-comparison.md). [Library chart controls guide](docs/library-chart-controls.md). [Follow live guide](docs/follow-live.md). [Audience trends and ratio guide](docs/audience-trends.md). [Sessions Book guide](docs/sessions-book.md). [ATH cleanup guide](docs/ath-retention.md). The simplified Current Live Session card provides Keep in Library, Auto, Compare with previous, and History. File controls are below the session list, and exports remain on stored-session menus and the separate replay card. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation instructions, see the [README](readme.md).
+Detailed reference for **3.27.0**. [Connection recovery guide](docs/connection-recovery.md). [Comparison fading and history guide](docs/comparison-history-shadows.md). [24h comparison guide](docs/clock-comparison.md). [Library chart controls guide](docs/library-chart-controls.md). [Follow live guide](docs/follow-live.md). [Audience trends and ratio guide](docs/audience-trends.md). [Sessions Book guide](docs/sessions-book.md). [ATH cleanup guide](docs/ath-retention.md). The simplified Current Live Session card provides Keep in Library, Auto, Compare with previous, and History. File controls are below the session list, and exports remain on stored-session menus and the separate replay card. Development uses modular sources and a single installable script; see [BUILDING.md](BUILDING.md). For installation instructions, see the [README](readme.md).
 
 ## Contents
 
@@ -195,15 +195,20 @@ The theme applies to expanded and compact views, Replay controls, scan settings,
 
 ## Request failures and retries
 
-Acquisition distinguishes server restrictions from temporary failures:
+Acquisition distinguishes connection problems from server restrictions:
 
+- **Browser reports offline:** show **No connection**, suspend API and DOM scans, and retain valid samples and highs without increasing retry counters. Tracking time continues while active; the outage remains a recording gap.
+- **Connection failures:** fetch rejection, interrupted response transfer and request timeouts retry after 15 seconds, then 30 seconds, then at most 60 seconds. They do not increase the server-error counter or trigger DOM fallback. Being online is only a browser hint, not proof that the API is reachable.
+- **Reconnection:** after an offline transition, schedule a local retry after 5–10 seconds, staggered between tabs. Server waits and access restrictions still take precedence; manual Pause, Stop and non-broadcast pages remain inactive.
 - **HTTP 429:** no DOM fallback is attempted. `Retry-After` is honored as either seconds or an HTTP date. Without a usable header, acquisition waits at least one minute and uses the backoff schedule below.
 - **HTTP 401 or 403:** automatic acquisition and its timer pause, and the panel shows **Access denied** with the status code. DOM fallback is not attempted. After resolving the access problem, use **Resume** to retry; Reset and reload do not clear the restriction. A server-provided wait still applies.
-- **Other failures:** retries start after the longer of one minute or the configured interval, then double after consecutive API failures, up to 15 minutes. A longer `Retry-After` takes precedence. The existing DOM fallback remains available for ordinary failures, with its own cooldown, but is skipped when the server specifies a future retry time.
+- **Other response failures:** retries start after the longer of one minute or the configured interval, then double after consecutive API failures, up to 15 minutes. A longer `Retry-After` takes precedence. The existing DOM fallback remains available for ordinary failures, with its own cooldown, but is skipped when the server specifies a future retry time.
 
-Successful, validated API acquisition clears the failure backoff unless another tab has since recorded a newer restriction. The last accepted sample stays visible throughout failures. The status and countdown show the retry or access state; the sample timestamp remains available in the status tooltip.
+Successful, validated API acquisition clears the failure backoff only when both the local and observed storage revisions still match the attempt. A newer restriction from another tab or unavailable storage prevents clearing; valid live samples are still retained. The last accepted sample stays visible throughout failures. The status and countdown show the retry or access state; the sample timestamp remains available in the status tooltip.
 
 Request restrictions are shared through userscript storage across TierScope tabs on the same origin and survive reloads. Changing the scan interval, resetting a room, or attempting another scan cannot shorten a server wait. This is a shared retry gate, not a single shared scanner: simultaneous tabs can still start requests before either receives a restriction.
+
+Older stored retry records have no failure classification, so their existing waits remain protected until expiry or a valid scan clears them. Refresh other room tabs after updating so all tabs use the new retry rules. See the [connection recovery guide](docs/connection-recovery.md).
 
 ## Replay
 
@@ -548,6 +553,8 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
+| **3.27.0** | Distinguish offline and connection failures from server restrictions; use short transport retries and staggered reconnection while preserving samples, recording gaps, Pause/Stop and newer restrictions across tabs. |
+| **3.27.0-beta.1** | Preview connection-aware recovery: suspend scans while offline, cap transport-error retries at one minute, and stagger reconnect attempts without clearing server waits or resuming paused/stopped sessions. |
 | **3.26.0** | Release thirty-session comparisons for one model and twelve across models. Fade earlier lines from the second session and composite sessions 13–30 as a faint background. Expand model shortcuts and retain inspection, visibility and gap-aware statistics. |
 | **3.26.0-beta.2** | Limit expanded comparisons to thirty sessions from one model, retaining twelve across models. Explain selection limits, keep export available, and preserve slots when a changed selection needs correction. |
 | **3.26.0-beta.1** | Preview comparisons with up to thirty sessions. Fade each earlier foreground line from the start; keep the newest twelve distinct and composite older sessions as a faint background without opacity buildup. Expand comparison shortcuts and use A–Z, AA–AD labels. |
@@ -651,3 +658,7 @@ Hover over the expanded tier or its collapsed restore button for separate female
 ### Comparison fading and background history (3.26.0)
 
 The [comparison guide](docs/comparison-history-shadows.md) describes the thirty-session limit for one model (twelve across models), progressive 100%–45% foreground opacity and the older-session layer at 12%. Background traces remain available for inspection and statistics. Compare with previous selects up to 29 earlier sessions, and model-card Compare selects up to 30 newest stored sessions. Labels continue through AA–AD.
+
+### Connection recovery (3.27.0)
+
+The [connection recovery guide](docs/connection-recovery.md) describes offline suspension, independent 15/30/60-second transport retries and staggered reconnection. Server waits and access restrictions remain protected, including after storage failures; manual Pause/Stop does not resume automatically. Accepted data is retained and outages remain recording gaps.

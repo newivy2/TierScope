@@ -21,6 +21,7 @@
     "src/playback-state.js",
     "src/presentation-data.js",
     "src/acquisition-state.js",
+    "src/request-policy-data.js",
     "src/panel-preferences.js"
   ]
 }

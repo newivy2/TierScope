@@ -1,4 +1,5 @@
 import { readRequestPolicy, requestPolicyMessage } from './request-policy.js';
+import { isBrowserOffline } from './connection-status.js';
 import { automaticLibraryWarning } from './automatic-library.js';
 import { runtime } from './runtime.js';
 import { presentationWarningModel } from './presentation-health.js';
@@ -21,6 +22,8 @@ export function buildAcquisitionStatusModel() {
         model.title = runtime.sessionStorageNotice;
         return model;
     }
+    if (runtime.isAutoRefreshOn && isBrowserOffline()) return {...model, text: 'No connection',
+        title: 'The browser reports offline. Scans are suspended; the last valid sample is retained. Tracking time continues.', color: 'var(--panel-warning)'};
     var policyMessage = requestPolicyMessage(readRequestPolicy());
     if (policyMessage) {
         var sample = runtime.lastAcceptedAcquisition || runtime.restoredDisplayFrame;
@@ -60,6 +63,8 @@ export function buildFreshnessModel() {
         model.text = 'Stopped'; model.title = stopDescription() + '. Start begins a new session.';
         model.color = 'var(--panel-muted)'; return model;
     }
+    if (runtime.isAutoRefreshOn && isBrowserOffline()) return {...model, text: 'No connection',
+        title: 'The browser reports offline. Scans are suspended; the last valid sample is retained. Tracking time continues.', color: 'var(--panel-warning)'};
     if (isAbsencePaused() && !runtime.sessionStorageNotice) {
         var waitingPolicy = requestPolicyMessage(readRequestPolicy());
         model.text = waitingPolicy || 'Auto-paused';
