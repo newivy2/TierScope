@@ -15,6 +15,8 @@ const modules = fs.readdirSync(path.join(root, 'src')).filter(file => file.endsW
 // Deliberate fixes and features have behavioral coverage; keep the original baseline
 // untouched so every other function still proves the extraction preserved it.
 const reviewedChanges = new Set([
+  // Offline/transport classification: connection-recovery unit and native browser fixtures.
+  'acquireAPISnapshot', 'recordRequestFailure', 'requestPolicyMessage',
   // Model-first Library + automatic favorite checkpoints: favorite-sessions and model-library browser tests.
   'loadCollapsedRows', 'drawHistorySparklines', 'pulseAcceptedHighs', 'captureSessionFile',
   // Acquisition/preference ownership and controller wiring: control-ownership.test.cjs,
@@ -78,6 +80,8 @@ const reviewedChanges = new Set([
 // Follow-live snapshot ownership: analysis-follow.test.cjs and follow-live-browser.cjs.
 const featureModules = new Set(['ath-retention.js', 'ath-activity.js', 'ath-maintenance.js', 'analysis-clock-data.js', 'analysis-metric-view.js', 'analysis-follow.js', 'library-capacity-data.js', 'library-capacity.js', 'library-capacity-view.js', 'automatic-library.js', 'favorite-controls.js', 'favorite-view.js', 'room-total-series.js', 'library-drafts.js', 'library-models.js', 'library-query.js', 'library-transfer.js', 'library-browser-view.js', 'tools-view-helpers.js', 'analysis-chart-data.js', 'analysis-chart-view.js', 'model-history.js', 'model-history-view.js', 'presentation-health.js', 'sample-presentation.js', 'analysis-preference-data.js', 'analysis-preferences.js', 'acquisition-state.js', 'panel-preferences.js', 'library-dock.js', 'library-shell.js', 'recording-export-data.js', 'recording-exports.js', 'display-model.js', 'display-values.js', 'immutable-data.js', 'presentation-data.js', 'status-model.js', 'status-view.js', 'trend-view.js', 'playback-state.js', 'live-session.js', 'diagnostics.js', 'room-context.js', 'backup.js', 'data-io.js', 'session-analysis.js', 'session-health.js', 'session-library.js', 'session-tools.js']);
 const addedFunctions = new Set(['clearInactiveAllTimeHighs', 'retireInactiveAllTimeRecord', 'captureLiveSessionFile', 'initializeLifecycle', 'refreshPanelOptions', 'refreshScanCountdown', 'getSessionSamplePolicy', 'initializePresentation', 'paintPanelFrame', 'getSessionWriteStatus', 'writeSessionRecord']); // shared history-gap policy; session/ownership tests
+featureModules.add('connection-status.js'); featureModules.add('request-policy-data.js');
+addedFunctions.add('effectiveRequestDeadline'); addedFunctions.add('initializeConnectionRecovery');
 
 test('unchanged extracted functions preserve 3.4.0; reviewed changes have behavior coverage', () => {
   const actual = {};
@@ -123,8 +127,16 @@ test('runtime initialization preserves preference loading and startup order', ()
   assert.deepEqual(presentationBinding.expression.arguments[0].properties.map(p => [p.key.name, p.value.name]),
     [['refreshOptions', 'updatePanelOptions'], ['refreshReplayAvailability', 'updateReplayAvailability'], ['refreshCountdown', 'updateCountdownDisplay']]);
   assert.equal(body[index + 6].expression.left.property.name, 'urlCheckInterval');
+  const connectionBinding = body[index + 7];
+  assert.equal(connectionBinding.expression.callee.name, 'initializeConnectionRecovery');
+  const offlineDefault = body.find(n => n.expression?.left?.property?.name === 'connectionOffline');
+  const recoveryDefault = body.find(n => n.expression?.left?.property?.name === 'connectionRecoveryAt');
+  const storedPolicyDefault = body.find(n => n.expression?.left?.property?.name === 'requestPolicyStorageRevision');
+  assert.equal(offlineDefault.expression.right.callee.name, 'isBrowserOffline');
+  assert.equal(recoveryDefault.expression.right.value, 0);
+  assert.equal(storedPolicyDefault.expression.right.value, null);
   // Preserve every original default, preference read and effect in order.
-  const ownerBindings = new Set([bindings[0], playbackBinding, acquisitionBinding, preferenceBinding, lifecycleBinding, presentationBinding]);
+  const ownerBindings = new Set([bindings[0], playbackBinding, acquisitionBinding, preferenceBinding, lifecycleBinding, presentationBinding, connectionBinding, offlineDefault, recoveryDefault, storedPolicyDefault]);
   const unchanged = structuredClone(body.filter(n => !ownerBindings.has(n)));
   const rows = unchanged.find(n => n.expression?.left?.property?.name === 'PANEL_ROWS').expression.right.arguments[0].elements;
   const roomRow = rows.pop();

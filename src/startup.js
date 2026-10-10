@@ -1,6 +1,7 @@
 import { observeAthRoom, stopAthActivity } from './ath-activity.js';
 import { initializeAthGrace } from './ath-maintenance.js';
 import { isAcquisitionCurrent } from './acquisition-context.js';
+import { isBrowserOffline } from './connection-status.js';
 import { beginAcquisitionGeneration, resetAcquisitionForRoom, schedulePresenceAcquisition, startAcquisitionClock, stopAcquisitionClock } from './acquisition-state.js';
 import { drawAllSparklines } from './charts.js';
 import { validateDOMHealth } from './dom-health.js';
@@ -12,7 +13,7 @@ import { createPanel } from './panel.js';
 import { updateAcquisitionStatus } from './presentation-status.js';
 import { updateDisplay, updateTrendDisplay } from './presentation.js';
 import { leavePlayback } from './replay.js';
-import { readRequestPolicy } from './request-policy.js';
+import { effectiveRequestDeadline, readRequestPolicy } from './request-policy.js';
 import { runtime } from './runtime.js';
 import { performScanThenReturn } from './scanning.js';
 import { retrySamplePresentation } from './sample-presentation.js';
@@ -86,7 +87,7 @@ export function init() {
     }
     if (runtime.isStopped) { updateStopControls(); updateCountdownDisplay(); updateTrackingTimer(); return; }
     if (isRoom && isAbsencePaused()) {
-        schedulePresenceAcquisition(Date.now(), readRequestPolicy().until);
+        schedulePresenceAcquisition(Date.now(), effectiveRequestDeadline(readRequestPolicy()));
         startCountdown();
         performScanThenReturn(true);
         updateTrackingTimer();
@@ -160,7 +161,7 @@ export function init() {
         }, 1000);
     }
     startAcquisitionClock('healthCheckInterval', function() {
-        if (myGeneration === runtime.initGuard && !runtime.isStopped && !isAbsencePaused() && runtime.lastAcquisitionAttemptSource === 'DOM' && !runtime.isScanning) {
+        if (myGeneration === runtime.initGuard && !isBrowserOffline() && !runtime.isStopped && !isAbsencePaused() && runtime.lastAcquisitionAttemptSource === 'DOM' && !runtime.isScanning) {
             validateDOMHealth();
         }
     }, 30000);

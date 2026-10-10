@@ -6,7 +6,7 @@
 export const ACQUISITION_FIELDS = Object.freeze(['scanEpoch', 'initGuard', 'isScanning', 'lastAcquisitionAttemptSource',
     'domHealthStatus', 'domFallbackReadyAtByRoom', 'requestPolicyCache', 'requestPolicyUnsaved',
     'scanIntervalSeconds', 'countdownSeconds', 'lastScheduledIntervalSeconds', 'nextScanAt',
-    'countdownInterval', 'trackingTimerInterval', 'healthCheckInterval']);
+    'countdownInterval', 'trackingTimerInterval', 'healthCheckInterval', 'connectionOffline', 'connectionRecoveryAt', 'requestPolicyStorageRevision']);
 /** @type {AcquisitionState} */
 let acquisitionState;
 /** @type {{start: (tick: () => void, delay: number) => unknown, stop: (handle: unknown) => void}} */
@@ -18,7 +18,9 @@ const acquisitionClockVersions = new Map();
 /** @param {AcquisitionState} target @param {typeof acquisitionClockEffects} effects */
 export function initializeAcquisitionState(target, effects) {
     acquisitionState = {.../** @type {AcquisitionState} */ (Object.fromEntries(ACQUISITION_FIELDS.map(key => [key, target[key]]))), domHealthStatus: {...target.domHealthStatus},
-        requestPolicyCache: {...target.requestPolicyCache}, domFallbackReadyAtByRoom: new Map(target.domFallbackReadyAtByRoom)};
+        requestPolicyCache: {...target.requestPolicyCache}, domFallbackReadyAtByRoom: new Map(target.domFallbackReadyAtByRoom),
+        connectionOffline: !!target.connectionOffline, connectionRecoveryAt: target.connectionRecoveryAt || 0,
+        requestPolicyStorageRevision: target.requestPolicyStorageRevision === undefined ? null : target.requestPolicyStorageRevision};
     acquisitionClockEffects = effects;
     acquisitionClockVersions.clear();
     const fallbackView = Object.freeze({get: room => acquisitionState.domFallbackReadyAtByRoom.get(room),
@@ -30,7 +32,7 @@ export function initializeAcquisitionState(target, effects) {
             key === 'domHealthStatus' || key === 'requestPolicyCache' ? Object.freeze({...acquisitionState[key]}) : acquisitionState[key]
     });
 }
-export function invalidateAcquisition() { acquisitionState.scanEpoch++; acquisitionState.isScanning = false; }
+export function invalidateAcquisition() { acquisitionState.scanEpoch++; acquisitionState.isScanning = false; acquisitionState.connectionRecoveryAt = 0; }
 export function beginAcquisitionGeneration() {
     acquisitionState.initGuard++;
     invalidateAcquisition();
@@ -38,9 +40,10 @@ export function beginAcquisitionGeneration() {
 }
 /** @param {string} url @param {string} room @param {RequestPolicy} policy @param {number} now @param {boolean} stopped */
 export function beginAcquisition(url, room, policy, now, stopped) {
-    if (acquisitionState.isScanning || stopped || policy.blocked || policy.until > now) return null;
+    if (acquisitionState.isScanning || acquisitionState.connectionOffline || stopped || policy.blocked || policy.until > now) return null;
     acquisitionState.isScanning = true;
-    return Object.freeze({epoch: ++acquisitionState.scanEpoch, generation: acquisitionState.initGuard, url, room, policyRevision: policy.revision});
+    return Object.freeze({epoch: ++acquisitionState.scanEpoch, generation: acquisitionState.initGuard, url, room,
+        policyRevision: policy.revision, policyStorageRevision: acquisitionState.requestPolicyStorageRevision});
 }
 /** @param {AcquisitionContext} context @param {string} url */
 export function acquisitionContextIsCurrent(context, url) {
@@ -50,6 +53,7 @@ export function acquisitionContextIsCurrent(context, url) {
 export function finishAcquisition(context, url) {
     if (!acquisitionContextIsCurrent(context, url)) return false;
     acquisitionState.isScanning = false;
+    acquisitionState.connectionRecoveryAt = 0;
     return true;
 }
 /** @param {'API'|'DOM'} source */
@@ -84,9 +88,24 @@ export function scheduleNextAcquisition(seconds, now, restrictedUntil, stopped) 
 /** @param {number} now @param {number} restrictedUntil */
 export function schedulePresenceAcquisition(now, restrictedUntil) { acquisitionState.nextScanAt = Math.max(now, restrictedUntil); }
 export function clearAcquisitionDeadline() { acquisitionState.nextScanAt = 0; }
+/** @param {boolean} offline */
+export function observeAcquisitionConnection(offline) {
+    if (acquisitionState.connectionOffline === offline) return false;
+    acquisitionState.connectionOffline = offline;
+    acquisitionState.connectionRecoveryAt = 0;
+    if (offline) invalidateAcquisition();
+    return true;
+}
+/** @param {number} readyAt @param {number} responseUntil */
+export function scheduleConnectionRecovery(readyAt, responseUntil) {
+    acquisitionState.connectionRecoveryAt = readyAt;
+    acquisitionState.nextScanAt = Math.max(readyAt, responseUntil);
+    acquisitionState.countdownSeconds = 0;
+}
 export function resetAcquisitionForRoom() {
     beginAcquisitionGeneration();
     clearAcquisitionDeadline();
+    acquisitionState.connectionRecoveryAt = 0;
     acquisitionState.countdownSeconds = acquisitionState.scanIntervalSeconds;
     noteAcquisitionSource('API');
     clearDOMFailures();
@@ -118,17 +137,30 @@ export function startAcquisitionClock(name, tick, delay) {
 }
 /** @returns {RequestPolicy} */
 function emptyRequestPolicy() { return {until: 0, failures: 0, blocked: 0, status: 0, revision: ''}; }
+/** @param {RequestPolicy} remote @param {RequestPolicy} local */
+function mergeRequestRestrictions(remote, local) {
+    const merged = {...remote, until: Math.max(remote.until, local.until),
+        serverUntil: Math.max(remote.serverUntil || 0, local.serverUntil || 0),
+        failures: Math.max(remote.failures, local.failures), blocked: local.blocked || remote.blocked,
+        status: local.until >= remote.until ? local.status : remote.status, revision: local.revision};
+    if (local.responseUntil !== undefined || remote.responseUntil !== undefined) {
+        merged.responseUntil = Math.max(local.responseUntil === undefined ? local.until : local.responseUntil,
+            remote.responseUntil === undefined ? remote.until : remote.responseUntil, merged.serverUntil);
+        merged.connectionUntil = Math.max(local.connectionUntil || 0, remote.connectionUntil || 0);
+        merged.connectionFailures = Math.max(local.connectionFailures || 0, remote.connectionFailures || 0);
+        if (local.status === 429 || remote.status === 429) merged.status = 429;
+    }
+    return merged;
+}
 /** @param {RequestPolicy|null} value */
 export function reconcileRequestPolicy(value) {
+    acquisitionState.requestPolicyStorageRevision = value === null ? '' : value.revision;
     if (value === null) {
         if (!acquisitionState.requestPolicyUnsaved) acquisitionState.requestPolicyCache = emptyRequestPolicy();
         return;
     }
     const local = acquisitionState.requestPolicyCache;
-    acquisitionState.requestPolicyCache = acquisitionState.requestPolicyUnsaved ? {...value,
-        until: Math.max(value.until, local.until), serverUntil: Math.max(value.serverUntil || 0, local.serverUntil || 0),
-        failures: Math.max(value.failures, local.failures), blocked: local.blocked || value.blocked,
-        status: local.until >= value.until ? local.status : value.status, revision: local.revision} : {...value};
+    acquisitionState.requestPolicyCache = acquisitionState.requestPolicyUnsaved ? mergeRequestRestrictions(value, local) : {...value};
 }
 /** @param {RequestPolicy} policy */
 export function stageRequestPolicy(policy) {
@@ -137,12 +169,17 @@ export function stageRequestPolicy(policy) {
 }
 /** @param {string} revision */
 export function confirmRequestPolicySaved(revision) {
-    if (acquisitionState.requestPolicyCache.revision === revision) acquisitionState.requestPolicyUnsaved = false;
+    if (acquisitionState.requestPolicyCache.revision === revision) {
+        acquisitionState.requestPolicyUnsaved = false;
+        acquisitionState.requestPolicyStorageRevision = revision;
+    }
 }
-/** @param {string} revision */
-export function clearOwnedRequestFailures(revision) {
+export function noteRequestPolicyReadFailure() { acquisitionState.requestPolicyStorageRevision = null; }
+/** @param {string} revision @param {string|null|undefined} storageRevision */
+export function clearOwnedRequestFailures(revision, storageRevision = undefined) {
     const current = acquisitionState.requestPolicyCache;
-    if (current.revision !== revision || current.blocked || !current.failures) return false;
+    if (acquisitionState.requestPolicyStorageRevision === null || storageRevision !== undefined && acquisitionState.requestPolicyStorageRevision !== storageRevision) return false;
+    if (current.revision !== revision || current.blocked || !(current.failures || current.connectionFailures)) return false;
     acquisitionState.requestPolicyCache = emptyRequestPolicy();
     acquisitionState.requestPolicyUnsaved = false;
     return true;

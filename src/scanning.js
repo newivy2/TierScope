@@ -1,6 +1,7 @@
 import { isAcquisitionCurrent } from './acquisition-context.js';
 import { beginAcquisition, clearDOMFailures, deferDOMFallback, finishAcquisition, noteAcquisitionSource } from './acquisition-state.js';
 import { diagnostic } from './diagnostics.js';
+import { isBrowserOffline } from './connection-status.js';
 import { findTab, isScanValid, scanUsers } from './dom.js';
 import { pulseAcceptedHighs } from './high-pulses.js';
 import { readAllTimeHighs } from './highs-store.js';
@@ -10,7 +11,7 @@ import { checkAbsenceStop, pauseForAccessRestriction, resetCountdown, startTrack
 import { abortAcceptedSample, beginAcceptedSample, commitAcceptedSample, markSessionGap, observeSessionPresence, resumeSessionForOwnerReturn } from './live-session.js';
 import { updateAcquisitionStatus } from './presentation-status.js';
 import { presentAcceptedSample } from './sample-presentation.js';
-import { clearRequestFailures, getDOMFallbackWaitSeconds, readRequestPolicy, recordRequestFailure, retryAfterTime } from './request-policy.js';
+import { clearRequestFailures, effectiveRequestDeadline, getDOMFallbackWaitSeconds, readRequestPolicy, recordRequestFailure, retryAfterTime } from './request-policy.js';
 import { runtime } from './runtime.js';
 import { saveSession } from './session-persistence.js';
 import { isAbsencePaused } from './session-selectors.js';
@@ -83,19 +84,22 @@ export async function acquireAPISnapshot(context) {
     try {
         var text = await Promise.race([
             (async function() {
-                var response = await fetch(url.href, { method: 'GET', credentials: 'same-origin',
-                    mode: 'same-origin', cache: 'no-store', redirect: 'error', signal: controller.signal });
+                var response;
+                try {
+                    response = await fetch(url.href, { method: 'GET', credentials: 'same-origin',
+                        mode: 'same-origin', cache: 'no-store', redirect: 'error', signal: controller.signal });
+                } catch (error) { throw connectionFailure(error); }
                 if (!response.ok) {
                     var error = new Error('API HTTP ' + response.status);
                     error.status = response.status;
                     error.retryAt = retryAfterTime(response.headers && response.headers.get('Retry-After'), Date.now());
                     throw error;
                 }
-                return response.text();
+                try { return await response.text(); } catch (error) { throw connectionFailure(error); }
             })(),
             new Promise(function(resolve, reject) {
                 timeout = setTimeout(function() {
-                    reject(new Error('API request timed out after ' + runtime.API_TIMEOUT_MS + ' ms'));
+                    reject(connectionFailure(new Error('API request timed out after ' + runtime.API_TIMEOUT_MS + ' ms')));
                     controller.abort();
                 }, runtime.API_TIMEOUT_MS);
             })
@@ -108,6 +112,12 @@ export async function acquireAPISnapshot(context) {
     } finally {
         clearTimeout(timeout);
     }
+}
+
+function connectionFailure(cause) {
+    var error = new Error(cause && cause.message || 'API connection failed');
+    error.connectionFailure = true;
+    return error;
 }
 
 export async function acquireDOMSnapshot(context, returnToChat) {
@@ -158,7 +168,7 @@ export async function checkBroadcasterReturn(context) {
         var snapshot = await acquireAPISnapshot(context);
         if (!isAcquisitionCurrent(context) || checkAbsenceStop() || !isAbsencePaused()) return null;
         if (readRequestPolicy().blocked) { pauseForAccessRestriction(); return null; }
-        clearRequestFailures(context.policyRevision);
+        clearRequestFailures(context.policyRevision, context.policyStorageRevision);
         if (!snapshot.users.some(function(user) { return user.isOwner === true; })) return null;
         resumeSessionForOwnerReturn(Date.now());
         startTrackingTimer();
@@ -190,7 +200,7 @@ export async function acquireRoomSnapshot(context, returnToChat) {
         if (checkAbsenceStop() || !isAcquisitionCurrent(context)) return null;
         validateRoomSnapshot(snapshot);
         clearDOMFailures();
-        clearRequestFailures(context.policyRevision);
+        clearRequestFailures(context.policyRevision, context.policyStorageRevision);
         return snapshot;
     } catch (err) {
         if (!isAcquisitionCurrent(context)) return null;
@@ -198,7 +208,7 @@ export async function acquireRoomSnapshot(context, returnToChat) {
         var policy = recordRequestFailure(err);
         if (policy.blocked) { pauseForAccessRestriction(); return null; }
         // Do not switch acquisition routes around a rate limit or explicit server wait.
-        if (err.status === 429 || err.retryAt > Date.now()) return null;
+        if (err.connectionFailure || isBrowserOffline() || err.status === 429 || err.retryAt > Date.now()) return null;
     }
     noteAcquisitionSource('DOM');
     var fallbackWait = getDOMFallbackWaitSeconds(context.room);
@@ -238,8 +248,10 @@ export async function performScanThenReturn(returnToChat) {
     if (runtime.isScanning || runtime.isStopped) return;
     var policy = readRequestPolicy();
     if (policy.blocked) { pauseForAccessRestriction(); updateCountdownDisplay(); return; }
-    if (policy.until > Date.now()) { updateCountdownDisplay(); return; }
-    var context = beginAcquisition(location.href, getModelName(), policy, Date.now(), runtime.isStopped);
+    if (isBrowserOffline()) { markSessionGap(); updateCountdownDisplay(); updateAcquisitionStatus(); return; }
+    var deadline = effectiveRequestDeadline(policy);
+    if (deadline > Date.now()) { updateCountdownDisplay(); return; }
+    var context = beginAcquisition(location.href, getModelName(), {...policy, until: deadline}, Date.now(), runtime.isStopped);
     if (!context) return;
     var priorState = null;
     var sampleCommitted = false;

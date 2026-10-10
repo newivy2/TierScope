@@ -4,7 +4,8 @@ import { updatePanelOptions } from './files.js';
 import { cancelGifExport, generateGifFromHistory } from './gif.js';
 import { cancelHighPulses } from './high-pulses.js';
 import { loadCollapsedRows, loadPanelGeometry } from './layout.js';
-import { initializeLifecycle, resetAllTracking, updateCountdownDisplay } from './lifecycle.js';
+import { initializeConnectionRecovery, initializeLifecycle, resetAllTracking, updateCountdownDisplay } from './lifecycle.js';
+import { isBrowserOffline } from './connection-status.js';
 import { initializeLiveSession } from './live-session.js';
 import { initializePanelPreferences } from './panel-preferences.js';
 import { initializePlaybackState } from './playback-state.js';
@@ -104,6 +105,8 @@ export function initializeRuntime() {
     runtime.domFallbackReadyAtByRoom = new Map();
     runtime.freshnessInterval = null;
     runtime.nextScanAt = 0;
+    runtime.connectionOffline = isBrowserOffline();
+    runtime.connectionRecoveryAt = 0;
     runtime.windowResizeHandler = null;
     runtime.miniSettingsKeyHandler = null;
     runtime.previousCounts = {
@@ -300,6 +303,7 @@ export function initializeRuntime() {
     };
     runtime.REQUEST_POLICY_KEY = 'tierscope:requests:v1:' + location.origin;
     runtime.requestPolicyUnsaved = false;
+    runtime.requestPolicyStorageRevision = null;
     runtime.requestPolicyCache = { until: 0, failures: 0, blocked: 0, status: 0, revision: '' };
     runtime.chartTimeCache = new WeakMap();
     runtime.panelBackgroundPercent = 95;
@@ -311,6 +315,7 @@ export function initializeRuntime() {
     initializeLifecycle({scan: performScanThenReturn});
     initializePresentation({refreshOptions: updatePanelOptions, refreshReplayAvailability: updateReplayAvailability, refreshCountdown: updateCountdownDisplay});
     runtime.urlCheckInterval = setInterval(checkUrlChange, 500);
+    initializeConnectionRecovery();
     window.addEventListener('beforeunload', function() {
         stopAthActivity();
         cancelGifExport();

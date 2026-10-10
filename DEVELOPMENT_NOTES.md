@@ -548,6 +548,7 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
+| **3.27.0-beta.1** | Preview connection-aware recovery: suspend scans while offline, cap transport-error retries at one minute, and stagger reconnect attempts without clearing server waits or resuming paused/stopped sessions. |
 | **3.26.0** | Release thirty-session comparisons for one model and twelve across models. Fade earlier lines from the second session and composite sessions 13–30 as a faint background. Expand model shortcuts and retain inspection, visibility and gap-aware statistics. |
 | **3.26.0-beta.2** | Limit expanded comparisons to thirty sessions from one model, retaining twelve across models. Explain selection limits, keep export available, and preserve slots when a changed selection needs correction. |
 | **3.26.0-beta.1** | Preview comparisons with up to thirty sessions. Fade each earlier foreground line from the start; keep the newest twelve distinct and composite older sessions as a faint background without opacity buildup. Expand comparison shortcuts and use A–Z, AA–AD labels. |
@@ -651,3 +652,7 @@ Hover over the expanded tier or its collapsed restore button for separate female
 ### Comparison fading and background history (3.26.0)
 
 The [comparison guide](docs/comparison-history-shadows.md) describes the thirty-session limit for one model (twelve across models), progressive 100%–45% foreground opacity and the older-session layer at 12%. Background traces remain available for inspection and statistics. Compare with previous selects up to 29 earlier sessions, and model-card Compare selects up to 30 newest stored sessions. Labels continue through AA–AD.
+
+### Connection recovery (3.27.0 beta)
+
+The [beta recovery guide](docs/connection-recovery.md) describes offline suspension, independent 15/30/60-second transport retries and staggered reconnection. Server waits and access restrictions remain protected, including after storage failures; manual Pause/Stop does not resume automatically. Accepted data is retained and outages remain recording gaps.

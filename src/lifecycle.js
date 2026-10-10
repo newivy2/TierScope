@@ -1,15 +1,17 @@
 import { isAcquisitionCurrent } from './acquisition-context.js';
-import { clearAcquisitionDeadline, clearDOMFailures, invalidateAcquisition, noteAcquisitionSource, refreshAcquisitionCountdown, scheduleNextAcquisition, schedulePresenceAcquisition, selectScanInterval, startAcquisitionClock, stopAcquisitionClock } from './acquisition-state.js';
+import { clearAcquisitionDeadline, clearDOMFailures, invalidateAcquisition, noteAcquisitionSource, observeAcquisitionConnection, refreshAcquisitionCountdown, scheduleConnectionRecovery, scheduleNextAcquisition, schedulePresenceAcquisition, selectScanInterval, startAcquisitionClock, stopAcquisitionClock } from './acquisition-state.js';
+import { isBrowserOffline } from './connection-status.js';
 import { drawAllSparklines } from './charts.js';
 import { cancelGifExport } from './gif.js';
 import { cancelHighPulses } from './high-pulses.js';
-import { nextSessionAbsence, pauseSessionClock, pauseSessionForAbsence, pauseSessionRecording, resetLiveSession, resumeSessionRecording, startSessionClock, stopLiveSession } from './live-session.js';
+import { markSessionGap, nextSessionAbsence, pauseSessionClock, pauseSessionForAbsence, pauseSessionRecording, resetLiveSession, resumeSessionRecording, startSessionClock, stopLiveSession } from './live-session.js';
 import { resetTrendPreferences } from './panel-preferences.js';
 import { updateAcquisitionStatus, updateMiniFreshness } from './presentation-status.js';
 import { updateDisplay, updateTrendDisplay } from './presentation.js';
 import { getStorageKey } from './record-validation.js';
 import { leavePlayback } from './replay.js';
-import { getDOMFallbackWaitSeconds, readRequestPolicy, requestPolicyMessage, writeRequestPolicy } from './request-policy.js';
+import { effectiveRequestDeadline, getDOMFallbackWaitSeconds, readRequestPolicy, requestPolicyMessage, writeRequestPolicy } from './request-policy.js';
+import { responseRetryDeadline } from './request-policy-data.js';
 import { runtime } from './runtime.js';
 import { saveSession } from './session-persistence.js';
 import { absencePauseDescription, getEffectiveScanIntervalSeconds, isAbsencePaused, stopDescription } from './session-selectors.js';
@@ -28,7 +30,7 @@ export function checkAbsenceStop() {
         stopTrackingTimer();
         cancelHighPulses();
         // The next attempt checks presence only; it cannot record absent-room counts.
-        schedulePresenceAcquisition(Date.now(), readRequestPolicy().until);
+        schedulePresenceAcquisition(Date.now(), effectiveRequestDeadline(readRequestPolicy()));
         updateTrackingTimer();
         updateStopControls();
         updateAcquisitionStatus();
@@ -180,11 +182,14 @@ export function resetTrackingData(deleteSaved) {
 }
 
 export function resetCountdown() {
-    scheduleNextAcquisition(getEffectiveScanIntervalSeconds(), Date.now(), readRequestPolicy().until, runtime.isStopped);
+    var policy = readRequestPolicy();
+    var seconds = policy.connectionFailures ? Math.min(15, getEffectiveScanIntervalSeconds()) : getEffectiveScanIntervalSeconds();
+    scheduleNextAcquisition(seconds, Date.now(), effectiveRequestDeadline(policy), runtime.isStopped);
     updateCountdownDisplay();
 }
 
 export function updateCountdownDisplay() {
+    refreshConnectionState();
     if (!isBroadcastRoom()) {
         ['auto-status', 'expanded-countdown', 'control-next-scan'].forEach(function(id) {
             var element = document.getElementById(id);
@@ -197,7 +202,7 @@ export function updateCountdownDisplay() {
     var policy = readRequestPolicy();
     if (policy.blocked && runtime.isAutoRefreshOn) pauseForAccessRestriction();
     var policyMessage = requestPolicyMessage(policy);
-    refreshAcquisitionCountdown(Date.now(), policy.until, runtime.isAutoRefreshOn);
+    refreshAcquisitionCountdown(Date.now(), effectiveRequestDeadline(policy), runtime.isAutoRefreshOn);
     updateMiniFreshness();
     var fallbackWait = getDOMFallbackWaitSeconds(getModelName());
     var timingTitle = 'Next API attempt after the countdown. ' + (fallbackWait > 0 ?
@@ -212,6 +217,15 @@ export function updateCountdownDisplay() {
             if (el) { el.textContent = 'Stopped'; el.title = stopDescription(); el.style.color = 'var(--panel-muted)'; }
         });
         updateStopControls();
+        return;
+    }
+    if (isBrowserOffline() && runtime.isAutoRefreshOn) {
+        if (timerDisplay) timerDisplay.textContent = runtime.scanIntervalSeconds + 's';
+        [statusEl, expandedCountdown, controlNextScan].forEach(function(el) {
+            if (!el) return;
+            el.textContent = 'No connection'; el.style.color = 'var(--panel-warning)';
+            el.title = 'The browser reports offline. Scans are suspended; valid samples and server restrictions are retained. Tracking time continues. Recovery is checked when connectivity returns.';
+        });
         return;
     }
     if (isAbsencePaused()) {
@@ -266,7 +280,7 @@ export function updateCountdownDisplay() {
             if (!el) return;
             el.textContent = policyMessage; el.style.color = 'var(--panel-warning)';
             el.title = policyMessage + (policy.blocked ? '. Automatic scans stopped. After resolving access, use Resume to retry.' :
-                '. No API or DOM acquisition before ' + new Date(policy.until).toLocaleString() + '.');
+                '. No API or DOM acquisition before ' + new Date(effectiveRequestDeadline(policy)).toLocaleString() + '.');
         });
         return;
     }
@@ -309,6 +323,7 @@ export function startCountdown() {
     startAcquisitionClock('countdownInterval', function() {
         if (!runtime.isAutoRefreshOn || runtime.isScanning) return;
         updateCountdownDisplay();
+        if (isBrowserOffline()) return;
         if (runtime.countdownSeconds <= 0) {
             lifecycleEffects.scan(true);
         }
@@ -359,6 +374,33 @@ export function toggleAutoRefresh() {
 }
 export function pauseForAccessRestriction() {
     pauseAutoRefresh();
+}
+
+// One listener pair per userscript instance; the regular freshness tick also
+// detects missed transitions. Recovery uses the existing owned countdown clock.
+function refreshConnectionState() {
+    var offline = isBrowserOffline();
+    if (!observeAcquisitionConnection(offline)) return;
+    if (offline) {
+        if (isBroadcastRoom() && runtime.isAutoRefreshOn && !runtime.isStopped) markSessionGap();
+        return;
+    }
+    var room = getModelName();
+    if (!isBroadcastRoom() || location.href !== runtime.lastUrl || runtime.activeSessionStorageKey !== getStorageKey(room) ||
+        runtime.isStopped || !runtime.isAutoRefreshOn || runtime.isPaused && !isAbsencePaused()) return;
+    var policy = readRequestPolicy();
+    if (policy.blocked) return;
+    // Local bypass of transport delay only: no shared record is cleared, and
+    // response backoff/Retry-After are rechecked on every attempt across tabs.
+    scheduleConnectionRecovery(Date.now() + 5000 + Math.floor(Math.random() * 5000), responseRetryDeadline(policy));
+    if (!runtime.isPaused) startTrackingTimer();
+    startCountdown();
+}
+
+export function initializeConnectionRecovery() {
+    var changed = function() { updateCountdownDisplay(); updateAcquisitionStatus(); };
+    window.addEventListener('offline', changed);
+    window.addEventListener('online', changed);
 }
 
 // The scan action is wired by bootstrap, keeping scheduling independent of acquisition controllers.
