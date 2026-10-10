@@ -34,9 +34,13 @@ const source=prepareSource(fs.readFileSync(path.join(__dirname,'../tierscope.use
   const scan=page=>page.evaluate(()=>ViewerTracker.__connection.scan());
   const a=await open('testroom'),b=await open('otherroom');await scan(a);await scan(b);
   await a.clock.runFor(500);
+  const layout=()=>a.evaluate(()=>Object.fromEntries([...document.querySelectorAll('#tracker-container, #tracker-container [id]')].map(e=>[e.id,{height:e.getBoundingClientRect().height,width:e.getBoundingClientRect().width}])));
+  const beforeLayout=await layout();
+  console.log('Before offline layout:',JSON.stringify(beforeLayout));
   const bounds=await a.locator('#tracker-container').boundingBox(),before=await state(a);
   await a.evaluate(()=>Math.random=()=>.2);await b.evaluate(()=>Math.random=()=>.8);
   await context.setOffline(true);await a.waitForFunction(()=>navigator.onLine===false&&document.getElementById('control-next-scan').textContent==='No connection');
+  console.log('Offline layout:',JSON.stringify(await layout()));
   const offlineBounds=await a.locator('#tracker-container').boundingBox();assert.equal(offlineBounds.width,bounds.width);assert.equal(offlineBounds.height,bounds.height);
   await a.clock.fastForward(180000);await scan(a);await scan(b);
   assert.equal(counts.get('testroom'),1);assert.equal(counts.get('otherroom'),1);assert.deepEqual((await state(a)).times,before.times);
