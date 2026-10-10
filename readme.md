@@ -8,7 +8,7 @@ Install [Tampermonkey](https://www.tampermonkey.net/), follow Tampermonkey’s [
 
 If you used the beta, install from the official link above to follow main releases. Keep only one enabled copy of TierScope.
 
-**Current release: 3.26.0** · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.26.0)
+**Current release: 3.27.0** · [Release notes](https://github.com/newivy2/TierScope/releases/tag/v3.27.0)
 
 ## Main features
 

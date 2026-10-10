@@ -1,4 +1,4 @@
-# Connection recovery — 3.27.0 review beta
+# Connection recovery — 3.27.0
 
 TierScope distinguishes browser-reported offline status, failed connections and server/response failures. Being online is only a browser hint; a validated API scan confirms recovery.
 
@@ -13,9 +13,9 @@ Offline handling retains accepted samples and highs, and marks a recording gap. 
 
 Reconnection does not erase a shared restriction or claim that the API is reachable. Only a successful, validated scan clears the applicable failure record, and a newer restriction from another tab remains protected. A missing browser event is detected by the existing display tick. Repeated online notifications do not shorten a wait.
 
-Older saved retry records did not distinguish connection errors from response errors. Their existing waits remain respected until they expire or a valid scan clears them. Refresh other room tabs after installing this beta so all tabs run the updated retry rules.
+Older saved retry records did not distinguish connection errors from response errors. Their existing waits remain respected until they expire or a valid scan clears them. Refresh other room tabs after updating so all tabs run the updated retry rules.
 
-## Review
+## Behavior checks
 
 1. Start tracking a room, then disconnect briefly. Check **No connection** and that the last counts/chart remain available.
 2. Reconnect. Check the short recovery countdown and that a fresh sample returns, with a gap across the outage.
