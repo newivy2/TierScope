@@ -35,6 +35,8 @@ npm run test:library-performance
 
 ## Coverage
 
+The 3.28.0 beta adds request-coordination unit checks for shared pacing, independent cooldown publishers, reloads, corrupt records, failed storage access, cancellation and queued requests interrupted by a newer wait. Acquisition checks retain the existing offline, access-denial, recording-gap and stale-response coverage.
+
 | Test | What it verifies |
 | --- | --- |
 | Live-session ownership | Getter-only session fields; direct/aliased-write source guard; coordinated commit/rollback; Reset/navigation/Stop reject candidate and delayed API work; clock cancellation keeps data; pause/resume, replay and save failure/retry stay independent. |

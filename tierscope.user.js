@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.27.0
+// @version      3.28.0-beta.1
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -2416,7 +2416,97 @@ underlying system, so should run in the browser, Node, or Plask.
     });
   }
 
+  // src/request-coordination.js
+  function createRequestCoordinator(participant, background = false, options = {}) {
+    const prefix = "cb-api-coordination:v1:", spacing = 3e3;
+    const now = options.now || (() => Date.now());
+    const delay = options.delay || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+    const storage = options.storage || (() => window.localStorage);
+    const locks = options.locks || (() => {
+      var _a;
+      return (_a = window.navigator) == null ? void 0 : _a.locks;
+    });
+    let rememberedUntil = 0, lastStart = -Infinity;
+    function read(key) {
+      try {
+        return JSON.parse(storage().getItem(prefix + key));
+      } catch (_) {
+        return null;
+      }
+    }
+    function write(key, value) {
+      try {
+        storage().setItem(prefix + key, JSON.stringify(value));
+      } catch (_) {
+      }
+    }
+    function validUntil(value) {
+      return (value == null ? void 0 : value.version) === 1 && Number.isSafeInteger(value.until) && value.until >= 0 && value.until <= 864e13 ? value.until : 0;
+    }
+    function deadline() {
+      for (const owner of ["tierscope", "viewer-probe"]) rememberedUntil = Math.max(rememberedUntil, validUntil(read("cooldown:" + owner)));
+      return rememberedUntil;
+    }
+    function publish(until) {
+      if (!Number.isSafeInteger(until) || until < 0 || until > 864e13) return;
+      rememberedUntil = Math.max(rememberedUntil, until);
+      const key = "cooldown:" + participant, previous = validUntil(read(key));
+      if (until <= previous) return;
+      write(key, { version: 1, until });
+      try {
+        const manager = locks();
+        if (manager && typeof manager.request === "function") {
+          Promise.resolve(manager.request(prefix + key, () => {
+            const stored = validUntil(read(key));
+            if (until > stored) write(key, { version: 1, until });
+          })).catch(() => {
+          });
+        }
+      } catch (_) {
+      }
+    }
+    async function waitForSlot(current) {
+      const reserve = async () => {
+        while (true) {
+          if (!current() || deadline() > now()) return false;
+          const at = now(), slot = read("slot");
+          const backgroundAt = (slot == null ? void 0 : slot.version) === 1 && Number.isSafeInteger(slot.backgroundAt) && slot.backgroundAt <= at ? slot.backgroundAt : 0;
+          const coordinated = background || backgroundAt > 0 && at - backgroundAt <= 9e4;
+          const next = (slot == null ? void 0 : slot.version) === 1 && Number.isSafeInteger(slot.next) && slot.next <= at + spacing ? slot.next : 0;
+          const wait = coordinated ? Math.max(background ? lastStart + spacing : 0, next) - at : 0;
+          if (wait > 0) {
+            await delay(Math.min(250, wait));
+            continue;
+          }
+          if (!current() || deadline() > now()) return false;
+          lastStart = now();
+          write("slot", { version: 1, next: lastStart + spacing, backgroundAt: background ? lastStart : backgroundAt });
+          return true;
+        }
+      };
+      let manager;
+      try {
+        manager = locks();
+      } catch (_) {
+      }
+      if (manager && typeof manager.request === "function") {
+        try {
+          return await manager.request(prefix + "request", reserve);
+        } catch (_) {
+        }
+      }
+      return reserve();
+    }
+    return { deadline, publish, waitForSlot };
+  }
+  var requestCoordinator = createRequestCoordinator("tierscope");
+
   // src/request-policy.js
+  function shareResponseWait(policy) {
+    if (policy.status === 429 || policy.status >= 500 || policy.serverUntil > Date.now()) {
+      requestCoordinator.publish(responseRetryDeadline(policy));
+    }
+  }
   function readRequestPolicy() {
     try {
       var raw = GM_getValue(runtime.REQUEST_POLICY_KEY, null);
@@ -2430,6 +2520,7 @@ underlying system, so should run in the browser, Node, or Plask.
     } catch (error) {
       noteRequestPolicyReadFailure();
     }
+    shareResponseWait(runtime.requestPolicyCache);
     return runtime.requestPolicyCache;
   }
   function writeRequestPolicy(policy) {
@@ -2441,6 +2532,7 @@ underlying system, so should run in the browser, Node, or Plask.
     } catch (error) {
       log("Request restriction is local to this tab: " + error.message);
     }
+    shareResponseWait(policy);
   }
   function retryAfterTime(value, now) {
     if (typeof value !== "string" || !value.trim()) return 0;
@@ -2460,7 +2552,7 @@ underlying system, so should run in the browser, Node, or Plask.
     return policy;
   }
   function effectiveRequestDeadline(policy) {
-    return requestRetryDeadline(policy, runtime.connectionRecoveryAt);
+    return Math.max(requestRetryDeadline(policy, runtime.connectionRecoveryAt), requestCoordinator.deadline());
   }
   function clearRequestFailures(revision, storageRevision) {
     readRequestPolicy();
@@ -2472,11 +2564,12 @@ underlying system, so should run in the browser, Node, or Plask.
   }
   function requestPolicyMessage(policy) {
     if (policy.blocked) return "Access denied (" + policy.blocked + ")";
-    if (!runtime.isAutoRefreshOn && policy.connectionFailures && responseRetryDeadline(policy) <= Date.now()) return "";
+    var sharedWait = requestCoordinator.deadline() > Date.now();
+    if (!runtime.isAutoRefreshOn && policy.connectionFailures && responseRetryDeadline(policy) <= Date.now() && !sharedWait) return "";
     var seconds = Math.max(0, Math.ceil((effectiveRequestDeadline(policy) - Date.now()) / 1e3));
     if (!seconds) return "";
-    var connection = responseRetryDeadline(policy) <= Date.now() && (runtime.connectionRecoveryAt || policy.connectionFailures);
-    return (policy.status === 429 && responseRetryDeadline(policy) > Date.now() ? "Rate limited · " : connection ? runtime.connectionRecoveryAt ? "Reconnecting · " : "Connection · " : "Retry in ") + (seconds >= 60 ? Math.ceil(seconds / 60) + "m" : seconds + "s");
+    var connection = !sharedWait && responseRetryDeadline(policy) <= Date.now() && (runtime.connectionRecoveryAt || policy.connectionFailures);
+    return (policy.status === 429 && responseRetryDeadline(policy) > Date.now() ? "Rate limited · " : sharedWait && requestCoordinator.deadline() > requestRetryDeadline(policy, runtime.connectionRecoveryAt) ? "API cooldown · " : connection ? runtime.connectionRecoveryAt ? "Reconnecting · " : "Connection · " : "Retry in ") + (seconds >= 60 ? Math.ceil(seconds / 60) + "m" : seconds + "s");
   }
   function getDOMFallbackWaitSeconds(modelName) {
     var readyAt = runtime.domFallbackReadyAtByRoom.get(modelName.toLowerCase()) || 0;
@@ -9958,6 +10051,12 @@ underlying system, so should run in the browser, Node, or Plask.
   }
   async function acquireAPISnapshot(context) {
     if (!context.room || context.room === "unknown") throw new Error("No current room username");
+    var allowedWhilePaused = runtime.isPaused;
+    var ready = await requestCoordinator.waitForSlot(function() {
+      var policy = readRequestPolicy();
+      return isAcquisitionCurrent(context) && (allowedWhilePaused || !runtime.isPaused || isAbsencePaused()) && !isBrowserOffline() && !policy.blocked && effectiveRequestDeadline(policy) <= Date.now();
+    });
+    if (!ready) throw Object.assign(new Error("API request deferred."), { requestDeferred: true });
     var url = new URL("/api/getchatuserlist/", location.origin);
     url.searchParams.set("roomname", context.room);
     url.searchParams.set("private", "false");
@@ -10080,6 +10179,7 @@ underlying system, so should run in the browser, Node, or Plask.
       return snapshot;
     } catch (error) {
       if (!isAcquisitionCurrent(context)) return null;
+      if (error.requestDeferred) return null;
       if (isAbsencePaused()) {
         var policy = recordRequestFailure(error);
         if (policy.blocked) pauseForAccessRestriction();
@@ -10102,6 +10202,7 @@ underlying system, so should run in the browser, Node, or Plask.
       return snapshot;
     } catch (err) {
       if (!isAcquisitionCurrent(context)) return null;
+      if (err.requestDeferred) return null;
       diagnostic("warn", "API failed: " + err.message);
       var policy = recordRequestFailure(err);
       if (policy.blocked) {
@@ -10701,7 +10802,7 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/bootstrap.js
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.27.0";
+    runtime.TIERSCOPE_VERSION = "3.28.0-beta.1";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;

@@ -13,6 +13,7 @@ import { updateAcquisitionStatus } from './presentation-status.js';
 import { presentAcceptedSample } from './sample-presentation.js';
 import { clearRequestFailures, effectiveRequestDeadline, getDOMFallbackWaitSeconds, readRequestPolicy, recordRequestFailure, retryAfterTime } from './request-policy.js';
 import { runtime } from './runtime.js';
+import { requestCoordinator } from './request-coordination.js';
 import { saveSession } from './session-persistence.js';
 import { isAbsencePaused } from './session-selectors.js';
 import { getModelName, isBroadcastRoom, log } from './utils.js';
@@ -74,6 +75,13 @@ export function validateRoomSnapshot(snapshot) {
 
 export async function acquireAPISnapshot(context) {
     if (!context.room || context.room === 'unknown') throw new Error('No current room username');
+    var allowedWhilePaused = runtime.isPaused;
+    var ready = await requestCoordinator.waitForSlot(function() {
+        var policy = readRequestPolicy();
+        return isAcquisitionCurrent(context) && (allowedWhilePaused || !runtime.isPaused || isAbsencePaused()) &&
+            !isBrowserOffline() && !policy.blocked && effectiveRequestDeadline(policy) <= Date.now();
+    });
+    if (!ready) throw Object.assign(new Error('API request deferred.'), {requestDeferred: true});
     var url = new URL('/api/getchatuserlist/', location.origin);
     url.searchParams.set('roomname', context.room);
     url.searchParams.set('private', 'false');
@@ -179,6 +187,7 @@ export async function checkBroadcasterReturn(context) {
         return snapshot;
     } catch (error) {
         if (!isAcquisitionCurrent(context)) return null;
+        if (error.requestDeferred) return null;
         if (isAbsencePaused()) {
             var policy = recordRequestFailure(error);
             if (policy.blocked) pauseForAccessRestriction();
@@ -204,6 +213,7 @@ export async function acquireRoomSnapshot(context, returnToChat) {
         return snapshot;
     } catch (err) {
         if (!isAcquisitionCurrent(context)) return null;
+        if (err.requestDeferred) return null;
         diagnostic('warn', 'API failed: ' + err.message);
         var policy = recordRequestFailure(err);
         if (policy.blocked) { pauseForAccessRestriction(); return null; }

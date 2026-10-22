@@ -4,6 +4,13 @@ import { runtime } from './runtime.js';
 import { isBrowserOffline } from './connection-status.js';
 import { nextRequestFailure, requestRetryDeadline, responseRetryDeadline } from './request-policy-data.js';
 import { log } from './utils.js';
+import { requestCoordinator } from './request-coordination.js';
+
+function shareResponseWait(policy) {
+    if (policy.status === 429 || policy.status >= 500 || policy.serverUntil > Date.now()) {
+        requestCoordinator.publish(responseRetryDeadline(policy));
+    }
+}
 
 export function readRequestPolicy() {
     try {
@@ -22,6 +29,7 @@ export function readRequestPolicy() {
             } else noteRequestPolicyReadFailure();
         }
     } catch (error) { noteRequestPolicyReadFailure(); /* Retain the in-memory restriction if storage cannot be read. */ }
+    shareResponseWait(runtime.requestPolicyCache);
     return runtime.requestPolicyCache;
 }
 
@@ -30,6 +38,7 @@ export function writeRequestPolicy(policy) {
     stageRequestPolicy(policy);
     try { GM_setValue(runtime.REQUEST_POLICY_KEY, JSON.stringify(policy)); confirmRequestPolicySaved(policy.revision); }
     catch (error) { log('Request restriction is local to this tab: ' + error.message); }
+    shareResponseWait(policy);
 }
 
 export function retryAfterTime(value, now) {
@@ -52,7 +61,7 @@ export function recordRequestFailure(error) {
 }
 
 export function effectiveRequestDeadline(policy) {
-    return requestRetryDeadline(policy, runtime.connectionRecoveryAt);
+    return Math.max(requestRetryDeadline(policy, runtime.connectionRecoveryAt), requestCoordinator.deadline());
 }
 
 export function clearRequestFailures(revision, storageRevision) {
@@ -64,11 +73,12 @@ export function clearRequestFailures(revision, storageRevision) {
 
 export function requestPolicyMessage(policy) {
     if (policy.blocked) return 'Access denied (' + policy.blocked + ')';
-    if (!runtime.isAutoRefreshOn && policy.connectionFailures && responseRetryDeadline(policy) <= Date.now()) return '';
+    var sharedWait = requestCoordinator.deadline() > Date.now();
+    if (!runtime.isAutoRefreshOn && policy.connectionFailures && responseRetryDeadline(policy) <= Date.now() && !sharedWait) return '';
     var seconds = Math.max(0, Math.ceil((effectiveRequestDeadline(policy) - Date.now()) / 1000));
     if (!seconds) return '';
-    var connection = responseRetryDeadline(policy) <= Date.now() && (runtime.connectionRecoveryAt || policy.connectionFailures);
-    return (policy.status === 429 && responseRetryDeadline(policy) > Date.now() ? 'Rate limited · ' : connection ? runtime.connectionRecoveryAt ? 'Reconnecting · ' : 'Connection · ' : 'Retry in ') +
+    var connection = !sharedWait && responseRetryDeadline(policy) <= Date.now() && (runtime.connectionRecoveryAt || policy.connectionFailures);
+    return (policy.status === 429 && responseRetryDeadline(policy) > Date.now() ? 'Rate limited · ' : sharedWait && requestCoordinator.deadline() > requestRetryDeadline(policy, runtime.connectionRecoveryAt) ? 'API cooldown · ' : connection ? runtime.connectionRecoveryAt ? 'Reconnecting · ' : 'Connection · ' : 'Retry in ') +
         (seconds >= 60 ? Math.ceil(seconds / 60) + 'm' : seconds + 's');
 }
 
