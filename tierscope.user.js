@@ -10138,12 +10138,20 @@ underlying system, so should run in the browser, Node, or Plask.
       return isAcquisitionCurrent(context) && (allowedWhilePaused || !runtime.isPaused || isAbsencePaused()) && !isBrowserOffline() && !policy.blocked && effectiveRequestDeadline(policy) <= Date.now();
     };
     if (!setAcquisitionWaiting(context, location.href, true)) throw Object.assign(new Error("API request deferred."), { requestDeferred: true });
-    updateCountdownDisplay();
-    updateAcquisitionStatus();
+    try {
+      updateCountdownDisplay();
+      updateAcquisitionStatus();
+    } catch (error) {
+      log("Request status display unavailable: " + error.message);
+    }
     var ready = await requestCoordinator.waitForSlot(canRequest);
     if (!ready || !canRequest() || !setAcquisitionWaiting(context, location.href, false)) throw Object.assign(new Error("API request deferred."), { requestDeferred: true });
-    updateCountdownDisplay();
-    updateAcquisitionStatus();
+    try {
+      updateCountdownDisplay();
+      updateAcquisitionStatus();
+    } catch (error) {
+      log("Request status display unavailable: " + error.message);
+    }
     var url = new URL("/api/getchatuserlist/", location.origin);
     url.searchParams.set("roomname", context.room);
     url.searchParams.set("private", "false");

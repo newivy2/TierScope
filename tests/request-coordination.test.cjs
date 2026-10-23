@@ -207,6 +207,19 @@ test('the status changes from API queue to scanning only when the network reques
     assert.equal(h.t.state().history.timestamps.length, 1);
 });
 
+test('a broken queue/status display cannot prevent the request or turn accepted data into API failures', async () => {
+    const {harness} = require('./helpers/harness.cjs');
+    for (const id of ['control-next-scan', 'acquisition-status']) {
+        const h = harness(); h.t.initPanel();
+        Object.defineProperty(h.e(id), 'textContent', {get: () => '', set: () => {throw Error('Paint failed');}});
+        h.setResponse('5,0,testroom|o|f|0,alice|t|f|0');
+        await h.t.performScanThenReturn();
+        assert.equal(h.fetchCount(), 1); assert.equal(h.t.readRequestPolicy().failures, 0);
+        assert.equal(h.t.state().history.timestamps.length, 1);
+        assert(!h.logs.some(line => line.includes('Attempting DOM fallback')));
+    }
+});
+
 test('retry tooltips expose the stored HTTP error without changing or bypassing the countdown', () => {
     const {harness} = require('./helpers/harness.cjs');
     for (const status of [404, 500]) {
