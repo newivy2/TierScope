@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.28.0-beta.2
+// @version      3.28.0-beta.3
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -826,6 +826,7 @@ underlying system, so should run in the browser, Node, or Plask.
     "scanEpoch",
     "initGuard",
     "isScanning",
+    "isWaitingForRequest",
     "lastAcquisitionAttemptSource",
     "domHealthStatus",
     "domFallbackReadyAtByRoom",
@@ -856,6 +857,7 @@ underlying system, so should run in the browser, Node, or Plask.
       domFallbackReadyAtByRoom: new Map(target.domFallbackReadyAtByRoom),
       connectionOffline: !!target.connectionOffline,
       connectionRecoveryAt: target.connectionRecoveryAt || 0,
+      isWaitingForRequest: false,
       requestPolicyStorageRevision: target.requestPolicyStorageRevision === void 0 ? null : target.requestPolicyStorageRevision
     });
     acquisitionClockEffects = effects;
@@ -877,6 +879,7 @@ underlying system, so should run in the browser, Node, or Plask.
   function invalidateAcquisition() {
     acquisitionState.scanEpoch++;
     acquisitionState.isScanning = false;
+    acquisitionState.isWaitingForRequest = false;
     acquisitionState.connectionRecoveryAt = 0;
   }
   function beginAcquisitionGeneration() {
@@ -887,6 +890,7 @@ underlying system, so should run in the browser, Node, or Plask.
   function beginAcquisition(url, room2, policy, now, stopped) {
     if (acquisitionState.isScanning || acquisitionState.connectionOffline || stopped || policy.blocked || policy.until > now) return null;
     acquisitionState.isScanning = true;
+    acquisitionState.isWaitingForRequest = false;
     return Object.freeze({
       epoch: ++acquisitionState.scanEpoch,
       generation: acquisitionState.initGuard,
@@ -902,7 +906,13 @@ underlying system, so should run in the browser, Node, or Plask.
   function finishAcquisition(context, url) {
     if (!acquisitionContextIsCurrent(context, url)) return false;
     acquisitionState.isScanning = false;
+    acquisitionState.isWaitingForRequest = false;
     acquisitionState.connectionRecoveryAt = 0;
+    return true;
+  }
+  function setAcquisitionWaiting(context, url, waiting) {
+    if (!acquisitionState.isScanning || !acquisitionContextIsCurrent(context, url)) return false;
+    acquisitionState.isWaitingForRequest = waiting;
     return true;
   }
   function noteAcquisitionSource(source) {
@@ -2428,7 +2438,7 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/request-coordination.js
   function createRequestCoordinator(participant, background = false, options = {}) {
-    const prefix = "cb-api-coordination:v1:", spacing = 3e3;
+    const prefix = "cb-api-coordination:v1:", spacing = 3e3, lease2 = 1500;
     const now = options.now || (() => Date.now());
     const delay = options.delay || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     const storage = options.storage || (() => window.localStorage);
@@ -2475,37 +2485,74 @@ underlying system, so should run in the browser, Node, or Plask.
       } catch (_) {
       }
     }
-    async function waitForSlot(current) {
-      const reserve = async () => {
-        while (true) {
-          if (!current() || deadline() > now()) return false;
-          const at = now(), slot = read("slot");
-          const backgroundAt = (slot == null ? void 0 : slot.version) === 1 && Number.isSafeInteger(slot.backgroundAt) && slot.backgroundAt <= at ? slot.backgroundAt : 0;
-          const coordinated = background || backgroundAt > 0;
-          const next = (slot == null ? void 0 : slot.version) === 1 && Number.isSafeInteger(slot.next) && slot.next <= at + spacing ? slot.next : 0;
-          const wait = coordinated ? Math.max(background ? lastStart + spacing : 0, next) - at : 0;
-          if (wait > 0) {
-            await delay(Math.min(250, wait));
-            continue;
-          }
-          if (!current() || deadline() > now()) return false;
-          lastStart = now();
-          write("slot", { version: 1, next: lastStart + spacing, backgroundAt: background ? lastStart : backgroundAt });
-          return true;
-        }
-      };
+    async function locked(operation) {
       let manager;
       try {
         manager = locks();
       } catch (_) {
       }
       if (manager && typeof manager.request === "function") {
+        let entered = false;
         try {
-          return await manager.request(prefix + "request", reserve);
-        } catch (_) {
+          return await manager.request(prefix + "request", () => {
+            entered = true;
+            return operation();
+          });
+        } catch (error) {
+          if (entered) throw error;
         }
       }
-      return reserve();
+      return operation();
+    }
+    function priority(at) {
+      const value = read("priority");
+      const sequence = (value == null ? void 0 : value.version) === 1 && Number.isSafeInteger(value.sequence) && value.sequence >= 0 && value.sequence <= at + 1e4 ? value.sequence : at;
+      const waiters = (value == null ? void 0 : value.version) === 1 && Array.isArray(value.waiters) ? value.waiters.slice(0, 128).filter((entry) => Number.isSafeInteger(entry == null ? void 0 : entry.ticket) && entry.ticket > 0 && entry.ticket <= sequence && Number.isSafeInteger(entry.until) && entry.until > at && entry.until <= at + lease2) : [];
+      return { version: 1, sequence, waiters };
+    }
+    async function waitForSlot(current) {
+      let ticket = 0;
+      try {
+        while (true) {
+          const result = await locked(() => {
+            if (!current() || deadline() > now()) return false;
+            const at = now(), slot = read("slot");
+            const backgroundAt = (slot == null ? void 0 : slot.version) === 1 && Number.isSafeInteger(slot.backgroundAt) && slot.backgroundAt <= at ? slot.backgroundAt : 0;
+            const coordinated = background || backgroundAt > 0;
+            const next = (slot == null ? void 0 : slot.version) === 1 && Number.isSafeInteger(slot.next) && slot.next <= at + spacing ? slot.next : 0;
+            const wait = coordinated ? Math.max(background ? lastStart + spacing : 0, next) - at : 0;
+            const queue = priority(at);
+            if (!background && (wait > 0 || queue.waiters.length)) {
+              let entry = queue.waiters.find((entry2) => entry2.ticket === ticket);
+              if (!entry && queue.waiters.length < 128) {
+                ticket = ++queue.sequence;
+                entry = { ticket, until: at + lease2 };
+                queue.waiters.push(entry);
+              }
+              if (entry) entry.until = at + lease2;
+              write("priority", queue);
+            }
+            if (queue.waiters.length && (background || queue.waiters[0].ticket !== ticket)) return 250;
+            if (wait > 0) return Math.min(250, wait);
+            lastStart = now();
+            write("slot", { version: 1, next: lastStart + spacing, backgroundAt: background ? lastStart : backgroundAt });
+            if (ticket) {
+              queue.waiters = queue.waiters.filter((entry) => entry.ticket !== ticket);
+              write("priority", queue);
+              ticket = 0;
+            }
+            return true;
+          });
+          if (typeof result === "boolean") return result;
+          await delay(result);
+        }
+      } finally {
+        if (ticket) await locked(() => {
+          const queue = priority(now());
+          queue.waiters = queue.waiters.filter((entry) => entry.ticket !== ticket);
+          write("priority", queue);
+        });
+      }
     }
     return { deadline, publish, waitForSlot };
   }
@@ -3554,6 +3601,11 @@ underlying system, so should run in the browser, Node, or Plask.
       model.title = policyMessage + requestFailureExplanation(policy) + (sample ? ". Last sample: " + new Date(sample.timestamp).toISOString() : ". No accepted sample.");
       return model;
     }
+    if (runtime.isWaitingForRequest) return __spreadProps(__spreadValues({}, model), {
+      text: "Waiting for API slot",
+      title: "The request has not started. Room scans have priority; request spacing and server cooldowns still apply.",
+      color: "var(--panel-warning)"
+    });
     if (isAbsencePaused()) {
       model.text = "Auto-paused • return checks";
       model.title = absencePauseDescription();
@@ -9650,7 +9702,7 @@ underlying system, so should run in the browser, Node, or Plask.
       if (timerDisplay) timerDisplay.textContent = runtime.scanIntervalSeconds + "s";
       [statusEl, expandedCountdown, controlNextScan].forEach(function(el) {
         if (!el) return;
-        el.textContent = policyMessage || (el === statusEl ? "Auto-paused" : runtime.isScanning ? "Checking..." : "Check: " + runtime.countdownSeconds + "s");
+        el.textContent = policyMessage || (runtime.isWaitingForRequest ? "API queue..." : el === statusEl ? "Auto-paused" : runtime.isScanning ? "Checking..." : "Check: " + runtime.countdownSeconds + "s");
         el.title = absencePauseDescription() + (policyMessage ? " " + policyMessage + "." : " Next return check: " + runtime.countdownSeconds + "s.");
         el.style.color = "var(--panel-warning)";
       });
@@ -9660,6 +9712,7 @@ underlying system, so should run in the browser, Node, or Plask.
     var effectiveInterval = getEffectiveScanIntervalSeconds();
     var reduced = effectiveInterval > runtime.scanIntervalSeconds;
     timingTitle += " Selected interval: " + runtime.scanIntervalSeconds + "s. Effective interval: " + effectiveInterval + "s." + (reduced ? " Reduced scanning while the broadcaster is absent; auto-pause at 15 minutes, then return checks for up to 3 hours." : "") + (runtime.absenceOverrideActive ? " Absence automation manually overridden until the broadcaster is detected again." : "");
+    if (runtime.isWaitingForRequest) timingTitle = "Waiting for API slot. The request has not started. Room scans have priority; request spacing and server cooldowns still apply. " + timingTitle;
     [statusEl, expandedCountdown, controlNextScan].forEach(function(el) {
       if (el) el.title = runtime.isAutoRefreshOn ? timingTitle : "Automatic scans paused. An in-flight scan may finish. " + timingTitle;
     });
@@ -9668,7 +9721,7 @@ underlying system, so should run in the browser, Node, or Plask.
     }
     if (expandedCountdown) {
       if (runtime.isScanning) {
-        expandedCountdown.textContent = "scanning...";
+        expandedCountdown.textContent = runtime.isWaitingForRequest ? "API queue..." : "scanning...";
         expandedCountdown.style.color = "var(--panel-warning)";
       } else if (runtime.isAutoRefreshOn) {
         expandedCountdown.textContent = "next: " + runtime.countdownSeconds + "s";
@@ -9680,7 +9733,7 @@ underlying system, so should run in the browser, Node, or Plask.
     }
     if (controlNextScan) {
       if (runtime.isScanning) {
-        controlNextScan.textContent = "Scanning...";
+        controlNextScan.textContent = runtime.isWaitingForRequest ? "API queue..." : "Scanning...";
         controlNextScan.style.color = "var(--panel-warning)";
       } else if (runtime.isAutoRefreshOn) {
         controlNextScan.textContent = (reduced ? "Reduced: " : "Next: ") + runtime.countdownSeconds + "s";
@@ -9701,7 +9754,7 @@ underlying system, so should run in the browser, Node, or Plask.
     }
     if (!statusEl) return;
     if (runtime.isScanning) {
-      statusEl.textContent = "Scanning...";
+      statusEl.textContent = runtime.isWaitingForRequest ? "Waiting for API slot" : "Scanning...";
       statusEl.style.color = "var(--panel-warning)";
     } else if (runtime.isAutoRefreshOn) {
       statusEl.textContent = "Next: " + runtime.countdownSeconds + "s";
@@ -10080,11 +10133,17 @@ underlying system, so should run in the browser, Node, or Plask.
   async function acquireAPISnapshot(context) {
     if (!context.room || context.room === "unknown") throw new Error("No current room username");
     var allowedWhilePaused = runtime.isPaused;
-    var ready = await requestCoordinator.waitForSlot(function() {
+    var canRequest = function() {
       var policy = readRequestPolicy();
       return isAcquisitionCurrent(context) && (allowedWhilePaused || !runtime.isPaused || isAbsencePaused()) && !isBrowserOffline() && !policy.blocked && effectiveRequestDeadline(policy) <= Date.now();
-    });
-    if (!ready) throw Object.assign(new Error("API request deferred."), { requestDeferred: true });
+    };
+    if (!setAcquisitionWaiting(context, location.href, true)) throw Object.assign(new Error("API request deferred."), { requestDeferred: true });
+    updateCountdownDisplay();
+    updateAcquisitionStatus();
+    var ready = await requestCoordinator.waitForSlot(canRequest);
+    if (!ready || !canRequest() || !setAcquisitionWaiting(context, location.href, false)) throw Object.assign(new Error("API request deferred."), { requestDeferred: true });
+    updateCountdownDisplay();
+    updateAcquisitionStatus();
     var url = new URL("/api/getchatuserlist/", location.origin);
     url.searchParams.set("roomname", context.room);
     url.searchParams.set("private", "false");
@@ -10831,7 +10890,7 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/bootstrap.js
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.28.0-beta.2";
+    runtime.TIERSCOPE_VERSION = "3.28.0-beta.3";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;

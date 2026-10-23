@@ -19,7 +19,8 @@ test('background requests and foreground scans share one origin-wide pace across
         assert(await client.waitForSlot(() => true)); starts.push(h.now());
     }
     assert.deepEqual(starts, [1000000, 1003000, 1006000, 1009000]);
-    assert.deepEqual([...h.data.keys()], [prefix + 'slot']);
+    assert.deepEqual([...h.data.keys()], [prefix + 'slot', prefix + 'priority']);
+    assert.deepEqual(JSON.parse(h.data.get(prefix + 'priority')).waiters, []);
     const fresh = setup(), solo = createRequestCoordinator('tierscope', false, fresh.options);
     await solo.waitForSlot(() => true); await solo.waitForSlot(() => true);
     assert.equal(fresh.now(), 1000000, 'ordinary scan scheduling is unchanged when no background pacing is active');
@@ -110,10 +111,100 @@ test('pausing while waiting for a request slot cancels the queued scan without r
     h.t.initPanel(); const now = h.context.Date.now();
     browserStore.set(prefix + 'slot', JSON.stringify({version: 1, next: now + 3000, backgroundAt: now}));
     const pending = h.t.performScanThenReturn(); await h.drain(); assert.equal(h.fetchCount(), 0);
+    assert.match(h.e('control-next-scan').textContent, /API queue/);
+    assert.match(h.e('control-next-scan').title, /Waiting for API slot/);
+    assert.match(h.e('acquisition-status').textContent, /Waiting for API slot/);
     h.t.toggleAutoRefresh(); h.advance(250); h.runTimers(timer => !timer.repeat && timer.ms === 250); await pending;
     assert.equal(h.fetchCount(), 0); assert.equal(h.t.readRequestPolicy().failures, 0);
     assert.equal(h.t.state().isPaused, true); assert.equal(h.t.state().history.timestamps.length, 0);
     assert(!h.logs.some(line => line.includes('Attempting DOM fallback')));
+    assert.deepEqual(JSON.parse(browserStore.get(prefix + 'priority')).waiters, []);
+});
+
+function manualClock() {
+    const h = setup(), timers = [];
+    let held = false, tail = Promise.resolve();
+    const locks = {request(key, operation) {
+        const work = tail.then(() => {held = true; try {return operation();} finally {held = false;}});
+        tail = work.catch(() => {}); return work;
+    }};
+    const options = {...h.options, locks: () => locks, delay: ms => {
+        assert.equal(held, false, 'sleeping never holds the shared Web Lock');
+        return new Promise(resolve => timers.push({at: h.now() + ms, resolve}));
+    }};
+    async function drain() {for (let i = 0; i < 40; i++) await Promise.resolve();}
+    async function tick(ms) {
+        for (let elapsed = 0; elapsed < ms; elapsed += 250) {
+            h.advance(Math.min(250, ms - elapsed));
+            for (const timer of timers.splice(0)) {if (timer.at <= h.now()) timer.resolve(); else timers.push(timer);}
+            await drain();
+        }
+    }
+    return {...h, options, drain, tick, timers};
+}
+
+test('foreground scans overtake waiting background work, keep FIFO order, and leave room for background requests', async () => {
+    const {createRequestCoordinator} = await import(moduleUrl), h = manualClock(), order = [];
+    const background = createRequestCoordinator('viewer-probe', true, h.options);
+    await background.waitForSlot(() => true);
+    const bg = background.waitForSlot(() => true).then(ok => {assert(ok); order.push(['background', h.now()]);});
+    await h.drain();
+    const first = createRequestCoordinator('tierscope', false, h.options).waitForSlot(() => true).then(ok => {assert(ok); order.push(['first', h.now()]);});
+    const second = createRequestCoordinator('tierscope', false, h.options).waitForSlot(() => true).then(ok => {assert(ok); order.push(['second', h.now()]);});
+    await h.drain(); await h.tick(9000); await Promise.all([first, second, bg]);
+    assert.deepEqual(order, [['first', 1003000], ['second', 1006000], ['background', 1009000]]);
+    assert.deepEqual(JSON.parse(h.data.get(prefix + 'priority')).waiters, []);
+});
+
+test('a throttled background timer cannot hold up a foreground scan in another tab', async () => {
+    const {createRequestCoordinator} = await import(moduleUrl), h = manualClock();
+    let wake;
+    const background = createRequestCoordinator('viewer-probe', true, {...h.options, delay: () => new Promise(resolve => {wake = resolve;})});
+    await background.waitForSlot(() => true);
+    let active = true;
+    const sleeping = background.waitForSlot(() => active); await h.drain();
+    assert.equal(typeof wake, 'function');
+    let accepted = false;
+    const foreground = createRequestCoordinator('tierscope', false, h.options).waitForSlot(() => true).then(ok => {accepted = ok;});
+    await h.drain(); await h.tick(3000); await foreground;
+    assert.equal(accepted, true, 'foreground completes while the background timer is still suspended');
+    active = false; wake(); assert.equal(await sleeping, false);
+});
+
+test('suspended foreground leases expire, and cancellation or a new cooldown releases only its own priority', async () => {
+    const {createRequestCoordinator} = await import(moduleUrl), h = manualClock();
+    const background = createRequestCoordinator('viewer-probe', true, h.options);
+    await background.waitForSlot(() => true);
+    let wake, active = true;
+    const suspended = createRequestCoordinator('tierscope', false, {...h.options, delay: () => new Promise(resolve => {wake = resolve;})});
+    const pending = suspended.waitForSlot(() => active); await h.drain();
+    const resumed = background.waitForSlot(() => true); await h.drain(); await h.tick(3000);
+    assert.equal(await resumed, true, 'a closed/suspended foreground tab does not starve background work');
+    active = false; wake(); assert.equal(await pending, false);
+    assert.deepEqual(JSON.parse(h.data.get(prefix + 'priority')).waiters, []);
+    const a = createRequestCoordinator('tierscope', false, h.options), b = createRequestCoordinator('tierscope', false, h.options);
+    let current = true;
+    const cancelled = a.waitForSlot(() => current), allowed = b.waitForSlot(() => true); await h.drain();
+    current = false; await h.tick(250); assert.equal(await cancelled, false);
+    assert.equal(JSON.parse(h.data.get(prefix + 'priority')).waiters.length, 1, 'another tab keeps its lease');
+    background.publish(h.now() + 900000); await h.tick(250); assert.equal(await allowed, false);
+    assert.deepEqual(JSON.parse(h.data.get(prefix + 'priority')).waiters, []);
+});
+
+test('the status changes from API queue to scanning only when the network request starts', async () => {
+    const {harness} = require('./helpers/harness.cjs'), h = harness(), data = new Map();
+    h.context.localStorage = {getItem: key => data.get(key) ?? null, setItem: (key, value) => data.set(key, value)};
+    h.t.initPanel(); const at = h.context.Date.now(); let respond;
+    h.setResponse(() => new Promise(resolve => {respond = resolve;}));
+    data.set(prefix + 'slot', JSON.stringify({version: 1, next: at + 3000, backgroundAt: at}));
+    const scan = h.t.performScanThenReturn(); await h.drain();
+    assert.equal(h.fetchCount(), 0); assert.match(h.e('control-next-scan').textContent, /API queue/);
+    for (let i = 0; i < 12; i++) {h.advance(250); h.runTimers(timer => !timer.repeat && timer.ms === 250); await h.drain();}
+    assert.equal(h.fetchCount(), 1); assert.equal(h.e('control-next-scan').textContent, 'Scanning...');
+    assert.doesNotMatch(h.e('control-next-scan').title, /Waiting for API slot/);
+    respond({ok: true, text: async () => '5,0,testroom|o|f|0,alice|t|f|0'}); await scan;
+    assert.equal(h.t.readRequestPolicy().failures, 0);
+    assert.equal(h.t.state().history.timestamps.length, 1);
 });
 
 test('retry tooltips expose the stored HTTP error without changing or bypassing the countdown', () => {

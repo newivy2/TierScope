@@ -31,6 +31,8 @@ export function buildAcquisitionStatusModel() {
         model.title = policyMessage + requestFailureExplanation(policy) + (sample ? '. Last sample: ' + new Date(sample.timestamp).toISOString() : '. No accepted sample.');
         return model;
     }
+    if (runtime.isWaitingForRequest) return {...model, text: 'Waiting for API slot',
+        title: 'The request has not started. Room scans have priority; request spacing and server cooldowns still apply.', color: 'var(--panel-warning)'};
     if (isAbsencePaused()) {
         model.text = 'Auto-paused • return checks';
         model.title = absencePauseDescription();

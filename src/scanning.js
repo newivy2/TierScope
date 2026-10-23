@@ -1,5 +1,5 @@
 import { isAcquisitionCurrent } from './acquisition-context.js';
-import { beginAcquisition, clearDOMFailures, deferDOMFallback, finishAcquisition, noteAcquisitionSource } from './acquisition-state.js';
+import { beginAcquisition, clearDOMFailures, deferDOMFallback, finishAcquisition, noteAcquisitionSource, setAcquisitionWaiting } from './acquisition-state.js';
 import { diagnostic } from './diagnostics.js';
 import { isBrowserOffline } from './connection-status.js';
 import { findTab, isScanValid, scanUsers } from './dom.js';
@@ -82,12 +82,18 @@ export function validateRoomSnapshot(snapshot) {
 export async function acquireAPISnapshot(context) {
     if (!context.room || context.room === 'unknown') throw new Error('No current room username');
     var allowedWhilePaused = runtime.isPaused;
-    var ready = await requestCoordinator.waitForSlot(function() {
+    var canRequest = function() {
         var policy = readRequestPolicy();
         return isAcquisitionCurrent(context) && (allowedWhilePaused || !runtime.isPaused || isAbsencePaused()) &&
             !isBrowserOffline() && !policy.blocked && effectiveRequestDeadline(policy) <= Date.now();
-    });
-    if (!ready) throw Object.assign(new Error('API request deferred.'), {requestDeferred: true});
+    };
+    if (!setAcquisitionWaiting(context, location.href, true)) throw Object.assign(new Error('API request deferred.'), {requestDeferred: true});
+    updateCountdownDisplay();
+    updateAcquisitionStatus();
+    var ready = await requestCoordinator.waitForSlot(canRequest);
+    if (!ready || !canRequest() || !setAcquisitionWaiting(context, location.href, false)) throw Object.assign(new Error('API request deferred.'), {requestDeferred: true});
+    updateCountdownDisplay();
+    updateAcquisitionStatus();
     var url = new URL('/api/getchatuserlist/', location.origin);
     url.searchParams.set('roomname', context.room);
     url.searchParams.set('private', 'false');

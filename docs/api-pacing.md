@@ -10,4 +10,10 @@ Server waits survive reloads and Reset. A successful older scan does not erase a
 
 The timing adapter uses browser Web Locks and a three-second minimum request slot once origin pacing has been enabled. Pacing remains enabled through long cooldowns, including when background work is paused or closed. Normal TierScope scan intervals remain unchanged. Only versioned timing records are written to site-local storage; these records contain no room names, viewers, recordings, cookies or credentials. Browser profiles and origins have independent timing state. If site-local storage or Web Locks is unavailable, cross-tab coordination is best effort and TierScope retains its own retry protections. Timing records are visible to the website and are not a security boundary.
 
+In beta.3, TierScope scans take the next available slot ahead of queued background requests. Several waiting room tabs take turns in arrival order. A request that has already started finishes normally; priority never bypasses the three-second gap or a server cooldown. Background work resumes when no room scan is waiting, so many active room tabs can delay it.
+
+The Web Lock now covers only a short reservation operation. Timer waits and network requests run outside it, so a throttled background timer cannot hold up another tab. A waiting foreground entry renews a 1.5-second lease; a suspended or closed tab loses its place rather than blocking the queue. Entries use numeric tickets and expiry times, with a bounded queue. Cancellation removes only that request's entry. Refresh all participating tabs after updating so an older scheduler cannot continue holding a lock while sleeping.
+
+The countdown shows **API queue…**, with **Waiting for API slot** in the footer and tooltip, until the request starts. **Scanning…** and the ten-second network timeout begin after a slot is granted. Queueing adds no retry failure and retains the last accepted sample.
+
 This reduces bursts and preserves cooldowns; it cannot establish or guarantee the website's unpublished request limits.

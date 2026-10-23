@@ -3,7 +3,7 @@ export type RequestPolicy = {until: number; failures: number; blocked: number; s
 export type AcquisitionContext = {epoch: number; generation: number; url: string; room?: string; policyRevision?: string; policyStorageRevision?: string|null};
 export type ClockName = 'countdownInterval' | 'trackingTimerInterval' | 'healthCheckInterval';
 export type AcquisitionState = Record<ClockName, unknown> & {
-    scanEpoch: number; initGuard: number; isScanning: boolean; lastAcquisitionAttemptSource: 'API' | 'DOM';
+    scanEpoch: number; initGuard: number; isScanning: boolean; isWaitingForRequest: boolean; lastAcquisitionAttemptSource: 'API' | 'DOM';
     domHealthStatus: {lastCheck: number; userListTabFound: boolean; consecutiveFailures: number; isHealthy: boolean};
     domFallbackReadyAtByRoom: Map<string, number>; requestPolicyCache: RequestPolicy; requestPolicyUnsaved: boolean;
     scanIntervalSeconds: number; countdownSeconds: number; lastScheduledIntervalSeconds: number; nextScanAt: number;

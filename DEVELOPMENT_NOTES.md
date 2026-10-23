@@ -553,6 +553,7 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
+| **3.28.0-beta.3** | Give live scans priority over background requests, release the shared lock during waits, and distinguish queued requests from scans. Expire suspended queue entries and retain request spacing, cooldowns and cancellation protections. |
 | **3.28.0-beta.2** | Accept the optional second numeric user-list header and recover old client-format waits without clearing HTTP/server restrictions. Add the AJAX header and HTTP retry tooltips. Preserve pacing after long cooldowns so room tabs do not retry together. |
 | **3.28.0-beta.1** | Preview origin-wide API pacing and persistent cooldowns. Preserve longer server waits across tabs and reloads, cancel queued scans after Pause/navigation, and keep connection recovery and stored sessions independent. |
 | **3.27.0** | Distinguish offline and connection failures from server restrictions; use short transport retries and staggered reconnection while preserving samples, recording gaps, Pause/Stop and newer restrictions across tabs. |

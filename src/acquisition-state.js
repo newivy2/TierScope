@@ -3,7 +3,7 @@
 /** @typedef {import('./control-types').AcquisitionContext} AcquisitionContext */
 /** @typedef {import('./control-types').ClockName} ClockName */
 /** @type {ReadonlyArray<keyof AcquisitionState>} */
-export const ACQUISITION_FIELDS = Object.freeze(['scanEpoch', 'initGuard', 'isScanning', 'lastAcquisitionAttemptSource',
+export const ACQUISITION_FIELDS = Object.freeze(['scanEpoch', 'initGuard', 'isScanning', 'isWaitingForRequest', 'lastAcquisitionAttemptSource',
     'domHealthStatus', 'domFallbackReadyAtByRoom', 'requestPolicyCache', 'requestPolicyUnsaved',
     'scanIntervalSeconds', 'countdownSeconds', 'lastScheduledIntervalSeconds', 'nextScanAt',
     'countdownInterval', 'trackingTimerInterval', 'healthCheckInterval', 'connectionOffline', 'connectionRecoveryAt', 'requestPolicyStorageRevision']);
@@ -19,7 +19,7 @@ const acquisitionClockVersions = new Map();
 export function initializeAcquisitionState(target, effects) {
     acquisitionState = {.../** @type {AcquisitionState} */ (Object.fromEntries(ACQUISITION_FIELDS.map(key => [key, target[key]]))), domHealthStatus: {...target.domHealthStatus},
         requestPolicyCache: {...target.requestPolicyCache}, domFallbackReadyAtByRoom: new Map(target.domFallbackReadyAtByRoom),
-        connectionOffline: !!target.connectionOffline, connectionRecoveryAt: target.connectionRecoveryAt || 0,
+        connectionOffline: !!target.connectionOffline, connectionRecoveryAt: target.connectionRecoveryAt || 0, isWaitingForRequest: false,
         requestPolicyStorageRevision: target.requestPolicyStorageRevision === undefined ? null : target.requestPolicyStorageRevision};
     acquisitionClockEffects = effects;
     acquisitionClockVersions.clear();
@@ -32,7 +32,7 @@ export function initializeAcquisitionState(target, effects) {
             key === 'domHealthStatus' || key === 'requestPolicyCache' ? Object.freeze({...acquisitionState[key]}) : acquisitionState[key]
     });
 }
-export function invalidateAcquisition() { acquisitionState.scanEpoch++; acquisitionState.isScanning = false; acquisitionState.connectionRecoveryAt = 0; }
+export function invalidateAcquisition() { acquisitionState.scanEpoch++; acquisitionState.isScanning = false; acquisitionState.isWaitingForRequest = false; acquisitionState.connectionRecoveryAt = 0; }
 export function beginAcquisitionGeneration() {
     acquisitionState.initGuard++;
     invalidateAcquisition();
@@ -42,6 +42,7 @@ export function beginAcquisitionGeneration() {
 export function beginAcquisition(url, room, policy, now, stopped) {
     if (acquisitionState.isScanning || acquisitionState.connectionOffline || stopped || policy.blocked || policy.until > now) return null;
     acquisitionState.isScanning = true;
+    acquisitionState.isWaitingForRequest = false;
     return Object.freeze({epoch: ++acquisitionState.scanEpoch, generation: acquisitionState.initGuard, url, room,
         policyRevision: policy.revision, policyStorageRevision: acquisitionState.requestPolicyStorageRevision});
 }
@@ -53,7 +54,14 @@ export function acquisitionContextIsCurrent(context, url) {
 export function finishAcquisition(context, url) {
     if (!acquisitionContextIsCurrent(context, url)) return false;
     acquisitionState.isScanning = false;
+    acquisitionState.isWaitingForRequest = false;
     acquisitionState.connectionRecoveryAt = 0;
+    return true;
+}
+/** @param {AcquisitionContext} context @param {string} url @param {boolean} waiting */
+export function setAcquisitionWaiting(context, url, waiting) {
+    if (!acquisitionState.isScanning || !acquisitionContextIsCurrent(context, url)) return false;
+    acquisitionState.isWaitingForRequest = waiting;
     return true;
 }
 /** @param {'API'|'DOM'} source */
