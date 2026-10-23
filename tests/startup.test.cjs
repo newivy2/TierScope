@@ -8,7 +8,7 @@ function saved(h,paused){
 }
 
 test('fresh room scans during init and starts its next interval only after completion',async()=>{
- const h=harness();let resolve;h.setResponse(()=>new Promise(r=>resolve=r));h.t.init();
+ const h=harness();let resolve;h.setResponse(()=>new Promise(r=>resolve=r));h.t.init();await h.drain();
  assert.equal(h.fetchCount(),1);assert.equal(h.t.state().isScanning,true);
  assert.equal(h.t.state().countdownInterval,null);
  h.advance(7500);h.runTimers(t=>t.ms===1000||t.ms===2002);await h.drain();
@@ -34,7 +34,7 @@ test('restored active and paused sessions keep their existing startup behavior',
 });
 
 test('pausing during the first scan never lets its completion restart automatic scans',async()=>{
- const h=harness();let resolve;h.setResponse(()=>new Promise(r=>resolve=r));h.t.init();
+ const h=harness();let resolve;h.setResponse(()=>new Promise(r=>resolve=r));h.t.init();await h.drain();
  h.t.toggleAutoRefresh();resolve(valid());await h.drain();
  assert.equal(h.t.state().history.timestamps.length,1);assert.equal(h.t.state().isPaused,true);
  assert.equal(h.t.state().isAutoRefreshOn,false);assert.equal(h.t.state().countdownInterval,null);
@@ -43,7 +43,7 @@ test('pausing during the first scan never lets its completion restart automatic 
 
 test('Reset or navigation invalidate the first scan and its scheduling continuation',async()=>{
  for(const action of ['reset','navigate']){
-  const h=harness();let resolve;h.setResponse(()=>new Promise(r=>resolve=r));h.t.init();
+  const h=harness();let resolve;h.setResponse(()=>new Promise(r=>resolve=r));h.t.init();await h.drain();
   if(action==='reset')h.t.resetAllTracking();
   else{h.context.location=new URL('https://chaturbate.com/otherroom/');h.t.checkUrlChange();}
   const countdown=h.t.state().countdownInterval;

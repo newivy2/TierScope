@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.27.0
+// @version      3.28.0-beta.3
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -826,6 +826,7 @@ underlying system, so should run in the browser, Node, or Plask.
     "scanEpoch",
     "initGuard",
     "isScanning",
+    "isWaitingForRequest",
     "lastAcquisitionAttemptSource",
     "domHealthStatus",
     "domFallbackReadyAtByRoom",
@@ -856,6 +857,7 @@ underlying system, so should run in the browser, Node, or Plask.
       domFallbackReadyAtByRoom: new Map(target.domFallbackReadyAtByRoom),
       connectionOffline: !!target.connectionOffline,
       connectionRecoveryAt: target.connectionRecoveryAt || 0,
+      isWaitingForRequest: false,
       requestPolicyStorageRevision: target.requestPolicyStorageRevision === void 0 ? null : target.requestPolicyStorageRevision
     });
     acquisitionClockEffects = effects;
@@ -877,6 +879,7 @@ underlying system, so should run in the browser, Node, or Plask.
   function invalidateAcquisition() {
     acquisitionState.scanEpoch++;
     acquisitionState.isScanning = false;
+    acquisitionState.isWaitingForRequest = false;
     acquisitionState.connectionRecoveryAt = 0;
   }
   function beginAcquisitionGeneration() {
@@ -887,6 +890,7 @@ underlying system, so should run in the browser, Node, or Plask.
   function beginAcquisition(url, room2, policy, now, stopped) {
     if (acquisitionState.isScanning || acquisitionState.connectionOffline || stopped || policy.blocked || policy.until > now) return null;
     acquisitionState.isScanning = true;
+    acquisitionState.isWaitingForRequest = false;
     return Object.freeze({
       epoch: ++acquisitionState.scanEpoch,
       generation: acquisitionState.initGuard,
@@ -902,7 +906,13 @@ underlying system, so should run in the browser, Node, or Plask.
   function finishAcquisition(context, url) {
     if (!acquisitionContextIsCurrent(context, url)) return false;
     acquisitionState.isScanning = false;
+    acquisitionState.isWaitingForRequest = false;
     acquisitionState.connectionRecoveryAt = 0;
+    return true;
+  }
+  function setAcquisitionWaiting(context, url, waiting) {
+    if (!acquisitionState.isScanning || !acquisitionContextIsCurrent(context, url)) return false;
+    acquisitionState.isWaitingForRequest = waiting;
     return true;
   }
   function noteAcquisitionSource(source) {
@@ -2385,6 +2395,16 @@ underlying system, so should run in the browser, Node, or Plask.
   function requestRetryDeadline(policy, recoveryAt = 0) {
     return recoveryAt ? Math.max(responseRetryDeadline(policy), recoveryAt) : policy.until;
   }
+  function userListFormatRecovery(policy, now) {
+    if (policy.userListFormatVersion !== void 0 || policy.status !== 0 || policy.blocked || !policy.failures || policy.responseUntil === void 0 || policy.responseUntil <= now || (policy.serverUntil || 0) > now) return null;
+    return __spreadProps(__spreadValues({}, policy), {
+      userListFormatVersion: 2,
+      failures: 0,
+      responseUntil: 0,
+      serverUntil: 0,
+      until: policy.connectionUntil || 0
+    });
+  }
   function nextRequestFailure(old, error, now, interval) {
     const responseUntil = responseRetryDeadline(old);
     if (error.connectionFailure) {
@@ -2416,7 +2436,134 @@ underlying system, so should run in the browser, Node, or Plask.
     });
   }
 
+  // src/request-coordination.js
+  function createRequestCoordinator(participant, background = false, options = {}) {
+    const prefix = "cb-api-coordination:v1:", spacing = 3e3, lease2 = 1500;
+    const now = options.now || (() => Date.now());
+    const delay = options.delay || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+    const storage = options.storage || (() => window.localStorage);
+    const locks = options.locks || (() => {
+      var _a;
+      return (_a = window.navigator) == null ? void 0 : _a.locks;
+    });
+    let rememberedUntil = 0, lastStart = -Infinity;
+    function read(key) {
+      try {
+        return JSON.parse(storage().getItem(prefix + key));
+      } catch (_) {
+        return null;
+      }
+    }
+    function write(key, value) {
+      try {
+        storage().setItem(prefix + key, JSON.stringify(value));
+      } catch (_) {
+      }
+    }
+    function validUntil(value) {
+      return (value == null ? void 0 : value.version) === 1 && Number.isSafeInteger(value.until) && value.until >= 0 && value.until <= 864e13 ? value.until : 0;
+    }
+    function deadline() {
+      for (const owner of ["tierscope", "viewer-probe"]) rememberedUntil = Math.max(rememberedUntil, validUntil(read("cooldown:" + owner)));
+      return rememberedUntil;
+    }
+    function publish(until) {
+      if (!Number.isSafeInteger(until) || until < 0 || until > 864e13) return;
+      rememberedUntil = Math.max(rememberedUntil, until);
+      const key = "cooldown:" + participant, previous = validUntil(read(key));
+      if (until <= previous) return;
+      write(key, { version: 1, until });
+      try {
+        const manager = locks();
+        if (manager && typeof manager.request === "function") {
+          Promise.resolve(manager.request(prefix + key, () => {
+            const stored = validUntil(read(key));
+            if (until > stored) write(key, { version: 1, until });
+          })).catch(() => {
+          });
+        }
+      } catch (_) {
+      }
+    }
+    async function locked(operation) {
+      let manager;
+      try {
+        manager = locks();
+      } catch (_) {
+      }
+      if (manager && typeof manager.request === "function") {
+        let entered = false;
+        try {
+          return await manager.request(prefix + "request", () => {
+            entered = true;
+            return operation();
+          });
+        } catch (error) {
+          if (entered) throw error;
+        }
+      }
+      return operation();
+    }
+    function priority(at) {
+      const value = read("priority");
+      const sequence = (value == null ? void 0 : value.version) === 1 && Number.isSafeInteger(value.sequence) && value.sequence >= 0 && value.sequence <= at + 1e4 ? value.sequence : at;
+      const waiters = (value == null ? void 0 : value.version) === 1 && Array.isArray(value.waiters) ? value.waiters.slice(0, 128).filter((entry) => Number.isSafeInteger(entry == null ? void 0 : entry.ticket) && entry.ticket > 0 && entry.ticket <= sequence && Number.isSafeInteger(entry.until) && entry.until > at && entry.until <= at + lease2) : [];
+      return { version: 1, sequence, waiters };
+    }
+    async function waitForSlot(current) {
+      let ticket = 0;
+      try {
+        while (true) {
+          const result = await locked(() => {
+            if (!current() || deadline() > now()) return false;
+            const at = now(), slot = read("slot");
+            const backgroundAt = (slot == null ? void 0 : slot.version) === 1 && Number.isSafeInteger(slot.backgroundAt) && slot.backgroundAt <= at ? slot.backgroundAt : 0;
+            const coordinated = background || backgroundAt > 0;
+            const next = (slot == null ? void 0 : slot.version) === 1 && Number.isSafeInteger(slot.next) && slot.next <= at + spacing ? slot.next : 0;
+            const wait = coordinated ? Math.max(background ? lastStart + spacing : 0, next) - at : 0;
+            const queue = priority(at);
+            if (!background && (wait > 0 || queue.waiters.length)) {
+              let entry = queue.waiters.find((entry2) => entry2.ticket === ticket);
+              if (!entry && queue.waiters.length < 128) {
+                ticket = ++queue.sequence;
+                entry = { ticket, until: at + lease2 };
+                queue.waiters.push(entry);
+              }
+              if (entry) entry.until = at + lease2;
+              write("priority", queue);
+            }
+            if (queue.waiters.length && (background || queue.waiters[0].ticket !== ticket)) return 250;
+            if (wait > 0) return Math.min(250, wait);
+            lastStart = now();
+            write("slot", { version: 1, next: lastStart + spacing, backgroundAt: background ? lastStart : backgroundAt });
+            if (ticket) {
+              queue.waiters = queue.waiters.filter((entry) => entry.ticket !== ticket);
+              write("priority", queue);
+              ticket = 0;
+            }
+            return true;
+          });
+          if (typeof result === "boolean") return result;
+          await delay(result);
+        }
+      } finally {
+        if (ticket) await locked(() => {
+          const queue = priority(now());
+          queue.waiters = queue.waiters.filter((entry) => entry.ticket !== ticket);
+          write("priority", queue);
+        });
+      }
+    }
+    return { deadline, publish, waitForSlot };
+  }
+  var requestCoordinator = createRequestCoordinator("tierscope");
+
   // src/request-policy.js
+  function shareResponseWait(policy) {
+    if (policy.status === 429 || policy.status >= 500 || policy.serverUntil > Date.now()) {
+      requestCoordinator.publish(responseRetryDeadline(policy));
+    }
+  }
   function readRequestPolicy() {
     try {
       var raw = GM_getValue(runtime.REQUEST_POLICY_KEY, null);
@@ -2430,9 +2577,18 @@ underlying system, so should run in the browser, Node, or Plask.
     } catch (error) {
       noteRequestPolicyReadFailure();
     }
+    var recovery = userListFormatRecovery(runtime.requestPolicyCache, Date.now());
+    if (recovery && !runtime.requestPolicyUnsaved) {
+      try {
+        if (GM_getValue(runtime.REQUEST_POLICY_KEY, null) === raw) writeRequestPolicy(recovery);
+      } catch (error) {
+      }
+    }
+    shareResponseWait(runtime.requestPolicyCache);
     return runtime.requestPolicyCache;
   }
   function writeRequestPolicy(policy) {
+    policy.userListFormatVersion = 2;
     policy.revision = makeStorageId();
     stageRequestPolicy(policy);
     try {
@@ -2441,6 +2597,7 @@ underlying system, so should run in the browser, Node, or Plask.
     } catch (error) {
       log("Request restriction is local to this tab: " + error.message);
     }
+    shareResponseWait(policy);
   }
   function retryAfterTime(value, now) {
     if (typeof value !== "string" || !value.trim()) return 0;
@@ -2460,7 +2617,7 @@ underlying system, so should run in the browser, Node, or Plask.
     return policy;
   }
   function effectiveRequestDeadline(policy) {
-    return requestRetryDeadline(policy, runtime.connectionRecoveryAt);
+    return Math.max(requestRetryDeadline(policy, runtime.connectionRecoveryAt), requestCoordinator.deadline());
   }
   function clearRequestFailures(revision, storageRevision) {
     readRequestPolicy();
@@ -2472,11 +2629,17 @@ underlying system, so should run in the browser, Node, or Plask.
   }
   function requestPolicyMessage(policy) {
     if (policy.blocked) return "Access denied (" + policy.blocked + ")";
-    if (!runtime.isAutoRefreshOn && policy.connectionFailures && responseRetryDeadline(policy) <= Date.now()) return "";
+    var sharedWait = requestCoordinator.deadline() > Date.now();
+    if (!runtime.isAutoRefreshOn && policy.connectionFailures && responseRetryDeadline(policy) <= Date.now() && !sharedWait) return "";
     var seconds = Math.max(0, Math.ceil((effectiveRequestDeadline(policy) - Date.now()) / 1e3));
     if (!seconds) return "";
-    var connection = responseRetryDeadline(policy) <= Date.now() && (runtime.connectionRecoveryAt || policy.connectionFailures);
-    return (policy.status === 429 && responseRetryDeadline(policy) > Date.now() ? "Rate limited · " : connection ? runtime.connectionRecoveryAt ? "Reconnecting · " : "Connection · " : "Retry in ") + (seconds >= 60 ? Math.ceil(seconds / 60) + "m" : seconds + "s");
+    var connection = !sharedWait && responseRetryDeadline(policy) <= Date.now() && (runtime.connectionRecoveryAt || policy.connectionFailures);
+    return (policy.status === 429 && responseRetryDeadline(policy) > Date.now() ? "Rate limited · " : sharedWait && requestCoordinator.deadline() > requestRetryDeadline(policy, runtime.connectionRecoveryAt) ? "API cooldown · " : connection ? runtime.connectionRecoveryAt ? "Reconnecting · " : "Connection · " : "Retry in ") + (seconds >= 60 ? Math.ceil(seconds / 60) + "m" : seconds + "s");
+  }
+  function requestFailureExplanation(policy) {
+    if (responseRetryDeadline(policy) <= Date.now()) return "";
+    if (policy.status >= 100 && policy.status <= 599) return " Last failed API response: HTTP " + policy.status;
+    return policy.failures > 0 ? " The API response or audience sample was rejected" : "";
   }
   function getDOMFallbackWaitSeconds(modelName) {
     var readyAt = runtime.domFallbackReadyAtByRoom.get(modelName.toLowerCase()) || 0;
@@ -3431,13 +3594,18 @@ underlying system, so should run in the browser, Node, or Plask.
       title: "The browser reports offline. Scans are suspended; the last valid sample is retained. Tracking time continues.",
       color: "var(--panel-warning)"
     });
-    var policyMessage = requestPolicyMessage(readRequestPolicy());
+    var policy = readRequestPolicy(), policyMessage = requestPolicyMessage(policy);
     if (policyMessage) {
       var sample = runtime.lastAcceptedAcquisition || runtime.restoredDisplayFrame;
       model.text = policyMessage;
-      model.title = policyMessage + (sample ? ". Last sample: " + new Date(sample.timestamp).toISOString() : ". No accepted sample.");
+      model.title = policyMessage + requestFailureExplanation(policy) + (sample ? ". Last sample: " + new Date(sample.timestamp).toISOString() : ". No accepted sample.");
       return model;
     }
+    if (runtime.isWaitingForRequest) return __spreadProps(__spreadValues({}, model), {
+      text: "Waiting for API slot",
+      title: "The request has not started. Room scans have priority; request spacing and server cooldowns still apply.",
+      color: "var(--panel-warning)"
+    });
     if (isAbsencePaused()) {
       model.text = "Auto-paused • return checks";
       model.title = absencePauseDescription();
@@ -3484,7 +3652,7 @@ underlying system, so should run in the browser, Node, or Plask.
     var source = runtime.lastAcceptedAcquisition ? runtime.lastAcceptedAcquisition.source : sample ? "Saved" : "No sample";
     model.text = runtime.sessionStorageNotice ? "Local only" : (runtime.isAutoRefreshOn ? source : "Paused") + (sample ? " · " + formatSampleAge(sample.timestamp) : "");
     model.color = runtime.sessionStorageNotice ? "var(--panel-warning)" : runtime.isAutoRefreshOn ? "var(--panel-muted)" : "var(--panel-paused)";
-    var policyMessage = requestPolicyMessage(readRequestPolicy());
+    var policy = readRequestPolicy(), policyMessage = requestPolicyMessage(policy);
     if (policyMessage && !runtime.sessionStorageNotice) {
       model.text = policyMessage;
       model.color = "var(--panel-warning)";
@@ -3492,7 +3660,7 @@ underlying system, so should run in the browser, Node, or Plask.
     if (!policyMessage && runtime.isAutoRefreshOn && getEffectiveScanIntervalSeconds() > runtime.scanIntervalSeconds) {
       model.text = "Reduced · " + getEffectiveScanIntervalSeconds() / 60 + "m";
     }
-    model.title = runtime.sessionStorageNotice || (policyMessage ? policyMessage + ". " : "") + source + (sample ? ": " + new Date(sample.timestamp).toISOString() : "") + ". Age of the last accepted sample. " + (runtime.isAutoRefreshOn ? "Next attempt: " + runtime.countdownSeconds + "s." : "Automatic scans paused.");
+    model.title = runtime.sessionStorageNotice || (policyMessage ? policyMessage + requestFailureExplanation(policy) + ". " : "") + source + (sample ? ": " + new Date(sample.timestamp).toISOString() : "") + ". Age of the last accepted sample. " + (runtime.isAutoRefreshOn ? "Next attempt: " + runtime.countdownSeconds + "s." : "Automatic scans paused.");
     return model;
   }
 
@@ -9534,7 +9702,7 @@ underlying system, so should run in the browser, Node, or Plask.
       if (timerDisplay) timerDisplay.textContent = runtime.scanIntervalSeconds + "s";
       [statusEl, expandedCountdown, controlNextScan].forEach(function(el) {
         if (!el) return;
-        el.textContent = policyMessage || (el === statusEl ? "Auto-paused" : runtime.isScanning ? "Checking..." : "Check: " + runtime.countdownSeconds + "s");
+        el.textContent = policyMessage || (runtime.isWaitingForRequest ? "API queue..." : el === statusEl ? "Auto-paused" : runtime.isScanning ? "Checking..." : "Check: " + runtime.countdownSeconds + "s");
         el.title = absencePauseDescription() + (policyMessage ? " " + policyMessage + "." : " Next return check: " + runtime.countdownSeconds + "s.");
         el.style.color = "var(--panel-warning)";
       });
@@ -9544,6 +9712,7 @@ underlying system, so should run in the browser, Node, or Plask.
     var effectiveInterval = getEffectiveScanIntervalSeconds();
     var reduced = effectiveInterval > runtime.scanIntervalSeconds;
     timingTitle += " Selected interval: " + runtime.scanIntervalSeconds + "s. Effective interval: " + effectiveInterval + "s." + (reduced ? " Reduced scanning while the broadcaster is absent; auto-pause at 15 minutes, then return checks for up to 3 hours." : "") + (runtime.absenceOverrideActive ? " Absence automation manually overridden until the broadcaster is detected again." : "");
+    if (runtime.isWaitingForRequest) timingTitle = "Waiting for API slot. The request has not started. Room scans have priority; request spacing and server cooldowns still apply. " + timingTitle;
     [statusEl, expandedCountdown, controlNextScan].forEach(function(el) {
       if (el) el.title = runtime.isAutoRefreshOn ? timingTitle : "Automatic scans paused. An in-flight scan may finish. " + timingTitle;
     });
@@ -9552,7 +9721,7 @@ underlying system, so should run in the browser, Node, or Plask.
     }
     if (expandedCountdown) {
       if (runtime.isScanning) {
-        expandedCountdown.textContent = "scanning...";
+        expandedCountdown.textContent = runtime.isWaitingForRequest ? "API queue..." : "scanning...";
         expandedCountdown.style.color = "var(--panel-warning)";
       } else if (runtime.isAutoRefreshOn) {
         expandedCountdown.textContent = "next: " + runtime.countdownSeconds + "s";
@@ -9564,7 +9733,7 @@ underlying system, so should run in the browser, Node, or Plask.
     }
     if (controlNextScan) {
       if (runtime.isScanning) {
-        controlNextScan.textContent = "Scanning...";
+        controlNextScan.textContent = runtime.isWaitingForRequest ? "API queue..." : "Scanning...";
         controlNextScan.style.color = "var(--panel-warning)";
       } else if (runtime.isAutoRefreshOn) {
         controlNextScan.textContent = (reduced ? "Reduced: " : "Next: ") + runtime.countdownSeconds + "s";
@@ -9579,13 +9748,13 @@ underlying system, so should run in the browser, Node, or Plask.
         if (!el) return;
         el.textContent = policyMessage;
         el.style.color = "var(--panel-warning)";
-        el.title = policyMessage + (policy.blocked ? ". Automatic scans stopped. After resolving access, use Resume to retry." : ". No API or DOM acquisition before " + new Date(effectiveRequestDeadline(policy)).toLocaleString() + ".");
+        el.title = policyMessage + requestFailureExplanation(policy) + (policy.blocked ? ". Automatic scans stopped. After resolving access, use Resume to retry." : ". No API or DOM acquisition before " + new Date(effectiveRequestDeadline(policy)).toLocaleString() + ".");
       });
       return;
     }
     if (!statusEl) return;
     if (runtime.isScanning) {
-      statusEl.textContent = "Scanning...";
+      statusEl.textContent = runtime.isWaitingForRequest ? "Waiting for API slot" : "Scanning...";
       statusEl.style.color = "var(--panel-warning)";
     } else if (runtime.isAutoRefreshOn) {
       statusEl.textContent = "Next: " + runtime.countdownSeconds + "s";
@@ -9902,13 +10071,18 @@ underlying system, so should run in the browser, Node, or Plask.
     if (!/^\d+$/.test(parts[0])) throw new Error("Invalid API anonymous count");
     var anonymousCount = Number(parts[0]);
     if (!Number.isSafeInteger(anonymousCount)) throw new Error("Unsafe API anonymous count");
+    var firstUser = 1;
+    if (parts.length > 1 && /^\d+$/.test(parts[1])) {
+      if (!Number.isSafeInteger(Number(parts[1]))) throw new Error("Unsafe API metadata count");
+      firstUser = 2;
+    }
     var classTiers = { m: "red", f: "green", l: "purple", p: "pink", tr: "dark-blue", t: "light-blue", g: "gray" };
     var genders = { m: "male", f: "female", s: "trans", c: "couple" };
     var seen = /* @__PURE__ */ new Set();
     var parsedUsers = [];
     var unknownClasses = /* @__PURE__ */ Object.create(null);
     var unknownGenders = /* @__PURE__ */ Object.create(null);
-    for (var i = 1; i < parts.length; i++) {
+    for (var i = firstUser; i < parts.length; i++) {
       var fields = parts[i].split("|");
       if (fields.length !== 4 || !/^[A-Za-z0-9_-]{2,30}$/.test(fields[0]) || fields.slice(1).some(function(field) {
         return !/^[^\s|,<>\x00-\x1f]+$/.test(field);
@@ -9958,6 +10132,26 @@ underlying system, so should run in the browser, Node, or Plask.
   }
   async function acquireAPISnapshot(context) {
     if (!context.room || context.room === "unknown") throw new Error("No current room username");
+    var allowedWhilePaused = runtime.isPaused;
+    var canRequest = function() {
+      var policy = readRequestPolicy();
+      return isAcquisitionCurrent(context) && (allowedWhilePaused || !runtime.isPaused || isAbsencePaused()) && !isBrowserOffline() && !policy.blocked && effectiveRequestDeadline(policy) <= Date.now();
+    };
+    if (!setAcquisitionWaiting(context, location.href, true)) throw Object.assign(new Error("API request deferred."), { requestDeferred: true });
+    try {
+      updateCountdownDisplay();
+      updateAcquisitionStatus();
+    } catch (error) {
+      log("Request status display unavailable: " + error.message);
+    }
+    var ready = await requestCoordinator.waitForSlot(canRequest);
+    if (!ready || !canRequest() || !setAcquisitionWaiting(context, location.href, false)) throw Object.assign(new Error("API request deferred."), { requestDeferred: true });
+    try {
+      updateCountdownDisplay();
+      updateAcquisitionStatus();
+    } catch (error) {
+      log("Request status display unavailable: " + error.message);
+    }
     var url = new URL("/api/getchatuserlist/", location.origin);
     url.searchParams.set("roomname", context.room);
     url.searchParams.set("private", "false");
@@ -9974,6 +10168,7 @@ underlying system, so should run in the browser, Node, or Plask.
               method: "GET",
               credentials: "same-origin",
               mode: "same-origin",
+              headers: { "X-Requested-With": "XMLHttpRequest" },
               cache: "no-store",
               redirect: "error",
               signal: controller.signal
@@ -10080,6 +10275,7 @@ underlying system, so should run in the browser, Node, or Plask.
       return snapshot;
     } catch (error) {
       if (!isAcquisitionCurrent(context)) return null;
+      if (error.requestDeferred) return null;
       if (isAbsencePaused()) {
         var policy = recordRequestFailure(error);
         if (policy.blocked) pauseForAccessRestriction();
@@ -10102,6 +10298,7 @@ underlying system, so should run in the browser, Node, or Plask.
       return snapshot;
     } catch (err) {
       if (!isAcquisitionCurrent(context)) return null;
+      if (err.requestDeferred) return null;
       diagnostic("warn", "API failed: " + err.message);
       var policy = recordRequestFailure(err);
       if (policy.blocked) {
@@ -10701,7 +10898,7 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/bootstrap.js
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.27.0";
+    runtime.TIERSCOPE_VERSION = "3.28.0-beta.3";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;

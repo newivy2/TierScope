@@ -52,6 +52,21 @@ test('request restrictions survive navigation and a shorter scan interval', asyn
   assert.equal(s.nextScanAt, 0, 'Stop clears the deadline without clearing restrictions');
 });
 
+test('request queue state belongs to the current acquisition and clears on completion or invalidation', async () => {
+  const {owner: o, state: s} = await acquisition();
+  const first = o.beginAcquisition('/room/', 'room', policy(), 100, false);
+  assert(o.setAcquisitionWaiting(first, '/room/', true));
+  assert.equal(s.isWaitingForRequest, true);
+  assert.equal(Reflect.set(s, 'isWaitingForRequest', false), false);
+  o.invalidateAcquisition(); assert.equal(s.isWaitingForRequest, false);
+  const second = o.beginAcquisition('/other/', 'other', policy(), 100, false);
+  assert(o.setAcquisitionWaiting(second, '/other/', true));
+  assert.equal(o.setAcquisitionWaiting(first, '/room/', false), false);
+  assert.equal(s.isWaitingForRequest, true);
+  assert(o.finishAcquisition(second, '/other/')); assert.equal(s.isWaitingForRequest, false);
+  assert.equal(o.setAcquisitionWaiting(second, '/other/', true), false);
+});
+
 test('pending local restrictions merge with another tab and only the current revision can clear them', async () => {
   const {owner: o, state: s} = await acquisition();
   o.stageRequestPolicy(policy({until: 500, failures: 2, revision: 'local', serverUntil: 400}));

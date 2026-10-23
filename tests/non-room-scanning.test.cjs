@@ -37,7 +37,7 @@ test('a directory cannot poison a healthy sibling; navigating into a room resume
  assert.equal(h.fetchCount(),1);assert.equal(h.api.__directory.state().minimized,false);assert(h.t.state().countdownInterval);
 });
 test('late room failures after navigation to a directory cannot write retry policy or restart tracking',async()=>{
- const h=harness(new Map(),extra);let finish;h.setResponse(()=>new Promise(resolve=>finish=resolve));h.t.init();
+ const h=harness(new Map(),extra);let finish;h.setResponse(()=>new Promise(resolve=>finish=resolve));h.t.init();await h.drain();
  h.context.location=new URL('https://chaturbate.com/female-cams/');h.t.checkUrlChange();h.runTimers(t=>!t.repeat&&t.ms===2002);
  finish({ok:false,status:429,headers:{get:()=> '600'}});await h.drain();
  assert.equal(h.storage.get(key),undefined);assert.equal(h.t.state().history.timestamps.length,0);assert.equal(h.t.state().countdownInterval,null);assert.equal(h.t.state().trackingTimerInterval,null);

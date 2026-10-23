@@ -10,7 +10,7 @@ import { updateAcquisitionStatus, updateMiniFreshness } from './presentation-sta
 import { updateDisplay, updateTrendDisplay } from './presentation.js';
 import { getStorageKey } from './record-validation.js';
 import { leavePlayback } from './replay.js';
-import { effectiveRequestDeadline, getDOMFallbackWaitSeconds, readRequestPolicy, requestPolicyMessage, writeRequestPolicy } from './request-policy.js';
+import { effectiveRequestDeadline, getDOMFallbackWaitSeconds, readRequestPolicy, requestFailureExplanation, requestPolicyMessage, writeRequestPolicy } from './request-policy.js';
 import { responseRetryDeadline } from './request-policy-data.js';
 import { runtime } from './runtime.js';
 import { saveSession } from './session-persistence.js';
@@ -232,7 +232,7 @@ export function updateCountdownDisplay() {
         if (timerDisplay) timerDisplay.textContent = runtime.scanIntervalSeconds + 's';
         [statusEl, expandedCountdown, controlNextScan].forEach(function(el) {
             if (!el) return;
-            el.textContent = policyMessage || (el === statusEl ? 'Auto-paused' : runtime.isScanning ? 'Checking...' : 'Check: ' + runtime.countdownSeconds + 's');
+            el.textContent = policyMessage || (runtime.isWaitingForRequest ? 'API queue...' : el === statusEl ? 'Auto-paused' : runtime.isScanning ? 'Checking...' : 'Check: ' + runtime.countdownSeconds + 's');
             el.title = absencePauseDescription() + (policyMessage ? ' ' + policyMessage + '.' : ' Next return check: ' + runtime.countdownSeconds + 's.');
             el.style.color = 'var(--panel-warning)';
         });
@@ -244,6 +244,7 @@ export function updateCountdownDisplay() {
     timingTitle += ' Selected interval: ' + runtime.scanIntervalSeconds + 's. Effective interval: ' + effectiveInterval + 's.' +
         (reduced ? ' Reduced scanning while the broadcaster is absent; auto-pause at 15 minutes, then return checks for up to 3 hours.' : '') +
         (runtime.absenceOverrideActive ? ' Absence automation manually overridden until the broadcaster is detected again.' : '');
+    if (runtime.isWaitingForRequest) timingTitle = 'Waiting for API slot. The request has not started. Room scans have priority; request spacing and server cooldowns still apply. ' + timingTitle;
     [statusEl, expandedCountdown, controlNextScan].forEach(function(el) {
         if (el) el.title = runtime.isAutoRefreshOn ? timingTitle :
             'Automatic scans paused. An in-flight scan may finish. ' + timingTitle;
@@ -253,7 +254,7 @@ export function updateCountdownDisplay() {
     }
     if (expandedCountdown) {
         if (runtime.isScanning) {
-            expandedCountdown.textContent = 'scanning...';
+            expandedCountdown.textContent = runtime.isWaitingForRequest ? 'API queue...' : 'scanning...';
             expandedCountdown.style.color = 'var(--panel-warning)';
         } else if (runtime.isAutoRefreshOn) {
             expandedCountdown.textContent = 'next: ' + runtime.countdownSeconds + 's';
@@ -265,7 +266,7 @@ export function updateCountdownDisplay() {
     }
     if (controlNextScan) {
         if (runtime.isScanning) {
-            controlNextScan.textContent = 'Scanning...';
+            controlNextScan.textContent = runtime.isWaitingForRequest ? 'API queue...' : 'Scanning...';
             controlNextScan.style.color = 'var(--panel-warning)';
         } else if (runtime.isAutoRefreshOn) {
             controlNextScan.textContent = (reduced ? 'Reduced: ' : 'Next: ') + runtime.countdownSeconds + 's';
@@ -279,14 +280,14 @@ export function updateCountdownDisplay() {
         [statusEl, expandedCountdown, controlNextScan].forEach(function(el) {
             if (!el) return;
             el.textContent = policyMessage; el.style.color = 'var(--panel-warning)';
-            el.title = policyMessage + (policy.blocked ? '. Automatic scans stopped. After resolving access, use Resume to retry.' :
+            el.title = policyMessage + requestFailureExplanation(policy) + (policy.blocked ? '. Automatic scans stopped. After resolving access, use Resume to retry.' :
                 '. No API or DOM acquisition before ' + new Date(effectiveRequestDeadline(policy)).toLocaleString() + '.');
         });
         return;
     }
     if (!statusEl) return;
     if (runtime.isScanning) {
-        statusEl.textContent = 'Scanning...';
+        statusEl.textContent = runtime.isWaitingForRequest ? 'Waiting for API slot' : 'Scanning...';
         statusEl.style.color = 'var(--panel-warning)';
     } else if (runtime.isAutoRefreshOn) {
         statusEl.textContent = 'Next: ' + runtime.countdownSeconds + 's';

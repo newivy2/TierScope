@@ -17,6 +17,7 @@ const modules = fs.readdirSync(path.join(root, 'src')).filter(file => file.endsW
 const reviewedChanges = new Set([
   // Offline/transport classification: connection-recovery unit and native browser fixtures.
   'acquireAPISnapshot', 'recordRequestFailure', 'requestPolicyMessage',
+  'parseGetChatUserListResponse', // optional numeric header: acquisition-csv and paired browser fixtures
   // Model-first Library + automatic favorite checkpoints: favorite-sessions and model-library browser tests.
   'loadCollapsedRows', 'drawHistorySparklines', 'pulseAcceptedHighs', 'captureSessionFile',
   // Acquisition/preference ownership and controller wiring: control-ownership.test.cjs,
@@ -80,8 +81,8 @@ const reviewedChanges = new Set([
 // Follow-live snapshot ownership: analysis-follow.test.cjs and follow-live-browser.cjs.
 const featureModules = new Set(['ath-retention.js', 'ath-activity.js', 'ath-maintenance.js', 'analysis-clock-data.js', 'analysis-metric-view.js', 'analysis-follow.js', 'library-capacity-data.js', 'library-capacity.js', 'library-capacity-view.js', 'automatic-library.js', 'favorite-controls.js', 'favorite-view.js', 'room-total-series.js', 'library-drafts.js', 'library-models.js', 'library-query.js', 'library-transfer.js', 'library-browser-view.js', 'tools-view-helpers.js', 'analysis-chart-data.js', 'analysis-chart-view.js', 'model-history.js', 'model-history-view.js', 'presentation-health.js', 'sample-presentation.js', 'analysis-preference-data.js', 'analysis-preferences.js', 'acquisition-state.js', 'panel-preferences.js', 'library-dock.js', 'library-shell.js', 'recording-export-data.js', 'recording-exports.js', 'display-model.js', 'display-values.js', 'immutable-data.js', 'presentation-data.js', 'status-model.js', 'status-view.js', 'trend-view.js', 'playback-state.js', 'live-session.js', 'diagnostics.js', 'room-context.js', 'backup.js', 'data-io.js', 'session-analysis.js', 'session-health.js', 'session-library.js', 'session-tools.js']);
 const addedFunctions = new Set(['clearInactiveAllTimeHighs', 'retireInactiveAllTimeRecord', 'captureLiveSessionFile', 'initializeLifecycle', 'refreshPanelOptions', 'refreshScanCountdown', 'getSessionSamplePolicy', 'initializePresentation', 'paintPanelFrame', 'getSessionWriteStatus', 'writeSessionRecord']); // shared history-gap policy; session/ownership tests
-featureModules.add('connection-status.js'); featureModules.add('request-policy-data.js');
-addedFunctions.add('effectiveRequestDeadline'); addedFunctions.add('initializeConnectionRecovery');
+featureModules.add('connection-status.js'); featureModules.add('request-policy-data.js'); featureModules.add('request-coordination.js');
+addedFunctions.add('effectiveRequestDeadline'); addedFunctions.add('initializeConnectionRecovery'); addedFunctions.add('shareResponseWait'); addedFunctions.add('requestFailureExplanation');
 
 test('unchanged extracted functions preserve 3.4.0; reviewed changes have behavior coverage', () => {
   const actual = {};

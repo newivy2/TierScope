@@ -84,7 +84,7 @@ test('offline invalidates pending responses, including a pending first scan, wit
  online(h,false);resolve(valid);await pending;assert.equal(h.t.state().history.timestamps.length,0);assert.equal(h.t.readRequestPolicy().failures,0);
  online(h,true);h.setResponse(()=>valid);await tick(h,h.t.state().nextScanAt-h.context.Date.now());assert.equal(h.t.state().history.timestamps.length,1);
  const first=harness(undefined,fixture);first.context.navigator={onLine:true};let finish;
- first.setResponse(()=>new Promise(r=>finish=r));first.t.init();online(first,false);finish(valid);await first.drain();
+ first.setResponse(()=>new Promise(r=>finish=r));first.t.init();await first.drain();online(first,false);finish(valid);await first.drain();
  online(first,true);first.setResponse(()=>valid);await tick(first,10000);assert.equal(first.t.state().history.timestamps.length,1);
  assert(first.t.state().countdownInterval);assert(first.t.state().trackingTimerInterval);
 });
