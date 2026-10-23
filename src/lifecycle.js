@@ -10,7 +10,7 @@ import { updateAcquisitionStatus, updateMiniFreshness } from './presentation-sta
 import { updateDisplay, updateTrendDisplay } from './presentation.js';
 import { getStorageKey } from './record-validation.js';
 import { leavePlayback } from './replay.js';
-import { effectiveRequestDeadline, getDOMFallbackWaitSeconds, readRequestPolicy, requestPolicyMessage, writeRequestPolicy } from './request-policy.js';
+import { effectiveRequestDeadline, getDOMFallbackWaitSeconds, readRequestPolicy, requestFailureExplanation, requestPolicyMessage, writeRequestPolicy } from './request-policy.js';
 import { responseRetryDeadline } from './request-policy-data.js';
 import { runtime } from './runtime.js';
 import { saveSession } from './session-persistence.js';
@@ -279,7 +279,7 @@ export function updateCountdownDisplay() {
         [statusEl, expandedCountdown, controlNextScan].forEach(function(el) {
             if (!el) return;
             el.textContent = policyMessage; el.style.color = 'var(--panel-warning)';
-            el.title = policyMessage + (policy.blocked ? '. Automatic scans stopped. After resolving access, use Resume to retry.' :
+            el.title = policyMessage + requestFailureExplanation(policy) + (policy.blocked ? '. Automatic scans stopped. After resolving access, use Resume to retry.' :
                 '. No API or DOM acquisition before ' + new Date(effectiveRequestDeadline(policy)).toLocaleString() + '.');
         });
         return;

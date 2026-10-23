@@ -24,13 +24,19 @@ export function parseGetChatUserListResponse(text) {
     if (!/^\d+$/.test(parts[0])) throw new Error('Invalid API anonymous count');
     var anonymousCount = Number(parts[0]);
     if (!Number.isSafeInteger(anonymousCount)) throw new Error('Unsafe API anonymous count');
+    var firstUser = 1;
+    // Some responses include a second numeric metadata header. It is not a viewer.
+    if (parts.length > 1 && /^\d+$/.test(parts[1])) {
+        if (!Number.isSafeInteger(Number(parts[1]))) throw new Error('Unsafe API metadata count');
+        firstUser = 2;
+    }
     var classTiers = { m: 'red', f: 'green', l: 'purple', p: 'pink', tr: 'dark-blue', t: 'light-blue', g: 'gray' };
     var genders = { m: 'male', f: 'female', s: 'trans', c: 'couple' };
     var seen = new Set();
     var parsedUsers = [];
     var unknownClasses = Object.create(null);
     var unknownGenders = Object.create(null);
-    for (var i = 1; i < parts.length; i++) {
+    for (var i = firstUser; i < parts.length; i++) {
         var fields = parts[i].split('|');
         if (fields.length !== 4 || !/^[A-Za-z0-9_-]{2,30}$/.test(fields[0]) ||
             fields.slice(1).some(function(field) { return !/^[^\s|,<>\x00-\x1f]+$/.test(field); })) {
@@ -95,7 +101,8 @@ export async function acquireAPISnapshot(context) {
                 var response;
                 try {
                     response = await fetch(url.href, { method: 'GET', credentials: 'same-origin',
-                        mode: 'same-origin', cache: 'no-store', redirect: 'error', signal: controller.signal });
+                        mode: 'same-origin', headers: {'X-Requested-With': 'XMLHttpRequest'},
+                        cache: 'no-store', redirect: 'error', signal: controller.signal });
                 } catch (error) { throw connectionFailure(error); }
                 if (!response.ok) {
                     var error = new Error('API HTTP ' + response.status);

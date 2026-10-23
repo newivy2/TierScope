@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.28.0-beta.1
+// @version      3.28.0-beta.2
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -2385,6 +2385,16 @@ underlying system, so should run in the browser, Node, or Plask.
   function requestRetryDeadline(policy, recoveryAt = 0) {
     return recoveryAt ? Math.max(responseRetryDeadline(policy), recoveryAt) : policy.until;
   }
+  function userListFormatRecovery(policy, now) {
+    if (policy.userListFormatVersion !== void 0 || policy.status !== 0 || policy.blocked || !policy.failures || policy.responseUntil === void 0 || policy.responseUntil <= now || (policy.serverUntil || 0) > now) return null;
+    return __spreadProps(__spreadValues({}, policy), {
+      userListFormatVersion: 2,
+      failures: 0,
+      responseUntil: 0,
+      serverUntil: 0,
+      until: policy.connectionUntil || 0
+    });
+  }
   function nextRequestFailure(old, error, now, interval) {
     const responseUntil = responseRetryDeadline(old);
     if (error.connectionFailure) {
@@ -2471,7 +2481,7 @@ underlying system, so should run in the browser, Node, or Plask.
           if (!current() || deadline() > now()) return false;
           const at = now(), slot = read("slot");
           const backgroundAt = (slot == null ? void 0 : slot.version) === 1 && Number.isSafeInteger(slot.backgroundAt) && slot.backgroundAt <= at ? slot.backgroundAt : 0;
-          const coordinated = background || backgroundAt > 0 && at - backgroundAt <= 9e4;
+          const coordinated = background || backgroundAt > 0;
           const next = (slot == null ? void 0 : slot.version) === 1 && Number.isSafeInteger(slot.next) && slot.next <= at + spacing ? slot.next : 0;
           const wait = coordinated ? Math.max(background ? lastStart + spacing : 0, next) - at : 0;
           if (wait > 0) {
@@ -2520,10 +2530,18 @@ underlying system, so should run in the browser, Node, or Plask.
     } catch (error) {
       noteRequestPolicyReadFailure();
     }
+    var recovery = userListFormatRecovery(runtime.requestPolicyCache, Date.now());
+    if (recovery && !runtime.requestPolicyUnsaved) {
+      try {
+        if (GM_getValue(runtime.REQUEST_POLICY_KEY, null) === raw) writeRequestPolicy(recovery);
+      } catch (error) {
+      }
+    }
     shareResponseWait(runtime.requestPolicyCache);
     return runtime.requestPolicyCache;
   }
   function writeRequestPolicy(policy) {
+    policy.userListFormatVersion = 2;
     policy.revision = makeStorageId();
     stageRequestPolicy(policy);
     try {
@@ -2570,6 +2588,11 @@ underlying system, so should run in the browser, Node, or Plask.
     if (!seconds) return "";
     var connection = !sharedWait && responseRetryDeadline(policy) <= Date.now() && (runtime.connectionRecoveryAt || policy.connectionFailures);
     return (policy.status === 429 && responseRetryDeadline(policy) > Date.now() ? "Rate limited · " : sharedWait && requestCoordinator.deadline() > requestRetryDeadline(policy, runtime.connectionRecoveryAt) ? "API cooldown · " : connection ? runtime.connectionRecoveryAt ? "Reconnecting · " : "Connection · " : "Retry in ") + (seconds >= 60 ? Math.ceil(seconds / 60) + "m" : seconds + "s");
+  }
+  function requestFailureExplanation(policy) {
+    if (responseRetryDeadline(policy) <= Date.now()) return "";
+    if (policy.status >= 100 && policy.status <= 599) return " Last failed API response: HTTP " + policy.status;
+    return policy.failures > 0 ? " The API response or audience sample was rejected" : "";
   }
   function getDOMFallbackWaitSeconds(modelName) {
     var readyAt = runtime.domFallbackReadyAtByRoom.get(modelName.toLowerCase()) || 0;
@@ -3524,11 +3547,11 @@ underlying system, so should run in the browser, Node, or Plask.
       title: "The browser reports offline. Scans are suspended; the last valid sample is retained. Tracking time continues.",
       color: "var(--panel-warning)"
     });
-    var policyMessage = requestPolicyMessage(readRequestPolicy());
+    var policy = readRequestPolicy(), policyMessage = requestPolicyMessage(policy);
     if (policyMessage) {
       var sample = runtime.lastAcceptedAcquisition || runtime.restoredDisplayFrame;
       model.text = policyMessage;
-      model.title = policyMessage + (sample ? ". Last sample: " + new Date(sample.timestamp).toISOString() : ". No accepted sample.");
+      model.title = policyMessage + requestFailureExplanation(policy) + (sample ? ". Last sample: " + new Date(sample.timestamp).toISOString() : ". No accepted sample.");
       return model;
     }
     if (isAbsencePaused()) {
@@ -3577,7 +3600,7 @@ underlying system, so should run in the browser, Node, or Plask.
     var source = runtime.lastAcceptedAcquisition ? runtime.lastAcceptedAcquisition.source : sample ? "Saved" : "No sample";
     model.text = runtime.sessionStorageNotice ? "Local only" : (runtime.isAutoRefreshOn ? source : "Paused") + (sample ? " · " + formatSampleAge(sample.timestamp) : "");
     model.color = runtime.sessionStorageNotice ? "var(--panel-warning)" : runtime.isAutoRefreshOn ? "var(--panel-muted)" : "var(--panel-paused)";
-    var policyMessage = requestPolicyMessage(readRequestPolicy());
+    var policy = readRequestPolicy(), policyMessage = requestPolicyMessage(policy);
     if (policyMessage && !runtime.sessionStorageNotice) {
       model.text = policyMessage;
       model.color = "var(--panel-warning)";
@@ -3585,7 +3608,7 @@ underlying system, so should run in the browser, Node, or Plask.
     if (!policyMessage && runtime.isAutoRefreshOn && getEffectiveScanIntervalSeconds() > runtime.scanIntervalSeconds) {
       model.text = "Reduced · " + getEffectiveScanIntervalSeconds() / 60 + "m";
     }
-    model.title = runtime.sessionStorageNotice || (policyMessage ? policyMessage + ". " : "") + source + (sample ? ": " + new Date(sample.timestamp).toISOString() : "") + ". Age of the last accepted sample. " + (runtime.isAutoRefreshOn ? "Next attempt: " + runtime.countdownSeconds + "s." : "Automatic scans paused.");
+    model.title = runtime.sessionStorageNotice || (policyMessage ? policyMessage + requestFailureExplanation(policy) + ". " : "") + source + (sample ? ": " + new Date(sample.timestamp).toISOString() : "") + ". Age of the last accepted sample. " + (runtime.isAutoRefreshOn ? "Next attempt: " + runtime.countdownSeconds + "s." : "Automatic scans paused.");
     return model;
   }
 
@@ -9672,7 +9695,7 @@ underlying system, so should run in the browser, Node, or Plask.
         if (!el) return;
         el.textContent = policyMessage;
         el.style.color = "var(--panel-warning)";
-        el.title = policyMessage + (policy.blocked ? ". Automatic scans stopped. After resolving access, use Resume to retry." : ". No API or DOM acquisition before " + new Date(effectiveRequestDeadline(policy)).toLocaleString() + ".");
+        el.title = policyMessage + requestFailureExplanation(policy) + (policy.blocked ? ". Automatic scans stopped. After resolving access, use Resume to retry." : ". No API or DOM acquisition before " + new Date(effectiveRequestDeadline(policy)).toLocaleString() + ".");
       });
       return;
     }
@@ -9995,13 +10018,18 @@ underlying system, so should run in the browser, Node, or Plask.
     if (!/^\d+$/.test(parts[0])) throw new Error("Invalid API anonymous count");
     var anonymousCount = Number(parts[0]);
     if (!Number.isSafeInteger(anonymousCount)) throw new Error("Unsafe API anonymous count");
+    var firstUser = 1;
+    if (parts.length > 1 && /^\d+$/.test(parts[1])) {
+      if (!Number.isSafeInteger(Number(parts[1]))) throw new Error("Unsafe API metadata count");
+      firstUser = 2;
+    }
     var classTiers = { m: "red", f: "green", l: "purple", p: "pink", tr: "dark-blue", t: "light-blue", g: "gray" };
     var genders = { m: "male", f: "female", s: "trans", c: "couple" };
     var seen = /* @__PURE__ */ new Set();
     var parsedUsers = [];
     var unknownClasses = /* @__PURE__ */ Object.create(null);
     var unknownGenders = /* @__PURE__ */ Object.create(null);
-    for (var i = 1; i < parts.length; i++) {
+    for (var i = firstUser; i < parts.length; i++) {
       var fields = parts[i].split("|");
       if (fields.length !== 4 || !/^[A-Za-z0-9_-]{2,30}$/.test(fields[0]) || fields.slice(1).some(function(field) {
         return !/^[^\s|,<>\x00-\x1f]+$/.test(field);
@@ -10073,6 +10101,7 @@ underlying system, so should run in the browser, Node, or Plask.
               method: "GET",
               credentials: "same-origin",
               mode: "same-origin",
+              headers: { "X-Requested-With": "XMLHttpRequest" },
               cache: "no-store",
               redirect: "error",
               signal: controller.signal
@@ -10802,7 +10831,7 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/bootstrap.js
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.28.0-beta.1";
+    runtime.TIERSCOPE_VERSION = "3.28.0-beta.2";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;

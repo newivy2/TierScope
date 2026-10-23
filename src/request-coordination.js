@@ -43,7 +43,9 @@ export function createRequestCoordinator(participant, background = false, option
                 if (!current() || deadline() > now()) return false;
                 const at = now(), slot = read('slot');
                 const backgroundAt = slot?.version === 1 && Number.isSafeInteger(slot.backgroundAt) && slot.backgroundAt <= at ? slot.backgroundAt : 0;
-                const coordinated = background || backgroundAt > 0 && at - backgroundAt <= 90000;
+                // Keep pacing enabled through long cooldowns and closed
+                // background tabs, so foreground tabs cannot resume in a burst.
+                const coordinated = background || backgroundAt > 0;
                 const next = slot?.version === 1 && Number.isSafeInteger(slot.next) && slot.next <= at + spacing ? slot.next : 0;
                 const wait = coordinated ? Math.max(background ? lastStart + spacing : 0, next) - at : 0;
                 if (wait > 0) { await delay(Math.min(250, wait)); continue; }

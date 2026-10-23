@@ -11,6 +11,33 @@ test('API parser rejects invalid totals, malformed records, duplicate usernames 
   assert.equal(result.users[2].tier,null);assert.equal(result.diagnostics.unknownClasses.newclass,1);
 });
 
+test('API acquisition sends the AJAX header and retains authenticated same-origin GET requests', async()=>{
+  const h=harness();h.t.initPanel();let optionsSeen;
+  h.context.fetch=async(url,options)=>{
+    assert.equal(new URL(url).pathname,'/api/getchatuserlist/');optionsSeen=options;
+    if(options.headers?.['X-Requested-With']!=='XMLHttpRequest')return {ok:false,status:404,headers:{get:()=>null}};
+    return {ok:true,text:async()=> '5,testroom|o|f|0,viewer|t|m|0'};
+  };
+  await h.t.performScanThenReturn();
+  assert.equal(h.t.state().history.timestamps.length,1);assert.equal(h.t.readRequestPolicy().failures,0);
+  assert.equal(optionsSeen.method,'GET');assert.equal(optionsSeen.credentials,'same-origin');assert.equal(optionsSeen.mode,'same-origin');
+  assert.equal(optionsSeen.redirect,'error');assert.equal(optionsSeen.headers['X-Requested-With'],'XMLHttpRequest');
+  assert(!h.logs.some(line=>line.includes('Attempting DOM fallback')));
+});
+
+test('API parsing accepts the optional numeric header without counting it as audience', async()=>{
+  const h=harness(),parse=h.api.parseGetChatUserListResponse;
+  const users='testroom|o|f|0,viewer|t|m|0', expected=parse('5,'+users);
+  for(const header of ['0','123','9007199254740991']) {
+    assert.deepEqual(JSON.parse(JSON.stringify(parse('5,'+header+','+users))),JSON.parse(JSON.stringify(expected)));
+  }
+  assert.equal(parse('5,0').totalUsers,5);
+  for(const header of ['-1','1.5','9007199254740992','0,1'])assert.throws(()=>parse('5,'+header+','+users));
+  h.t.initPanel();h.setResponse('5,123,'+users);await h.t.performScanThenReturn();
+  assert.equal(h.t.state().history.timestamps.length,1);assert.equal(h.t.state().roomTotal,7);
+  assert.equal(h.t.readRequestPolicy().failures,0);assert(!h.logs.some(line=>line.includes('Attempting DOM fallback')));
+});
+
 test('CSV contains retained history in tier order, safe text, UTC times and correct totals',async()=>{
   const injected=source.replace('downloadTrackingReport: downloadTrackingReport,', '__csvRoom: value => {getModelName = () => value;}, downloadTrackingReport: downloadTrackingReport,');
   const h=harness(new Map(),injected);h.t.loadSession('testroom');h.t.sample(2);h.advance(60000);h.t.sample(3);

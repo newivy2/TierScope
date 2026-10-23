@@ -36,6 +36,34 @@ test('cooldowns survive reloads and independent publishers cannot shorten each o
     h.unavailable(); assert.equal(reload.deadline(), h.now() + 900000, 'a failed read retains the last observed wait');
     h.advance(900000); assert(await reload.waitForSlot(() => true));
 });
+
+test('foreground tabs remain paced after a fifteen-minute cooldown with background work paused', async () => {
+    const {createRequestCoordinator} = await import(moduleUrl), h = setup(), starts = [];
+    const background = createRequestCoordinator('viewer-probe', true, h.options);
+    await background.waitForSlot(() => true); background.publish(h.now() + 900000);
+    h.advance(900000);
+    const base = h.options.storage();
+    const storage = {...base, setItem(key, value) {
+        if (key === prefix + 'slot') starts.push(JSON.parse(value).next - 3000);
+        base.setItem(key, value);
+    }};
+    const tabs = Array.from({length: 3}, () => createRequestCoordinator('tierscope', false, {...h.options, storage: () => storage}));
+    const accepted = await Promise.all(tabs.map(tab => tab.waitForSlot(() => true)));
+    assert(accepted.every(Boolean));
+    assert.deepEqual(starts, [1900000, 1903000, 1906000]);
+});
+
+test('reading an active cooldown never renews its deadline or starts a request', async () => {
+    const {createRequestCoordinator} = await import(moduleUrl), h = setup();
+    const main = createRequestCoordinator('tierscope', false, h.options), until = h.now() + 900000;
+    main.publish(until);
+    for (let i = 0; i < 60; i++) {
+        assert.equal(main.deadline(), until); assert.equal(await main.waitForSlot(() => true), false);
+        h.advance(15000);
+    }
+    assert.equal(h.data.has(prefix + 'slot'), false);
+    assert.equal(main.deadline(), until); assert(await main.waitForSlot(() => true));
+});
 test('invalid records are ignored, waiting can be cancelled, and new cooldowns stop queued requests', async () => {
     const {createRequestCoordinator} = await import(moduleUrl), h = setup();
     h.data.set(prefix + 'cooldown:tierscope', JSON.stringify({version: 1, until: '999999999'}));
@@ -86,4 +114,61 @@ test('pausing while waiting for a request slot cancels the queued scan without r
     assert.equal(h.fetchCount(), 0); assert.equal(h.t.readRequestPolicy().failures, 0);
     assert.equal(h.t.state().isPaused, true); assert.equal(h.t.state().history.timestamps.length, 0);
     assert(!h.logs.some(line => line.includes('Attempting DOM fallback')));
+});
+
+test('retry tooltips expose the stored HTTP error without changing or bypassing the countdown', () => {
+    const {harness} = require('./helpers/harness.cjs');
+    for (const status of [404, 500]) {
+        const h = harness(); h.t.initPanel(); h.t.recordRequestFailure({status}); h.t.updateCountdownDisplay(); h.t.updateAcquisitionStatus();
+        assert.match(h.e('control-next-scan').title, new RegExp('HTTP ' + status));
+        assert.match(h.e('acquisition-status').title, new RegExp('HTTP ' + status));
+        assert.match(h.e('control-next-scan').textContent, /Retry in/);
+        assert.equal(h.fetchCount(), 0);
+        const restored = harness(h.storage); restored.t.initPanel(); restored.t.updateCountdownDisplay();
+        assert.match(restored.e('control-next-scan').title, new RegExp('HTTP ' + status));
+        assert.equal(restored.fetchCount(), 0);
+    }
+});
+
+test('upgrading the parser recovers an old non-HTTP format backoff once without losing the session', async()=>{
+    const {harness}=require('./helpers/harness.cjs'), h=harness(), key='tierscope:requests:v1:https://chaturbate.com', now=h.context.Date.now();
+    h.t.initPanel();h.t.sample(2);const before=h.t.state().history.timestamps.slice();
+    h.storage.set(key,JSON.stringify({until:now+900000,responseUntil:now+900000,serverUntil:0,connectionUntil:0,connectionFailures:0,
+        failures:7,status:0,blocked:0,revision:'old-format'}));
+    h.setResponse('5,123,testroom|o|f|0,viewer|t|m|0');
+    assert.equal(h.t.readRequestPolicy().until,0);await h.t.performScanThenReturn();
+    assert.equal(h.fetchCount(),1);assert.equal(h.t.state().history.timestamps.length,before.length+1);
+    assert.deepEqual(h.t.state().history.timestamps.slice(0,before.length),before);
+    h.t.recordRequestFailure({status:0});const current=h.t.readRequestPolicy();
+    assert.equal(current.userListFormatVersion,2);assert.equal(current.failures,1);
+    assert(current.until>h.context.Date.now(),'new client failures still retain backoff');
+});
+
+test('format recovery preserves real HTTP/server restrictions, ambiguous legacy records and newer tab failures', ()=>{
+    const {harness}=require('./helpers/harness.cjs'), key='tierscope:requests:v1:https://chaturbate.com';
+    for(const change of [{status:429},{status:500},{status:404},{blocked:403},{serverUntil:1780000900000},
+        {responseUntil:undefined,connectionUntil:undefined,connectionFailures:undefined}]) {
+        const h=harness(), now=h.context.Date.now();
+        h.storage.set(key,JSON.stringify({until:now+900000,responseUntil:now+900000,serverUntil:0,connectionUntil:0,connectionFailures:0,
+            failures:7,status:0,blocked:0,revision:'protected',...change}));
+        assert.equal(h.t.readRequestPolicy().until,now+900000);
+    }
+    const h=harness(),now=h.context.Date.now();
+    const old=JSON.stringify({until:now+900000,responseUntil:now+900000,serverUntil:0,connectionUntil:0,connectionFailures:0,
+        failures:7,status:0,blocked:0,revision:'old-format'});
+    const newer=JSON.stringify({...JSON.parse(old),status:429,serverUntil:now+900000,revision:'newer'});
+    h.storage.set(key,old);const get=h.context.GM_getValue;let reads=0;
+    h.context.GM_getValue=(k,d)=>{if(k===key && ++reads===2)h.storage.set(key,newer);return get(k,d);};
+    h.t.readRequestPolicy();assert.equal(h.storage.get(key),newer);
+    assert.equal(h.t.readRequestPolicy().status,429);
+});
+
+test('recovering a format wait cannot bypass a cooldown reported by another client', async()=>{
+    const {harness}=require('./helpers/harness.cjs'),h=harness(),now=h.context.Date.now(),until=now+900000,browserStore=new Map();
+    h.context.localStorage={getItem:key=>browserStore.get(key)??null,setItem:(key,value)=>browserStore.set(key,value)};
+    browserStore.set(prefix+'cooldown:viewer-probe',JSON.stringify({version:1,until}));
+    h.storage.set('tierscope:requests:v1:https://chaturbate.com',JSON.stringify({until,responseUntil:until,serverUntil:0,
+        connectionUntil:0,connectionFailures:0,failures:7,status:0,blocked:0,revision:'old-format'}));
+    h.t.initPanel();assert.equal(h.t.readRequestPolicy().until,0);await h.t.performScanThenReturn();
+    assert.equal(h.fetchCount(),0);assert.equal(JSON.parse(browserStore.get(prefix+'cooldown:viewer-probe')).until,until);
 });

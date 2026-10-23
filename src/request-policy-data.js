@@ -11,6 +11,16 @@ export function requestRetryDeadline(policy, recoveryAt = 0) {
     return recoveryAt ? Math.max(responseRetryDeadline(policy), recoveryAt) : policy.until;
 }
 
+/** @param {RequestPolicy} policy @param {number} now @returns {RequestPolicy|null} */
+export function userListFormatRecovery(policy, now) {
+    // Only an old client/data failure can be retried under the corrected parser.
+    // Keep legacy ambiguous waits, HTTP failures, access blocks and server waits.
+    if (policy.userListFormatVersion !== undefined || policy.status !== 0 || policy.blocked || !policy.failures ||
+        policy.responseUntil === undefined || policy.responseUntil <= now || (policy.serverUntil || 0) > now) return null;
+    return {...policy, userListFormatVersion: 2, failures: 0, responseUntil: 0, serverUntil: 0,
+        until: policy.connectionUntil || 0};
+}
+
 /** @param {RequestPolicy} old @param {{status?:number,retryAt?:number,connectionFailure?:boolean}} error @param {number} now @param {number} interval */
 export function nextRequestFailure(old, error, now, interval) {
     const responseUntil = responseRetryDeadline(old);

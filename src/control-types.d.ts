@@ -1,5 +1,5 @@
 export type RequestPolicy = {until: number; failures: number; blocked: number; status: number; revision: string; serverUntil?: number;
-    responseUntil?: number; connectionUntil?: number; connectionFailures?: number};
+    responseUntil?: number; connectionUntil?: number; connectionFailures?: number; userListFormatVersion?: number};
 export type AcquisitionContext = {epoch: number; generation: number; url: string; room?: string; policyRevision?: string; policyStorageRevision?: string|null};
 export type ClockName = 'countdownInterval' | 'trackingTimerInterval' | 'healthCheckInterval';
 export type AcquisitionState = Record<ClockName, unknown> & {

@@ -1,4 +1,4 @@
-import { readRequestPolicy, requestPolicyMessage } from './request-policy.js';
+import { readRequestPolicy, requestFailureExplanation, requestPolicyMessage } from './request-policy.js';
 import { isBrowserOffline } from './connection-status.js';
 import { automaticLibraryWarning } from './automatic-library.js';
 import { runtime } from './runtime.js';
@@ -24,11 +24,11 @@ export function buildAcquisitionStatusModel() {
     }
     if (runtime.isAutoRefreshOn && isBrowserOffline()) return {...model, text: 'No connection',
         title: 'The browser reports offline. Scans are suspended; the last valid sample is retained. Tracking time continues.', color: 'var(--panel-warning)'};
-    var policyMessage = requestPolicyMessage(readRequestPolicy());
+    var policy = readRequestPolicy(), policyMessage = requestPolicyMessage(policy);
     if (policyMessage) {
         var sample = runtime.lastAcceptedAcquisition || runtime.restoredDisplayFrame;
         model.text = policyMessage;
-        model.title = policyMessage + (sample ? '. Last sample: ' + new Date(sample.timestamp).toISOString() : '. No accepted sample.');
+        model.title = policyMessage + requestFailureExplanation(policy) + (sample ? '. Last sample: ' + new Date(sample.timestamp).toISOString() : '. No accepted sample.');
         return model;
     }
     if (isAbsencePaused()) {
@@ -77,12 +77,12 @@ export function buildFreshnessModel() {
     model.text = runtime.sessionStorageNotice ? 'Local only' : (runtime.isAutoRefreshOn ? source : 'Paused') +
         (sample ? ' · ' + formatSampleAge(sample.timestamp) : '');
     model.color = runtime.sessionStorageNotice ? 'var(--panel-warning)' : runtime.isAutoRefreshOn ? 'var(--panel-muted)' : 'var(--panel-paused)';
-    var policyMessage = requestPolicyMessage(readRequestPolicy());
+    var policy = readRequestPolicy(), policyMessage = requestPolicyMessage(policy);
     if (policyMessage && !runtime.sessionStorageNotice) { model.text = policyMessage; model.color = 'var(--panel-warning)'; }
     if (!policyMessage && runtime.isAutoRefreshOn && getEffectiveScanIntervalSeconds() > runtime.scanIntervalSeconds) {
         model.text = 'Reduced · ' + getEffectiveScanIntervalSeconds() / 60 + 'm';
     }
-    model.title = runtime.sessionStorageNotice || (policyMessage ? policyMessage + '. ' : '') + source + (sample ? ': ' + new Date(sample.timestamp).toISOString() : '') +
+    model.title = runtime.sessionStorageNotice || (policyMessage ? policyMessage + requestFailureExplanation(policy) + '. ' : '') + source + (sample ? ': ' + new Date(sample.timestamp).toISOString() : '') +
         '. Age of the last accepted sample. ' + (runtime.isAutoRefreshOn ? 'Next attempt: ' + runtime.countdownSeconds + 's.' : 'Automatic scans paused.');
     return model;
 }
