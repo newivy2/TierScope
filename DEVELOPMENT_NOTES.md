@@ -4,6 +4,8 @@ Detailed reference for **3.27.0**. [Connection recovery guide](docs/connection-r
 
 ## Contents
 
+Preview: [Live models comparison across tabs](docs/live-models-comparison.md) is available on the **3.29.0 beta** branch.
+
 - [Installation and updates](#installation-and-updates)
 - [Live controls and customization](#live-controls)
 - [Charts and sample inspection](#charts-and-sample-inspection)
@@ -553,6 +555,7 @@ A room-level storage access failure can still make saving read-only. Individual 
 
 | Version | Notes |
 | --- | --- |
+| **3.29.0-beta.1** | Compare up to twelve models tracked in different tabs, using existing scans on a shared date/time axis. Add automatic updates, sample age and tracking status, Freeze/Resume, and safe Reset/stale-source handling. Duplicate models use the session with the most samples; ties keep the current source. |
 | **3.28.0-beta.3** | Give live scans priority over background requests, release the shared lock during waits, and distinguish queued requests from scans. Expire suspended queue entries and retain request spacing, cooldowns and cancellation protections. |
 | **3.28.0-beta.2** | Accept the optional second numeric user-list header and recover old client-format waits without clearing HTTP/server restrictions. Add the AJAX header and HTTP retry tooltips. Preserve pacing after long cooldowns so room tabs do not retry together. |
 | **3.28.0-beta.1** | Preview origin-wide API pacing and persistent cooldowns. Preserve longer server waits across tabs and reloads, cancel queued scans after Pause/navigation, and keep connection recovery and stored sessions independent. |

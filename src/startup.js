@@ -8,6 +8,7 @@ import { validateDOMHealth } from './dom-health.js';
 import { cleanupDragListeners, restorePanelGeometry } from './layout.js';
 import { startCountdown, startTrackingTimer, stopCountdown, stopTrackingTimer, updateCountdownDisplay, updateStopControls, updateTrackingTimer } from './lifecycle.js';
 import { configureSessionTracking, resetLiveSession } from './live-session.js';
+import { publishLiveModelSource } from './live-model-sources.js';
 import { resetTrendPreferences, selectPanelMinimized, selectPanelScale } from './panel-preferences.js';
 import { createPanel } from './panel.js';
 import { updateAcquisitionStatus } from './presentation-status.js';
@@ -54,6 +55,7 @@ export function init() {
         selectPanelMinimized(false);
     }
     configureSessionTracking(loaded, isRoom);
+    publishLiveModelSource();
     try {
         createPanel();
     } catch (e) {
@@ -178,6 +180,7 @@ export function checkUrlChange() {
         }
         runtime.lastUrl = location.href;
         runtime.activeSessionStorageKey = null;
+        publishLiveModelSource();
         stopCountdown();
         resetAcquisitionForRoom();
         stopTrackingTimer();

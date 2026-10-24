@@ -16,6 +16,7 @@ import { LIBRARY_TRANSFER_MAX_COUNT } from './library-capacity-data.js';
 import { readAutomaticKeepingMinutes, saveAutomaticKeepingMinutes, readLibraryLimits, saveLibraryLimits } from './library-capacity.js';
 import { renderAutomaticKeepingSettings, renderLibraryCapacity } from './library-capacity-view.js';
 import { libraryShell } from './library-shell.js';
+import { createLiveComparisonState, renderLiveModelsComparison } from './live-model-comparison.js';
 import { migrateRecordingFavorites, readModelFavorites, readModelFavorite } from './library-models.js';
 import { createLibraryDrafts } from './library-drafts.js';
 import { renderLibraryBrowser, renderRecordingNotes } from './library-browser-view.js';
@@ -102,6 +103,8 @@ export function openSessionTools(focusTarget) {
     let refreshCapacity = null, capacityCheckpoint = '';
     let detachDock = null, historyView = null, followControls = null, liveCapture = null, historyDiscovery = '';
     let currentArchiveIsReplay = isPlaybackCurrent(runtime.playback);
+    let compareMode = 'saved', liveModelsView = null;
+    const liveModelsState = createLiveComparisonState();
     const followers = {summary: createAnalysisFollower(), compare: createAnalysisFollower(), history: createAnalysisFollower()};
     try { currentArchive = captureSessionFile(); } catch (error) { /* Tools also work on directory pages. */ }
     const content = dialog.querySelector('#tools-content'), message = dialog.querySelector('#tools-message');
@@ -317,6 +320,7 @@ export function openSessionTools(focusTarget) {
         if (followers[tab]) followers[tab].reset();
     }
     function refreshCurrent() {
+        if (tab === 'compare' && liveModelsView) { liveModelsView.refresh(); return; }
         if (followers[tab] && updateFollowing()) refreshFollowedView();
         const checkpoint = automaticLibraryStatus(getModelName());
         const checkpointSignature = [checkpoint.identity, checkpoint.signature, checkpoint.savedAt, checkpoint.error].join(':');
@@ -468,13 +472,14 @@ export function openSessionTools(focusTarget) {
         }
     }
     function compareLiveWithPrevious() {
+        compareMode = 'saved';
         const snapshot = captureLiveSessionFile();
         const state = readLibrary(), ids = previousModelSessionIds(state.entries, snapshot);
         if (!ids.length) { refreshCards(); tell('No earlier saved sessions for ' + snapshot.room + '. Keep a session in Library to compare with a later one.'); return; }
         liveComparisonArchive = snapshot; followers.compare.reset();
         selectedA = 'live'; selectedB = ids[0]; selectedExtra = ids.slice(1);
         Object.assign(analysisFilters, {room: snapshot.room.toLowerCase(), query: '', from: '', to: ''});
-        pickerOpen.compare = false; render('compare');
+        pickerOpen.compare = false; compareMode = 'saved'; render('compare');
         (dialog.querySelector('#tools-analysis-chart') || dialog.querySelector('#tools-session-picker > summary'))?.focus();
     }
     function openHistory(room) {
@@ -512,13 +517,13 @@ export function openSessionTools(focusTarget) {
                 if (ids.length < 2) return;
                 [selectedA, selectedB] = ids; selectedExtra = ids.slice(2);
                 Object.assign(analysisFilters, {room, query: '', from: '', to: ''});
-                pickerOpen.compare = false; render('compare');
+                pickerOpen.compare = false; compareMode = 'saved'; render('compare');
                 dialog.querySelector('#tools-analysis-chart')?.focus();
             },
             duration: formatElapsedTime,
             room: room => { libraryRoom = room; },
             history: openHistory,
-            compare: ids => { selectedA = ids[0]; selectedB = ids[1]; selectedExtra = ids.slice(2); Object.assign(analysisFilters, {room: '', query: '', from: '', to: ''}); render('compare'); },
+            compare: ids => { compareMode = 'saved'; selectedA = ids[0]; selectedB = ids[1]; selectedExtra = ids.slice(2); Object.assign(analysisFilters, {room: '', query: '', from: '', to: ''}); render('compare'); },
             export: ids => { downloadDataFile(exportLibrarySelection(ids, runtime.TIERSCOPE_VERSION), 'TierScope-library-selection-' + new Date().toISOString().slice(0, 10) + '.json'); tell('Selected sessions exported, including titles, notes and favorite models.'); },
             favoriteModel: room => {
                 if (state.favoriteError) throw new Error('Model favorites are not fully available. Refresh before changing them.');
@@ -698,7 +703,7 @@ export function openSessionTools(focusTarget) {
             compare: ids => {
                 [selectedA, selectedB] = ids; selectedExtra = ids.slice(2);
                 Object.assign(analysisFilters, {room: libraryRoom, query: '', from: '', to: ''});
-                pickerOpen.compare = false; render('compare');
+                pickerOpen.compare = false; compareMode = 'saved'; render('compare');
                 (dialog.querySelector('#tools-analysis-chart') || dialog.querySelector('#tools-session-picker > summary'))?.focus();
             }
         });
@@ -787,6 +792,21 @@ export function openSessionTools(focusTarget) {
         if (window.ResizeObserver) { chartObserver = new window.ResizeObserver(view.draw); chartObserver.observe(view.canvas); }
     }
     function renderAnalysis(comparing) {
+        if (comparing) {
+            const mode = node(content, 'div', undefined, 'tools-actions tools-comparison-mode');
+            mode.setAttribute('role', 'group'); mode.setAttribute('aria-label', 'Comparison source');
+            for (const [value, title] of [['saved', 'Saved sessions'], ['live', 'Live models']]) {
+                const control = button(mode, title, () => {compareMode = value; render('compare');}, 'tools-compare-' + value);
+                control.className = compareMode === value ? 'tools-primary' : '';
+                control.setAttribute('aria-pressed', String(compareMode === value));
+            }
+            if (compareMode === 'live') {
+                liveModelsView = renderLiveModelsComparison(content, {state: liveModelsState, getMetric: () => metric,
+                    metricControl: (parent, changed) => metricStrip(parent, changed, 'tools-live-metric')});
+                chartDraw = liveModelsView.draw;
+                return;
+            }
+        }
         const options = analysisControls(comparing); if (!options) return;
         if (comparing) comparisonRange();
         analysisOutput = node(content, 'div'); analysisOutput.id = 'tools-analysis-output';
@@ -890,6 +910,7 @@ export function openSessionTools(focusTarget) {
         }
     }
     function render(next, revealSessions = false) {
+        if (liveModelsView) { liveModelsView.dispose(); liveModelsView = null; }
         refreshCapacity = null; historyView = null; followControls = null;
         const focusedId = dialog.contains(document.activeElement) ? document.activeElement.id : '';
         // Read synchronously before replacing nodes: native toggle events can be queued.
@@ -924,6 +945,7 @@ export function openSessionTools(focusTarget) {
         }
     }
     function close() {
+        if (liveModelsView) { liveModelsView.dispose(); liveModelsView = null; }
         fileRequest++; refreshSessionTools = null; refreshCapacity = null; chartDraw = null; historyView = null; followControls = null; liveCapture = null;
         if (chartDispose) { chartDispose(); chartDispose = null; }
         analysisStates.clear(); analysisView = null; analysisSources = null; analysisOutput = null; analysisReports = null;

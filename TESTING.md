@@ -39,6 +39,10 @@ The 3.28.0 beta adds request-coordination unit checks for shared pacing, indepen
 
 Beta.3 adds controlled-clock contention checks: foreground requests overtake queued background work, several room tabs retain arrival order, and background requests continue afterward. Suspended background timers never hold the lock; expired foreground leases cannot block requests forever. Cancellation removes only its own entry, and a newly published cooldown stops queued work. Bundle-level checks distinguish **API queue** from **Scanning**, retaining the last sample, failure counters and stale-acquisition guards.
 
+The 3.29.0 beta adds `live-model-sources.test.cjs` and `live-model-chart-data.test.cjs`: exact record/session/epoch matching, timestamp binding across a delayed write, metadata-only discovery, stale heartbeats, disabled directory publishers, cleanup, storage failures, cache revisions, true-time alignment across dates, preserved gaps and distinct colors after selection changes.
+
+`live-model-chart-browser.cjs` covers dated axis labels, opaque model lines, sample inspection without extrapolation and preserved absolute cursor/zoom/visibility. `live-models-browser.cjs` runs actual userscript instances in separate room and directory tabs with shared GM storage. It verifies live updates without extra API traffic or automatic Library keeping, the most-samples duplicate rule and stable ties, Freeze/catch-up, zero-sample and paused/stopped sources, stale publishers, explicit Reset replacement, room navigation, themes/narrow layout and listener cleanup. Both are included in the Chromium and Firefox runners.
+
 | Test | What it verifies |
 | --- | --- |
 | Live-session ownership | Getter-only session fields; direct/aliased-write source guard; coordinated commit/rollback; Reset/navigation/Stop reject candidate and delayed API work; clock cancellation keeps data; pause/resume, replay and save failure/retry stay independent. |

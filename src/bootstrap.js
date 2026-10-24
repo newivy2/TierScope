@@ -7,6 +7,7 @@ import { loadCollapsedRows, loadPanelGeometry } from './layout.js';
 import { initializeConnectionRecovery, initializeLifecycle, resetAllTracking, updateCountdownDisplay } from './lifecycle.js';
 import { isBrowserOffline } from './connection-status.js';
 import { initializeLiveSession } from './live-session.js';
+import { initializeLiveModelSources, stopLiveModelSources } from './live-model-sources.js';
 import { initializePanelPreferences } from './panel-preferences.js';
 import { initializePlaybackState } from './playback-state.js';
 import { initializePresentation } from './presentation.js';
@@ -316,6 +317,9 @@ export function initializeRuntime() {
     initializePresentation({refreshOptions: updatePanelOptions, refreshReplayAvailability: updateReplayAvailability, refreshCountdown: updateCountdownDisplay});
     runtime.urlCheckInterval = setInterval(checkUrlChange, 500);
     initializeConnectionRecovery();
+    initializeLiveModelSources();
+    window.addEventListener('pagehide', stopLiveModelSources);
+    window.addEventListener('pageshow', function(event) { if (event.persisted) initializeLiveModelSources(); });
     window.addEventListener('beforeunload', function() {
         stopAthActivity();
         cancelGifExport();

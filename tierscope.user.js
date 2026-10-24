@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TierScope - Chaturbate Viewers Visualizer
 // @namespace    http://tampermonkey.net/
-// @version      3.28.0-beta.3
+// @version      3.29.0-beta.1
 // @description  TierScope - Viewer visualizer with trend tracking, reports, and GIF export
 // @author       newivy
 // @match        https://chaturbate.com/*
@@ -10,6 +10,8 @@
 // @grant        GM_getValue
 // @grant        GM_listValues
 // @grant        GM_deleteValue
+// @grant        GM_addValueChangeListener
+// @grant        GM_removeValueChangeListener
 // @run-at       document-end
 // ==/UserScript==
 
@@ -805,7 +807,7 @@ underlying system, so should run in the browser, Node, or Plask.
     if (!current) return;
     room = current.toLowerCase();
     lease = makeStorageId();
-    function heartbeat() {
+    function heartbeat2() {
       var _a;
       if (((_a = roomFromUrl(location.href)) == null ? void 0 : _a.toLowerCase()) !== room) {
         stopAthActivity();
@@ -817,8 +819,8 @@ underlying system, so should run in the browser, Node, or Plask.
         diagnostic("warn", "ATH visit tracking unavailable: " + error.message);
       }
     }
-    heartbeat();
-    clock = setInterval(heartbeat, 6e4);
+    heartbeat2();
+    clock = setInterval(heartbeat2, 6e4);
   }
 
   // src/acquisition-state.js
@@ -1717,11 +1719,11 @@ underlying system, so should run in the browser, Node, or Plask.
     var seconds = totalSeconds % 60;
     return (hours < 10 ? "0" : "") + hours + ":" + (minutes < 10 ? "0" : "") + minutes + ":" + (seconds < 10 ? "0" : "") + seconds;
   }
-  function formatDateTime(timestamp) {
-    return new Date(timestamp).toLocaleString();
+  function formatDateTime(timestamp2) {
+    return new Date(timestamp2).toLocaleString();
   }
-  function formatSampleAge(timestamp) {
-    var seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1e3));
+  function formatSampleAge(timestamp2) {
+    var seconds = Math.max(0, Math.floor((Date.now() - timestamp2) / 1e3));
     if (seconds < 60) return seconds + "s";
     var minutes = Math.floor(seconds / 60);
     if (minutes < 60) return minutes + "m";
@@ -1744,8 +1746,8 @@ underlying system, so should run in the browser, Node, or Plask.
       copiedHistory[key] = sourceHistory[key].slice();
       highs[key] = [];
     });
-    copiedHistory.timestamps.forEach(function(timestamp, index) {
-      timeline.push(Math.max(index ? timeline[index - 1] : 0, timestamp - firstTimestamp));
+    copiedHistory.timestamps.forEach(function(timestamp2, index) {
+      timeline.push(Math.max(index ? timeline[index - 1] : 0, timestamp2 - firstTimestamp));
       runtime.STORAGE_HISTORY_SERIES.forEach(function(key) {
         highs[key].push(Math.max(index ? highs[key][index - 1] : 0, copiedHistory[key][index]));
       });
@@ -1838,11 +1840,11 @@ underlying system, so should run in the browser, Node, or Plask.
     if (runtime.highMode === "ath" && !high.source) return label + ": no record yet";
     return label + ": " + high.value.toLocaleString() + (high.time != null ? " · " + new Date(high.time).toLocaleString() : "") + (runtime.highMode === "ath" ? (high.source === "file" ? " · Added from a session file" : high.source === "saved" ? " · Restored local session" : " · Recorded live") + (displayedAllTimeState().pending ? " · Local only, not saved" : "") : "");
   }
-  function getHighValue(data, currentValue, timestamp) {
+  function getHighValue(data, currentValue, timestamp2) {
     var historyMax = data && data.length > 0 ? Math.max.apply(null, data) : 0;
     var newHigh = Math.max(historyMax, currentValue || 0);
-    if (timestamp && newHigh > historyMax) {
-      return { value: newHigh, isNew: true, time: timestamp };
+    if (timestamp2 && newHigh > historyMax) {
+      return { value: newHigh, isNew: true, time: timestamp2 };
     }
     return { value: newHigh, isNew: false };
   }
@@ -5552,8 +5554,8 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/analysis-clock-data.js
   var CLOCK_DAY_MS = 24 * 60 * 60 * 1e3;
-  function clockTime(timestamp) {
-    const date = new Date(timestamp);
+  function clockTime(timestamp2) {
+    const date = new Date(timestamp2);
     return ((date.getHours() * 60 + date.getMinutes()) * 60 + date.getSeconds()) * 1e3 + date.getMilliseconds();
   }
   function clockSessionDuration(archive) {
@@ -5651,9 +5653,9 @@ underlying system, so should run in the browser, Node, or Plask.
       if (time === segment.times.at(-1) && !segment.real.at(-1)) continue;
       const sample = inspectAnalysisSample(segment, time);
       if (sample.value === null) continue;
-      const index = segment.indices[sample.index], timestamp = sample.timestamp;
+      const index = segment.indices[sample.index], timestamp2 = sample.timestamp;
       const kind = sample.kind === "sample" && segment.real[sample.index] ? "sample" : "held";
-      if (!matches.some((match) => match.index === index)) matches.push({ kind, index, value: sample.value, timestamp });
+      if (!matches.some((match) => match.index === index)) matches.push({ kind, index, value: sample.value, timestamp: timestamp2 });
     }
     return { matches, kind: matches.length ? "covered" : projection.gaps.some((gap) => time >= gap.start && time <= gap.end) ? "gap" : "outside" };
   }
@@ -6476,6 +6478,17 @@ underlying system, so should run in the browser, Node, or Plask.
 #tools-message:not(:empty){padding:7px 12px;border-bottom:1px solid var(--panel-divider);font-size:.95em;white-space:pre-line;overflow-wrap:anywhere;flex-shrink:0}
 #tierscope-session-tools .tools-actions{display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin:8px 0}
 #tierscope-session-tools .tools-muted{color:var(--panel-muted);font-size:.92em;line-height:1.45}
+#tierscope-session-tools .tools-comparison-mode{padding-bottom:7px;border-bottom:1px solid var(--panel-divider)}
+#tierscope-session-tools .tools-comparison-mode button{flex:1}
+#tools-live-chooser>summary{color:var(--panel-accent);font-weight:bold}
+#tierscope-session-tools .tools-live-sources{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;margin:8px 0}
+#tierscope-session-tools .tools-live-source{display:flex;flex-direction:column;align-items:stretch;gap:3px;padding:7px;border:1px solid var(--panel-divider);border-radius:4px;min-width:0;background:rgba(var(--panel-row-rgb),.035)}
+#tierscope-session-tools .tools-live-model{display:flex;align-items:center;gap:5px;min-width:0}
+#tierscope-session-tools .tools-live-model strong{overflow-wrap:anywhere;color:var(--panel-text)}
+#tierscope-session-tools .tools-live-source select{width:100%;font-size:.9em}
+#tierscope-session-tools .tools-live-source[data-live-state=tracking] [data-live-status]{color:var(--panel-positive)}
+#tierscope-session-tools .tools-live-source:is([data-live-state=stale],[data-live-state=unavailable],[data-live-state=reset]) [data-live-status]{color:var(--panel-warning)}
+@container tierscope-library (max-width:360px){#tierscope-session-tools .tools-live-sources{grid-template-columns:1fr}}
 #tierscope-session-tools p{margin:6px 0 9px}
 #tierscope-session-tools h3{font-size:1em;margin:8px 0;color:var(--panel-secondary)}
 #tierscope-session-tools .tools-current{border:1px solid #4169e170;background:rgba(65,105,225,.08);border-radius:4px;padding:9px;margin-bottom:10px}
@@ -6582,6 +6595,1031 @@ underlying system, so should run in the browser, Node, or Plask.
 <div id="tools-message" role="status" aria-live="polite"></div>
 <div id="gif-export-controls" style="display:none"><span id="gif-export-status" role="status"></span><button id="btn-cancel-gif" hidden type="button">Cancel</button></div>
 <div id="tools-content"></div>`;
+  }
+
+  // src/analysis-chart-view.js
+  function renderAnalysisChart(parent, series, labels, axisMs, metricLabel, savedState = null, axisMode = "elapsed", config = {}) {
+    const element = toolNode(parent, "div");
+    element.id = "tools-chart-view";
+    parent = element;
+    let start = 0, end = axisMs, cursor = 0, pinned = false, drag = null, disposed = false;
+    const hidden = /* @__PURE__ */ new Set(), controls = toolNode(parent, "div", void 0, "tools-actions");
+    if (savedState && (savedState.axisMode || "elapsed") === axisMode) {
+      ({ start, end, cursor, pinned } = savedState);
+      savedState.hidden.forEach((index) => {
+        if (index >= 0 && index < series.length) hidden.add(index);
+      });
+      if (hidden.size === series.length) hidden.delete(0);
+      fitWindow(savedState.axisMs, axisMode === "live" ? (savedState.originAt || 0) - (config.originAt || 0) : 0);
+    }
+    let plotCache = null;
+    const number = (value) => value.toLocaleString(void 0, { maximumFractionDigits: 2 });
+    const elapsed = (ms) => number(ms / 6e4) + "m";
+    const clock2 = (ms) => {
+      const seconds = Math.floor(ms / 1e3), pad = (n) => String(n).padStart(2, "0");
+      return pad(Math.floor(seconds / 3600)) + ":" + pad(Math.floor(seconds / 60) % 60) + (end - start < 6e4 ? ":" + pad(seconds % 60) : "");
+    };
+    const liveDate = (ms) => new Date((config.originAt || 0) + ms);
+    const liveClock = (ms) => liveDate(ms).toLocaleTimeString(void 0, __spreadValues({
+      hour: "2-digit",
+      minute: "2-digit"
+    }, end - start < 6e4 ? { second: "2-digit" } : {}));
+    const axisLabel = (ms) => axisMode === "live" ? liveClock(ms) : axisMode === "clock" ? clock2(ms) : elapsed(ms);
+    const chartLabel = () => metricLabel + (axisMode === "live" ? " for live models, aligned by actual dated sample timestamps." : axisMode === "clock" ? " by local time of day, 00:00 to 24:00." : " by real elapsed time.") + " Arrow keys inspect samples; plus and minus zoom; Home and End jump to visible endpoints.";
+    const zoomIn = toolButton(controls, "Zoom +", () => zoom(0.5), "tools-chart-zoom-in");
+    const zoomOut = toolButton(controls, "Zoom −", () => zoom(2), "tools-chart-zoom-out");
+    const panLeft = toolButton(controls, "‹", () => pan(-1), "tools-chart-pan-left");
+    panLeft.setAttribute("aria-label", "Pan earlier");
+    const panRight = toolButton(controls, "›", () => pan(1), "tools-chart-pan-right");
+    panRight.setAttribute("aria-label", "Pan later");
+    toolButton(controls, "Full range", () => {
+      start = 0;
+      end = axisMs;
+      draw();
+    }, "tools-chart-reset");
+    const pin = toolButton(controls, "Pin cursor", () => {
+      pinned = !pinned;
+      inspect();
+    }, "tools-chart-pin");
+    const legend = toolNode(parent, "div", void 0, "tools-chart-legend");
+    const dark = ["#ff69b4", "#79baff", "#68d391", "#ffd166", "#c4a3ff", "#ff987d", "#47c9cf", "#eaa1e8", "#b5cf63", "#e99c55", "#92a3e8", "#b4b4bd"];
+    const bright = ["#b42370", "#175db0", "#176f36", "#835900", "#7140a6", "#a23c20", "#08767c", "#96558d", "#557315", "#98530d", "#414b9d", "#626269"];
+    const newestFirst = series.map((s, i) => i).sort((a, b) => series[b].timestamps[0] - series[a].timestamps[0] || a - b);
+    const ranks = series.map((s, i) => newestFirst.indexOf(i));
+    const colorIndices = ranks.map((rank, i) => {
+      var _a, _b;
+      return axisMode === "live" ? (_b = (_a = config.colorIndices) == null ? void 0 : _a[i]) != null ? _b : i : rank < 6 ? rank : 1 + (rank - 6) % 5;
+    });
+    const opacities = ranks.map((rank) => axisMode === "live" ? 1 : comparisonOpacity(rank));
+    const newest = newestFirst[0];
+    const legendLabels = labels.map((label, i) => {
+      const control = toolNode(legend, "label"), check = toolNode(control, "input");
+      check.type = "checkbox";
+      check.checked = !hidden.has(i);
+      check.dataset.analysisSeries = String(i);
+      const swatch = toolNode(control, "span", "", "tools-series-swatch");
+      swatch.setAttribute("aria-hidden", "true");
+      swatch.style.borderTopStyle = axisMode === "live" || i === newest ? "solid" : "dashed";
+      swatch.style.opacity = String(opacities[i]);
+      toolNode(control, "span", axisMode === "live" ? label : comparisonLabel(i) + (series.length > 1 && i === newest ? " · Latest" : "") + " · " + label);
+      control.title = axisMode === "live" ? label + " · live model · solid line" : (series.length > 1 ? i === newest ? "Latest session — solid pink: " : (ranks[i] >= COMPARISON_FOREGROUND_COUNT ? "Background session — dashed" : "Earlier session — dashed") + ", " + Math.round(opacities[i] * 100) + "% opacity: " : "") + label;
+      check.onchange = () => {
+        if (!check.checked && hidden.size === series.length - 1) {
+          check.checked = true;
+          return;
+        }
+        if (check.checked) hidden.delete(i);
+        else hidden.add(i);
+        draw();
+      };
+      return control;
+    });
+    const canvas = toolNode(parent, "canvas");
+    canvas.id = "tools-analysis-chart";
+    canvas.tabIndex = 0;
+    canvas.setAttribute("role", "img");
+    parent.insertBefore(canvas, legend);
+    canvas.setAttribute("aria-label", chartLabel());
+    const range = toolNode(parent, "p", "", "tools-muted");
+    range.id = "tools-chart-range";
+    parent.insertBefore(range, legend);
+    const settings = toolNode(parent, "div");
+    const hint = toolNode(parent, "p", "", "tools-muted");
+    const scroll = toolNode(parent, "div", void 0, "tools-scroll"), table = toolNode(scroll, "table");
+    table.id = "tools-chart-inspection";
+    const caption = toolNode(table, "caption");
+    const header = toolNode(toolNode(table, "thead"), "tr");
+    [axisMode === "live" ? "Model" : "Session", "Count", "Sample timestamp / status"].forEach((text) => {
+      toolNode(header, "th", text).scope = "col";
+    });
+    const body = toolNode(table, "tbody");
+    const rows = series.map((s, i) => {
+      const row = toolNode(body, "tr");
+      toolNode(row, "th", axisMode === "live" ? labels[i] : comparisonLabel(i)).scope = "row";
+      return { row, value: toolNode(row, "td"), detail: toolNode(row, "td") };
+    });
+    const bitmap = document.createElement("canvas"), backgroundBitmap = document.createElement("canvas");
+    let width = 260, height = 200, ratio = 1, left = 52, right = 248, top = 15, bottom = 164;
+    const timeAt = (event) => {
+      const bounds = canvas.getBoundingClientRect(), x = (event.clientX - bounds.left) * width / bounds.width;
+      return start + Math.max(0, Math.min(1, (x - left) / (right - left))) * (end - start);
+    };
+    function zoom(factor) {
+      [start, end] = zoomAnalysisWindow(axisMs, start, end, factor, cursor);
+      cursor = Math.max(start, Math.min(end, cursor));
+      draw();
+    }
+    function pan(direction) {
+      const span = end - start, next = Math.max(0, Math.min(axisMs - span, start + direction * span / 2));
+      start = next;
+      end = next + span;
+      cursor = Math.max(start, Math.min(end, cursor));
+      draw();
+    }
+    function inspect() {
+      if (disposed) return;
+      caption.textContent = "Cursor " + (axisMode === "live" ? liveDate(cursor).toLocaleString() : axisLabel(cursor)) + (pinned ? " · pinned" : "");
+      pin.textContent = pinned ? "Unpin" : "Pin";
+      pin.setAttribute("aria-label", pinned ? "Unpin inspection cursor" : "Pin inspection cursor");
+      pin.setAttribute("aria-pressed", String(pinned));
+      series.forEach((s, i) => {
+        const row = rows[i];
+        row.row.hidden = hidden.has(i);
+        if (axisMode === "clock") {
+          const sample = inspectClockSample(s.clock, cursor);
+          row.value.textContent = sample.matches.length ? sample.matches.map((match) => number(match.value)).join(" / ") : "—";
+          row.detail.textContent = sample.matches.length ? sample.matches.map((match) => new Date(match.timestamp).toLocaleString(void 0, { timeZoneName: "shortOffset" }) + " · sample " + (match.index + 1) + (match.kind === "held" ? " (held until next sample)" : "")).join(" ; ") : sample.kind === "gap" ? "Session gap — no sample" : "Outside session at this clock time";
+        } else {
+          const sample = inspectAnalysisSample(s, cursor);
+          row.value.textContent = sample.value === null ? "—" : number(sample.value);
+          row.detail.textContent = sample.kind === "gap" ? "Session gap — no sample" : sample.kind === "outside" ? axisMode === "live" ? "No accepted sample at this time" : "Outside session" : new Date(sample.timestamp).toLocaleString() + " · sample " + (sample.index + 1) + (sample.kind === "held" ? " (held until next sample)" : "");
+        }
+      });
+      const ctx = canvas.getContext("2d");
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      ctx.clearRect(0, 0, width, height);
+      ctx.drawImage(bitmap, 0, 0, width, height);
+      const style = window.getComputedStyle(parent);
+      const x = left + (cursor - start) / (end - start || 1) * (right - left);
+      ctx.strokeStyle = style.getPropertyValue("--panel-text").trim();
+      ctx.setLineDash([3, 3]);
+      ctx.lineWidth = 1;
+      if (cursor >= start && cursor <= end) {
+        ctx.beginPath();
+        ctx.moveTo(x, top);
+        ctx.lineTo(x, bottom);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      if (drag) {
+        ctx.fillStyle = "#ff69b433";
+        const from = left + (drag.from - start) / (end - start || 1) * (right - left);
+        ctx.fillRect(Math.min(from, x), top, Math.abs(x - from), bottom - top);
+      }
+    }
+    function draw() {
+      var _a, _b, _c;
+      if (disposed) return;
+      width = Math.max(260, canvas.clientWidth);
+      right = width - 14;
+      ratio = window.devicePixelRatio || 1;
+      canvas.width = bitmap.width = width * ratio;
+      canvas.height = bitmap.height = height * ratio;
+      const ctx = bitmap.getContext("2d");
+      ctx.scale(ratio, ratio);
+      const style = window.getComputedStyle(parent), isDark = ((_a = parent.closest("[data-theme]")) == null ? void 0 : _a.dataset.theme) !== "bright";
+      const colors = isDark ? dark : bright;
+      if (!plotCache || plotCache.series !== series || plotCache.start !== start || plotCache.end !== end || plotCache.width !== right - left) {
+        plotCache = { series, start, end, width: right - left, plots: new Array(series.length) };
+      }
+      const plots = series.map((s, j) => {
+        var _a2;
+        return hidden.has(j) ? null : (_a2 = plotCache.plots)[j] || (_a2[j] = axisMode === "clock" ? buildClockPlot(s.clock, start, end, right - left) : buildAnalysisPlot(s, start, end, right - left));
+      });
+      const maximum = Math.max(1, ...plots.map((plot) => plot ? plot.maximum : 1));
+      ctx.strokeStyle = style.getPropertyValue("--panel-divider").trim();
+      ctx.fillStyle = style.getPropertyValue("--panel-muted").trim();
+      ctx.font = "10px Arial";
+      for (let step = 0; step <= 2; step++) {
+        const y = bottom - step / 2 * (bottom - top);
+        ctx.beginPath();
+        ctx.moveTo(left, y);
+        ctx.lineTo(right, y);
+        ctx.stroke();
+        ctx.textAlign = "right";
+        ctx.fillText(number(maximum * step / 2), left - 5, y + 3);
+      }
+      if (axisMode === "clock" || axisMode === "live") {
+        const steps = axisMode === "live" ? 2 : 4;
+        for (let step = 0; step <= steps; step++) {
+          ctx.textAlign = step === 0 ? "left" : step === steps ? "right" : "center";
+          ctx.fillText(axisLabel(start + (end - start) * step / steps), left + (right - left) * step / steps, bottom + 20);
+        }
+      } else {
+        ctx.textAlign = "left";
+        ctx.fillText(elapsed(start), left, bottom + 20);
+        ctx.textAlign = "right";
+        ctx.fillText(elapsed(end), right, bottom + 20);
+      }
+      const backgroundColor = style.getPropertyValue("--panel-muted").trim();
+      function paintSeries(target, j, color) {
+        target.strokeStyle = target.fillStyle = color;
+        target.lineWidth = axisMode !== "live" && ranks[j] >= COMPARISON_FOREGROUND_COUNT ? 1.2 : 1.8;
+        target.lineCap = "butt";
+        target.setLineDash(axisMode === "live" || j === newest ? [] : [6, 4]);
+        target.beginPath();
+        let previousY = 0;
+        const dots = [], points = plots[j].points;
+        points.forEach((point, i) => {
+          const x = left + (point.time - start) / (end - start || 1) * (right - left), y = bottom - point.value / maximum * (bottom - top);
+          if (point.move) target.moveTo(x, y);
+          else {
+            target.lineTo(x, previousY);
+            target.lineTo(x, y);
+          }
+          if (point.move && (i + 1 === points.length || points[i + 1].move)) dots.push([x, y]);
+          previousY = y;
+        });
+        target.stroke();
+        target.setLineDash([]);
+        dots.forEach(([x, y]) => {
+          target.beginPath();
+          target.arc(x, y, 2.5, 0, Math.PI * 2);
+          target.fill();
+        });
+      }
+      const backgroundIndices = axisMode === "live" ? [] : newestFirst.filter((j) => ranks[j] >= COMPARISON_FOREGROUND_COUNT && !hidden.has(j));
+      backgroundBitmap.width = backgroundIndices.length ? width * ratio : 0;
+      backgroundBitmap.height = backgroundIndices.length ? height * ratio : 0;
+      if (backgroundIndices.length) {
+        const backgroundCtx = backgroundBitmap.getContext("2d");
+        backgroundCtx.scale(ratio, ratio);
+        for (const j of backgroundIndices) paintSeries(backgroundCtx, j, backgroundColor);
+        ctx.globalAlpha = COMPARISON_BACKGROUND_OPACITY;
+        ctx.drawImage(backgroundBitmap, 0, 0, width, height);
+        ctx.globalAlpha = 1;
+      }
+      for (const j of newestFirst.slice().reverse()) {
+        const background = axisMode !== "live" && ranks[j] >= COMPARISON_FOREGROUND_COUNT;
+        const colorIndex = axisMode === "live" ? (_c = (_b = config.colorIndices) == null ? void 0 : _b[j]) != null ? _c : colorIndices[j] : colorIndices[j];
+        const color = background ? backgroundColor : colors[colorIndex % colors.length];
+        legendLabels[j].style.color = color;
+        legendLabels[j].querySelector("input").disabled = hidden.size === series.length - 1 && !hidden.has(j);
+        if (hidden.has(j) || background) continue;
+        ctx.globalAlpha = opacities[j];
+        paintSeries(ctx, j, color);
+      }
+      ctx.globalAlpha = 1;
+      range.textContent = "Chart window " + (axisMode === "live" ? liveDate(start).toLocaleString() + " – " + liveDate(end).toLocaleString() : axisLabel(start) + " – " + axisLabel(end) + (axisMode === "clock" ? " · 24h local clock" : " · full comparison/session range " + elapsed(axisMs)));
+      hint.textContent = (axisMode === "live" ? "Models are aligned by actual dated sample timestamps. Each line ends at its last accepted scan; it is not extended to the current time." : axisMode === "clock" ? "Aligned by local time of day. Midnight crossings continue at the start of the chart. Clock changes are separate segments; repeated clock times can show multiple dated values. Statistics use full sessions." : "Aligned from each session’s first retained sample, using real elapsed time. Hidden lines and zoom do not change summary totals or the shared comparison length.") + " Move to inspect; click to pin, drag to zoom, or use the buttons and arrow keys. Gaps have no assumed samples." + (axisMode === "live" ? " Each model has a solid, opaque line and can be hidden independently." : series.length > COMPARISON_FOREGROUND_COUNT ? " The newest twelve lines fade progressively; older sessions form a faint background. Each session remains inspectable and can be hidden." : " The newest line is opaque; earlier sessions fade progressively.");
+      zoomIn.disabled = end - start <= Math.min(1e3, axisMs);
+      zoomOut.disabled = end - start >= axisMs;
+      panLeft.disabled = start <= 0;
+      panRight.disabled = end >= axisMs;
+      inspect();
+    }
+    canvas.onpointermove = (event) => {
+      if (!pinned || drag) {
+        cursor = timeAt(event);
+        inspect();
+      }
+    };
+    canvas.onpointerdown = (event) => {
+      if (event.button !== 0) return;
+      canvas.focus();
+      drag = { from: timeAt(event), x: event.clientX, pinned };
+      canvas.setPointerCapture(event.pointerId);
+      cursor = drag.from;
+      inspect();
+    };
+    canvas.onpointerup = (event) => {
+      if (!drag) return;
+      const origin = drag;
+      cursor = timeAt(event);
+      drag = null;
+      if (Math.abs(event.clientX - origin.x) > 5 && Math.abs(cursor - origin.from) >= Math.min(1e3, axisMs)) {
+        start = Math.min(cursor, origin.from);
+        end = Math.max(cursor, origin.from);
+        pinned = origin.pinned;
+        draw();
+      } else {
+        pinned = !origin.pinned;
+        inspect();
+      }
+      if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+    };
+    canvas.onpointercancel = () => {
+      drag = null;
+      inspect();
+    };
+    canvas.onkeydown = (event) => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End", "+", "=", "-", "Escape"].includes(event.key)) return;
+      event.preventDefault();
+      if (event.key === "+" || event.key === "=") {
+        zoom(0.5);
+        return;
+      }
+      if (event.key === "-") {
+        zoom(2);
+        return;
+      }
+      if (event.key === "Escape") {
+        pinned = false;
+        inspect();
+        return;
+      }
+      if (event.key === "Home") cursor = start;
+      else if (event.key === "End") cursor = end;
+      else {
+        let target = event.key === "ArrowRight" ? end : start;
+        for (let j = 0; j < series.length; j++) if (!hidden.has(j)) {
+          const times = axisMode === "clock" ? series[j].clock.navigation : series[j].times, index = analysisSampleIndex(times, cursor);
+          if (event.key === "ArrowRight" && index + 1 < times.length) target = Math.min(target, times[index + 1]);
+          if (event.key === "ArrowLeft") {
+            let i = index;
+            while (i >= 0 && times[i] >= cursor) i--;
+            if (i >= 0) target = Math.max(target, times[i]);
+          }
+        }
+        cursor = Math.max(start, Math.min(end, target));
+      }
+      pinned = true;
+      inspect();
+    };
+    function fitWindow(previousAxis, originShift = 0) {
+      if (start === 0 && end === previousAxis) {
+        start = 0;
+        end = axisMs;
+      } else {
+        const span = Math.min(Math.max(0, end - start), axisMs);
+        start = Math.max(0, Math.min(start + originShift, axisMs - span));
+        end = start + span;
+      }
+      cursor = Math.max(start, Math.min(end, cursor + originShift));
+    }
+    draw();
+    return {
+      element,
+      canvas,
+      settings,
+      draw,
+      capture: () => __spreadValues({
+        start,
+        end,
+        cursor,
+        pinned,
+        axisMs,
+        axisMode,
+        hidden: [...hidden]
+      }, axisMode === "live" ? { originAt: config.originAt, sourceIds: config.sourceIds } : {}),
+      update(nextSeries, nextAxis, nextMetricLabel, nextMode = "elapsed", nextConfig = config) {
+        if (disposed) return;
+        const originShift = axisMode === "live" && nextMode === "live" ? (config.originAt || 0) - (nextConfig.originAt || 0) : 0;
+        const previousAxis = axisMs;
+        series = nextSeries;
+        axisMs = nextAxis;
+        metricLabel = nextMetricLabel;
+        config = nextConfig;
+        if (axisMode !== nextMode) {
+          axisMode = nextMode;
+          start = 0;
+          end = axisMs;
+          cursor = 0;
+          pinned = false;
+        } else fitWindow(previousAxis, originShift);
+        drag = null;
+        canvas.setAttribute("aria-label", chartLabel());
+        draw();
+      },
+      dispose() {
+        disposed = true;
+        drag = null;
+        plotCache = null;
+        bitmap.width = bitmap.height = backgroundBitmap.width = backgroundBitmap.height = 0;
+      }
+    };
+  }
+
+  // src/live-model-chart-data.js
+  function allocateLiveModelColors(rooms, previous = /* @__PURE__ */ new Map()) {
+    const selected = [...new Set(rooms)];
+    if (selected.length > 12 || selected.some((room2) => typeof room2 !== "string" || !room2.length)) {
+      throw new Error("Choose up to twelve named models for live comparison colors.");
+    }
+    const colors = /* @__PURE__ */ new Map(), used = /* @__PURE__ */ new Set();
+    for (const room2 of selected) {
+      const index = previous.get(room2);
+      if (Number.isSafeInteger(index) && index >= 0 && index < 12 && !used.has(index)) {
+        colors.set(room2, index);
+        used.add(index);
+      }
+    }
+    for (const room2 of selected) {
+      if (colors.has(room2)) continue;
+      let index = 0;
+      while (used.has(index)) index++;
+      colors.set(room2, index);
+      used.add(index);
+    }
+    return colors;
+  }
+  function buildLiveModelSeries(archives, metric = "room", options = {}) {
+    let latest = 0, earliest = Infinity;
+    for (const archive of archives) for (const time of archive.session.history.timestamps) {
+      if (!Number.isSafeInteger(time) || time < 0 || time > 864e13) continue;
+      latest = Math.max(latest, time);
+      earliest = Math.min(earliest, time);
+    }
+    const now = options.now === void 0 ? latest : options.now;
+    const windowMs = options.windowMs === void 0 ? 36e5 : options.windowMs;
+    if (!Number.isSafeInteger(now) || now < 0 || now > 864e13 || !(windowMs === Infinity || Number.isSafeInteger(windowMs) && windowMs > 0)) throw new Error("Invalid live comparison window.");
+    const originAt = options.originAt === void 0 ? Math.max(0, windowMs === Infinity ? earliest === Infinity ? now : Math.min(earliest, now) : now - windowMs) : options.originAt;
+    if (!Number.isSafeInteger(originAt) || originAt < 0 || originAt > now) throw new Error("Invalid live comparison origin.");
+    let excludedSamples = 0;
+    const series = archives.map((archive) => {
+      const input = analysisSeries(archive, metric), timestamps = archive.session.history.timestamps;
+      const output = { times: [], values: [], breaks: [], timestamps: [] };
+      let previous = -1, interrupted = false;
+      timestamps.forEach((time, index) => {
+        const value = input.values[index];
+        if (!Number.isSafeInteger(time) || time < 0 || time > now || time < previous || !Number.isSafeInteger(value) || value < 0) {
+          excludedSamples++;
+          interrupted = true;
+          return;
+        }
+        output.times.push(time - originAt);
+        output.values.push(value);
+        output.breaks.push(interrupted || !!input.breaks[index]);
+        output.timestamps.push(time);
+        previous = time;
+        interrupted = false;
+      });
+      const first = Math.max(0, analysisSampleIndex(output.times, 0));
+      for (const key of ["times", "values", "breaks", "timestamps"]) output[key] = output[key].slice(first);
+      return output;
+    });
+    return { series, labels: archives.map((archive) => archive.room), originAt, axisMs: Math.max(1e3, now - originAt), excludedSamples };
+  }
+
+  // src/live-model-data.js
+  var LIVE_MODEL_PREFIX = "tierscope:live:v1:source:";
+  var LIVE_MODEL_NOTICE = "tierscope:live:v1:changed";
+  var LIVE_MODEL_HEARTBEAT_MS = 3e4;
+  var LIVE_MODEL_STALE_MS = 18e4;
+  var statuses = /* @__PURE__ */ new Set(["tracking", "paused", "stopped", "waiting", "offline", "retry", "reset", "unavailable"]);
+  var timestamp = (value) => Number.isSafeInteger(value) && value >= 0 && value <= 864e13;
+  function decodeLiveModelSource(value, key, at) {
+    if (!value || value.version !== 1 || typeof value.publisherId !== "string" || !/^[a-z0-9-]{1,160}$/i.test(value.publisherId) || key !== LIVE_MODEL_PREFIX + value.publisherId || typeof value.room !== "string" || !/^[a-z0-9_-]{1,100}$/.test(value.room) || typeof value.roomEpoch !== "string" || !/^[a-z0-9-]{1,160}$/i.test(value.roomEpoch) || !(value.sessionStartedAt === null || timestamp(value.sessionStartedAt)) || value.sessionId !== value.roomEpoch + "@" + (value.sessionStartedAt === null ? "pending" : value.sessionStartedAt) || value.id !== value.publisherId + ":" + value.room + ":" + value.sessionId || !statuses.has(value.status) || !timestamp(value.lastSeenAt) || value.lastSeenAt > at + 5e3 || !Number.isSafeInteger(value.sampleCount) || value.sampleCount < 0 || value.sampleCount > 1e6 || !(value.sampleCount === 0 ? value.sampleAt === null : timestamp(value.sampleAt) && value.sampleAt <= value.lastSeenAt) || !(value.sessionStartedAt === null || value.sessionStartedAt <= value.lastSeenAt) || typeof value.revision !== "string" || value.revision.length > 512) return null;
+    if (value.recordKey === null) {
+      if (value.recordSavedAt !== null || value.revision !== "") return null;
+    } else if (typeof value.recordKey !== "string" || !value.recordKey.startsWith("tierscope:tab:v2:" + value.room + ":") || !/^[a-z0-9-]{1,160}$/i.test(value.recordKey.slice(("tierscope:tab:v2:" + value.room + ":").length)) || !timestamp(value.recordSavedAt) || value.recordSavedAt > value.lastSeenAt || !value.revision) return null;
+    return {
+      version: 1,
+      id: value.id,
+      publisherId: value.publisherId,
+      room: value.room,
+      roomEpoch: value.roomEpoch,
+      sessionId: value.sessionId,
+      sessionStartedAt: value.sessionStartedAt,
+      status: value.status,
+      lastSeenAt: value.lastSeenAt,
+      sampleAt: value.sampleAt,
+      sampleCount: value.sampleCount,
+      revision: value.revision,
+      recordKey: value.recordKey,
+      recordSavedAt: value.recordSavedAt
+    };
+  }
+  function liveModelSourceStatus(source, at, epoch) {
+    if (source.roomEpoch !== epoch) return "reset";
+    if (at - source.lastSeenAt > LIVE_MODEL_STALE_MS) return "stale";
+    return source.status;
+  }
+
+  // src/live-model-sources.js
+  function createLiveModelExchange(effects) {
+    const archives = /* @__PURE__ */ new Map();
+    let discoveryKeys = null, discoveryAt = -Infinity;
+    function invalidate() {
+      discoveryKeys = null;
+    }
+    function readSources(force = false) {
+      if (force) invalidate();
+      const sources = [], errors = [];
+      const at = effects.now();
+      try {
+        if (!discoveryKeys || at < discoveryAt || at - discoveryAt >= 1e4) {
+          discoveryKeys = effects.list().filter((key) => key.startsWith(LIVE_MODEL_PREFIX));
+          discoveryAt = at;
+        }
+      } catch (_) {
+        return { sources, error: "Live tab discovery is unavailable. Existing chart snapshots are retained." };
+      }
+      for (const key of discoveryKeys) {
+        try {
+          const source = decodeLiveModelSource(effects.get(key, null), key, at);
+          if (!source || at - source.lastSeenAt > 3 * 60 * 60 * 1e3) continue;
+          source.status = liveModelSourceStatus(source, at, effects.epoch(source.room));
+          sources.push(Object.freeze(source));
+        } catch (_) {
+          errors.push(key);
+        }
+      }
+      sources.sort((a, b) => b.lastSeenAt - a.lastSeenAt || a.id.localeCompare(b.id));
+      const selected = sources.slice(0, 200);
+      selected.sort((a, b) => a.room.localeCompare(b.room) || a.id.localeCompare(b.id));
+      return { sources: selected, error: errors.length ? "Some live tabs could not be read. Their previous snapshots are retained." : sources.length > 200 ? "Showing the 200 most recently active source tabs." : "" };
+    }
+    function readArchive(source) {
+      var _a;
+      const at = effects.now(), key = LIVE_MODEL_PREFIX + source.publisherId;
+      const current = decodeLiveModelSource(effects.get(key, null), key, at);
+      if (!current || current.id !== source.id || current.recordKey !== source.recordKey || current.revision !== source.revision || current.roomEpoch !== effects.epoch(current.room) || ["reset", "unavailable"].includes(current.status) || !current.recordKey) {
+        throw new Error("This live source changed or is unavailable. Its previous chart snapshot is retained.");
+      }
+      const cached = archives.get(current.id);
+      if ((cached == null ? void 0 : cached.revision) === current.revision) return cached.archive;
+      const raw = effects.get(current.recordKey, null);
+      if (typeof raw !== "string") throw new Error("The live session record is unavailable.");
+      const data = JSON.parse(raw), times = (_a = data == null ? void 0 : data.history) == null ? void 0 : _a.timestamps;
+      if (data.roomEpoch !== current.roomEpoch || data.sessionStartedAt !== current.sessionStartedAt || data.timestamp !== current.recordSavedAt || !Array.isArray(times) || times.length !== current.sampleCount || times.at(-1) !== current.sampleAt) {
+        throw new Error("The live session changed while reading. Waiting for its next announcement.");
+      }
+      const archive = freezeRecordingData(effects.archive(current.room, data));
+      if (effects.epoch(current.room) !== current.roomEpoch) throw new Error("This room was reset. Choose its new session.");
+      archives.set(current.id, { revision: current.revision, archive });
+      if (archives.size > 24) archives.delete(archives.keys().next().value);
+      return archive;
+    }
+    function clear() {
+      archives.clear();
+      invalidate();
+    }
+    function cleanupExpired() {
+      if (!effects.remove) return;
+      try {
+        const at = effects.now();
+        for (const key of effects.list().filter((key2) => key2.startsWith(LIVE_MODEL_PREFIX))) {
+          const source = decodeLiveModelSource(effects.get(key, null), key, at);
+          if (!source || at - source.lastSeenAt <= 3 * 60 * 60 * 1e3) continue;
+          const current = decodeLiveModelSource(effects.get(key, null), key, at);
+          if ((current == null ? void 0 : current.id) === source.id && current.lastSeenAt === source.lastSeenAt && current.revision === source.revision) effects.remove(key);
+        }
+        invalidate();
+      } catch (_) {
+      }
+    }
+    return { readSources, readArchive, clear, invalidate, cleanupExpired };
+  }
+  var exchange = createLiveModelExchange({
+    get: (key, fallback) => GM_getValue(key, fallback),
+    list: () => GM_listValues(),
+    remove: (key) => GM_deleteValue(key),
+    now: () => Date.now(),
+    epoch: (room2) => getRoomEpoch(getStorageKey(room2)),
+    archive: (room2, session) => validateSessionFile({
+      format: runtime.SESSION_FILE_FORMAT,
+      formatVersion: runtime.SESSION_FILE_VERSION,
+      producerVersion: session.producerVersion || runtime.TIERSCOPE_VERSION,
+      room: room2,
+      session
+    })
+  });
+  var publisherId = null, heartbeat = null, announced = false, started = false, cleanupInitialized = false, savedBinding = null;
+  function notifyLiveModels() {
+    exchange.invalidate();
+    GM_setValue(LIVE_MODEL_NOTICE, { version: 1, at: Date.now(), token: makeStorageId() });
+  }
+  function retirePublisher() {
+    if (heartbeat !== null) clearInterval(heartbeat);
+    heartbeat = null;
+    const wasAnnounced = announced;
+    announced = false;
+    savedBinding = null;
+    if (!publisherId || !wasAnnounced) return;
+    try {
+      GM_deleteValue(LIVE_MODEL_PREFIX + publisherId);
+      notifyLiveModels();
+    } catch (_) {
+    }
+  }
+  function publishLiveModelSource(savedTimestamp = null) {
+    var _a, _b;
+    if (!started || !publisherId) return;
+    const room2 = (_a = roomFromUrl(location.href)) == null ? void 0 : _a.toLowerCase();
+    if (!room2 || runtime.lastUrl !== location.href || runtime.activeSessionStorageKey !== getStorageKey(room2)) {
+      retirePublisher();
+      return;
+    }
+    if (heartbeat === null) heartbeat = setInterval(publishLiveModelSource, LIVE_MODEL_HEARTBEAT_MS);
+    try {
+      const at = Date.now(), epoch = getRoomEpoch(getStorageKey(room2));
+      const sessionStartedAt = runtime.sessionStartedAt, roomEpoch = runtime.activeRoomEpoch;
+      if (typeof roomEpoch !== "string") {
+        retirePublisher();
+        return;
+      }
+      const history = runtime.history, sampleCount = history.timestamps.length, sampleAt = (_b = history.timestamps.at(-1)) != null ? _b : null;
+      const record = runtime.tabRecords.get(getStorageKey(room2));
+      const sessionId = roomEpoch + "@" + (sessionStartedAt === null ? "pending" : sessionStartedAt);
+      const candidateKey = record ? runtime.TAB_RECORD_PREFIX + room2 + ":" + record.id : null;
+      if (record && Number.isSafeInteger(savedTimestamp) && savedTimestamp >= 0) {
+        savedBinding = { recordKey: candidateKey, sessionId, timestamp: savedTimestamp, writtenAt: record.savedAt, sampleCount, sampleAt };
+      }
+      const saved = !getSessionSaveState(room2).error && record && sampleCount > 0 && savedBinding && savedBinding.recordKey === candidateKey && savedBinding.sessionId === sessionId && savedBinding.writtenAt === record.savedAt && savedBinding.sampleCount === sampleCount && savedBinding.sampleAt === sampleAt;
+      const recordKey = saved ? candidateKey : null;
+      const revision = saved ? [record.id, savedBinding.timestamp, record.savedAt, sampleCount, sampleAt].join(":") : "";
+      let status = runtime.isStopped ? "stopped" : runtime.isPaused || !runtime.isAutoRefreshOn ? "paused" : isBrowserOffline() ? "offline" : runtime.requestPolicyCache.blocked || runtime.requestPolicyCache.until > at ? "retry" : sampleCount === 0 ? "waiting" : saved ? "tracking" : "unavailable";
+      if (epoch !== roomEpoch) status = "reset";
+      const source = {
+        version: 1,
+        id: publisherId + ":" + room2 + ":" + sessionId,
+        publisherId,
+        room: room2,
+        roomEpoch,
+        sessionId,
+        sessionStartedAt,
+        status,
+        lastSeenAt: at,
+        sampleAt,
+        sampleCount,
+        revision,
+        recordKey,
+        recordSavedAt: saved ? savedBinding.timestamp : null
+      };
+      GM_setValue(LIVE_MODEL_PREFIX + publisherId, source);
+      announced = true;
+      notifyLiveModels();
+    } catch (_) {
+    }
+  }
+  function initializeLiveModelSources() {
+    if (heartbeat !== null) clearInterval(heartbeat);
+    heartbeat = null;
+    started = true;
+    if (!publisherId) publisherId = makeStorageId();
+    if (!cleanupInitialized) {
+      cleanupInitialized = true;
+      exchange.cleanupExpired();
+    }
+    publishLiveModelSource();
+  }
+  function stopLiveModelSources() {
+    started = false;
+    if (heartbeat !== null) clearInterval(heartbeat);
+    heartbeat = null;
+    retirePublisher();
+    exchange.clear();
+  }
+  function readLiveModelSources(force = false) {
+    return exchange.readSources(force);
+  }
+  function readLiveModelArchive(source) {
+    return exchange.readArchive(source);
+  }
+  function subscribeLiveModelSources(changed) {
+    let disposed = false, pending = null, listener = null;
+    function schedule() {
+      if (disposed || pending !== null) return;
+      pending = setTimeout(() => {
+        pending = null;
+        if (!disposed) changed();
+      }, 80);
+    }
+    try {
+      if (typeof GM_addValueChangeListener === "function") listener = GM_addValueChangeListener(LIVE_MODEL_NOTICE, () => {
+        exchange.invalidate();
+        schedule();
+      });
+    } catch (_) {
+    }
+    const timer = setInterval(schedule, 5e3);
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+      if (pending !== null) clearTimeout(pending);
+      if (listener !== null) {
+        try {
+          if (typeof GM_removeValueChangeListener === "function") GM_removeValueChangeListener(listener);
+        } catch (_) {
+        }
+      }
+      exchange.clear();
+    };
+  }
+
+  // src/live-model-comparison.js
+  var MAX_MODELS = 12;
+  var statusNames = {
+    tracking: "Tracking",
+    paused: "Paused",
+    stopped: "Stopped",
+    waiting: "Waiting for first sample",
+    offline: "No connection",
+    retry: "Waiting to retry",
+    reset: "Session reset in another tab",
+    unavailable: "Unavailable",
+    stale: "Stale / suspended"
+  };
+  function createLiveComparisonState() {
+    return {
+      selected: /* @__PURE__ */ new Set(),
+      choices: /* @__PURE__ */ new Map(),
+      known: /* @__PURE__ */ new Map(),
+      snapshots: /* @__PURE__ */ new Map(),
+      colors: /* @__PURE__ */ new Map(),
+      autoPicked: false,
+      frozen: false,
+      frozenAt: 0,
+      windowMs: 36e5,
+      pickerOpen: false,
+      chartState: null,
+      chartIds: []
+    };
+  }
+  function renderLiveModelsComparison(parent, { state, getMetric, metricControl }) {
+    const root = toolNode(parent, "section");
+    root.id = "tools-live-models";
+    toolNode(root, "h3", "Live models comparison");
+    toolNode(root, "p", "Uses scans from your other TierScope tabs. No additional API requests.", "tools-muted");
+    const controls = toolNode(root, "div", void 0, "tools-actions");
+    const freeze = toolButton(controls, "", () => {
+      state.frozen = !state.frozen;
+      state.frozenAt = state.frozen ? state.displayAt || Date.now() : 0;
+      plotSignature = "";
+      refresh();
+    }, "tools-live-freeze");
+    freeze.className = "tools-primary";
+    toolButton(controls, "Refresh sources", () => refresh(true), "tools-live-refresh");
+    const rangeLabel = toolNode(controls, "label", "Show "), windowSelect = toolNode(rangeLabel, "select");
+    windowSelect.id = "tools-live-window";
+    for (const [value, label] of [[9e5, "Last 15 minutes"], [36e5, "Last hour"], [144e5, "Last 4 hours"], [Infinity, "Full sessions"]]) {
+      const option = toolNode(windowSelect, "option", label);
+      option.value = String(value);
+    }
+    windowSelect.value = String(state.windowMs);
+    windowSelect.onchange = () => {
+      state.windowMs = Number(windowSelect.value);
+      clearChart();
+      state.chartState = null;
+      plotSignature = "";
+      refresh();
+    };
+    const status = toolNode(root, "p", "", "tools-muted");
+    status.id = "tools-live-status";
+    status.setAttribute("role", "status");
+    const chooser = toolNode(root, "details");
+    chooser.id = "tools-live-chooser";
+    chooser.open = state.pickerOpen;
+    chooser.ontoggle = () => {
+      if (!disposed) state.pickerOpen = chooser.open;
+    };
+    const chooserTitle = toolNode(chooser, "summary", "Models being tracked");
+    toolNode(chooser, "p", "Choose up to 12 models. When a model is open in several tabs, the session with the most samples is used. Ties keep the current source. Tracking status and sample age are shown separately.", "tools-muted");
+    const rowsElement = toolNode(chooser, "div", void 0, "tools-live-sources");
+    const empty = toolNode(chooser, "p", "", "tools-muted");
+    empty.id = "tools-live-empty";
+    metricControl(root, () => {
+      plotSignature = "";
+      refresh();
+    });
+    const chartHost = toolNode(root, "div");
+    const reports = toolNode(root, "div", void 0, "tools-scroll");
+    const table = toolNode(reports, "table");
+    table.id = "tools-live-samples";
+    toolNode(table, "caption", "Latest accepted sample in each displayed snapshot");
+    const heading = toolNode(toolNode(table, "thead"), "tr");
+    ["Model", "Count", "Sample time", "Samples", "Source status"].forEach((text) => {
+      toolNode(heading, "th", text).scope = "col";
+    });
+    const reportBody = toolNode(table, "tbody");
+    toolNode(root, "p", "The chart uses actual dates and clock times, including midnight crossings. Gaps stay gaps and lines end at their last accepted sample. A stale source may be suspended or closed; its old counts are never treated as a fresh scan. Keeping sessions in Library remains a separate choice.", "tools-muted");
+    let disposed = false, refreshing = false, view = null, observer = null, detach = null;
+    let rows = /* @__PURE__ */ new Map(), topology = "", plotSignature = "", notice = "", userNotice = "";
+    function age(time, at) {
+      if (!Number.isFinite(time)) return "No sample";
+      const seconds = Math.max(0, Math.floor((at - time) / 1e3));
+      return seconds < 60 ? seconds + "s ago" : seconds < 3600 ? Math.floor(seconds / 60) + "m ago" : Math.floor(seconds / 3600) + "h ago";
+    }
+    function describe(source) {
+      return statusNames[source.status] || "Unavailable";
+    }
+    function clearChart() {
+      if (view) {
+        state.chartState = view.capture();
+        view.dispose();
+        view = null;
+      }
+      if (observer) {
+        observer.disconnect();
+        observer = null;
+      }
+      chartHost.replaceChildren();
+    }
+    function choose(source, checked) {
+      state.autoPicked = true;
+      if (checked && !state.selected.has(source.id) && state.selected.size >= MAX_MODELS) {
+        userNotice = "Choose up to 12 models. Uncheck another model first.";
+        refresh();
+        return;
+      }
+      if (checked) state.selected.add(source.id);
+      else state.selected.delete(source.id);
+      plotSignature = "";
+      userNotice = "";
+      refresh();
+    }
+    function sourceText(source, index, at) {
+      return "Tab " + (index + 1) + " · " + describe(source) + " · " + (source.sampleAt ? new Date(source.sampleAt).toLocaleTimeString() : "no sample");
+    }
+    function updateRows(groups, at) {
+      const nextTopology = [...groups].map(([room2, sources]) => room2 + ":" + sources.map((source) => source.id).join("|")).join("\n");
+      if (nextTopology !== topology) {
+        topology = nextTopology;
+        rowsElement.replaceChildren();
+        rows = /* @__PURE__ */ new Map();
+        for (const [room2, sources] of groups) {
+          const row = toolNode(rowsElement, "div", void 0, "tools-live-source");
+          row.dataset.liveRoom = room2;
+          const label = toolNode(row, "label", void 0, "tools-live-model");
+          const check = toolNode(label, "input");
+          check.type = "checkbox";
+          toolNode(label, "strong", room2);
+          const select = toolNode(row, "select");
+          select.dataset.liveTab = room2;
+          select.setAttribute("aria-label", "Source tab for " + room2);
+          for (const source of sources) {
+            const option = toolNode(select, "option");
+            option.value = source.id;
+          }
+          const tabNote = toolNode(row, "span", "", "tools-muted");
+          tabNote.dataset.liveTabNote = "";
+          const detail = toolNode(row, "span", "", "tools-muted");
+          detail.dataset.liveStatus = "";
+          const snapshot = toolNode(row, "span", "", "tools-muted");
+          snapshot.dataset.liveSample = "";
+          rows.set(room2, { row, check, select, tabNote, detail, snapshot });
+          check.onchange = () => choose(state.known.get(state.choices.get(room2)), check.checked);
+          select.onchange = () => {
+            const old = state.choices.get(room2), checked = state.selected.delete(old);
+            state.choices.set(room2, select.value);
+            if (checked) state.selected.add(select.value);
+            state.autoPicked = true;
+            plotSignature = "";
+            userNotice = "";
+            refresh();
+          };
+        }
+      }
+      for (const [room2, sources] of groups) {
+        const row = rows.get(room2), source = state.known.get(state.choices.get(room2));
+        row.check.dataset.liveSource = source.id;
+        row.check.checked = state.selected.has(source.id);
+        row.check.disabled = state.frozen || !row.check.checked && (!source.sampleCount || source.status === "reset" || source.status === "unavailable");
+        const changedSession = sources.some((other) => other.publisherId === source.publisherId && other.id !== source.id);
+        row.select.value = source.id;
+        row.select.hidden = !changedSession || !["unavailable", "reset"].includes(source.status);
+        row.select.disabled = state.frozen;
+        [...row.select.options].forEach((option, index) => {
+          option.textContent = sourceText(sources[index], index, at);
+        });
+        const publishers = new Set(sources.filter((item) => item.status !== "unavailable" && item.status !== "reset").map((item) => item.publisherId));
+        row.tabNote.hidden = publishers.size < 2;
+        row.tabNote.textContent = publishers.size + " tabs · using the session with the most samples";
+        row.detail.textContent = describe(source);
+        row.snapshot.textContent = source.sampleCount ? source.sampleCount.toLocaleString() + " samples · latest " + age(source.sampleAt, at) : "Waiting for a first accepted sample";
+        row.row.dataset.liveState = source.status;
+        row.row.dataset.liveSampleCount = String(source.sampleCount);
+      }
+    }
+    function updateChart(sources, at, force) {
+      if (!state.frozen) {
+        for (const source of sources) {
+          if (!source.sampleCount || ["reset", "unavailable"].includes(source.status)) continue;
+          const previous = state.snapshots.get(source.id);
+          if (!force && (previous == null ? void 0 : previous.revision) === source.revision && previous.recordKey === source.recordKey) continue;
+          try {
+            const archive = readLiveModelArchive(source);
+            if (archive) state.snapshots.set(source.id, { archive, revision: source.revision, recordKey: source.recordKey });
+          } catch (error) {
+            notice = "Some source data is unavailable. Previous displayed snapshots are retained.";
+          }
+        }
+      }
+      const selected = sources.filter((source) => state.snapshots.has(source.id));
+      const ids = selected.map((source) => source.id), archives = selected.map((source) => state.snapshots.get(source.id).archive);
+      const signature = [
+        getMetric(),
+        state.windowMs,
+        state.frozen,
+        Math.floor((state.frozen ? state.frozenAt : at) / 3e4),
+        ...selected.map((source) => source.id + ":" + source.status + ":" + state.snapshots.get(source.id).revision)
+      ].join("|");
+      if (signature === plotSignature && !force) return;
+      plotSignature = signature;
+      if (!selected.length) {
+        clearChart();
+        reportBody.replaceChildren();
+        table.hidden = true;
+        return;
+      }
+      const data = buildLiveModelSeries(archives, getMetric(), { now: state.frozen ? state.frozenAt : at, windowMs: state.windowMs });
+      const same = state.chartIds.length === ids.length && ids.every((id, index) => state.chartIds[index] === id);
+      if (!same) {
+        clearChart();
+        state.chartState = null;
+      }
+      state.colors = allocateLiveModelColors(selected.map((source) => source.room), state.colors);
+      const config = { originAt: data.originAt, sourceIds: ids, colorIndices: selected.map((source) => state.colors.get(source.room)) };
+      if (view) view.update(data.series, data.axisMs, ANALYSIS_METRICS[getMetric()], "live", config);
+      else {
+        view = renderAnalysisChart(
+          chartHost,
+          data.series,
+          selected.map((source) => source.room),
+          data.axisMs,
+          ANALYSIS_METRICS[getMetric()],
+          same ? state.chartState : null,
+          "live",
+          config
+        );
+        if (window.ResizeObserver) {
+          observer = new window.ResizeObserver(view.draw);
+          observer.observe(view.canvas);
+        }
+      }
+      state.chartIds = ids.slice();
+      state.displayAt = state.frozen ? state.frozenAt : at;
+      reportBody.replaceChildren();
+      table.hidden = false;
+      for (const source of selected) {
+        const archive = state.snapshots.get(source.id).archive, history = archive.session.history;
+        const row = toolNode(reportBody, "tr");
+        row.dataset.liveReport = source.room;
+        toolNode(row, "th", source.room).scope = "row";
+        toolNode(row, "td", analysisSeries(archive, getMetric()).values.at(-1).toLocaleString());
+        toolNode(row, "td", new Date(history.timestamps.at(-1)).toLocaleString());
+        toolNode(row, "td", history.timestamps.length.toLocaleString());
+        toolNode(row, "td", describe(source) + (state.frozen ? " · chart frozen" : ""));
+      }
+    }
+    function refresh(force = false) {
+      if (disposed || refreshing) return;
+      refreshing = true;
+      try {
+        notice = "";
+        const at = Date.now(), result = readLiveModelSources(force), sources = [...result.sources || []], available = new Map(sources.map((source) => [source.id, source]));
+        if (result.error) notice = "Live sharing is unavailable: " + result.error + ". Previous snapshots are retained.";
+        for (const id of state.selected) {
+          if (available.has(id)) continue;
+          const previous = state.known.get(id);
+          if (previous) sources.push(__spreadProps(__spreadValues({}, previous), { status: "unavailable" }));
+        }
+        const groups = /* @__PURE__ */ new Map();
+        sources.sort((a, b) => a.room.localeCompare(b.room) || a.id.localeCompare(b.id));
+        for (const source of sources) {
+          state.known.set(source.id, source);
+          if (!groups.has(source.room)) groups.set(source.room, []);
+          groups.get(source.room).push(source);
+        }
+        for (const [room2, entries] of groups) {
+          const choice = state.choices.get(room2), previous = state.known.get(choice);
+          const candidates = entries.filter((source) => available.has(source.id) && !["reset", "unavailable", "stale"].includes(source.status));
+          const preferred = candidates.sort((a, b) => b.sampleCount - a.sampleCount || Number(b.id === choice) - Number(a.id === choice) || (b.sampleAt || 0) - (a.sampleAt || 0) || a.id.localeCompare(b.id))[0];
+          const changedSession = previous && entries.some((source) => available.has(source.id) && source.publisherId === previous.publisherId && source.id !== choice);
+          if (!state.frozen && preferred && !result.error && (!choice || !state.selected.has(choice) || (previous == null ? void 0 : previous.status) !== "reset" && !changedSession && (!available.has(choice) || (previous == null ? void 0 : previous.status) === "stale" || preferred.sampleCount > previous.sampleCount))) {
+            if (state.selected.delete(choice)) state.selected.add(preferred.id);
+            state.choices.set(room2, preferred.id);
+          } else if (!choice) state.choices.set(room2, entries[0].id);
+        }
+        if (!state.autoPicked) {
+          const initial = [...groups].map(([room2]) => state.known.get(state.choices.get(room2))).filter((source) => source.sampleCount && !["reset", "unavailable", "stale"].includes(source.status)).slice(0, MAX_MODELS);
+          if (initial.length) {
+            initial.forEach((source) => state.selected.add(source.id));
+            state.autoPicked = true;
+          }
+        }
+        updateRows(groups, at);
+        const selected = [...state.selected].map((id) => state.known.get(id)).filter((value) => !!value);
+        updateChart(selected, at, force);
+        freeze.textContent = state.frozen ? "Resume comparison" : "Freeze comparison";
+        freeze.setAttribute("aria-pressed", String(state.frozen));
+        freeze.disabled = !state.snapshots.size;
+        chooserTitle.textContent = "Models being tracked · " + groups.size + " · " + state.selected.size + " selected";
+        empty.hidden = groups.size > 0;
+        empty.textContent = "Open broadcast rooms in other tabs with this TierScope beta enabled. Models appear after their tabs start tracking; no favorite or saved Library session is required.";
+        const unavailable = selected.filter((source) => ["unavailable", "reset", "stale"].includes(source.status)).length;
+        status.textContent = (state.frozen ? "Frozen at " + new Date(state.frozenAt).toLocaleTimeString() + " · source status still updates." : "Following new scans · " + state.selected.size + " / 12 models selected.") + (unavailable ? " " + unavailable + " source(s) unavailable or stale; open Models being tracked for details." : "") + (notice ? " " + notice : "") + (userNotice ? " " + userNotice : "");
+        if (!groups.size) {
+          chooser.open = true;
+          status.textContent = "Open a room in another TierScope tab to start comparing live models.";
+        }
+        for (const id of [...state.snapshots.keys()]) if (!state.selected.has(id)) state.snapshots.delete(id);
+        for (const id of [...state.known.keys()]) if (!available.has(id) && !state.selected.has(id) && ![...state.choices.values()].includes(id)) state.known.delete(id);
+      } catch (error) {
+        status.textContent = "Live comparison unavailable: " + error.message + ". Existing session data is unchanged.";
+      } finally {
+        refreshing = false;
+      }
+    }
+    refresh();
+    detach = subscribeLiveModelSources(() => refresh());
+    return {
+      refresh,
+      draw() {
+        if (view) view.draw();
+      },
+      dispose() {
+        if (disposed) return;
+        disposed = true;
+        if (detach) detach();
+        if (view) {
+          state.chartState = view.capture();
+          view.dispose();
+        }
+        if (observer) observer.disconnect();
+      }
+    };
   }
 
   // src/library-drafts.js
@@ -6863,369 +7901,6 @@ underlying system, so should run in the browser, Node, or Plask.
       library,
       favoriteModels: [...models.favorites].filter((room2) => rooms.has(room2))
     });
-  }
-
-  // src/analysis-chart-view.js
-  function renderAnalysisChart(parent, series, labels, axisMs, metricLabel, savedState = null, axisMode = "elapsed") {
-    const element = toolNode(parent, "div");
-    element.id = "tools-chart-view";
-    parent = element;
-    let start = 0, end = axisMs, cursor = 0, pinned = false, drag = null, disposed = false;
-    const hidden = /* @__PURE__ */ new Set(), controls = toolNode(parent, "div", void 0, "tools-actions");
-    if (savedState && (savedState.axisMode || "elapsed") === axisMode) {
-      ({ start, end, cursor, pinned } = savedState);
-      savedState.hidden.forEach((index) => {
-        if (index >= 0 && index < series.length) hidden.add(index);
-      });
-      if (hidden.size === series.length) hidden.delete(0);
-      fitWindow(savedState.axisMs);
-    }
-    let plotCache = null;
-    const number = (value) => value.toLocaleString(void 0, { maximumFractionDigits: 2 });
-    const elapsed = (ms) => number(ms / 6e4) + "m";
-    const clock2 = (ms) => {
-      const seconds = Math.floor(ms / 1e3), pad = (n) => String(n).padStart(2, "0");
-      return pad(Math.floor(seconds / 3600)) + ":" + pad(Math.floor(seconds / 60) % 60) + (end - start < 6e4 ? ":" + pad(seconds % 60) : "");
-    };
-    const axisLabel = (ms) => axisMode === "clock" ? clock2(ms) : elapsed(ms);
-    const chartLabel = () => metricLabel + (axisMode === "clock" ? " by local time of day, 00:00 to 24:00." : " by real elapsed time.") + " Arrow keys inspect samples; plus and minus zoom; Home and End jump to visible endpoints.";
-    const zoomIn = toolButton(controls, "Zoom +", () => zoom(0.5), "tools-chart-zoom-in");
-    const zoomOut = toolButton(controls, "Zoom −", () => zoom(2), "tools-chart-zoom-out");
-    const panLeft = toolButton(controls, "‹", () => pan(-1), "tools-chart-pan-left");
-    panLeft.setAttribute("aria-label", "Pan earlier");
-    const panRight = toolButton(controls, "›", () => pan(1), "tools-chart-pan-right");
-    panRight.setAttribute("aria-label", "Pan later");
-    toolButton(controls, "Full range", () => {
-      start = 0;
-      end = axisMs;
-      draw();
-    }, "tools-chart-reset");
-    const pin = toolButton(controls, "Pin cursor", () => {
-      pinned = !pinned;
-      inspect();
-    }, "tools-chart-pin");
-    const legend = toolNode(parent, "div", void 0, "tools-chart-legend");
-    const dark = ["#ff69b4", "#79baff", "#68d391", "#ffd166", "#c4a3ff", "#ff987d"];
-    const bright = ["#b42370", "#175db0", "#176f36", "#835900", "#7140a6", "#a23c20"];
-    const newestFirst = series.map((s, i) => i).sort((a, b) => series[b].timestamps[0] - series[a].timestamps[0] || a - b);
-    const ranks = series.map((s, i) => newestFirst.indexOf(i));
-    const colorIndices = ranks.map((rank) => rank < 6 ? rank : 1 + (rank - 6) % 5);
-    const opacities = ranks.map(comparisonOpacity);
-    const newest = newestFirst[0];
-    const legendLabels = labels.map((label, i) => {
-      const control = toolNode(legend, "label"), check = toolNode(control, "input");
-      check.type = "checkbox";
-      check.checked = !hidden.has(i);
-      check.dataset.analysisSeries = String(i);
-      const swatch = toolNode(control, "span", "", "tools-series-swatch");
-      swatch.setAttribute("aria-hidden", "true");
-      swatch.style.borderTopStyle = i === newest ? "solid" : "dashed";
-      swatch.style.opacity = String(opacities[i]);
-      toolNode(control, "span", comparisonLabel(i) + (series.length > 1 && i === newest ? " · Latest" : "") + " · " + label);
-      control.title = (series.length > 1 ? i === newest ? "Latest session — solid pink: " : (ranks[i] >= COMPARISON_FOREGROUND_COUNT ? "Background session — dashed" : "Earlier session — dashed") + ", " + Math.round(opacities[i] * 100) + "% opacity: " : "") + label;
-      check.onchange = () => {
-        if (!check.checked && hidden.size === series.length - 1) {
-          check.checked = true;
-          return;
-        }
-        if (check.checked) hidden.delete(i);
-        else hidden.add(i);
-        draw();
-      };
-      return control;
-    });
-    const canvas = toolNode(parent, "canvas");
-    canvas.id = "tools-analysis-chart";
-    canvas.tabIndex = 0;
-    canvas.setAttribute("role", "img");
-    parent.insertBefore(canvas, legend);
-    canvas.setAttribute("aria-label", chartLabel());
-    const range = toolNode(parent, "p", "", "tools-muted");
-    range.id = "tools-chart-range";
-    parent.insertBefore(range, legend);
-    const settings = toolNode(parent, "div");
-    const hint = toolNode(parent, "p", "", "tools-muted");
-    const scroll = toolNode(parent, "div", void 0, "tools-scroll"), table = toolNode(scroll, "table");
-    table.id = "tools-chart-inspection";
-    const caption = toolNode(table, "caption");
-    const header = toolNode(toolNode(table, "thead"), "tr");
-    ["Session", "Count", "Sample timestamp / status"].forEach((text) => {
-      toolNode(header, "th", text).scope = "col";
-    });
-    const body = toolNode(table, "tbody");
-    const rows = series.map((s, i) => {
-      const row = toolNode(body, "tr");
-      toolNode(row, "th", comparisonLabel(i)).scope = "row";
-      return { row, value: toolNode(row, "td"), detail: toolNode(row, "td") };
-    });
-    const bitmap = document.createElement("canvas"), backgroundBitmap = document.createElement("canvas");
-    let width = 260, height = 200, ratio = 1, left = 52, right = 248, top = 15, bottom = 164;
-    const timeAt = (event) => {
-      const bounds = canvas.getBoundingClientRect(), x = (event.clientX - bounds.left) * width / bounds.width;
-      return start + Math.max(0, Math.min(1, (x - left) / (right - left))) * (end - start);
-    };
-    function zoom(factor) {
-      [start, end] = zoomAnalysisWindow(axisMs, start, end, factor, cursor);
-      cursor = Math.max(start, Math.min(end, cursor));
-      draw();
-    }
-    function pan(direction) {
-      const span = end - start, next = Math.max(0, Math.min(axisMs - span, start + direction * span / 2));
-      start = next;
-      end = next + span;
-      cursor = Math.max(start, Math.min(end, cursor));
-      draw();
-    }
-    function inspect() {
-      if (disposed) return;
-      caption.textContent = "Cursor " + axisLabel(cursor) + (pinned ? " · pinned" : "");
-      pin.textContent = pinned ? "Unpin" : "Pin";
-      pin.setAttribute("aria-label", pinned ? "Unpin inspection cursor" : "Pin inspection cursor");
-      pin.setAttribute("aria-pressed", String(pinned));
-      series.forEach((s, i) => {
-        const row = rows[i];
-        row.row.hidden = hidden.has(i);
-        if (axisMode === "clock") {
-          const sample = inspectClockSample(s.clock, cursor);
-          row.value.textContent = sample.matches.length ? sample.matches.map((match) => number(match.value)).join(" / ") : "—";
-          row.detail.textContent = sample.matches.length ? sample.matches.map((match) => new Date(match.timestamp).toLocaleString(void 0, { timeZoneName: "shortOffset" }) + " · sample " + (match.index + 1) + (match.kind === "held" ? " (held until next sample)" : "")).join(" ; ") : sample.kind === "gap" ? "Session gap — no sample" : "Outside session at this clock time";
-        } else {
-          const sample = inspectAnalysisSample(s, cursor);
-          row.value.textContent = sample.value === null ? "—" : number(sample.value);
-          row.detail.textContent = sample.kind === "gap" ? "Session gap — no sample" : sample.kind === "outside" ? "Outside session" : new Date(sample.timestamp).toLocaleString() + " · sample " + (sample.index + 1) + (sample.kind === "held" ? " (held until next sample)" : "");
-        }
-      });
-      const ctx = canvas.getContext("2d");
-      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-      ctx.clearRect(0, 0, width, height);
-      ctx.drawImage(bitmap, 0, 0, width, height);
-      const style = window.getComputedStyle(parent);
-      const x = left + (cursor - start) / (end - start || 1) * (right - left);
-      ctx.strokeStyle = style.getPropertyValue("--panel-text").trim();
-      ctx.setLineDash([3, 3]);
-      ctx.lineWidth = 1;
-      if (cursor >= start && cursor <= end) {
-        ctx.beginPath();
-        ctx.moveTo(x, top);
-        ctx.lineTo(x, bottom);
-        ctx.stroke();
-      }
-      ctx.setLineDash([]);
-      if (drag) {
-        ctx.fillStyle = "#ff69b433";
-        const from = left + (drag.from - start) / (end - start || 1) * (right - left);
-        ctx.fillRect(Math.min(from, x), top, Math.abs(x - from), bottom - top);
-      }
-    }
-    function draw() {
-      var _a;
-      if (disposed) return;
-      width = Math.max(260, canvas.clientWidth);
-      right = width - 14;
-      ratio = window.devicePixelRatio || 1;
-      canvas.width = bitmap.width = width * ratio;
-      canvas.height = bitmap.height = height * ratio;
-      const ctx = bitmap.getContext("2d");
-      ctx.scale(ratio, ratio);
-      const style = window.getComputedStyle(parent), isDark = ((_a = parent.closest("[data-theme]")) == null ? void 0 : _a.dataset.theme) !== "bright";
-      const colors = isDark ? dark : bright;
-      if (!plotCache || plotCache.series !== series || plotCache.start !== start || plotCache.end !== end || plotCache.width !== right - left) {
-        plotCache = { series, start, end, width: right - left, plots: new Array(series.length) };
-      }
-      const plots = series.map((s, j) => {
-        var _a2;
-        return hidden.has(j) ? null : (_a2 = plotCache.plots)[j] || (_a2[j] = axisMode === "clock" ? buildClockPlot(s.clock, start, end, right - left) : buildAnalysisPlot(s, start, end, right - left));
-      });
-      const maximum = Math.max(1, ...plots.map((plot) => plot ? plot.maximum : 1));
-      ctx.strokeStyle = style.getPropertyValue("--panel-divider").trim();
-      ctx.fillStyle = style.getPropertyValue("--panel-muted").trim();
-      ctx.font = "10px Arial";
-      for (let step = 0; step <= 2; step++) {
-        const y = bottom - step / 2 * (bottom - top);
-        ctx.beginPath();
-        ctx.moveTo(left, y);
-        ctx.lineTo(right, y);
-        ctx.stroke();
-        ctx.textAlign = "right";
-        ctx.fillText(number(maximum * step / 2), left - 5, y + 3);
-      }
-      if (axisMode === "clock") {
-        for (let step = 0; step <= 4; step++) {
-          ctx.textAlign = step === 0 ? "left" : step === 4 ? "right" : "center";
-          ctx.fillText(clock2(start + (end - start) * step / 4), left + (right - left) * step / 4, bottom + 20);
-        }
-      } else {
-        ctx.textAlign = "left";
-        ctx.fillText(elapsed(start), left, bottom + 20);
-        ctx.textAlign = "right";
-        ctx.fillText(elapsed(end), right, bottom + 20);
-      }
-      const backgroundColor = style.getPropertyValue("--panel-muted").trim();
-      function paintSeries(target, j, color) {
-        target.strokeStyle = target.fillStyle = color;
-        target.lineWidth = ranks[j] >= COMPARISON_FOREGROUND_COUNT ? 1.2 : 1.8;
-        target.lineCap = "butt";
-        target.setLineDash(j === newest ? [] : [6, 4]);
-        target.beginPath();
-        let previousY = 0;
-        const dots = [], points = plots[j].points;
-        points.forEach((point, i) => {
-          const x = left + (point.time - start) / (end - start || 1) * (right - left), y = bottom - point.value / maximum * (bottom - top);
-          if (point.move) target.moveTo(x, y);
-          else {
-            target.lineTo(x, previousY);
-            target.lineTo(x, y);
-          }
-          if (point.move && (i + 1 === points.length || points[i + 1].move)) dots.push([x, y]);
-          previousY = y;
-        });
-        target.stroke();
-        target.setLineDash([]);
-        dots.forEach(([x, y]) => {
-          target.beginPath();
-          target.arc(x, y, 2.5, 0, Math.PI * 2);
-          target.fill();
-        });
-      }
-      const backgroundIndices = newestFirst.filter((j) => ranks[j] >= COMPARISON_FOREGROUND_COUNT && !hidden.has(j));
-      backgroundBitmap.width = backgroundIndices.length ? width * ratio : 0;
-      backgroundBitmap.height = backgroundIndices.length ? height * ratio : 0;
-      if (backgroundIndices.length) {
-        const backgroundCtx = backgroundBitmap.getContext("2d");
-        backgroundCtx.scale(ratio, ratio);
-        for (const j of backgroundIndices) paintSeries(backgroundCtx, j, backgroundColor);
-        ctx.globalAlpha = COMPARISON_BACKGROUND_OPACITY;
-        ctx.drawImage(backgroundBitmap, 0, 0, width, height);
-        ctx.globalAlpha = 1;
-      }
-      for (const j of newestFirst.slice().reverse()) {
-        const background = ranks[j] >= COMPARISON_FOREGROUND_COUNT;
-        const color = background ? backgroundColor : colors[colorIndices[j]];
-        legendLabels[j].style.color = color;
-        legendLabels[j].querySelector("input").disabled = hidden.size === series.length - 1 && !hidden.has(j);
-        if (hidden.has(j) || background) continue;
-        ctx.globalAlpha = opacities[j];
-        paintSeries(ctx, j, color);
-      }
-      ctx.globalAlpha = 1;
-      range.textContent = "Chart window " + axisLabel(start) + " – " + axisLabel(end) + (axisMode === "clock" ? " · 24h local clock" : " · full comparison/session range " + elapsed(axisMs));
-      hint.textContent = (axisMode === "clock" ? "Aligned by local time of day. Midnight crossings continue at the start of the chart. Clock changes are separate segments; repeated clock times can show multiple dated values. Statistics use full sessions." : "Aligned from each session’s first retained sample, using real elapsed time. Hidden lines and zoom do not change summary totals or the shared comparison length.") + " Move to inspect; click to pin, drag to zoom, or use the buttons and arrow keys. Gaps have no assumed samples." + (series.length > COMPARISON_FOREGROUND_COUNT ? " The newest twelve lines fade progressively; older sessions form a faint background. Each session remains inspectable and can be hidden." : " The newest line is opaque; earlier sessions fade progressively.");
-      zoomIn.disabled = end - start <= Math.min(1e3, axisMs);
-      zoomOut.disabled = end - start >= axisMs;
-      panLeft.disabled = start <= 0;
-      panRight.disabled = end >= axisMs;
-      inspect();
-    }
-    canvas.onpointermove = (event) => {
-      if (!pinned || drag) {
-        cursor = timeAt(event);
-        inspect();
-      }
-    };
-    canvas.onpointerdown = (event) => {
-      if (event.button !== 0) return;
-      canvas.focus();
-      drag = { from: timeAt(event), x: event.clientX, pinned };
-      canvas.setPointerCapture(event.pointerId);
-      cursor = drag.from;
-      inspect();
-    };
-    canvas.onpointerup = (event) => {
-      if (!drag) return;
-      const origin = drag;
-      cursor = timeAt(event);
-      drag = null;
-      if (Math.abs(event.clientX - origin.x) > 5 && Math.abs(cursor - origin.from) >= Math.min(1e3, axisMs)) {
-        start = Math.min(cursor, origin.from);
-        end = Math.max(cursor, origin.from);
-        pinned = origin.pinned;
-        draw();
-      } else {
-        pinned = !origin.pinned;
-        inspect();
-      }
-      if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
-    };
-    canvas.onpointercancel = () => {
-      drag = null;
-      inspect();
-    };
-    canvas.onkeydown = (event) => {
-      if (!["ArrowLeft", "ArrowRight", "Home", "End", "+", "=", "-", "Escape"].includes(event.key)) return;
-      event.preventDefault();
-      if (event.key === "+" || event.key === "=") {
-        zoom(0.5);
-        return;
-      }
-      if (event.key === "-") {
-        zoom(2);
-        return;
-      }
-      if (event.key === "Escape") {
-        pinned = false;
-        inspect();
-        return;
-      }
-      if (event.key === "Home") cursor = start;
-      else if (event.key === "End") cursor = end;
-      else {
-        let target = event.key === "ArrowRight" ? end : start;
-        for (let j = 0; j < series.length; j++) if (!hidden.has(j)) {
-          const times = axisMode === "clock" ? series[j].clock.navigation : series[j].times, index = analysisSampleIndex(times, cursor);
-          if (event.key === "ArrowRight" && index + 1 < times.length) target = Math.min(target, times[index + 1]);
-          if (event.key === "ArrowLeft") {
-            let i = index;
-            while (i >= 0 && times[i] >= cursor) i--;
-            if (i >= 0) target = Math.max(target, times[i]);
-          }
-        }
-        cursor = Math.max(start, Math.min(end, target));
-      }
-      pinned = true;
-      inspect();
-    };
-    function fitWindow(previousAxis) {
-      if (start === 0 && end === previousAxis) {
-        start = 0;
-        end = axisMs;
-      } else {
-        const span = Math.min(Math.max(0, end - start), axisMs);
-        start = Math.max(0, Math.min(start, axisMs - span));
-        end = start + span;
-      }
-      cursor = Math.max(start, Math.min(end, cursor));
-    }
-    draw();
-    return {
-      element,
-      canvas,
-      settings,
-      draw,
-      capture: () => ({ start, end, cursor, pinned, axisMs, axisMode, hidden: [...hidden] }),
-      update(nextSeries, nextAxis, nextMetricLabel, nextMode = "elapsed") {
-        if (disposed) return;
-        const previousAxis = axisMs;
-        series = nextSeries;
-        axisMs = nextAxis;
-        metricLabel = nextMetricLabel;
-        if (axisMode !== nextMode) {
-          axisMode = nextMode;
-          start = 0;
-          end = axisMs;
-          cursor = 0;
-          pinned = false;
-        } else fitWindow(previousAxis);
-        drag = null;
-        canvas.setAttribute("aria-label", chartLabel());
-        draw();
-      },
-      dispose() {
-        disposed = true;
-        drag = null;
-        plotCache = null;
-        bitmap.width = bitmap.height = backgroundBitmap.width = backgroundBitmap.height = 0;
-      }
-    };
   }
 
   // src/model-history.js
@@ -7839,12 +8514,12 @@ underlying system, so should run in the browser, Node, or Plask.
       "grey",
       "female_trans"
     ]];
-    runtime.history.timestamps.forEach(function(timestamp, i) {
+    runtime.history.timestamps.forEach(function(timestamp2, i) {
       rows.push([
         model,
         i + 1,
-        new Date(timestamp).toISOString(),
-        Math.max(0, timestamp - runtime.history.timestamps[0]) / 1e3,
+        new Date(timestamp2).toISOString(),
+        Math.max(0, timestamp2 - runtime.history.timestamps[0]) / 1e3,
         runtime.history.total[i] + runtime.history.anonymous[i],
         runtime.history.total[i],
         runtime.history.anonymous[i],
@@ -7949,6 +8624,8 @@ underlying system, so should run in the browser, Node, or Plask.
     let refreshCapacity = null, capacityCheckpoint = "";
     let detachDock = null, historyView = null, followControls = null, liveCapture = null, historyDiscovery = "";
     let currentArchiveIsReplay = isPlaybackCurrent(runtime.playback);
+    let compareMode = "saved", liveModelsView = null;
+    const liveModelsState = createLiveComparisonState();
     const followers = { summary: createAnalysisFollower(), compare: createAnalysisFollower(), history: createAnalysisFollower() };
     try {
       currentArchive = captureSessionFile();
@@ -8243,6 +8920,10 @@ underlying system, so should run in the browser, Node, or Plask.
     }
     function refreshCurrent() {
       var _a;
+      if (tab === "compare" && liveModelsView) {
+        liveModelsView.refresh();
+        return;
+      }
       if (followers[tab] && updateFollowing()) refreshFollowedView();
       const checkpoint2 = automaticLibraryStatus(getModelName());
       const checkpointSignature = [checkpoint2.identity, checkpoint2.signature, checkpoint2.savedAt, checkpoint2.error].join(":");
@@ -8430,6 +9111,7 @@ underlying system, so should run in the browser, Node, or Plask.
     }
     function compareLiveWithPrevious() {
       var _a;
+      compareMode = "saved";
       const snapshot = captureLiveSessionFile();
       const state = readLibrary(), ids = previousModelSessionIds(state.entries, snapshot);
       if (!ids.length) {
@@ -8444,6 +9126,7 @@ underlying system, so should run in the browser, Node, or Plask.
       selectedExtra = ids.slice(1);
       Object.assign(analysisFilters, { room: snapshot.room.toLowerCase(), query: "", from: "", to: "" });
       pickerOpen.compare = false;
+      compareMode = "saved";
       render("compare");
       (_a = dialog.querySelector("#tools-analysis-chart") || dialog.querySelector("#tools-session-picker > summary")) == null ? void 0 : _a.focus();
     }
@@ -8503,6 +9186,7 @@ underlying system, so should run in the browser, Node, or Plask.
           selectedExtra = ids.slice(2);
           Object.assign(analysisFilters, { room: room2, query: "", from: "", to: "" });
           pickerOpen.compare = false;
+          compareMode = "saved";
           render("compare");
           (_a = dialog.querySelector("#tools-analysis-chart")) == null ? void 0 : _a.focus();
         },
@@ -8512,6 +9196,7 @@ underlying system, so should run in the browser, Node, or Plask.
         },
         history: openHistory,
         compare: (ids) => {
+          compareMode = "saved";
           selectedA = ids[0];
           selectedB = ids[1];
           selectedExtra = ids.slice(2);
@@ -8849,6 +9534,7 @@ underlying system, so should run in the browser, Node, or Plask.
           selectedExtra = ids.slice(2);
           Object.assign(analysisFilters, { room: libraryRoom, query: "", from: "", to: "" });
           pickerOpen.compare = false;
+          compareMode = "saved";
           render("compare");
           (_a = dialog.querySelector("#tools-analysis-chart") || dialog.querySelector("#tools-session-picker > summary")) == null ? void 0 : _a.focus();
         }
@@ -8969,6 +9655,28 @@ underlying system, so should run in the browser, Node, or Plask.
       }
     }
     function renderAnalysis(comparing) {
+      if (comparing) {
+        const mode = node(content, "div", void 0, "tools-actions tools-comparison-mode");
+        mode.setAttribute("role", "group");
+        mode.setAttribute("aria-label", "Comparison source");
+        for (const [value, title] of [["saved", "Saved sessions"], ["live", "Live models"]]) {
+          const control = button(mode, title, () => {
+            compareMode = value;
+            render("compare");
+          }, "tools-compare-" + value);
+          control.className = compareMode === value ? "tools-primary" : "";
+          control.setAttribute("aria-pressed", String(compareMode === value));
+        }
+        if (compareMode === "live") {
+          liveModelsView = renderLiveModelsComparison(content, {
+            state: liveModelsState,
+            getMetric: () => metric,
+            metricControl: (parent, changed) => metricStrip(parent, changed, "tools-live-metric")
+          });
+          chartDraw = liveModelsView.draw;
+          return;
+        }
+      }
       const options2 = analysisControls(comparing);
       if (!options2) return;
       if (comparing) comparisonRange();
@@ -9094,6 +9802,10 @@ underlying system, so should run in the browser, Node, or Plask.
     }
     function render(next, revealSessions = false) {
       var _a;
+      if (liveModelsView) {
+        liveModelsView.dispose();
+        liveModelsView = null;
+      }
       refreshCapacity = null;
       historyView = null;
       followControls = null;
@@ -9145,6 +9857,10 @@ underlying system, so should run in the browser, Node, or Plask.
       }
     }
     function close() {
+      if (liveModelsView) {
+        liveModelsView.dispose();
+        liveModelsView = null;
+      }
       fileRequest++;
       refreshSessionTools = null;
       refreshCapacity = null;
@@ -9399,6 +10115,7 @@ underlying system, so should run in the browser, Node, or Plask.
       return { status: "failed", error: e.message || String(e) };
     } finally {
       keepFavoriteSession(model, flushLibrary);
+      publishLiveModelSource((result == null ? void 0 : result.status) === "saved" ? saveData.timestamp : null);
       try {
         updateAcquisitionStatus();
         refreshPanelOptions();
@@ -10742,6 +11459,7 @@ underlying system, so should run in the browser, Node, or Plask.
       selectPanelMinimized(false);
     }
     configureSessionTracking(loaded, isRoom);
+    publishLiveModelSource();
     try {
       createPanel();
     } catch (e) {
@@ -10879,6 +11597,7 @@ underlying system, so should run in the browser, Node, or Plask.
       }
       runtime.lastUrl = location.href;
       runtime.activeSessionStorageKey = null;
+      publishLiveModelSource();
       stopCountdown();
       resetAcquisitionForRoom();
       stopTrackingTimer();
@@ -10898,7 +11617,7 @@ underlying system, so should run in the browser, Node, or Plask.
 
   // src/bootstrap.js
   function initializeRuntime() {
-    runtime.TIERSCOPE_VERSION = "3.28.0-beta.3";
+    runtime.TIERSCOPE_VERSION = "3.29.0-beta.1";
     runtime.API_TIMEOUT_MS = 1e4;
     runtime.DEFAULT_API_INTERVAL_SECONDS = 60;
     runtime.DOM_FALLBACK_INTERVAL_SECONDS = 60;
@@ -11251,6 +11970,11 @@ underlying system, so should run in the browser, Node, or Plask.
     initializePresentation({ refreshOptions: updatePanelOptions, refreshReplayAvailability: updateReplayAvailability, refreshCountdown: updateCountdownDisplay });
     runtime.urlCheckInterval = setInterval(checkUrlChange, 500);
     initializeConnectionRecovery();
+    initializeLiveModelSources();
+    window.addEventListener("pagehide", stopLiveModelSources);
+    window.addEventListener("pageshow", function(event) {
+      if (event.persisted) initializeLiveModelSources();
+    });
     window.addEventListener("beforeunload", function() {
       stopAthActivity();
       cancelGifExport();

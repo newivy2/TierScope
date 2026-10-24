@@ -82,6 +82,7 @@ const reviewedChanges = new Set([
 const featureModules = new Set(['ath-retention.js', 'ath-activity.js', 'ath-maintenance.js', 'analysis-clock-data.js', 'analysis-metric-view.js', 'analysis-follow.js', 'library-capacity-data.js', 'library-capacity.js', 'library-capacity-view.js', 'automatic-library.js', 'favorite-controls.js', 'favorite-view.js', 'room-total-series.js', 'library-drafts.js', 'library-models.js', 'library-query.js', 'library-transfer.js', 'library-browser-view.js', 'tools-view-helpers.js', 'analysis-chart-data.js', 'analysis-chart-view.js', 'model-history.js', 'model-history-view.js', 'presentation-health.js', 'sample-presentation.js', 'analysis-preference-data.js', 'analysis-preferences.js', 'acquisition-state.js', 'panel-preferences.js', 'library-dock.js', 'library-shell.js', 'recording-export-data.js', 'recording-exports.js', 'display-model.js', 'display-values.js', 'immutable-data.js', 'presentation-data.js', 'status-model.js', 'status-view.js', 'trend-view.js', 'playback-state.js', 'live-session.js', 'diagnostics.js', 'room-context.js', 'backup.js', 'data-io.js', 'session-analysis.js', 'session-health.js', 'session-library.js', 'session-tools.js']);
 const addedFunctions = new Set(['clearInactiveAllTimeHighs', 'retireInactiveAllTimeRecord', 'captureLiveSessionFile', 'initializeLifecycle', 'refreshPanelOptions', 'refreshScanCountdown', 'getSessionSamplePolicy', 'initializePresentation', 'paintPanelFrame', 'getSessionWriteStatus', 'writeSessionRecord']); // shared history-gap policy; session/ownership tests
 featureModules.add('connection-status.js'); featureModules.add('request-policy-data.js'); featureModules.add('request-coordination.js');
+for (const file of ['live-model-data.js', 'live-model-sources.js', 'live-model-chart-data.js', 'live-model-comparison.js']) featureModules.add(file);
 addedFunctions.add('effectiveRequestDeadline'); addedFunctions.add('initializeConnectionRecovery'); addedFunctions.add('shareResponseWait'); addedFunctions.add('requestFailureExplanation');
 
 test('unchanged extracted functions preserve 3.4.0; reviewed changes have behavior coverage', () => {
@@ -130,6 +131,14 @@ test('runtime initialization preserves preference loading and startup order', ()
   assert.equal(body[index + 6].expression.left.property.name, 'urlCheckInterval');
   const connectionBinding = body[index + 7];
   assert.equal(connectionBinding.expression.callee.name, 'initializeConnectionRecovery');
+  const liveBinding = body[index + 8], hideBinding = body[index + 9], showBinding = body[index + 10];
+  assert.equal(liveBinding.expression.callee.name, 'initializeLiveModelSources');
+  assert.equal(hideBinding.expression.arguments[0].value, 'pagehide');
+  assert.equal(hideBinding.expression.arguments[1].name, 'stopLiveModelSources');
+  assert.equal(showBinding.expression.arguments[0].value, 'pageshow');
+  const resume = showBinding.expression.arguments[1].body.body[0];
+  assert.equal(resume.test.property.name, 'persisted');
+  assert.equal(resume.consequent.expression.callee.name, 'initializeLiveModelSources');
   const offlineDefault = body.find(n => n.expression?.left?.property?.name === 'connectionOffline');
   const recoveryDefault = body.find(n => n.expression?.left?.property?.name === 'connectionRecoveryAt');
   const storedPolicyDefault = body.find(n => n.expression?.left?.property?.name === 'requestPolicyStorageRevision');
@@ -137,7 +146,7 @@ test('runtime initialization preserves preference loading and startup order', ()
   assert.equal(recoveryDefault.expression.right.value, 0);
   assert.equal(storedPolicyDefault.expression.right.value, null);
   // Preserve every original default, preference read and effect in order.
-  const ownerBindings = new Set([bindings[0], playbackBinding, acquisitionBinding, preferenceBinding, lifecycleBinding, presentationBinding, connectionBinding, offlineDefault, recoveryDefault, storedPolicyDefault]);
+  const ownerBindings = new Set([bindings[0], playbackBinding, acquisitionBinding, preferenceBinding, lifecycleBinding, presentationBinding, connectionBinding, liveBinding, hideBinding, showBinding, offlineDefault, recoveryDefault, storedPolicyDefault]);
   const unchanged = structuredClone(body.filter(n => !ownerBindings.has(n)));
   const rows = unchanged.find(n => n.expression?.left?.property?.name === 'PANEL_ROWS').expression.right.arguments[0].elements;
   const roomRow = rows.pop();
@@ -157,7 +166,7 @@ test('runtime initialization preserves preference loading and startup order', ()
 });
 
 test('module dependencies are explicit and the built script preserves userscript permissions', () => {
-  const allowed = new Set([...baseline.browserGlobals, '__TIERSCOPE_VERSION__', 'Symbol', 'TextEncoder', 'Intl']);
+  const allowed = new Set([...baseline.browserGlobals, '__TIERSCOPE_VERSION__', 'Symbol', 'TextEncoder', 'Intl', 'GM_addValueChangeListener', 'GM_removeValueChangeListener']);
   for (const {file,ast} of modules) {
     const scope = eslintScope.analyze(ast, {ecmaVersion: 2022, sourceType: 'module'});
     const unresolved = [...new Set(scope.globalScope.through.map(ref => ref.identifier.name))].filter(name => !allowed.has(name));
@@ -167,7 +176,8 @@ test('module dependencies are explicit and the built script preserves userscript
   const header = script.slice(0, script.indexOf('// ==/UserScript==') + '// ==/UserScript=='.length);
   const expectedHeader = baseline.header.replace(/^\/\/ @grant\s+unsafeWindow\n/m, '')
     .replace(/^\/\/ @require\s+.*\n/m, '');
-  assert.equal(header.replace(/^\/\/ @version\s+.*$/m, '// @version      <version>'), expectedHeader);
+  assert(header.includes('// @grant        GM_addValueChangeListener\n// @grant        GM_removeValueChangeListener\n'), 'only change notifications are added for live tab sharing');
+  assert.equal(header.replace(/^\/\/ @grant\s+GM_(?:add|remove)ValueChangeListener\n/gm, '').replace(/^\/\/ @version\s+.*$/m, '// @version      <version>'), expectedHeader);
   assert(script.includes(fs.readFileSync(path.join(root, 'THIRD_PARTY_LICENSES.txt'), 'utf8').trimEnd()), 'encoder license ships in the script');
   assert(!/unsafeWindow|window\.ViewerTracker/.test(script), 'no page control API');
   assert(!/\b(?:import|export)\s+(?:\{|\*|default|function|const|let|var)/.test(script), 'installed script needs no module loader');
