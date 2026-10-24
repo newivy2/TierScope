@@ -3,6 +3,7 @@ import { keepFavoriteSession } from './automatic-library.js';
 import { readAllTimeHighs, sessionAllTimeHighs, storeAllTimeHighs } from './highs-store.js';
 import { clearRestoredSessionFrame, prepareSessionHighsForSave, restoreLiveSession } from './live-session.js';
 import { restoreTrendPreferences } from './panel-preferences.js';
+import { publishLiveModelSource } from './live-model-sources.js';
 import { createPlaybackSnapshot, getPlaybackFrame } from './playback-data.js';
 import { updateAcquisitionStatus } from './presentation-status.js';
 import { refreshPanelOptions } from './presentation.js';
@@ -75,6 +76,7 @@ export function saveSession(model, flushLibrary = false) {
         return {status: 'failed', error: e.message || String(e)};
     } finally {
         keepFavoriteSession(model, flushLibrary);
+        publishLiveModelSource(result?.status === 'saved' ? saveData.timestamp : null);
         try { updateAcquisitionStatus(); refreshPanelOptions(); }
         catch (error) { log('Save feedback unavailable: ' + error.message); }
     }

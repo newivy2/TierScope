@@ -15,6 +15,7 @@
     "src/library-drafts.js",
     "src/analysis-chart-data.js",
     "src/analysis-clock-data.js",
+    "src/live-model-chart-data.js",
     "src/model-history.js",
     "src/analysis-preference-data.js",
     "src/live-session.js",

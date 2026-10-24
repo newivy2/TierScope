@@ -91,11 +91,24 @@ test('retry policy calculations cannot depend on browser, storage, owners or con
 });
 
 test('drawing health and analysis preferences cannot depend on session or presentation controllers', () => {
-  const permitted = new Set(['presentation-health.js', 'analysis-preferences.js', 'analysis-preference-data.js', 'session-analysis.js', 'model-history.js', 'library-query.js', 'analysis-chart-data.js', 'analysis-clock-data.js', 'library-drafts.js', 'analysis-follow.js']);
+  const permitted = new Set(['presentation-health.js', 'analysis-preferences.js', 'analysis-preference-data.js', 'session-analysis.js', 'model-history.js', 'library-query.js', 'analysis-chart-data.js', 'analysis-clock-data.js', 'library-drafts.js', 'analysis-follow.js', 'live-model-data.js', 'live-model-chart-data.js']);
   for (const file of permitted) {
     assert.deepEqual([...dependencies(file)].filter(dependency => !permitted.has(dependency)), [], file);
     assert.deepEqual([...runtimeFields(modules[file].ast)], [], file);
     assert(!/\b(?:document|location|alert|confirm|setInterval|clearInterval)\b/.test(modules[file].source), file + ' directs presentation');
     if (file !== 'analysis-preferences.js') assert(!/\bGM_\w+\b/.test(modules[file].source), file + ' accesses storage');
   }
+});
+
+test('live sharing reads aggregate session data without reaching acquisition or presentation controls', () => {
+  const blocked = ['scanning.js', 'lifecycle.js', 'startup.js', 'session-persistence.js', 'session-tools.js', 'automatic-library.js', 'live-model-comparison.js'];
+  for (const file of blocked) assert(!dependencies('live-model-sources.js').has(file), file);
+  const source = modules['live-model-sources.js'].source;
+  assert(!/\b(?:fetch|XMLHttpRequest|unsafeWindow)\b/.test(source));
+  walk(modules['live-model-sources.js'].ast, node => {
+    if (node.type === 'AssignmentExpression' || node.type === 'UpdateExpression') {
+      const target = node.left || node.argument;
+      assert(!(target.type === 'MemberExpression' && target.object.name === 'runtime'), 'sharing cannot mutate live state');
+    }
+  });
 });

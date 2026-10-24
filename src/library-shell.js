@@ -27,6 +27,17 @@ export function libraryShell() {
 #tools-message:not(:empty){padding:7px 12px;border-bottom:1px solid var(--panel-divider);font-size:.95em;white-space:pre-line;overflow-wrap:anywhere;flex-shrink:0}
 #tierscope-session-tools .tools-actions{display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin:8px 0}
 #tierscope-session-tools .tools-muted{color:var(--panel-muted);font-size:.92em;line-height:1.45}
+#tierscope-session-tools .tools-comparison-mode{padding-bottom:7px;border-bottom:1px solid var(--panel-divider)}
+#tierscope-session-tools .tools-comparison-mode button{flex:1}
+#tools-live-chooser>summary{color:var(--panel-accent);font-weight:bold}
+#tierscope-session-tools .tools-live-sources{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;margin:8px 0}
+#tierscope-session-tools .tools-live-source{display:flex;flex-direction:column;align-items:stretch;gap:3px;padding:7px;border:1px solid var(--panel-divider);border-radius:4px;min-width:0;background:rgba(var(--panel-row-rgb),.035)}
+#tierscope-session-tools .tools-live-model{display:flex;align-items:center;gap:5px;min-width:0}
+#tierscope-session-tools .tools-live-model strong{overflow-wrap:anywhere;color:var(--panel-text)}
+#tierscope-session-tools .tools-live-source select{width:100%;font-size:.9em}
+#tierscope-session-tools .tools-live-source[data-live-state=tracking] [data-live-status]{color:var(--panel-positive)}
+#tierscope-session-tools .tools-live-source:is([data-live-state=stale],[data-live-state=unavailable],[data-live-state=reset]) [data-live-status]{color:var(--panel-warning)}
+@container tierscope-library (max-width:360px){#tierscope-session-tools .tools-live-sources{grid-template-columns:1fr}}
 #tierscope-session-tools p{margin:6px 0 9px}
 #tierscope-session-tools h3{font-size:1em;margin:8px 0;color:var(--panel-secondary)}
 #tierscope-session-tools .tools-current{border:1px solid #4169e170;background:rgba(65,105,225,.08);border-radius:4px;padding:9px;margin-bottom:10px}
